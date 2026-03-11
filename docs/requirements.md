@@ -41,9 +41,9 @@
 - 工具调用与工具结果已进入类型化会话磁带，并能投影到后续默认上下文
 - 工具调用与工具结果现已通过稳定调用标识关联，便于后续 replay 与压缩
 - 默认上下文里的工具结果投影也保留调用标识，避免同名工具结果混淆
-- 轮次块已落盘到 `.like/session.jsonl`，可用于后续 resume / replay
+- 轮次块已落盘到 `.aia/session.jsonl`，可用于后续 resume / replay
 - `agent-cli` 已可在启动时通过终端交互创建或选择 provider
-- provider 本地资料当前落盘在 `.like/providers.json`，并通过 `.gitignore` 避免误提交
+- provider 本地资料当前落盘在 `.aia/providers.json`，并通过 `.gitignore` 避免误提交
 - `agent-cli` 已可进入多轮 agent loop，并支持退出指令
 - `agent-cli` 已按模块拆分，并在真实终端环境中优先进入最小 TUI
 - 真实终端下的 provider 选择与首条问题输入已并入 TUI 状态机
