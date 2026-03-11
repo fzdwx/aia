@@ -47,7 +47,7 @@ where
         }
 
         if is_exit_command(&input) {
-            writeln!(writer, "已退出 like agent loop")?;
+            writeln!(writer, "已退出 aia agent loop")?;
             break;
         }
 
@@ -181,7 +181,7 @@ mod tests {
 
     fn temp_file(name: &str) -> std::path::PathBuf {
         let suffix = SystemTime::now().duration_since(UNIX_EPOCH).expect("时间有效").as_nanos();
-        std::env::temp_dir().join(format!("like-agent-cli-{name}-{suffix}.json"))
+        std::env::temp_dir().join(format!("aia-agent-cli-{name}-{suffix}.json"))
     }
 
     #[test]
@@ -274,7 +274,7 @@ mod tests {
         .expect("循环运行成功");
 
         let output = String::from_utf8(writer).expect("输出是有效 utf-8");
-        assert!(output.contains("已退出 like agent loop"));
+        assert!(output.contains("已退出 aia agent loop"));
         assert!(!output.contains("收到需求：退出"));
     }
 

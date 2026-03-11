@@ -12,7 +12,7 @@ pub fn choose_provider_via_tui<R: BufRead, W: Write>(
     registry: &mut ProviderRegistry,
     store_path: &std::path::Path,
 ) -> Result<ProviderLaunchChoice, CliSetupError> {
-    writeln!(writer, "like provider 设置")?;
+    writeln!(writer, "aia provider 设置")?;
 
     loop {
         if registry.providers().is_empty() {
@@ -155,17 +155,17 @@ mod tests {
 
     fn temp_file(name: &str) -> std::path::PathBuf {
         let suffix = SystemTime::now().duration_since(UNIX_EPOCH).expect("时间有效").as_nanos();
-        std::env::temp_dir().join(format!("like-agent-cli-{name}-{suffix}.json"))
+        std::env::temp_dir().join(format!("aia-agent-cli-{name}-{suffix}.json"))
     }
 
     #[test]
     fn provider_文件默认放在项目内隐藏目录() {
-        assert_eq!(default_registry_path(), std::path::PathBuf::from(".like/providers.json"));
+        assert_eq!(default_registry_path(), std::path::PathBuf::from(".aia/providers.json"));
     }
 
     #[test]
     fn 会话文件默认放在项目内隐藏目录() {
-        assert_eq!(default_session_path(), std::path::PathBuf::from(".like/session.jsonl"));
+        assert_eq!(default_session_path(), std::path::PathBuf::from(".aia/session.jsonl"));
     }
 
     #[test]

@@ -35,7 +35,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     let current_model_provider = identity.provider.clone();
     let current_model_name = identity.name.clone();
     let mut runtime = AgentRuntime::with_tape(model, tools, identity, tape)
-        .with_instructions("你是 like 的起步代理。优先给出结构化、可继续落地的答案。");
+        .with_instructions("你是 aia 的起步代理。优先给出结构化、可继续落地的答案。");
     runtime.disable_tool("handoff_session");
 
     let stdin = io::stdin();
@@ -47,7 +47,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         &mut writer,
         runtime,
         &session_path,
-        Some(prompt_seed.unwrap_or_else(|| "描述一下 like 的下一步".to_string())),
+        Some(prompt_seed.unwrap_or_else(|| "描述一下 aia 的下一步".to_string())),
         &current_model_provider,
         &current_model_name,
     )
