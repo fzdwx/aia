@@ -1,5 +1,5 @@
-# like agent
-i just wanted a like agent.
+# aia agent
+i just wanted an aia agent.
 
 - a nice tui
 - gui support as a desktop app
@@ -16,7 +16,7 @@ i just wanted a like agent.
 - incremental compaction and handoff
 - easy to use as an interface for driving other clients
 
-just a normal, like agent.
+just a normal, aia agent.
 
 ## current bootstrap
 
@@ -27,15 +27,17 @@ this repository now starts with a library-first rust workspace:
 - `crates/agent-runtime`: minimal runtime that composes models, tools, and session state
 - `crates/provider-registry`: stores local provider profiles and active selection
 - `crates/openai-adapter`: the first real model adapter, targeting responses-style http interfaces
-- `apps/agent-cli` (binary `like`): a tiny runnable shell used to verify the core boundaries
+- `apps/agent-cli` (binary `aia`): a tiny runnable shell used to verify the core boundaries
 
 `agent-cli` is now split into startup wiring, provider setup, a shared driver layer, loop driving, rendering, and tui modules. when running in a real terminal it prefers a minimal tui; provider selection and the first question now happen inside the tui startup state machine, and the current session remembers the last provider binding unless the user actively presses `F2` during startup to replace it. in non-terminal environments it falls back to the plain text loop, but both paths now share the same driver protocol.
 
 the shared driver boundary has also been tightened so it no longer leaks cli-specific error types or pre-stringified errors into the reusable turn-driving path.
 
-on startup, `like` now enters a terminal provider flow: create a provider, select a saved provider, or fall back to the local bootstrap model. local provider data is stored in `.like/providers.json`, and `.like/` is ignored to reduce accidental commits.
+the current tui message flow now renders markdown content into terminal lines and keeps a single scrollable message list with auto-follow unless the user scrolls upward.
 
-session replay data is stored separately in `.like/session.jsonl` as jsonl snapshots of tape entries.
+on startup, `aia` now enters a terminal provider flow: create a provider, select a saved provider, or fall back to the local bootstrap model. local provider data is stored in `.aia/providers.json`, and `.aia/` is ignored to reduce accidental commits.
+
+session replay data is stored separately in `.aia/session.jsonl` as jsonl snapshots of tape entries.
 
 see `docs/architecture.md` for the first-phase architecture and why the project starts from reusable libraries instead of a premature ui shell.
 
