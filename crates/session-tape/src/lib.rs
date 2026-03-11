@@ -4,7 +4,7 @@ use agent_core::{Message, Role, ToolCall, ToolResult};
 use serde::{Deserialize, Serialize};
 
 pub fn default_session_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(".like/session.jsonl")
+    std::path::PathBuf::from(".aia/session.jsonl")
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -396,12 +396,12 @@ mod tests {
 
     fn temp_file(name: &str) -> PathBuf {
         let suffix = SystemTime::now().duration_since(UNIX_EPOCH).expect("时间有效").as_nanos();
-        std::env::temp_dir().join(format!("like-session-{name}-{suffix}.jsonl"))
+        std::env::temp_dir().join(format!("aia-session-{name}-{suffix}.jsonl"))
     }
 
     #[test]
     fn 默认会话路径位于项目隐藏目录() {
-        assert_eq!(super::default_session_path(), PathBuf::from(".like/session.jsonl"));
+        assert_eq!(super::default_session_path(), PathBuf::from(".aia/session.jsonl"));
     }
 
     #[test]

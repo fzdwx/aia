@@ -3,7 +3,7 @@ use std::{fmt, fs, path::Path};
 use serde::{Deserialize, Serialize};
 
 pub fn default_registry_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(".like/providers.json")
+    std::path::PathBuf::from(".aia/providers.json")
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -131,12 +131,12 @@ mod tests {
 
     fn temp_file(name: &str) -> PathBuf {
         let suffix = SystemTime::now().duration_since(UNIX_EPOCH).expect("时间有效").as_nanos();
-        std::env::temp_dir().join(format!("like-{name}-{suffix}.json"))
+        std::env::temp_dir().join(format!("aia-{name}-{suffix}.json"))
     }
 
     #[test]
     fn 默认存储路径位于项目隐藏目录() {
-        assert_eq!(super::default_registry_path(), PathBuf::from(".like/providers.json"));
+        assert_eq!(super::default_registry_path(), PathBuf::from(".aia/providers.json"));
     }
 
     #[test]
