@@ -96,10 +96,13 @@ README 里真正难的是这些能力：
 - 启动时提供最小终端内 provider 创建与选择流程
 - 启动后提供最小可运行的 agent loop
 - 在真实终端中优先运行最小 TUI，在非终端环境回退到文本 loop
-- 入口已按 startup / provider / loop / tui / model / error 拆分，避免单文件巨石继续膨胀
+- 入口已按 startup / provider / driver / loop / tui / model / error 拆分，避免单文件巨石继续膨胀
 - TUI 启动状态机负责 provider 选择、provider 创建与首条问题输入
 - 当前会话会记住上次使用的 provider 绑定（名称 / 模型 / 基地址，或 bootstrap）；用户在启动阶段通过 `F2` 才会替换
 - 当前最小 TUI 已把历史 replay 与本次运行分区显示，并支持焦点切换
+- 当前最小 TUI 通过后台驱动线程消费 loop 结果，渲染与 loop 执行已初步分离
+- 文本 loop 与 TUI 已开始共用同一驱动协议，为后续 web / 其他客户端接入预留边界
+- 共享驱动层已收敛为驱动本地错误与事件结果，不再直接泄漏命令行错误类型，也不再把错误提前压成字符串
 - 未来可替换为真正的终端界面程序
 - 桌面应用后续将共享同一运行时，而不是重写代理逻辑
 

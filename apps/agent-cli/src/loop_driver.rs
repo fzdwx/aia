@@ -8,13 +8,9 @@ use agent_runtime::{
     AgentRuntime, RuntimeEvent, RuntimeSubscriberId, ToolInvocationOutcome, TurnLifecycle,
 };
 
+use crate::driver;
 use crate::errors::{CliLoopError, CliSetupError};
 use crate::provider_setup::prompt_line;
-
-pub struct HandoffSummary {
-    pub summary: String,
-    pub next_steps: Vec<String>,
-}
 
 pub fn run_agent_loop<M, T, R, W>(
     reader: &mut R,
@@ -58,7 +54,7 @@ where
         render_turn(writer, &mut runtime, subscriber, input, session_path)?;
     }
 
-    let handoff = finalize_runtime(&mut runtime, session_path)?;
+    let handoff = driver::finalize_runtime(&mut runtime, session_path)?;
     writeln!(writer, "交接摘要：{}", handoff.summary)?;
     writeln!(writer, "下一步：")?;
     for step in handoff.next_steps {
@@ -66,54 +62,6 @@ where
     }
 
     Ok(())
-}
-
-pub fn try_process_turn<M, T>(
-    runtime: &mut AgentRuntime<M, T>,
-    subscriber: RuntimeSubscriberId,
-    prompt: String,
-    session_path: &Path,
-) -> (Vec<RuntimeEvent>, Option<usize>, Option<CliLoopError>)
-where
-    M: LanguageModel,
-    T: agent_core::ToolExecutor,
-{
-    match runtime.handle_turn(prompt) {
-        Ok(output) => {
-            let events = runtime.collect_events(subscriber).unwrap_or_default();
-            let save_error = runtime.tape().save_jsonl(session_path).err().map(CliLoopError::from);
-            (events, Some(output.visible_tools.len()), save_error)
-        }
-        Err(error) => {
-            let events = runtime.collect_events(subscriber).unwrap_or_default();
-            let save_error = runtime.tape().save_jsonl(session_path).err().map(CliLoopError::from);
-            let runtime_error = CliLoopError::Runtime(error);
-            (events, None, save_error.or(Some(runtime_error)))
-        }
-    }
-}
-
-pub fn finalize_runtime<M, T>(
-    runtime: &mut AgentRuntime<M, T>,
-    session_path: &Path,
-) -> Result<HandoffSummary, CliLoopError>
-where
-    M: LanguageModel,
-    T: agent_core::ToolExecutor,
-{
-    let handoff = runtime.handoff(
-        "首个真实模型适配器已经接入",
-        vec![
-            "把统一工具规范映射到外部协议".into(),
-            "推进 MCP 风格工具协议接入".into(),
-            "为终端界面准备稳定事件流".into(),
-        ],
-    );
-    runtime.tape().save_jsonl(session_path)?;
-    Ok(HandoffSummary {
-        summary: handoff.anchor.state.summary,
-        next_steps: handoff.anchor.state.next_steps,
-    })
 }
 
 fn render_turn<M, T, W>(
@@ -128,14 +76,13 @@ where
     T: agent_core::ToolExecutor,
     W: Write,
 {
-    let (events, visible_tool_count, error) =
-        try_process_turn(runtime, subscriber, prompt, session_path);
-    render_events(writer, &events)?;
-    if let Some(visible_tool_count) = visible_tool_count {
-        writeln!(writer, "可见工具数：{visible_tool_count}")?;
+    let result = driver::process_turn(runtime, subscriber, prompt, session_path);
+    render_events(writer, &result.events)?;
+    if let Some(error) = result.persist_error {
+        return Err(error.into());
     }
-    if let Some(error) = error {
-        return Err(error);
+    if let Some(error) = result.turn_error {
+        return Err(error.into());
     }
     Ok(())
 }

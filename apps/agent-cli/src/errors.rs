@@ -6,6 +6,8 @@ use openai_adapter::OpenAiAdapterError;
 use provider_registry::ProviderRegistryError;
 use session_tape::SessionTapeError;
 
+use crate::driver::DriverError;
+
 #[derive(Debug)]
 pub enum CliModelError {
     Bootstrap(CoreError),
@@ -90,5 +92,15 @@ impl From<RuntimeError> for CliLoopError {
 impl From<SessionTapeError> for CliLoopError {
     fn from(value: SessionTapeError) -> Self {
         Self::Session(value)
+    }
+}
+
+impl From<DriverError> for CliLoopError {
+    fn from(value: DriverError) -> Self {
+        match value {
+            DriverError::Io(error) => Self::Io(error),
+            DriverError::Runtime(error) => Self::Runtime(error),
+            DriverError::Session(error) => Self::Session(error),
+        }
     }
 }

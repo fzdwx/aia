@@ -29,7 +29,9 @@ this repository now starts with a library-first rust workspace:
 - `crates/openai-adapter`: the first real model adapter, targeting responses-style http interfaces
 - `apps/agent-cli` (binary `like`): a tiny runnable shell used to verify the core boundaries
 
-`agent-cli` is now split into startup wiring, provider setup, loop driving, rendering, and tui modules. when running in a real terminal it prefers a minimal tui; provider selection and the first question now happen inside the tui startup state machine, and the current session remembers the last provider binding unless the user actively presses `F2` during startup to replace it. in non-terminal environments it falls back to the plain text loop.
+`agent-cli` is now split into startup wiring, provider setup, a shared driver layer, loop driving, rendering, and tui modules. when running in a real terminal it prefers a minimal tui; provider selection and the first question now happen inside the tui startup state machine, and the current session remembers the last provider binding unless the user actively presses `F2` during startup to replace it. in non-terminal environments it falls back to the plain text loop, but both paths now share the same driver protocol.
+
+the shared driver boundary has also been tightened so it no longer leaks cli-specific error types or pre-stringified errors into the reusable turn-driving path.
 
 on startup, `like` now enters a terminal provider flow: create a provider, select a saved provider, or fall back to the local bootstrap model. local provider data is stored in `.like/providers.json`, and `.like/` is ignored to reduce accidental commits.
 
