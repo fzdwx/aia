@@ -11,8 +11,9 @@ openai-adapter = { path = "../../crates/openai-adapter" }
 provider-registry = { path = "../../crates/provider-registry" }
 session-tape = { path = "../../crates/session-tape" }
 crossterm = "0.28"
+pulldown-cmark = "0.12"
 ratatui = "0.29"
 
 [[bin]]
-name = "like"
+name = "aia"
 path = "src/main.rs"

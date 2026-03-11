@@ -7,10 +7,12 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use provider_registry::{ProviderProfile, ProviderRegistry};
+use pulldown_cmark::{Event as MarkdownEvent, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
+    style::{Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Paragraph, Wrap},
 };
@@ -127,7 +129,18 @@ fn run_tui_loop_inner(
                     continue;
                 }
             }
-            // Cursor movement keys — handled in all phases with text input
+            KeyCode::PageUp => {
+                if matches!(state.focus, FocusArea::Messages) {
+                    state.page_up();
+                    continue;
+                }
+            }
+            KeyCode::PageDown => {
+                if matches!(state.focus, FocusArea::Messages) {
+                    state.page_down();
+                    continue;
+                }
+            }
             KeyCode::Left => {
                 state.cursor_left();
                 continue;
@@ -137,16 +150,22 @@ fn run_tui_loop_inner(
                 continue;
             }
             KeyCode::Home | KeyCode::Char('a')
-                if key.code == KeyCode::Home
-                    || key.modifiers.contains(KeyModifiers::CONTROL) =>
+                if key.code == KeyCode::Home || key.modifiers.contains(KeyModifiers::CONTROL) =>
             {
+                if matches!(state.focus, FocusArea::Messages) && key.code == KeyCode::Home {
+                    state.scroll_to_top();
+                    continue;
+                }
                 state.cursor_pos = 0;
                 continue;
             }
             KeyCode::End | KeyCode::Char('e')
-                if key.code == KeyCode::End
-                    || key.modifiers.contains(KeyModifiers::CONTROL) =>
+                if key.code == KeyCode::End || key.modifiers.contains(KeyModifiers::CONTROL) =>
             {
+                if matches!(state.focus, FocusArea::Messages) && key.code == KeyCode::End {
+                    state.scroll_to_bottom();
+                    continue;
+                }
                 state.cursor_pos = state.input.chars().count();
                 continue;
             }
@@ -406,7 +425,7 @@ fn handle_initial_prompt_key(
                 identity,
                 tape_slot.take().unwrap_or_default(),
             )
-            .with_instructions("你是 like 的起步代理。优先给出结构化、可继续落地的答案。");
+            .with_instructions("你是 aia 的起步代理。优先给出结构化、可继续落地的答案。");
             runtime.disable_tool("handoff_session");
             let subscriber = runtime.subscribe();
             state.pending_prompt = Some(prompt);
@@ -449,7 +468,7 @@ fn handle_chat_key(
                 return Ok(());
             }
             if is_exit_command(&prompt) {
-                state.status = Some("已退出 like agent loop".into());
+                state.status = Some("已退出 aia agent loop".into());
                 state.should_exit = true;
                 return Ok(());
             }
@@ -480,6 +499,7 @@ struct TuiState {
     focus: FocusArea,
     message_scroll: usize,
     message_line_count: usize,
+    message_viewport_height: usize,
     user_scrolled_up: bool,
     processing: bool,
     pending_prompt: Option<String>,
@@ -530,6 +550,7 @@ impl TuiState {
             focus: FocusArea::Input,
             message_scroll: 0,
             message_line_count: 0,
+            message_viewport_height: 1,
             user_scrolled_up: false,
             processing: false,
             pending_prompt: None,
@@ -629,15 +650,39 @@ impl TuiState {
             if self.message_scroll < max {
                 self.message_scroll += 1;
             }
-            // Reset user_scrolled_up when reaching bottom
             if self.message_scroll >= max {
                 self.user_scrolled_up = false;
             }
         }
     }
 
+    fn page_up(&mut self) {
+        let step = self.message_viewport_height.max(1);
+        self.message_scroll = self.message_scroll.saturating_sub(step);
+        self.user_scrolled_up = self.message_scroll > 0;
+    }
+
+    fn page_down(&mut self) {
+        let max = self.max_message_scroll();
+        let step = self.message_viewport_height.max(1);
+        self.message_scroll = (self.message_scroll + step).min(max);
+        if self.message_scroll >= max {
+            self.user_scrolled_up = false;
+        }
+    }
+
+    fn scroll_to_top(&mut self) {
+        self.message_scroll = 0;
+        self.user_scrolled_up = true;
+    }
+
+    fn scroll_to_bottom(&mut self) {
+        self.message_scroll = self.max_message_scroll();
+        self.user_scrolled_up = false;
+    }
+
     fn max_message_scroll(&self) -> usize {
-        self.message_line_count.saturating_sub(1)
+        self.message_line_count.saturating_sub(self.message_viewport_height.max(1))
     }
 
     fn clamp_scroll(&mut self) {
@@ -904,11 +949,7 @@ fn draw_tui(frame: &mut ratatui::Frame<'_>, state: &mut TuiState, registry: &Pro
     }
 }
 
-fn draw_messages(
-    frame: &mut ratatui::Frame<'_>,
-    area: Rect,
-    state: &mut TuiState,
-) {
+fn draw_messages(frame: &mut ratatui::Frame<'_>, area: Rect, state: &mut TuiState) {
     // Build unified message flow: replay_turns ++ current_turns (chronological)
     let all_turns: Vec<&TurnLifecycle> =
         state.replay_turns.iter().chain(state.current_turns.iter()).collect();
@@ -936,6 +977,7 @@ fn draw_messages(
 
     let line_count = lines.len();
     state.message_line_count = line_count;
+    state.message_viewport_height = area.height.max(1) as usize;
     state.clamp_scroll();
 
     let panel = Paragraph::new(Text::from(lines))
@@ -944,11 +986,7 @@ fn draw_messages(
     frame.render_widget(panel, area);
 }
 
-fn draw_input_bar(
-    frame: &mut ratatui::Frame<'_>,
-    area: Rect,
-    state: &TuiState,
-) {
+fn draw_input_bar(frame: &mut ratatui::Frame<'_>, area: Rect, state: &TuiState) {
     // Thin separator line at the top of input area
     if area.width > 2 {
         let sep_line = "─".repeat((area.width - 2) as usize);
@@ -996,10 +1034,11 @@ fn draw_input_bar(
 
     // Place terminal cursor
     let prefix_width: u16 = 3; // "❯ "
-    let cursor_display_offset: u16 =
-        state.input.chars().take(state.cursor_pos).fold(0u16, |acc, c| {
-            acc + if is_wide_char(c) { 2 } else { 1 }
-        });
+    let cursor_display_offset: u16 = state
+        .input
+        .chars()
+        .take(state.cursor_pos)
+        .fold(0u16, |acc, c| acc + if is_wide_char(c) { 2 } else { 1 });
     let cursor_x = area.x + prefix_width + cursor_display_offset;
     let cursor_y = area.y + 1; // after separator
     if cursor_x < area.x + area.width {
@@ -1020,21 +1059,223 @@ fn is_wide_char(c: char) -> bool {
         || (0x20000..=0x2A6DF).contains(&cp)
 }
 
+struct MarkdownRenderState {
+    lines: Vec<Line<'static>>,
+    current: Vec<Span<'static>>,
+    style_stack: Vec<Style>,
+    list_depth: usize,
+    pending_prefix: Option<(String, Style)>,
+    quote_depth: usize,
+    in_code_block: bool,
+}
+
+impl MarkdownRenderState {
+    fn new(base_style: Style) -> Self {
+        Self {
+            lines: Vec::new(),
+            current: Vec::new(),
+            style_stack: vec![base_style],
+            list_depth: 0,
+            pending_prefix: None,
+            quote_depth: 0,
+            in_code_block: false,
+        }
+    }
+
+    fn current_style(&self) -> Style {
+        self.style_stack.last().copied().unwrap_or_default()
+    }
+
+    fn push_style(&mut self, style: Style) {
+        self.style_stack.push(style);
+    }
+
+    fn pop_style(&mut self) {
+        if self.style_stack.len() > 1 {
+            let _ = self.style_stack.pop();
+        }
+    }
+
+    fn push_prefix_if_needed(&mut self) {
+        if !self.current.is_empty() {
+            return;
+        }
+        if self.quote_depth > 0 {
+            self.current
+                .push(Span::styled("│ ".repeat(self.quote_depth), theme::MARKDOWN_QUOTE_STYLE));
+        }
+        if let Some((prefix, style)) = self.pending_prefix.take() {
+            self.current.push(Span::styled(prefix, style));
+        }
+    }
+
+    fn push_text(&mut self, text: &str, style: Style) {
+        for (index, segment) in text.split('\n').enumerate() {
+            if !segment.is_empty() {
+                self.push_prefix_if_needed();
+                self.current.push(Span::styled(segment.to_string(), style));
+            }
+            if index + 1 < text.split('\n').count() {
+                self.flush_line(!segment.is_empty());
+            }
+        }
+    }
+
+    fn flush_line(&mut self, allow_empty: bool) {
+        if !self.current.is_empty() || allow_empty {
+            self.lines.push(Line::from(std::mem::take(&mut self.current)));
+        }
+    }
+
+    fn finish(mut self) -> Vec<Line<'static>> {
+        self.flush_line(false);
+        self.lines
+    }
+}
+
+fn heading_prefix(level: HeadingLevel) -> String {
+    let count = match level {
+        HeadingLevel::H1 => 1,
+        HeadingLevel::H2 => 2,
+        HeadingLevel::H3 => 3,
+        HeadingLevel::H4 => 4,
+        HeadingLevel::H5 => 5,
+        HeadingLevel::H6 => 6,
+    };
+    format!("{} ", "#".repeat(count))
+}
+
+fn markdown_lines(content: &str, base_style: Style) -> Vec<Line<'static>> {
+    let options =
+        Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES | Options::ENABLE_TASKLISTS;
+    let parser = Parser::new_ext(content, options);
+    let mut state = MarkdownRenderState::new(base_style);
+
+    for event in parser {
+        match event {
+            MarkdownEvent::Start(tag) => match tag {
+                Tag::Heading { level, .. } => {
+                    state.flush_line(false);
+                    state.pending_prefix =
+                        Some((heading_prefix(level), theme::MARKDOWN_HEADING_STYLE));
+                    state.push_style(theme::MARKDOWN_HEADING_STYLE);
+                }
+                Tag::List(_) => {
+                    state.flush_line(false);
+                    state.list_depth += 1;
+                }
+                Tag::Item => {
+                    state.flush_line(false);
+                    let indent = "  ".repeat(state.list_depth.saturating_sub(1));
+                    state.pending_prefix =
+                        Some((format!("{indent}• "), theme::MARKDOWN_BULLET_STYLE));
+                }
+                Tag::BlockQuote(_) => {
+                    state.flush_line(false);
+                    state.quote_depth += 1;
+                }
+                Tag::CodeBlock(_) => {
+                    state.flush_line(false);
+                    state.in_code_block = true;
+                    state.push_style(theme::MARKDOWN_CODE_BLOCK_STYLE);
+                }
+                Tag::Emphasis => {
+                    state.push_style(state.current_style().add_modifier(Modifier::ITALIC));
+                }
+                Tag::Strong => {
+                    state.push_style(state.current_style().add_modifier(Modifier::BOLD));
+                }
+                Tag::Strikethrough => {
+                    state.push_style(state.current_style().add_modifier(Modifier::CROSSED_OUT));
+                }
+                _ => {}
+            },
+            MarkdownEvent::End(tag) => match tag {
+                TagEnd::Paragraph | TagEnd::Heading(_) | TagEnd::Item => {
+                    state.flush_line(false);
+                    if matches!(tag, TagEnd::Heading(_)) {
+                        state.pop_style();
+                    }
+                }
+                TagEnd::List(_) => {
+                    state.flush_line(false);
+                    state.list_depth = state.list_depth.saturating_sub(1);
+                }
+                TagEnd::BlockQuote(_) => {
+                    state.flush_line(false);
+                    state.quote_depth = state.quote_depth.saturating_sub(1);
+                }
+                TagEnd::CodeBlock => {
+                    state.flush_line(false);
+                    state.in_code_block = false;
+                    state.pop_style();
+                }
+                TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough => {
+                    state.pop_style();
+                }
+                _ => {}
+            },
+            MarkdownEvent::Text(text) => {
+                let style = state.current_style();
+                state.push_text(text.as_ref(), style);
+            }
+            MarkdownEvent::Code(code) => {
+                state.push_prefix_if_needed();
+                state
+                    .current
+                    .push(Span::styled(code.to_string(), theme::MARKDOWN_INLINE_CODE_STYLE));
+            }
+            MarkdownEvent::SoftBreak | MarkdownEvent::HardBreak => {
+                state.flush_line(true);
+            }
+            MarkdownEvent::Rule => {
+                state.flush_line(false);
+                state.lines.push(Line::from(Span::styled(
+                    "────────────".to_string(),
+                    theme::SEPARATOR_STYLE,
+                )));
+            }
+            MarkdownEvent::TaskListMarker(done) => {
+                state.push_prefix_if_needed();
+                let marker = if done { "[x] " } else { "[ ] " };
+                state.current.push(Span::styled(marker.to_string(), theme::MARKDOWN_BULLET_STYLE));
+            }
+            MarkdownEvent::Html(html) | MarkdownEvent::InlineHtml(html) => {
+                let style = state.current_style();
+                state.push_text(html.as_ref(), style);
+            }
+            MarkdownEvent::FootnoteReference(text) => {
+                state.push_prefix_if_needed();
+                state.current.push(Span::styled(format!("[{text}]"), state.current_style()));
+            }
+            MarkdownEvent::InlineMath(text) | MarkdownEvent::DisplayMath(text) => {
+                state.push_prefix_if_needed();
+                state
+                    .current
+                    .push(Span::styled(text.to_string(), theme::MARKDOWN_INLINE_CODE_STYLE));
+            }
+        }
+    }
+
+    let lines = state.finish();
+    if lines.is_empty() {
+        vec![Line::from(Span::styled(content.to_string(), base_style))]
+    } else {
+        lines
+    }
+}
+
 fn turn_lines(turn: &TurnLifecycle) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-
-    // User label + message
     lines.push(Line::from(Span::styled("You", theme::USER_LABEL_STYLE)));
-    lines.push(Line::from(turn.user_message.clone()));
+    lines.extend(markdown_lines(&turn.user_message, Style::default()));
 
-    // Assistant label + message (if present)
     if let Some(assistant) = &turn.assistant_message {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled("Assistant", theme::ASSISTANT_LABEL_STYLE)));
-        lines.push(Line::from(assistant.clone()));
+        lines.extend(markdown_lines(assistant, Style::default()));
     }
 
-    // Tool invocations
     for invocation in &turn.tool_invocations {
         lines.push(Line::from(""));
         let tool_name = &invocation.call.tool_name;
@@ -1045,30 +1286,21 @@ fn turn_lines(turn: &TurnLifecycle) -> Vec<Line<'static>> {
                     format!("┄ {tool_name} #{call_id} ┄┄┄"),
                     theme::TOOL_STYLE,
                 )));
-                lines.push(Line::from(Span::styled(
-                    result.content.clone(),
-                    theme::DIM_STYLE,
-                )));
+                lines.extend(markdown_lines(&result.content, theme::DIM_STYLE));
             }
             agent_runtime::ToolInvocationOutcome::Failed { message } => {
                 lines.push(Line::from(Span::styled(
                     format!("┄ {tool_name} #{call_id} ┄┄┄"),
                     theme::TOOL_FAIL_STYLE,
                 )));
-                lines.push(Line::from(Span::styled(
-                    format!("[失败] {message}"),
-                    theme::FAIL_STYLE,
-                )));
+                lines
+                    .push(Line::from(Span::styled(format!("[失败] {message}"), theme::FAIL_STYLE)));
             }
         }
     }
 
-    // Failure message (if present)
     if let Some(failure) = &turn.failure_message {
-        lines.push(Line::from(Span::styled(
-            format!("[失败] {failure}"),
-            theme::FAIL_STYLE,
-        )));
+        lines.push(Line::from(Span::styled(format!("[失败] {failure}"), theme::FAIL_STYLE)));
     }
 
     lines
@@ -1083,10 +1315,7 @@ fn section_header(title: &str, width: u16) -> Line<'static> {
     let used = prefix.len() + label.len() + suffix.len();
     let fill_count = (width as usize).saturating_sub(used);
     let fill: String = "─".repeat(fill_count);
-    Line::from(Span::styled(
-        format!("{prefix}{label}{fill}{suffix}"),
-        theme::SEPARATOR_STYLE,
-    ))
+    Line::from(Span::styled(format!("{prefix}{label}{fill}{suffix}"), theme::SEPARATOR_STYLE))
 }
 
 fn draw_provider_selection(
@@ -1107,8 +1336,7 @@ fn draw_provider_selection(
         let prefix = if index == state.selected_option { "> " } else { "  " };
         let content = match option {
             StartupOption::Existing(profile) => {
-                let mark =
-                    if active_name == Some(profile.name.as_str()) { " *当前" } else { "" };
+                let mark = if active_name == Some(profile.name.as_str()) { " *当前" } else { "" };
                 format!("{prefix}使用 provider: {} ({}){mark}", profile.name, profile.model)
             }
             StartupOption::CreateOpenAi => {
@@ -1140,9 +1368,7 @@ fn draw_provider_creation(
     lines.push(section_header("创建 provider", area.width));
     lines.push(Line::from(""));
     lines.push(Line::from(prompt));
-    lines.push(Line::from(
-        Span::styled("按 Enter 提交，Esc 退出整个程序。", theme::DIM_STYLE),
-    ));
+    lines.push(Line::from(Span::styled("按 Enter 提交，Esc 退出整个程序。", theme::DIM_STYLE)));
 
     let widget = Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false });
     frame.render_widget(widget, area);
@@ -1270,6 +1496,34 @@ mod tests {
         assert_eq!(super::phase_label(&phase), "创建 provider");
     }
 
+    fn line_text(line: &ratatui::text::Line<'_>) -> String {
+        line.spans.iter().map(|span| span.content.as_ref()).collect::<Vec<_>>().join("")
+    }
+
+    #[test]
+    fn turn_lines_会渲染基础_markdown_结构() {
+        let turn = agent_runtime::TurnLifecycle {
+            turn_id: "turn-1".into(),
+            started_at_ms: 1,
+            finished_at_ms: 2,
+            source_entry_ids: vec![1],
+            user_message: "请总结下面内容".into(),
+            assistant_message: Some(
+                "# 标题\n\n- 第一项\n- 第二项\n\n`命令`\n\n```rust\nfn main() {}\n```".into(),
+            ),
+            tool_invocations: vec![],
+            failure_message: None,
+        };
+
+        let lines = super::turn_lines(&turn);
+        let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+
+        assert!(text.contains("# 标题"));
+        assert!(text.contains("• 第一项"));
+        assert!(text.contains("• 第二项"));
+        assert!(text.contains("fn main() {}"));
+    }
+
     #[test]
     fn cursor_insert_and_backspace() {
         let mut state = TuiState::new(vec![], None, None, None);
@@ -1330,6 +1584,20 @@ mod tests {
         state.message_scroll = 10;
         state.clamp_scroll();
         assert_eq!(state.message_scroll, 4); // max = 5-1 = 4
+    }
+
+    #[test]
+    fn 消息滚动上限会考虑视口高度() {
+        let mut state = TuiState::new(vec![], None, None, None);
+        state.phase = Phase::Chat;
+        state.focus = FocusArea::Messages;
+        state.message_line_count = 20;
+        state.message_viewport_height = 5;
+        state.message_scroll = 99;
+
+        state.clamp_scroll();
+
+        assert_eq!(state.message_scroll, 15);
     }
 
     #[test]
