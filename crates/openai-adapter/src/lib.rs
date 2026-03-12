@@ -1,6 +1,11 @@
-use std::fmt;
+use std::{
+    fmt,
+    io::{self, BufRead},
+};
 
-use agent_core::{Completion, CompletionRequest, CompletionSegment, LanguageModel, Role, ToolCall};
+use agent_core::{
+    Completion, CompletionRequest, CompletionSegment, LanguageModel, Role, StreamEvent, ToolCall,
+};
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -90,7 +95,14 @@ impl OpenAiResponsesModel {
             "instructions": request.instructions,
             "input": input,
             "tools": tools,
+            "reasoning": {"effort": "medium", "summary": "auto"},
         })
+    }
+
+    fn build_streaming_request_body(&self, request: &CompletionRequest) -> Value {
+        let mut body = self.build_request_body(request);
+        body["stream"] = json!(true);
+        body
     }
 
     fn parse_response_body(&self, body: &str) -> Result<Completion, OpenAiAdapterError> {
@@ -101,6 +113,19 @@ impl OpenAiResponsesModel {
 
         for (index, item) in payload.output.into_iter().enumerate() {
             match item {
+                ResponsesOutput::Reasoning { summary } => {
+                    let text: String = summary
+                        .into_iter()
+                        .filter_map(|part| match part {
+                            ReasoningSummaryPart::SummaryText { text } => Some(text),
+                            ReasoningSummaryPart::Other => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("");
+                    if !text.is_empty() {
+                        segments.push(CompletionSegment::Thinking(text));
+                    }
+                }
                 ResponsesOutput::Message { content } => {
                     for part in content {
                         if let ResponsesContent::OutputText { text } = part {
@@ -156,6 +181,136 @@ impl LanguageModel for OpenAiResponsesModel {
 
         self.parse_response_body(&body)
     }
+
+    fn complete_streaming(
+        &self,
+        request: CompletionRequest,
+        sink: &mut dyn FnMut(StreamEvent),
+    ) -> Result<Completion, Self::Error> {
+        if request.model.name != self.config.model {
+            return Err(OpenAiAdapterError::new(format!(
+                "模型标识不一致：请求为 {}，适配器配置为 {}",
+                request.model.name, self.config.model
+            )));
+        }
+
+        let response = Client::new()
+            .post(format!("{}/responses", self.config.base_url.trim_end_matches('/')))
+            .bearer_auth(&self.config.api_key)
+            .json(&self.build_streaming_request_body(&request))
+            .send()
+            .map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body =
+                response.text().map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
+            return Err(OpenAiAdapterError::new(format!("请求失败：{status} {body}")));
+        }
+
+        let reader = io::BufReader::new(response);
+        let mut text_buf = String::new();
+        let mut thinking_buf = String::new();
+        let mut saw_text_delta = false;
+        let mut saw_reasoning_delta = false;
+        let mut tool_calls: Vec<(String, String, String)> = Vec::new(); // (id, name, args_buf)
+        let mut current_tool_id = String::new();
+        let mut current_tool_name = String::new();
+        let mut current_tool_args = String::new();
+
+        for line in reader.lines() {
+            let line = line.map_err(|e| OpenAiAdapterError::new(e.to_string()))?;
+            let Some(data) = line.strip_prefix("data: ") else {
+                continue;
+            };
+            if data == "[DONE]" {
+                break;
+            }
+            let event: Value = match serde_json::from_str(data) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            match event["type"].as_str() {
+                Some("response.output_text.delta") => {
+                    if let Some(delta) = extract_stream_text(&event["delta"]) {
+                        saw_text_delta = true;
+                        text_buf.push_str(&delta);
+                        sink(StreamEvent::TextDelta { text: delta });
+                    }
+                }
+                Some("response.output_text.done") => {
+                    if !saw_text_delta {
+                        if let Some(text) = extract_stream_text(&event["text"]) {
+                            text_buf.push_str(&text);
+                            sink(StreamEvent::TextDelta { text });
+                        }
+                    }
+                }
+                Some(t) if t.contains("reasoning") || t.contains("thinking") => {
+                    if let Some(delta) = extract_reasoning_stream_text(&event) {
+                        let is_done_event = t.ends_with(".done");
+                        if !is_done_event || !saw_reasoning_delta {
+                            saw_reasoning_delta = saw_reasoning_delta || !is_done_event;
+                            thinking_buf.push_str(&delta);
+                            sink(StreamEvent::ThinkingDelta { text: delta });
+                        }
+                    }
+                }
+                Some("response.function_call_arguments.delta") => {
+                    let delta = event["delta"].as_str().unwrap_or("");
+                    current_tool_args.push_str(delta);
+                }
+                Some("response.output_item.added") => {
+                    let item = &event["item"];
+                    if item["type"].as_str() == Some("function_call") {
+                        current_tool_id = item["id"]
+                            .as_str()
+                            .or_else(|| item["call_id"].as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        current_tool_name = item["name"].as_str().unwrap_or("").to_string();
+                        current_tool_args.clear();
+                    }
+                }
+                Some("response.function_call_arguments.done") => {
+                    if !current_tool_name.is_empty() {
+                        let id = if current_tool_id.is_empty() {
+                            format!("openai-stream-call-{}", tool_calls.len() + 1)
+                        } else {
+                            current_tool_id.clone()
+                        };
+                        tool_calls.push((id, current_tool_name.clone(), current_tool_args.clone()));
+                    }
+                    current_tool_id.clear();
+                    current_tool_name.clear();
+                    current_tool_args.clear();
+                }
+                Some("response.completed") => {
+                    // Final event — may contain full response as fallback
+                }
+                Some(other) => {
+                    sink(StreamEvent::Log { text: format!("[sse] {other}") });
+                }
+                None => {}
+            }
+        }
+
+        let mut segments = Vec::new();
+        if !thinking_buf.is_empty() {
+            segments.push(CompletionSegment::Thinking(thinking_buf));
+        }
+        if !text_buf.is_empty() {
+            segments.push(CompletionSegment::Text(text_buf));
+        }
+        for (id, name, args) in tool_calls {
+            let arguments = parse_tool_arguments(&args).unwrap_or_default();
+            segments.push(CompletionSegment::ToolUse(
+                ToolCall::new(name).with_invocation_id(id).with_arguments(arguments),
+            ));
+        }
+        sink(StreamEvent::Done);
+        Ok(Completion { segments })
+    }
 }
 
 fn role_name(role: &Role) -> &'static str {
@@ -186,6 +341,32 @@ fn parse_tool_arguments(arguments: &str) -> Result<Vec<(String, String)>, OpenAi
         .collect())
 }
 
+fn extract_stream_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) if !text.is_empty() => Some(text.clone()),
+        Value::Array(values) => {
+            let text = values.iter().filter_map(extract_stream_text).collect::<Vec<_>>().join("");
+            if text.is_empty() { None } else { Some(text) }
+        }
+        Value::Object(map) => {
+            for key in ["text", "summary_text", "content", "value"] {
+                if let Some(text) = map.get(key).and_then(extract_stream_text) {
+                    return Some(text);
+                }
+            }
+            let text = map.values().filter_map(extract_stream_text).collect::<Vec<_>>().join("");
+            if text.is_empty() { None } else { Some(text) }
+        }
+        _ => None,
+    }
+}
+
+fn extract_reasoning_stream_text(event: &Value) -> Option<String> {
+    extract_stream_text(&event["delta"])
+        .or_else(|| extract_stream_text(&event["text"]))
+        .or_else(|| extract_stream_text(&event["part"]["text"]))
+}
+
 #[derive(Deserialize)]
 struct ResponsesResponse {
     output: Vec<ResponsesOutput>,
@@ -198,6 +379,11 @@ enum ResponsesOutput {
     Message { content: Vec<ResponsesContent> },
     #[serde(rename = "function_call")]
     FunctionCall { id: Option<String>, call_id: Option<String>, name: String, arguments: String },
+    #[serde(rename = "reasoning")]
+    Reasoning {
+        #[serde(default)]
+        summary: Vec<ReasoningSummaryPart>,
+    },
     #[serde(other)]
     Other,
 }
@@ -207,6 +393,15 @@ enum ResponsesOutput {
 enum ResponsesContent {
     #[serde(rename = "output_text")]
     OutputText { text: String },
+    #[serde(other)]
+    Other,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type")]
+enum ReasoningSummaryPart {
+    #[serde(rename = "summary_text")]
+    SummaryText { text: String },
     #[serde(other)]
     Other,
 }
@@ -279,6 +474,8 @@ mod tests {
         assert_eq!(body["input"][1]["content"], json!("帮我总结当前工作区"));
         assert_eq!(body["tools"][0]["name"], json!("search_code"));
         assert_eq!(body["tools"][0]["parameters"]["required"], json!(["query"]));
+        assert_eq!(body["reasoning"]["effort"], json!("medium"));
+        assert_eq!(body["reasoning"]["summary"], json!("auto"));
     }
 
     #[test]
@@ -317,6 +514,43 @@ mod tests {
             segment,
             agent_core::CompletionSegment::ToolUse(ToolCall { tool_name, .. }) if tool_name == "search_code"
         )));
+    }
+
+    #[test]
+    fn 响应体可解析推理摘要() {
+        let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
+            "http://127.0.0.1:1",
+            "test-key",
+            "o4-mini",
+        ))
+        .expect("模型创建成功");
+
+        let completion = model
+            .parse_response_body(
+                r#"{
+                    "output": [
+                        {
+                            "type": "reasoning",
+                            "id": "rs_1",
+                            "summary": [
+                                {"type": "summary_text", "text": "我先分析需求"},
+                                {"type": "summary_text", "text": "，然后给出方案"}
+                            ]
+                        },
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [
+                                {"type": "output_text", "text": "这是回答"}
+                            ]
+                        }
+                    ]
+                }"#,
+            )
+            .expect("响应解析成功");
+
+        assert_eq!(completion.thinking_text(), Some("我先分析需求，然后给出方案".into()));
+        assert_eq!(completion.plain_text(), "这是回答");
     }
 
     #[test]
@@ -394,7 +628,7 @@ mod tests {
             .iter()
             .filter_map(|segment| match segment {
                 CompletionSegment::ToolUse(call) => Some(call.invocation_id.clone()),
-                CompletionSegment::Text(_) => None,
+                CompletionSegment::Text(_) | CompletionSegment::Thinking(_) => None,
             })
             .collect::<Vec<_>>();
 
@@ -403,5 +637,163 @@ mod tests {
         assert_eq!(ids.len(), 2);
         assert!(ids[0].starts_with("openai-call-"));
         assert!(ids[1].starts_with("openai-call-"));
+    }
+
+    #[test]
+    fn 流式调用可逐段收到文本与思考() {
+        use agent_core::StreamEvent;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("监听成功");
+        let address = listener.local_addr().expect("读取地址成功");
+
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("接受连接成功");
+            let mut buffer = [0_u8; 4096];
+            let _ = stream.read(&mut buffer).expect("读取请求成功");
+
+            let sse_body = [
+                r#"data: {"type":"response.reasoning_summary_text.delta","delta":"思考中"}"#,
+                r#"data: {"type":"response.output_text.delta","delta":"你"}"#,
+                r#"data: {"type":"response.output_text.delta","delta":"好"}"#,
+                r#"data: [DONE]"#,
+            ]
+            .join("\n\n");
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n{sse_body}\n\n"
+            );
+            stream.write_all(response.as_bytes()).expect("写回响应成功");
+        });
+
+        let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
+            format!("http://{address}"),
+            "test-key",
+            "gpt-4.1-mini",
+        ))
+        .expect("模型创建成功");
+
+        let mut deltas = Vec::new();
+        let completion = model
+            .complete_streaming(sample_request(), &mut |event| {
+                deltas.push(event);
+            })
+            .expect("流式调用成功");
+
+        handle.join().expect("服务线程退出");
+        assert_eq!(completion.plain_text(), "你好");
+        assert_eq!(completion.thinking_text(), Some("思考中".into()));
+        assert_eq!(
+            deltas,
+            vec![
+                StreamEvent::ThinkingDelta { text: "思考中".into() },
+                StreamEvent::TextDelta { text: "你".into() },
+                StreamEvent::TextDelta { text: "好".into() },
+                StreamEvent::Done,
+            ]
+        );
+    }
+
+    #[test]
+    fn 流式调用可解析对象形态的推理摘要增量() {
+        use agent_core::StreamEvent;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("监听成功");
+        let address = listener.local_addr().expect("读取地址成功");
+
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("接受连接成功");
+            let mut buffer = [0_u8; 4096];
+            let _ = stream.read(&mut buffer).expect("读取请求成功");
+
+            let sse_body = [
+                r#"data: {"type":"response.reasoning_summary.delta","delta":{"text":"先分析"}}"#,
+                r#"data: {"type":"response.output_text.delta","delta":"答案"}"#,
+                r#"data: [DONE]"#,
+            ]
+            .join("\n\n");
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n{sse_body}\n\n"
+            );
+            stream.write_all(response.as_bytes()).expect("写回响应成功");
+        });
+
+        let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
+            format!("http://{address}"),
+            "test-key",
+            "gpt-4.1-mini",
+        ))
+        .expect("模型创建成功");
+
+        let mut deltas = Vec::new();
+        let completion = model
+            .complete_streaming(sample_request(), &mut |event| {
+                deltas.push(event);
+            })
+            .expect("流式调用成功");
+
+        handle.join().expect("服务线程退出");
+        assert_eq!(completion.thinking_text(), Some("先分析".into()));
+        assert_eq!(completion.plain_text(), "答案");
+        assert_eq!(
+            deltas,
+            vec![
+                StreamEvent::ThinkingDelta { text: "先分析".into() },
+                StreamEvent::TextDelta { text: "答案".into() },
+                StreamEvent::Done,
+            ]
+        );
+    }
+
+    #[test]
+    fn 流式调用可解析_done_事件里的推理摘要文本() {
+        use agent_core::StreamEvent;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("监听成功");
+        let address = listener.local_addr().expect("读取地址成功");
+
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("接受连接成功");
+            let mut buffer = [0_u8; 4096];
+            let _ = stream.read(&mut buffer).expect("读取请求成功");
+
+            let sse_body = [
+                r#"data: {"type":"response.reasoning_summary_text.done","text":"先分析"}"#,
+                r#"data: {"type":"response.output_text.done","text":"答案"}"#,
+                r#"data: [DONE]"#,
+            ]
+            .join("\n\n");
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n{sse_body}\n\n"
+            );
+            stream.write_all(response.as_bytes()).expect("写回响应成功");
+        });
+
+        let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
+            format!("http://{address}"),
+            "test-key",
+            "gpt-4.1-mini",
+        ))
+        .expect("模型创建成功");
+
+        let mut deltas = Vec::new();
+        let completion = model
+            .complete_streaming(sample_request(), &mut |event| {
+                deltas.push(event);
+            })
+            .expect("流式调用成功");
+
+        handle.join().expect("服务线程退出");
+        assert_eq!(completion.thinking_text(), Some("先分析".into()));
+        assert_eq!(completion.plain_text(), "答案");
+        assert_eq!(
+            deltas,
+            vec![
+                StreamEvent::ThinkingDelta { text: "先分析".into() },
+                StreamEvent::TextDelta { text: "答案".into() },
+                StreamEvent::Done,
+            ]
+        );
     }
 }

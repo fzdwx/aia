@@ -137,6 +137,7 @@ impl ToolResult {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum CompletionSegment {
     Text(String),
+    Thinking(String),
     ToolUse(ToolCall),
 }
 
@@ -155,10 +156,22 @@ impl Completion {
             .iter()
             .filter_map(|segment| match segment {
                 CompletionSegment::Text(text) => Some(text.as_str()),
-                CompletionSegment::ToolUse(_) => None,
+                CompletionSegment::Thinking(_) | CompletionSegment::ToolUse(_) => None,
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    pub fn thinking_text(&self) -> Option<String> {
+        let parts: Vec<&str> = self
+            .segments
+            .iter()
+            .filter_map(|s| match s {
+                CompletionSegment::Thinking(t) => Some(t.as_str()),
+                _ => None,
+            })
+            .collect();
+        if parts.is_empty() { None } else { Some(parts.join("")) }
     }
 }
 
@@ -170,10 +183,28 @@ pub struct CompletionRequest {
     pub available_tools: Vec<ToolDefinition>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum StreamEvent {
+    ThinkingDelta { text: String },
+    TextDelta { text: String },
+    Log { text: String },
+    Done,
+}
+
 pub trait LanguageModel {
     type Error: std::error::Error;
 
     fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error>;
+
+    fn complete_streaming(
+        &self,
+        request: CompletionRequest,
+        sink: &mut dyn FnMut(StreamEvent),
+    ) -> Result<Completion, Self::Error> {
+        let completion = self.complete(request)?;
+        sink(StreamEvent::Done);
+        Ok(completion)
+    }
 }
 
 pub trait ToolExecutor {

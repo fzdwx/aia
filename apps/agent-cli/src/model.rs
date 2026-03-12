@@ -1,6 +1,6 @@
 use agent_core::{
     Completion, CompletionRequest, CoreError, LanguageModel, ModelDisposition, ModelIdentity,
-    ToolCall, ToolDefinition, ToolExecutor, ToolResult,
+    StreamEvent, ToolCall, ToolDefinition, ToolExecutor, ToolResult,
 };
 use openai_adapter::{OpenAiResponsesConfig, OpenAiResponsesModel};
 use provider_registry::ProviderProfile;
@@ -25,6 +25,21 @@ impl LanguageModel for CliModel {
         match self {
             Self::Bootstrap(model) => model.complete(request).map_err(CliModelError::Bootstrap),
             Self::OpenAi(model) => model.complete(request).map_err(CliModelError::OpenAi),
+        }
+    }
+
+    fn complete_streaming(
+        &self,
+        request: CompletionRequest,
+        sink: &mut dyn FnMut(StreamEvent),
+    ) -> Result<Completion, Self::Error> {
+        match self {
+            Self::Bootstrap(model) => {
+                model.complete_streaming(request, sink).map_err(CliModelError::Bootstrap)
+            }
+            Self::OpenAi(model) => {
+                model.complete_streaming(request, sink).map_err(CliModelError::OpenAi)
+            }
         }
     }
 }
