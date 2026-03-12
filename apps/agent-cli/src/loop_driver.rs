@@ -132,6 +132,9 @@ pub fn render_turn_lifecycle<W: Write>(
         turn.turn_id, turn.started_at_ms, turn.finished_at_ms, turn.source_entry_ids
     )?;
     writeln!(writer, "[用户] {}", turn.user_message)?;
+    if let Some(thinking) = &turn.thinking {
+        writeln!(writer, "[思考] {thinking}")?;
+    }
     if let Some(assistant_message) = &turn.assistant_message {
         writeln!(writer, "[助手] {assistant_message}")?;
     }

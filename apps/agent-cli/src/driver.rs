@@ -5,7 +5,7 @@ use std::{
     thread,
 };
 
-use agent_core::LanguageModel;
+use agent_core::{LanguageModel, StreamEvent};
 use agent_runtime::{AgentRuntime, RuntimeError, RuntimeEvent, RuntimeSubscriberId};
 use session_tape::SessionTapeError;
 
@@ -67,8 +67,15 @@ enum DriverCommand {
 }
 
 enum DriverResponse {
+    StreamDelta(StreamEvent),
     TurnProcessed(DriverTurnResult),
     Finalized(Result<(), DriverError>),
+}
+
+pub enum DriverPollResult {
+    StreamDelta(StreamEvent),
+    TurnCompleted(DriverTurnResult),
+    Nothing,
 }
 
 pub fn process_turn<M, T>(
@@ -82,6 +89,34 @@ where
     T: agent_core::ToolExecutor,
 {
     match runtime.handle_turn(prompt) {
+        Ok(output) => {
+            let events = runtime.collect_events(subscriber).unwrap_or_default();
+            let persist_error =
+                runtime.tape().save_jsonl(session_path).err().map(DriverError::from);
+            let _ = output;
+            DriverTurnResult { events, turn_error: None, persist_error }
+        }
+        Err(error) => {
+            let events = runtime.collect_events(subscriber).unwrap_or_default();
+            let persist_error =
+                runtime.tape().save_jsonl(session_path).err().map(DriverError::from);
+            DriverTurnResult { events, turn_error: Some(DriverError::from(error)), persist_error }
+        }
+    }
+}
+
+fn process_turn_streaming<M, T>(
+    runtime: &mut AgentRuntime<M, T>,
+    subscriber: RuntimeSubscriberId,
+    prompt: String,
+    session_path: &Path,
+    on_delta: impl FnMut(StreamEvent),
+) -> DriverTurnResult
+where
+    M: LanguageModel,
+    T: agent_core::ToolExecutor,
+{
+    match runtime.handle_turn_streaming(prompt, on_delta) {
         Ok(output) => {
             let events = runtime.collect_events(subscriber).unwrap_or_default();
             let persist_error =
@@ -122,7 +157,16 @@ pub fn spawn_driver(
         while let Ok(command) = command_receiver.recv() {
             match command {
                 DriverCommand::ProcessTurn(prompt) => {
-                    let result = process_turn(&mut runtime, subscriber, prompt, &session_path);
+                    let sender = response_sender.clone();
+                    let result = process_turn_streaming(
+                        &mut runtime,
+                        subscriber,
+                        prompt,
+                        &session_path,
+                        |event| {
+                            let _ = sender.send(DriverResponse::StreamDelta(event));
+                        },
+                    );
                     let _ = response_sender.send(DriverResponse::TurnProcessed(result));
                 }
                 DriverCommand::Finalize => {
@@ -144,11 +188,12 @@ pub fn submit_turn(driver: &mut DriverHandle, prompt: String) -> Result<(), Driv
         .map_err(|error| DriverError::Io(io::Error::other(error.to_string())))
 }
 
-pub fn poll_driver(driver: &mut DriverHandle) -> Result<Option<DriverTurnResult>, DriverError> {
+pub fn poll_driver(driver: &mut DriverHandle) -> Result<DriverPollResult, DriverError> {
     match driver.receiver.try_recv() {
-        Ok(DriverResponse::TurnProcessed(result)) => Ok(Some(result)),
-        Ok(DriverResponse::Finalized(_)) => Ok(None),
-        Err(TryRecvError::Empty) => Ok(None),
+        Ok(DriverResponse::StreamDelta(event)) => Ok(DriverPollResult::StreamDelta(event)),
+        Ok(DriverResponse::TurnProcessed(result)) => Ok(DriverPollResult::TurnCompleted(result)),
+        Ok(DriverResponse::Finalized(_)) => Ok(DriverPollResult::Nothing),
+        Err(TryRecvError::Empty) => Ok(DriverPollResult::Nothing),
         Err(TryRecvError::Disconnected) => Err(DriverError::Io(io::Error::other("驱动线程已断开"))),
     }
 }
@@ -161,7 +206,7 @@ pub fn finalize_driver(driver: &mut DriverHandle) -> Result<(), DriverError> {
     loop {
         match driver.receiver.recv() {
             Ok(DriverResponse::Finalized(result)) => return result,
-            Ok(DriverResponse::TurnProcessed(_)) => continue,
+            Ok(DriverResponse::TurnProcessed(_)) | Ok(DriverResponse::StreamDelta(_)) => continue,
             Err(error) => return Err(DriverError::Io(io::Error::other(error.to_string()))),
         }
     }
