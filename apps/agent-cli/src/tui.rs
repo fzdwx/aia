@@ -882,7 +882,7 @@ fn submit_turn_to_driver(
     };
     state.streaming_turn = Some(StreamingTurn {
         user_message: prompt.clone(),
-        status_text: Some("Thinking ...".into()),
+        status_text: Some("Thinking".into()),
         thinking: String::new(),
         text: String::new(),
     });
@@ -909,7 +909,7 @@ fn poll_driver_state(
             DriverPollResult::StreamDelta(event) => match event {
                 StreamEvent::ThinkingDelta { text } => {
                     let streaming = state.streaming_turn.get_or_insert_with(StreamingTurn::default);
-                    streaming.status_text = Some("Thinking ...".into());
+                    streaming.status_text = Some("Thinking".into());
                     streaming.thinking.push_str(&text);
                     had_updates = true;
                     if !state.user_scrolled_up {
@@ -918,7 +918,7 @@ fn poll_driver_state(
                 }
                 StreamEvent::TextDelta { text } => {
                     let streaming = state.streaming_turn.get_or_insert_with(StreamingTurn::default);
-                    streaming.status_text = Some("Responding ...".into());
+                    streaming.status_text = Some("Responding".into());
                     streaming.text.push_str(&text);
                     had_updates = true;
                     if !state.user_scrolled_up {
@@ -1070,7 +1070,7 @@ fn draw_tui(frame: &mut ratatui::Frame<'_>, state: &mut TuiState, registry: &Pro
             // Chat phase: 2 zones — messages (fill) | input bar (3 lines)
             let layout = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Min(4), Constraint::Length(3)])
+                .constraints([Constraint::Min(4), Constraint::Length(1), Constraint::Length(3)])
                 .split(frame.area());
 
             if state.show_logs {
@@ -1083,7 +1083,7 @@ fn draw_tui(frame: &mut ratatui::Frame<'_>, state: &mut TuiState, registry: &Pro
             } else {
                 draw_messages(frame, layout[0], state);
             }
-            draw_input_bar(frame, layout[1], state);
+            draw_input_bar(frame, layout[2], state);
         }
         Phase::SelectProvider => {
             // 3 zones: messages (top) | phase UI (mid) | input bar (bottom)
@@ -1127,7 +1127,7 @@ fn draw_tui(frame: &mut ratatui::Frame<'_>, state: &mut TuiState, registry: &Pro
             // Same as Chat — just messages + input bar; status bar already shows the phase
             let layout = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Min(4), Constraint::Length(3)])
+                .constraints([Constraint::Min(4), Constraint::Length(1), Constraint::Length(3)])
                 .split(frame.area());
 
             if state.show_logs {
@@ -1140,7 +1140,7 @@ fn draw_tui(frame: &mut ratatui::Frame<'_>, state: &mut TuiState, registry: &Pro
             } else {
                 draw_messages(frame, layout[0], state);
             }
-            draw_input_bar(frame, layout[1], state);
+            draw_input_bar(frame, layout[2], state);
         }
     }
 }
@@ -1205,22 +1205,25 @@ fn message_lines(state: &TuiState, width: u16) -> MessageView {
             lines.push(Line::from(""));
         }
         if !streaming.thinking.is_empty() {
-            lines.extend(inline_markdown_lines(
+            lines.extend(padded_plain_lines(inline_markdown_lines(
                 "Thinking: ",
                 &streaming.thinking,
                 theme::thinking_label_style(),
                 theme::thinking_style(),
-            ));
+            )));
             lines.push(Line::from(""));
         }
         if !streaming.text.is_empty() {
-            lines.extend(markdown_lines(&streaming.text, theme::assistant_message_style()));
+            lines.extend(padded_plain_lines(markdown_lines(
+                &streaming.text,
+                theme::assistant_message_style(),
+            )));
         }
         if let Some(status_text) = &streaming.status_text {
             footer = Some(animated_status_line(status_text, state.spinner_tick));
         }
     } else if state.processing {
-        footer = Some(animated_status_line("Thinking ...", state.spinner_tick));
+        footer = Some(animated_status_line("Thinking", state.spinner_tick));
     }
 
     MessageView { lines, footer }
@@ -1576,6 +1579,18 @@ fn inline_markdown_lines(
     }
 }
 
+fn padded_plain_line(line: Line<'static>) -> Line<'static> {
+    let mut spans = Vec::with_capacity(line.spans.len() + 2);
+    spans.push(Span::raw(" "));
+    spans.extend(line.spans);
+    spans.push(Span::raw(" "));
+    Line::from(spans)
+}
+
+fn padded_plain_lines(lines: Vec<Line<'static>>) -> Vec<Line<'static>> {
+    lines.into_iter().map(padded_plain_line).collect()
+}
+
 fn padded_message_line(line: Line<'static>, style: Style) -> Line<'static> {
     let mut spans = Vec::with_capacity(line.spans.len() + 2);
     spans.push(Span::styled(" ".to_string(), style));
@@ -1593,17 +1608,21 @@ fn animated_status_line(text: &str, tick: usize) -> Line<'static> {
     if chars.is_empty() {
         return Line::default();
     }
-    let head = tick % chars.len();
+    let len = chars.len();
+    let head = (tick / 2) % len;
     Line::from(
         chars
             .into_iter()
             .enumerate()
             .map(|(index, ch)| {
-                let distance = head.abs_diff(index);
+                let raw_distance = head.abs_diff(index);
+                let distance = raw_distance.min(len.saturating_sub(raw_distance));
                 let style = if index == head {
                     theme::status_head_style()
-                } else if distance <= 2 {
+                } else if distance == 1 {
                     theme::status_trail_style()
+                } else if distance == 2 {
+                    theme::dim_style()
                 } else {
                     theme::status_dim_style()
                 };
@@ -1626,7 +1645,7 @@ fn turn_lines(turn: &TurnLifecycle, width: u16) -> Vec<Line<'static>> {
 
     if let Some(thinking) = &turn.thinking {
         lines.push(Line::from(""));
-        lines.extend(inline_thinking_lines(thinking));
+        lines.extend(padded_plain_lines(inline_thinking_lines(thinking)));
     }
 
     for invocation in &turn.tool_invocations {
@@ -1634,20 +1653,21 @@ fn turn_lines(turn: &TurnLifecycle, width: u16) -> Vec<Line<'static>> {
         let tool_name = &invocation.call.tool_name;
         match &invocation.outcome {
             agent_runtime::ToolInvocationOutcome::Succeeded { result } => {
-                lines.push(tool_header_line(tool_name, theme::tool_style()));
-                lines.extend(prefixed_markdown_lines(
+                lines.push(padded_plain_line(tool_header_line(tool_name, theme::tool_style())));
+                lines.extend(padded_plain_lines(prefixed_markdown_lines(
                     &result.content,
                     "  └ ",
                     "    ",
                     theme::dim_style(),
-                ));
+                )));
             }
             agent_runtime::ToolInvocationOutcome::Failed { message } => {
-                lines.push(tool_header_line(tool_name, theme::tool_fail_style()));
-                lines.push(Line::from(Span::styled(
+                lines
+                    .push(padded_plain_line(tool_header_line(tool_name, theme::tool_fail_style())));
+                lines.push(padded_plain_line(Line::from(Span::styled(
                     format!("  └ [失败] {message}"),
                     theme::fail_style(),
-                )));
+                ))));
             }
         }
     }
@@ -1661,11 +1681,17 @@ fn turn_lines(turn: &TurnLifecycle, width: u16) -> Vec<Line<'static>> {
 
     if let Some(assistant) = &turn.assistant_message {
         lines.push(Line::from(""));
-        lines.extend(markdown_lines(assistant, theme::assistant_message_style()));
+        lines.extend(padded_plain_lines(markdown_lines(
+            assistant,
+            theme::assistant_message_style(),
+        )));
     }
 
     if let Some(failure) = &turn.failure_message {
-        lines.push(Line::from(Span::styled(format!("[失败] {failure}"), theme::fail_style())));
+        lines.push(padded_plain_line(Line::from(Span::styled(
+            format!("[失败] {failure}"),
+            theme::fail_style(),
+        ))));
     }
 
     lines
@@ -2074,7 +2100,7 @@ mod tests {
 
         let streaming = state.streaming_turn.expect("应创建进行中轮次");
         assert_eq!(streaming.user_message, "hello world");
-        assert_eq!(streaming.status_text.as_deref(), Some("Thinking ..."));
+        assert_eq!(streaming.status_text.as_deref(), Some("Thinking"));
         assert!(state.processing);
         assert!(!state.user_scrolled_up);
         assert!(state.pending_auto_scroll);
@@ -2090,7 +2116,7 @@ mod tests {
         state.status = Some("正在处理中...".into());
         state.streaming_turn = Some(super::StreamingTurn {
             user_message: "hello".into(),
-            status_text: Some("Thinking ...".into()),
+            status_text: Some("Thinking".into()),
             thinking: String::new(),
             text: String::new(),
         });
@@ -2106,12 +2132,12 @@ mod tests {
 
     #[test]
     fn 状态动画会从左到右逐步变暗() {
-        let line = super::animated_status_line("Thinking ...", 3);
+        let line = super::animated_status_line("Thinking", 3);
 
-        assert_eq!(line.spans[0].style, theme::status_dim_style());
-        assert_eq!(line.spans[1].style, theme::status_trail_style());
-        assert_eq!(line.spans[3].style, theme::status_head_style());
-        assert_eq!(line.spans[6].style, theme::status_dim_style());
+        assert_eq!(line.spans[0].style, theme::status_trail_style());
+        assert_eq!(line.spans[1].style, theme::status_head_style());
+        assert_eq!(line.spans[2].style, theme::status_trail_style());
+        assert_eq!(line.spans[4].style, theme::status_dim_style());
     }
 
     #[test]
@@ -2143,7 +2169,7 @@ mod tests {
         state.processing = true;
         state.streaming_turn = Some(super::StreamingTurn {
             user_message: "hello".into(),
-            status_text: Some("Thinking ...".into()),
+            status_text: Some("Thinking".into()),
             thinking: "first line".into(),
             text: "reply".into(),
         });
@@ -2197,7 +2223,7 @@ mod tests {
         });
         state.streaming_turn = Some(super::StreamingTurn {
             user_message: "当前输入".into(),
-            status_text: Some("Thinking ...".into()),
+            status_text: Some("Thinking".into()),
             thinking: String::new(),
             text: String::new(),
         });
@@ -2212,6 +2238,21 @@ mod tests {
 
         assert_eq!(rendered[current_index - 1], "");
         assert_eq!(rendered[current_index - 2], "");
+    }
+
+    #[test]
+    fn 聊天布局会在消息区与输入框之间保留固定空白行() {
+        let backend = TestBackend::new(80, 12);
+        let mut terminal = Terminal::new(backend).expect("终端创建成功");
+        let mut state = TuiState::new(vec![], None, None, None);
+        state.phase = Phase::Chat;
+        let registry = provider_registry::ProviderRegistry::default();
+
+        terminal.draw(|frame| draw_tui(frame, &mut state, &registry)).expect("绘制成功");
+
+        let buffer = terminal.backend().buffer().clone();
+        let gap_row = buffer_row_text(&buffer, 8);
+        assert!(gap_row.trim().is_empty());
     }
 
     #[test]
@@ -2237,9 +2278,9 @@ mod tests {
         let lines = super::turn_lines(&turn, 60);
         let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
 
-        assert!(text.contains("• tool search_code"));
-        assert!(text.contains("  └ 搜索结果"));
-        assert!(text.contains("    第二行"));
+        assert!(text.contains(" • tool search_code "));
+        assert!(text.contains("   └ 搜索结果 "));
+        assert!(text.contains("     第二行 "));
         assert!(text.contains("────────"));
 
         let tool_index = text.find("• tool search_code").expect("应有工具调用");
@@ -2299,8 +2340,8 @@ mod tests {
         let lines = super::turn_lines(&turn, 60);
         let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
 
-        assert!(text.contains("• tool search_code"));
-        assert!(text.contains("  └ [失败] 请求失败"));
+        assert!(text.contains(" • tool search_code "));
+        assert!(text.contains("   └ [失败] 请求失败 "));
     }
 
     #[test]
