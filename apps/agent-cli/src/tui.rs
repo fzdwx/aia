@@ -632,7 +632,7 @@ impl MessagePanel {
     fn start_streaming(&mut self, user_message: String) {
         self.streaming = Some(StreamingTurn {
             user_message,
-            status_text: Some("Thinking".into()),
+            status_text: Some("Waiting".into()),
             thinking: String::new(),
             text: String::new(),
         });
@@ -655,7 +655,7 @@ impl MessagePanel {
             }
             StreamEvent::TextDelta { text } => {
                 let streaming = self.streaming.get_or_insert_with(StreamingTurn::default);
-                streaming.status_text = Some("Responding".into());
+                streaming.status_text = Some("Generating".into());
                 streaming.text.push_str(&text);
                 self.overlay_cache = None;
                 if !self.user_scrolled_up {
@@ -952,7 +952,7 @@ impl MessagePanel {
                 footer_text = Some(status_text.clone());
             }
         } else if self.processing {
-            footer_text = Some("Thinking".into());
+            footer_text = Some("Waiting".into());
         }
 
         let all_overlay: Vec<Line<'static>> =
@@ -2265,7 +2265,7 @@ mod tests {
 
         let streaming = state.messages.streaming.expect("应创建进行中轮次");
         assert_eq!(streaming.user_message, "hello world");
-        assert_eq!(streaming.status_text.as_deref(), Some("Thinking"));
+        assert_eq!(streaming.status_text.as_deref(), Some("Waiting"));
         assert!(state.messages.processing);
         assert!(!state.messages.user_scrolled_up);
         assert!(state.messages.pending_auto_scroll);
@@ -2418,7 +2418,7 @@ mod tests {
         state.messages.processing = true;
         state.messages.streaming = Some(super::StreamingTurn {
             user_message: "hello".into(),
-            status_text: Some("Responding".into()),
+            status_text: Some("Generating".into()),
             thinking: String::new(),
             text: (1..=12).map(|i| format!("第{i}行")).collect::<Vec<_>>().join("\n"),
         });
