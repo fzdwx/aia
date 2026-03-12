@@ -1,6 +1,6 @@
-use std::{io, path::Path, time::Duration};
+use std::{collections::BTreeMap, io, path::Path, time::Duration};
 
-use agent_runtime::{AgentRuntime, RuntimeEvent, RuntimeSubscriberId, TurnLifecycle};
+use agent_runtime::{AgentRuntime, RuntimeEvent, RuntimeSubscriberId, TurnLifecycle, ToolInvocationLifecycle, ToolInvocationOutcome};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
@@ -35,7 +35,7 @@ pub fn run_tui_loop(
 ) -> Result<(), CliLoopError> {
     let (remembered_selection, startup_notice) = resolve_remembered_selection(&tape, &registry);
     let mut state = TuiState::new(
-        tape.replay_turns().into_iter().map(turn_from_record).collect(),
+        reconstruct_turns(&tape),
         prompt_seed,
         remembered_selection,
         startup_notice,
@@ -71,12 +71,7 @@ pub fn run_tui_loop(
     }
 
     if let Some(mut driver) = driver {
-        let handoff = driver::finalize_driver(&mut driver)?;
-        println!("交接摘要：{}", handoff.summary);
-        println!("下一步：");
-        for step in handoff.next_steps {
-            println!("- {step}");
-        }
+        driver::finalize_driver(&mut driver)?;
     }
 
     Ok(())
@@ -850,31 +845,103 @@ fn poll_driver_state(
     Ok(had_new_turns)
 }
 
-fn turn_from_record(record: session_tape::TurnRecord) -> TurnLifecycle {
-    TurnLifecycle {
-        turn_id: record.turn_id,
-        started_at_ms: record.started_at_ms,
-        finished_at_ms: record.finished_at_ms,
-        source_entry_ids: record.source_entry_ids,
-        user_message: record.user_message,
-        assistant_message: record.assistant_message,
-        tool_invocations: record
-            .tool_invocations
-            .into_iter()
-            .map(|invocation| agent_runtime::ToolInvocationLifecycle {
-                call: invocation.call,
-                outcome: match invocation.outcome {
-                    session_tape::ToolInvocationRecordOutcome::Succeeded { result } => {
-                        agent_runtime::ToolInvocationOutcome::Succeeded { result }
-                    }
-                    session_tape::ToolInvocationRecordOutcome::Failed { message } => {
-                        agent_runtime::ToolInvocationOutcome::Failed { message }
-                    }
-                },
-            })
-            .collect(),
-        failure_message: record.failure_message,
+fn reconstruct_turns(tape: &SessionTape) -> Vec<TurnLifecycle> {
+    let mut groups: BTreeMap<String, Vec<&session_tape::TapeEntry>> = BTreeMap::new();
+    let mut order: Vec<String> = Vec::new();
+
+    for entry in tape.entries() {
+        if let Some(run_id) = entry.meta.get("run_id").and_then(|v| v.as_str()) {
+            let key = run_id.to_string();
+            if !groups.contains_key(&key) {
+                order.push(key.clone());
+            }
+            groups.entry(key).or_default().push(entry);
+        }
     }
+
+    order
+        .into_iter()
+        .filter_map(|run_id| {
+            let entries = groups.remove(&run_id)?;
+            let user_message = entries
+                .iter()
+                .find_map(|e| e.as_message().filter(|m| m.role == agent_core::Role::User))
+                .map(|m| m.content)?;
+            let assistant_message = entries
+                .iter()
+                .find_map(|e| e.as_message().filter(|m| m.role == agent_core::Role::Assistant))
+                .map(|m| m.content);
+
+            let mut tool_invocations = Vec::new();
+            let calls: Vec<_> = entries.iter().filter_map(|e| {
+                e.as_tool_call().map(|c| (e.id, c))
+            }).collect();
+            for (call_id, call) in &calls {
+                let outcome = entries
+                    .iter()
+                    .find_map(|e| {
+                        let result = e.as_tool_result()?;
+                        if result.invocation_id == call.invocation_id {
+                            Some(ToolInvocationOutcome::Succeeded { result })
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| {
+                        let fail_msg = entries
+                            .iter()
+                            .filter(|e| e.kind == "event")
+                            .find_map(|e| {
+                                let ids = e.meta.get("source_entry_ids")
+                                    .and_then(|v| v.as_array())?;
+                                if ids.iter().any(|v| v.as_u64() == Some(*call_id)) {
+                                    e.event_data()
+                                        .and_then(|d| d.get("message"))
+                                        .and_then(|v| v.as_str())
+                                        .map(|s| s.to_string())
+                                } else {
+                                    None
+                                }
+                            })
+                            .unwrap_or_else(|| "unknown failure".into());
+                        ToolInvocationOutcome::Failed { message: fail_msg }
+                    });
+                tool_invocations.push(ToolInvocationLifecycle {
+                    call: call.clone(),
+                    outcome,
+                });
+            }
+
+            let failure_message = entries.iter().find_map(|e| {
+                if e.kind == "error" {
+                    e.payload.get("message").and_then(|v| v.as_str()).map(|s| s.to_string())
+                } else if e.kind == "event" && e.event_name() == Some("turn_failed") {
+                    e.event_data()
+                        .and_then(|d| d.get("message"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                } else {
+                    None
+                }
+            });
+
+            let source_entry_ids: Vec<u64> = entries.iter().map(|e| e.id).collect();
+            // Parse first/last date to approximate timestamps
+            let started_at_ms = 0u128;
+            let finished_at_ms = 0u128;
+
+            Some(TurnLifecycle {
+                turn_id: run_id,
+                started_at_ms,
+                finished_at_ms,
+                source_entry_ids,
+                user_message,
+                assistant_message,
+                tool_invocations,
+                failure_message,
+            })
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------

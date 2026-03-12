@@ -42,6 +42,12 @@
 - 工具调用与工具结果现已通过稳定调用标识关联，便于后续 replay 与压缩
 - 默认上下文里的工具结果投影也保留调用标识，避免同名工具结果混淆
 - 轮次块已落盘到 `.aia/session.jsonl`，可用于后续 resume / replay
+- `session-tape` 已补齐命名锚点、查询切片、命名磁带存储抽象与 fork / merge 语义
+- `session-tape` TapeEntry 已改为扁平 `{id, kind, payload, meta, date}` 模型，对齐 republic 数据模型
+- 锚点已简化为 `{entry_id, name, state: Value}`，不再硬编码固定字段
+- 运行时不再将 TurnRecord 写入磁带，遵循 "derivatives never replace original facts" 原则
+- 旧格式 JSONL 可兼容载入并自动转换为新扁平格式
+- 兼容门面仍保持 `.aia/session.jsonl` 的旧格式读写，避免当前 CLI 会话文件被隐式迁移
 - `agent-cli` 已可在启动时通过终端交互创建或选择 provider
 - provider 本地资料当前落盘在 `.aia/providers.json`，并通过 `.gitignore` 避免误提交
 - `agent-cli` 已可进入多轮 agent loop，并支持退出指令
@@ -59,9 +65,11 @@
 - 完整 MCP 接入
 - 多提供商真实适配
 - 异步子代理调度
+- 跨磁带视图与锚点图内存策略
 
 ### 下一阶段优先事项
 
 - 明确内部统一工具规范与外部协议映射
 - 推进 MCP 方向的工具协议接入
 - 为后续终端界面准备稳定事件流，并让 provider 管理复用同一事件流
+- 在保持现有会话文件兼容的前提下，逐步把运行时接到更完整的命名磁带能力

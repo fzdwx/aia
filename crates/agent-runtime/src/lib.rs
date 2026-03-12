@@ -9,10 +9,8 @@ use agent_core::{
     Completion, CompletionRequest, CompletionSegment, LanguageModel, Message, ModelIdentity, Role,
     ToolCall, ToolDefinition, ToolExecutor, ToolResult,
 };
-use session_tape::{
-    Anchor, Handoff, SessionEvent, SessionFact, SessionTape, ToolInvocationRecord,
-    ToolInvocationRecordOutcome, TurnRecord,
-};
+use session_tape::{Anchor, Handoff, SessionTape, TapeEntry};
+use serde_json::json;
 
 pub struct AgentRuntime<M, T> {
     model: M,
@@ -96,7 +94,9 @@ where
         let turn_id = next_turn_id();
         let started_at_ms = now_timestamp_ms();
         let user_message = Message::new(Role::User, user_input.into());
-        let user_entry_id = self.tape.append(user_message.clone());
+        let user_entry_id = self.tape.append_entry(
+            TapeEntry::message(&user_message).with_run_id(&turn_id),
+        );
         let mut source_entry_ids = vec![user_entry_id];
         self.publish_event(RuntimeEvent::UserMessage { content: user_message.content.clone() });
         let view = self.tape.default_view();
@@ -117,12 +117,11 @@ where
             Ok(completion) => completion,
             Err(error) => {
                 let runtime_error = RuntimeError::model(error);
-                let failure_event_id =
-                    self.tape.append_fact(SessionFact::Event(SessionEvent::new(
-                        "turn_failed",
-                        runtime_error.to_string(),
-                        vec![user_entry_id],
-                    )));
+                let failure_event_id = self.tape.append_entry(
+                    TapeEntry::event("turn_failed", Some(json!({"message": runtime_error.to_string()})))
+                        .with_run_id(&turn_id)
+                        .with_meta("source_entry_ids", json!([user_entry_id])),
+                );
                 source_entry_ids.push(failure_event_id);
                 self.publish_event(RuntimeEvent::TurnFailed { message: runtime_error.to_string() });
                 self.publish_turn_lifecycle(TurnLifecycle {
@@ -140,7 +139,9 @@ where
         };
         let assistant_text = completion.plain_text();
         let assistant_message = Message::new(Role::Assistant, assistant_text.clone());
-        let assistant_entry_id = self.tape.append(assistant_message);
+        let assistant_entry_id = self.tape.append_entry(
+            TapeEntry::message(&assistant_message).with_run_id(&turn_id),
+        );
         source_entry_ids.push(assistant_entry_id);
         self.publish_event(RuntimeEvent::AssistantMessage { content: assistant_text.clone() });
         let mut tool_invocations = Vec::new();
@@ -151,16 +152,17 @@ where
             .collect::<BTreeSet<_>>();
         for segment in &completion.segments {
             if let CompletionSegment::ToolUse(call) = segment {
-                let tool_call_entry_id = self.tape.append_fact(SessionFact::ToolCall(call.clone()));
+                let tool_call_entry_id = self.tape.append_entry(
+                    TapeEntry::tool_call(call).with_run_id(&turn_id),
+                );
                 source_entry_ids.push(tool_call_entry_id);
                 if !available_tool_names.contains(&call.tool_name) {
                     let runtime_error = RuntimeError::tool_unavailable(call.tool_name.clone());
-                    let reject_event_id =
-                        self.tape.append_fact(SessionFact::Event(SessionEvent::new(
-                            "tool_call_rejected",
-                            runtime_error.to_string(),
-                            vec![assistant_entry_id, tool_call_entry_id],
-                        )));
+                    let reject_event_id = self.tape.append_entry(
+                        TapeEntry::event("tool_call_rejected", Some(json!({"message": runtime_error.to_string()})))
+                            .with_run_id(&turn_id)
+                            .with_meta("source_entry_ids", json!([assistant_entry_id, tool_call_entry_id])),
+                    );
                     source_entry_ids.push(reject_event_id);
                     self.publish_event(RuntimeEvent::ToolInvocation {
                         call: call.clone(),
@@ -193,12 +195,11 @@ where
                             || result.tool_name != call.tool_name
                         {
                             let runtime_error = RuntimeError::tool_result_mismatch(call, &result);
-                            let reject_event_id =
-                                self.tape.append_fact(SessionFact::Event(SessionEvent::new(
-                                    "tool_result_rejected",
-                                    runtime_error.to_string(),
-                                    vec![assistant_entry_id, tool_call_entry_id],
-                                )));
+                            let reject_event_id = self.tape.append_entry(
+                                TapeEntry::event("tool_result_rejected", Some(json!({"message": runtime_error.to_string()})))
+                                    .with_run_id(&turn_id)
+                                    .with_meta("source_entry_ids", json!([assistant_entry_id, tool_call_entry_id])),
+                            );
                             source_entry_ids.push(reject_event_id);
                             self.publish_event(RuntimeEvent::ToolInvocation {
                                 call: call.clone(),
@@ -225,15 +226,15 @@ where
                             return Err(runtime_error);
                         }
 
-                        let tool_result_entry_id =
-                            self.tape.append_fact(SessionFact::ToolResult(result.clone()));
+                        let tool_result_entry_id = self.tape.append_entry(
+                            TapeEntry::tool_result(&result).with_run_id(&turn_id),
+                        );
                         source_entry_ids.push(tool_result_entry_id);
-                        let tool_result_event_id =
-                            self.tape.append_fact(SessionFact::Event(SessionEvent::new(
-                                "tool_result_recorded",
-                                result.tool_name.clone(),
-                                vec![assistant_entry_id, tool_call_entry_id, tool_result_entry_id],
-                            )));
+                        let tool_result_event_id = self.tape.append_entry(
+                            TapeEntry::event("tool_result_recorded", Some(json!({"tool_name": result.tool_name.clone()})))
+                                .with_run_id(&turn_id)
+                                .with_meta("source_entry_ids", json!([assistant_entry_id, tool_call_entry_id, tool_result_entry_id])),
+                        );
                         source_entry_ids.push(tool_result_event_id);
                         self.publish_event(RuntimeEvent::ToolInvocation {
                             call: call.clone(),
@@ -246,12 +247,11 @@ where
                     }
                     Err(error) => {
                         let runtime_error = RuntimeError::tool(error);
-                        let failure_event_id =
-                            self.tape.append_fact(SessionFact::Event(SessionEvent::new(
-                                "tool_call_failed",
-                                runtime_error.to_string(),
-                                vec![assistant_entry_id, tool_call_entry_id],
-                            )));
+                        let failure_event_id = self.tape.append_entry(
+                            TapeEntry::event("tool_call_failed", Some(json!({"message": runtime_error.to_string()})))
+                                .with_run_id(&turn_id)
+                                .with_meta("source_entry_ids", json!([assistant_entry_id, tool_call_entry_id])),
+                        );
                         source_entry_ids.push(failure_event_id);
                         self.publish_event(RuntimeEvent::ToolInvocation {
                             call: call.clone(),
@@ -311,8 +311,8 @@ where
             .collect()
     }
 
-    pub fn handoff(&mut self, summary: impl Into<String>, next_steps: Vec<String>) -> Handoff {
-        self.tape.handoff(summary, next_steps)
+    pub fn handoff(&mut self, name: impl Into<String>, state: serde_json::Value) -> Handoff {
+        self.tape.handoff(name, state)
     }
 
     pub fn tape(&self) -> &SessionTape {
@@ -344,35 +344,7 @@ where
     }
 
     fn publish_turn_lifecycle(&mut self, turn: TurnLifecycle) {
-        self.tape.append_fact(SessionFact::Turn(turn_record_from_lifecycle(&turn)));
         self.publish_event(RuntimeEvent::TurnLifecycle { turn });
-    }
-}
-
-fn turn_record_from_lifecycle(turn: &TurnLifecycle) -> TurnRecord {
-    TurnRecord {
-        turn_id: turn.turn_id.clone(),
-        started_at_ms: turn.started_at_ms,
-        finished_at_ms: turn.finished_at_ms,
-        source_entry_ids: turn.source_entry_ids.clone(),
-        user_message: turn.user_message.clone(),
-        assistant_message: turn.assistant_message.clone(),
-        tool_invocations: turn
-            .tool_invocations
-            .iter()
-            .map(|invocation| ToolInvocationRecord {
-                call: invocation.call.clone(),
-                outcome: match &invocation.outcome {
-                    ToolInvocationOutcome::Succeeded { result } => {
-                        ToolInvocationRecordOutcome::Succeeded { result: result.clone() }
-                    }
-                    ToolInvocationOutcome::Failed { message } => {
-                        ToolInvocationRecordOutcome::Failed { message: message.clone() }
-                    }
-                },
-            })
-            .collect(),
-        failure_message: turn.failure_message.clone(),
     }
 }
 
@@ -387,15 +359,27 @@ fn now_timestamp_ms() -> u128 {
 }
 
 fn anchor_state_message(anchor: &Anchor) -> Message {
+    let state = &anchor.state;
+    let phase = state.get("phase").and_then(|v| v.as_str()).unwrap_or(&anchor.name);
+    let summary = state.get("summary").and_then(|v| v.as_str()).unwrap_or("");
+    let next_steps = state
+        .get("next_steps")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join("、")
+        })
+        .unwrap_or_default();
+    let source_entry_ids = state
+        .get("source_entry_ids")
+        .and_then(|v| v.as_array())
+        .map(|arr| format!("{:?}", arr.iter().filter_map(|v| v.as_u64()).collect::<Vec<_>>()))
+        .unwrap_or_else(|| "[]".into());
+    let owner = state.get("owner").and_then(|v| v.as_str()).unwrap_or("");
     Message::new(
         Role::System,
         format!(
-            "当前阶段: {}\n锚点摘要: {}\n下一步: {}\n来源条目: {:?}\n所有者: {}",
-            anchor.state.phase,
-            anchor.state.summary,
-            anchor.state.next_steps.join("、"),
-            anchor.state.source_entry_ids,
-            anchor.state.owner,
+            "当前阶段: {}\n锚点摘要: {}\n下一步: {}\n来源条目: {}\n所有者: {}",
+            phase, summary, next_steps, source_entry_ids, owner,
         ),
     )
 }
@@ -458,6 +442,7 @@ mod tests {
         Completion, CompletionRequest, CompletionSegment, CoreError, LanguageModel, Message,
         ModelDisposition, ModelIdentity, Role, ToolCall, ToolDefinition, ToolExecutor, ToolResult,
     };
+    use serde_json::json;
     use session_tape::SessionTape;
 
     use super::{
@@ -554,8 +539,7 @@ mod tests {
         let output = runtime.handle_turn("你好").expect("运行成功");
 
         assert_eq!(output.assistant_text, "已收到：你好");
-        assert_eq!(runtime.tape().entries().len(), 6);
-        assert_eq!(runtime.tape().replay_turns().len(), 1);
+        assert_eq!(runtime.tape().entries().len(), 5);
         assert_eq!(output.visible_tools.len(), 1);
     }
 
@@ -565,10 +549,19 @@ mod tests {
         let mut runtime = AgentRuntime::new(StubModel, StubTools, identity);
         runtime.handle_turn("开始").expect("运行成功");
 
-        let handoff = runtime.handoff("发现阶段结束", vec!["进入实现".into()]);
+        let handoff = runtime.handoff(
+            "handoff",
+            json!({"summary": "发现阶段结束", "next_steps": ["进入实现"]}),
+        );
 
-        assert_eq!(handoff.anchor.state.summary, "发现阶段结束");
-        assert_eq!(handoff.anchor.state.next_steps, vec!["进入实现"]);
+        assert_eq!(
+            handoff.anchor.state.get("summary").and_then(|v| v.as_str()),
+            Some("发现阶段结束"),
+        );
+        assert_eq!(
+            handoff.anchor.state.get("next_steps").and_then(|v| v.as_array()).map(|a| a.len()),
+            Some(1),
+        );
         assert!(handoff.event_id > handoff.anchor.entry_id);
     }
 
@@ -593,14 +586,14 @@ mod tests {
         let output = runtime.handle_turn("第二轮").expect("第二轮成功");
 
         assert_eq!(output.assistant_text, "已收到：第二轮");
-        assert_eq!(runtime.tape().entries().len(), 12);
+        assert_eq!(runtime.tape().entries().len(), 10);
         assert_eq!(
-            runtime.tape().entries()[0].message().map(|value| value.content.as_str()),
-            Some("第一轮")
+            runtime.tape().entries()[0].as_message().map(|value| value.content.clone()),
+            Some("第一轮".into())
         );
         assert_eq!(
-            runtime.tape().entries()[6].message().map(|value| value.content.as_str()),
-            Some("第二轮")
+            runtime.tape().entries()[5].as_message().map(|value| value.content.clone()),
+            Some("第二轮".into())
         );
     }
 
@@ -612,12 +605,12 @@ mod tests {
         let error = runtime.handle_turn("会失败").expect_err("应当失败");
 
         assert!(error.to_string().contains("模型执行失败"));
-        assert_eq!(runtime.tape().entries().len(), 3);
+        assert_eq!(runtime.tape().entries().len(), 2);
         assert_eq!(
-            runtime.tape().entries()[0].message().map(|value| value.content.as_str()),
-            Some("会失败")
+            runtime.tape().entries()[0].as_message().map(|value| value.content.clone()),
+            Some("会失败".into())
         );
-        assert!(runtime.tape().entries()[1].event().is_some());
+        assert!(runtime.tape().entries()[1].event_name().is_some());
     }
 
     #[test]
@@ -626,7 +619,10 @@ mod tests {
         let mut runtime = AgentRuntime::new(StubModel, StubTools, identity);
 
         runtime.handle_turn("第一轮").expect("第一轮成功");
-        let _ = runtime.handoff("切到实现阶段", vec!["继续执行".into()]);
+        let _ = runtime.handoff(
+            "handoff",
+            json!({"phase": "handoff", "summary": "切到实现阶段", "next_steps": ["继续执行"], "source_entry_ids": [], "owner": "agent"}),
+        );
         runtime.handle_turn("第二轮").expect("第二轮成功");
 
         let default_messages = runtime.tape().default_messages();
@@ -645,7 +641,10 @@ mod tests {
         let mut runtime = AgentRuntime::new(model, StubTools, identity);
 
         runtime.handle_turn("第一轮").expect("第一轮成功");
-        let _ = runtime.handoff("切到实现阶段", vec!["继续执行".into()]);
+        let _ = runtime.handoff(
+            "handoff",
+            json!({"phase": "handoff", "summary": "切到实现阶段", "next_steps": ["继续执行"], "source_entry_ids": [], "owner": "agent"}),
+        );
         runtime.handle_turn("第二轮").expect("第二轮成功");
 
         let requests = runtime.model.seen_requests.borrow();
@@ -697,8 +696,8 @@ mod tests {
         assert!(first_events.iter().any(|event| matches!(
             event,
             RuntimeEvent::ToolInvocation { call, outcome: ToolInvocationOutcome::Succeeded { result } }
-                if call == runtime.tape().entries()[2].tool_call().expect("应有工具调用")
-                && result == runtime.tape().entries()[3].tool_result().expect("应有工具结果")
+                if call == &runtime.tape().entries()[2].as_tool_call().expect("应有工具调用")
+                && result == &runtime.tape().entries()[3].as_tool_result().expect("应有工具结果")
         )));
     }
 
@@ -730,7 +729,7 @@ mod tests {
             event,
             RuntimeEvent::TurnFailed { message } if message.contains("模型执行失败")
         )));
-        assert!(runtime.tape().entries()[1].event().is_some());
+        assert!(runtime.tape().entries()[1].event_name().is_some());
     }
 
     #[test]
@@ -742,8 +741,8 @@ mod tests {
         let _ = runtime.handle_turn("你好").expect("运行成功");
         let events = runtime.collect_events(subscriber).expect("读取事件成功");
 
-        assert!(runtime.tape().entries().iter().any(|entry| entry.tool_call().is_some()));
-        assert!(runtime.tape().entries().iter().any(|entry| entry.tool_result().is_some()));
+        assert!(runtime.tape().entries().iter().any(|entry| entry.as_tool_call().is_some()));
+        assert!(runtime.tape().entries().iter().any(|entry| entry.as_tool_result().is_some()));
         assert_eq!(
             events
                 .iter()
@@ -754,12 +753,12 @@ mod tests {
         assert!(events.iter().any(|event| matches!(
             event,
             RuntimeEvent::ToolInvocation { call, outcome: ToolInvocationOutcome::Succeeded { result } }
-                if call == runtime.tape().entries()[2].tool_call().expect("应有工具调用")
-                && result == runtime.tape().entries()[3].tool_result().expect("应有工具结果")
+                if call == &runtime.tape().entries()[2].as_tool_call().expect("应有工具调用")
+                && result == &runtime.tape().entries()[3].as_tool_result().expect("应有工具结果")
         )));
         assert_eq!(
-            runtime.tape().entries()[2].tool_call().expect("应有工具调用").invocation_id,
-            runtime.tape().entries()[3].tool_result().expect("应有工具结果").invocation_id,
+            runtime.tape().entries()[2].as_tool_call().expect("应有工具调用").invocation_id,
+            runtime.tape().entries()[3].as_tool_result().expect("应有工具结果").invocation_id,
         );
     }
 
@@ -774,7 +773,7 @@ mod tests {
         let events = runtime.collect_events(subscriber).expect("读取事件成功");
 
         assert!(error.to_string().contains("工具不可用"));
-        assert!(!runtime.tape().entries().iter().any(|entry| entry.tool_result().is_some()));
+        assert!(!runtime.tape().entries().iter().any(|entry| entry.as_tool_result().is_some()));
         assert!(events.iter().any(|event| matches!(
             event,
             RuntimeEvent::ToolInvocation { call, outcome: ToolInvocationOutcome::Failed { message } }
@@ -792,7 +791,7 @@ mod tests {
         let events = runtime.collect_events(subscriber).expect("读取事件成功");
 
         assert!(error.to_string().contains("工具结果不匹配"));
-        assert!(!runtime.tape().entries().iter().any(|entry| entry.tool_result().is_some()));
+        assert!(!runtime.tape().entries().iter().any(|entry| entry.as_tool_result().is_some()));
         assert!(events.iter().any(|event| matches!(
             event,
             RuntimeEvent::ToolInvocation { call, outcome: ToolInvocationOutcome::Failed { message } }

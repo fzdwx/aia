@@ -54,12 +54,7 @@ where
         render_turn(writer, &mut runtime, subscriber, input, session_path)?;
     }
 
-    let handoff = driver::finalize_runtime(&mut runtime, session_path)?;
-    writeln!(writer, "交接摘要：{}", handoff.summary)?;
-    writeln!(writer, "下一步：")?;
-    for step in handoff.next_steps {
-        writeln!(writer, "- {step}")?;
-    }
+    driver::finalize_runtime(&mut runtime, session_path)?;
 
     Ok(())
 }
@@ -245,7 +240,8 @@ mod tests {
         .expect("循环运行成功");
 
         let restored = SessionTape::load_jsonl_or_default(&session_path).expect("载入会话成功");
-        assert!(!restored.replay_turns().is_empty());
+        assert!(restored.entries().iter().any(|e| e.as_message().is_some()));
+        assert!(restored.latest_anchor().is_none());
 
         let _ = fs::remove_file(session_path);
     }
@@ -276,6 +272,7 @@ mod tests {
         let output = String::from_utf8(writer).expect("输出是有效 utf-8");
         assert!(output.contains("已退出 aia agent loop"));
         assert!(!output.contains("收到需求：退出"));
+        assert!(!output.contains("交接摘要："));
     }
 
     #[test]

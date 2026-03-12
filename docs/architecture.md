@@ -5,7 +5,7 @@
 这份骨架先解决三件以后最难改的事：
 
 1. **统一代理核心**：终端界面和桌面壳共享同一套运行时，不重复造轮子。
-2. **可追加的会话磁带**：把上下文、压缩、交接、分叉都建立在可追溯的事件流之上。
+2. **可追加的会话磁带**：把上下文、压缩、交接、分叉都建立在扁平的 `{id, kind, payload, meta, date}` 事件流之上，对齐 republic 数据模型。
 3. **可兼容的工具协议**：内部只维护一套工具定义，向外可映射到不同模型或协议。
 
 ## 为什么先做库，不先做界面
@@ -20,7 +20,7 @@ README 里真正难的是这些能力：
 这些如果先揉在界面里，后面会很难拆。第一阶段因此采用“库优先”：
 
 - `agent-core`：领域模型与协议边界
-- `session-tape`：类型化事实磁带、锚点、handoff 事件与重建状态
+- `session-tape`：扁平条目磁带（`{id, kind, payload, meta, date}`）、轻量锚点、handoff 事件、查询切片、fork / merge 与重建状态
 - `agent-runtime`：运行时编排与最小 turn 执行
 - `provider-registry`：provider 资料、活动项与本地持久化
 - `openai-adapter`：首个真实模型适配层，负责把统一请求映射到 Responses 风格接口
@@ -41,15 +41,24 @@ README 里真正难的是这些能力：
 
 负责可追溯会话：
 
-- 追加式事实磁带
-- 类型化 entry（消息 / 锚点 / 工具调用 / 工具结果 / 事件）
-- 结构化锚点状态
+- 扁平条目模型：每条 entry 均为 `{id, kind, payload, meta, date}`，对齐 republic / bub 数据模型
+- `kind` 为字符串（message / system / anchor / tool_call / tool_result / event / error）
+- `payload` 为 JSON Value，按 kind 语义承载类型化数据
+- `meta` 为 JSON Value（对象），携带 run_id、source_entry_ids 等追踪信息
+- `date` 为 ISO 8601 字符串，每条 entry 均带时间戳
+- 工厂方法构造条目，builder 追加元数据（`with_meta` / `with_run_id`）
+- 类型化访问器按需从 payload 反序列化（`as_message` / `as_tool_call` / `as_tool_result` / `anchor_name` / `event_name` 等）
+- 轻量锚点：`Anchor {entry_id, name, state: Value}`，不再硬编码 phase / summary / next_steps / owner
+- 命名锚点与按锚点切片查询
 - handoff 时同时写入锚点与事件
 - 默认从最新锚点之后重建上下文视图
 - 工具调用与工具结果通过稳定调用标识关联
-- 通过 jsonl 快照文件落盘可重放条目流
+- 通过 jsonl 快照文件落盘可重放条目流，新格式直接序列化扁平 entry
+- 追加式文件存储与内存存储都围绕”每个磁带一条独立日志”建模
+- 分叉 / 合并只追加增量，不重写主线条目
+- 旧格式兼容：载入时识别 `{id, fact, date}` 旧 JSONL 并自动转换为扁平条目，写出始终为新格式
 
-这部分会成为后续“增量压缩”和“fork / handoff”的基础。
+这部分会成为后续”增量压缩”和”fork / handoff”的基础。
 
 ### `agent-runtime`
 
@@ -61,13 +70,15 @@ README 里真正难的是这些能力：
 - 调用模型
 - 记录代理输出
 - 通过统一事件方法向多个订阅者分发运行时事件
-- 记录工具调用与工具结果到会话磁带
+- 记录工具调用与工具结果到会话磁带（通过 `TapeEntry` 工厂方法 + `with_run_id` 追踪）
 - 在执行前强校验工具是否可用，禁止绕过禁用策略
 - 工具相关运行时事件直接携带结构化调用/结果载荷，而不是仅传字符串
 - 工具相关运行时事件进一步聚合为单个调用生命周期块，便于 TUI 直接渲染
 - 整轮 turn 进一步聚合为轮次块事件，便于界面直接渲染完整时间线
 - 每个轮次块带稳定轮次标识与时间戳，便于时间线跳转与回放定位
-- CLI 每轮会把轮次块同步落盘到 `.aia/session.jsonl`
+- 轮次块只作为运行时事件发出，不再写入磁带（"derivatives never replace original facts"）
+- TUI 从磁带 entries 按 `meta.run_id` 分组重建历史轮次，不依赖磁带内的 TurnRecord
+- CLI 每轮会把原始 entries 同步落盘到 `.aia/session.jsonl`
 
 第一阶段只实现最小 turn 执行，故意不把并发子代理一次做满，避免空壳化。
 
@@ -103,6 +114,7 @@ README 里真正难的是这些能力：
 - 当前最小 TUI 通过后台驱动线程消费 loop 结果，渲染与 loop 执行已初步分离
 - 文本 loop 与 TUI 已开始共用同一驱动协议，为后续 web / 其他客户端接入预留边界
 - 共享驱动层已收敛为驱动本地错误与事件结果，不再直接泄漏命令行错误类型，也不再把错误提前压成字符串
+- 共享驱动层在退出时只负责收尾与最终落盘，不再自动写入硬编码 handoff；handoff 保持为会话层显式能力
 - 当前消息区已按单一时间线渲染 turn 流，并支持 Markdown 消息渲染、自动滚到底部与基于视口高度的手动滚动
 - 未来可替换为真正的终端界面程序
 - 桌面应用后续将共享同一运行时，而不是重写代理逻辑

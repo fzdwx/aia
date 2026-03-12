@@ -3,7 +3,7 @@
 ## 当前阶段
 
 - 阶段：真实模型适配
-- 当前步骤：git 已初始化，agent-cli 已模块化并接入最小 TUI 启动状态机，共享 driver 已进一步去除命令行专用错误耦合，TUI 已支持消息 Markdown 渲染与列表滚动，准备继续推进工具协议与 MCP 接入
+- 当前步骤：已将 `session-tape` 的 TapeEntry 改为扁平 `{id, kind, payload, meta, date}` 模型，一比一对齐 republic 数据模型；运行时不再将 TurnRecord 写入磁带，TUI 改为按 `meta.run_id` 从 entries 重建历史轮次；下一步继续推进工具协议映射与 MCP 接入
 
 ## 已完成
 
@@ -36,23 +36,33 @@
 - 完成 TUI 后台驱动线程接入，发送消息不再阻塞整个界面
 - 完成共享 driver 模块抽取，文本 loop 与 TUI 已开始共用统一驱动接口
 - 完成共享 driver 结果与错误边界收敛，不再直接暴露命令行错误类型或字符串化错误
+- 完成退出阶段的共享 driver 语义收敛：只做 finalize 与持久化，不再自动注入硬编码 handoff
 - 完成 TUI 消息区的 Markdown 渲染与基于视口高度的滚动收敛
 - 完成对外产品名与本地隐藏目录从 `like` 统一重命名为 `aia`
+- 完成 `session-tape` 的命名锚点、查询切片、命名磁带存储抽象与 fork / merge 语义补齐
+- 完成 `.aia/session.jsonl` 旧格式兼容门面保留，避免当前 CLI 会话文件被隐式迁移
+- 完成 `session-tape` TapeEntry 扁平化为 `{id, kind, payload, meta, date}`，对齐 republic 数据模型
+- 删除 SessionFact 枚举、SessionMetadata、SessionEvent、TurnRecord、ToolInvocationRecord 等旧类型
+- 简化 Anchor 为 `{entry_id, name, state: Value}`，不再硬编码 phase / summary / next_steps / owner
+- 运行时不再将 TurnRecord 写入磁带，遵循 "derivatives never replace original facts"
+- TUI 改为从 entries 按 `meta.run_id` 分组重建历史轮次
+- 旧格式 JSONL 载入时自动转换为扁平 entry，写出始终为新格式
 
 ## 正在进行
 
-- 统一工具规范向外部协议的映射收敛，并继续把共享 driver 往客户端无关边界推进，同时把当前最小 TUI 扩展成更完整的终端界面
+- 统一工具规范向外部协议的映射收敛，并继续把共享 driver 往客户端无关边界推进；磁带核心已补齐，现在没有必要跳过协议层直接堆完整界面
 
 ## 下一步
 
 1. 把统一工具规范往外映射到标准协议方向
 2. 推进 MCP 风格工具协议接入
-3. 继续收敛共享 driver 与启动编排边界，减少 `app.rs` 与 `tui.rs` 的重复职责
-4. 把当前最小 TUI 继续扩展为更完整的终端界面
+3. 继续把运行时与客户端层接到更完整的命名磁带能力，但不破坏现有兼容门面
+4. 继续收敛共享 driver 与启动编排边界，减少 `app.rs` 与 `tui.rs` 的重复职责
+5. 把当前最小 TUI 继续扩展为更完整的终端界面
 
 ## 为什么当前先不直接做完整界面
 
-因为界面依赖稳定的运行时、会话模型和工具协议；现在直接堆界面，会把后续协议与运行时设计锁死。
+因为界面依赖稳定的运行时、会话模型和工具协议；现在虽然磁带核心已经补齐，但如果跳过工具协议映射与 MCP 接入直接堆界面，仍会把后续协议边界和客户端职责锁死。
 
 ## 阻塞
 

@@ -28,6 +28,7 @@ name = "agent-runtime"
 version = "0.1.0"
 dependencies = [
  "agent-core",
+ "serde_json",
  "session-tape",
 ]
 

@@ -13,11 +13,6 @@ use crate::model::{BootstrapTools, CliModel};
 
 pub type CliRuntime = AgentRuntime<CliModel, BootstrapTools>;
 
-pub struct HandoffSummary {
-    pub summary: String,
-    pub next_steps: Vec<String>,
-}
-
 pub struct DriverHandle {
     sender: Sender<DriverCommand>,
     receiver: Receiver<DriverResponse>,
@@ -73,7 +68,7 @@ enum DriverCommand {
 
 enum DriverResponse {
     TurnProcessed(DriverTurnResult),
-    Finalized(Result<HandoffSummary, DriverError>),
+    Finalized(Result<(), DriverError>),
 }
 
 pub fn process_turn<M, T>(
@@ -106,24 +101,13 @@ where
 pub fn finalize_runtime<M, T>(
     runtime: &mut AgentRuntime<M, T>,
     session_path: &Path,
-) -> Result<HandoffSummary, DriverError>
+) -> Result<(), DriverError>
 where
     M: LanguageModel,
     T: agent_core::ToolExecutor,
 {
-    let handoff = runtime.handoff(
-        "首个真实模型适配器已经接入",
-        vec![
-            "把统一工具规范映射到外部协议".into(),
-            "推进 MCP 风格工具协议接入".into(),
-            "为终端界面准备稳定事件流".into(),
-        ],
-    );
     runtime.tape().save_jsonl(session_path)?;
-    Ok(HandoffSummary {
-        summary: handoff.anchor.state.summary,
-        next_steps: handoff.anchor.state.next_steps,
-    })
+    Ok(())
 }
 
 pub fn spawn_driver(
@@ -169,7 +153,7 @@ pub fn poll_driver(driver: &mut DriverHandle) -> Result<Option<DriverTurnResult>
     }
 }
 
-pub fn finalize_driver(driver: &mut DriverHandle) -> Result<HandoffSummary, DriverError> {
+pub fn finalize_driver(driver: &mut DriverHandle) -> Result<(), DriverError> {
     driver
         .sender
         .send(DriverCommand::Finalize)
@@ -180,5 +164,43 @@ pub fn finalize_driver(driver: &mut DriverHandle) -> Result<HandoffSummary, Driv
             Ok(DriverResponse::TurnProcessed(_)) => continue,
             Err(error) => return Err(DriverError::Io(io::Error::other(error.to_string()))),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use agent_core::{ModelDisposition, ModelIdentity};
+    use agent_runtime::AgentRuntime;
+    use session_tape::SessionTape;
+
+    use crate::model::{BootstrapModel, BootstrapTools};
+
+    use super::finalize_runtime;
+
+    fn temp_file(name: &str) -> std::path::PathBuf {
+        let suffix = SystemTime::now().duration_since(UNIX_EPOCH).expect("时间有效").as_nanos();
+        std::env::temp_dir().join(format!("aia-driver-{name}-{suffix}.jsonl"))
+    }
+
+    #[test]
+    fn finalize_runtime_只保存当前磁带而不自动生成交接() {
+        let identity = ModelIdentity::new("local", "bootstrap", ModelDisposition::Balanced);
+        let mut runtime = AgentRuntime::new(BootstrapModel, BootstrapTools, identity)
+            .with_instructions("保持简洁");
+        runtime.handle_turn("第一句").expect("运行成功");
+
+        let session_path = temp_file("finalize");
+        finalize_runtime(&mut runtime, &session_path).expect("收尾成功");
+
+        let restored = SessionTape::load_jsonl_or_default(&session_path).expect("载入成功");
+        assert!(restored.entries().iter().any(|e| e.as_message().is_some()));
+        assert!(restored.latest_anchor().is_none());
+
+        let _ = fs::remove_file(session_path);
     }
 }
