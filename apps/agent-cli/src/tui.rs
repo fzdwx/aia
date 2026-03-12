@@ -1,27 +1,30 @@
-use std::{collections::BTreeMap, io, path::Path, time::Duration};
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+    io,
+    path::Path,
+    time::Duration,
+};
 
 use agent_core::StreamEvent;
-use agent_runtime::{
-    AgentRuntime, RuntimeEvent, RuntimeSubscriberId, ToolInvocationLifecycle,
-    ToolInvocationOutcome, TurnLifecycle,
-};
+use agent_runtime::{AgentRuntime, RuntimeEvent, RuntimeSubscriberId, TurnLifecycle};
 use crossterm::{
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
         MouseEvent, MouseEventKind,
     },
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use provider_registry::{ProviderProfile, ProviderRegistry};
-use pulldown_cmark::{Event as MarkdownEvent, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::{
-    backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Rect},
-    style::{Modifier, Style},
-    text::{Line, Span, Text},
-    widgets::{Paragraph, Wrap},
     Terminal,
+    backend::CrosstermBackend,
+    buffer::Buffer,
+    layout::{Constraint, Direction, Layout, Rect},
+    style::Style,
+    text::{Line, Span, Text},
+    widgets::{Paragraph, Widget, Wrap},
 };
 use session_tape::{SessionProviderBinding, SessionTape};
 
@@ -29,9 +32,21 @@ use crate::{
     driver::{self, CliRuntime, DriverHandle, DriverPollResult},
     errors::CliLoopError,
     loop_driver::is_exit_command,
-    model::{build_model_from_selection, BootstrapTools, ProviderLaunchChoice},
+    model::{BootstrapTools, ProviderLaunchChoice, build_model_from_selection},
     theme,
+    tui_markdown::{
+        inline_markdown_lines, inline_thinking_lines, markdown_lines, padded_plain_line,
+        padded_plain_lines, prefixed_markdown_lines, user_message_lines,
+    },
+    tui_timeline::reconstruct_turns,
 };
+
+const TUI_RENDER_INTERVAL_MS: u64 = 16;
+const MAX_DELTAS_PER_FRAME: usize = 64;
+const STATUS_ANIMATION_FRAME_DIVISOR: usize = 6;
+const STATUS_ANIMATION_TRAIL_LENGTH: usize = 2;
+const STATUS_ANIMATION_RESTART_PAUSE: usize = 2;
+const STREAMING_PINNED_MAX_LINES: usize = 6;
 
 pub fn run_tui_loop(
     mut registry: ProviderRegistry,
@@ -92,20 +107,24 @@ fn run_tui_loop_inner(
 ) -> Result<(), CliLoopError> {
     loop {
         let had_new_turns = poll_driver_state(state, driver)?;
-        if had_new_turns && !state.user_scrolled_up {
-            state.pending_auto_scroll = true;
+        if had_new_turns && !state.messages.user_scrolled_up {
+            state.messages.pending_auto_scroll = true;
         }
         // Advance spinner each frame during streaming
-        if state.streaming_turn.is_some() {
-            state.spinner_tick = state.spinner_tick.wrapping_add(1);
+        if state.messages.streaming.is_some() {
+            state.messages.advance_spinner();
         }
         terminal.draw(|frame| draw_tui(frame, state, registry))?;
 
-        if !event::poll(Duration::from_millis(100))? {
+        if !event::poll(Duration::from_millis(TUI_RENDER_INTERVAL_MS))? {
             continue;
         }
 
         let input_event = event::read()?;
+        if let Event::Resize(_, _) = input_event {
+            handle_resize_event(state);
+            continue;
+        }
         if let Event::Mouse(mouse) = input_event {
             if handle_mouse_event(mouse, state) {
                 continue;
@@ -128,25 +147,25 @@ fn run_tui_loop_inner(
             }
             KeyCode::Up => {
                 if matches!(state.focus, FocusArea::Messages) {
-                    state.scroll_up();
+                    state.messages.scroll_up();
                     continue;
                 }
             }
             KeyCode::Down => {
                 if matches!(state.focus, FocusArea::Messages) {
-                    state.scroll_down();
+                    state.messages.scroll_down();
                     continue;
                 }
             }
             KeyCode::PageUp => {
                 if matches!(state.focus, FocusArea::Messages) {
-                    state.page_up();
+                    state.messages.page_up();
                     continue;
                 }
             }
             KeyCode::PageDown => {
                 if matches!(state.focus, FocusArea::Messages) {
-                    state.page_down();
+                    state.messages.page_down();
                     continue;
                 }
             }
@@ -162,7 +181,7 @@ fn run_tui_loop_inner(
                 if key.code == KeyCode::Home || key.modifiers.contains(KeyModifiers::CONTROL) =>
             {
                 if matches!(state.focus, FocusArea::Messages) && key.code == KeyCode::Home {
-                    state.scroll_to_top();
+                    state.messages.scroll_to_top();
                     continue;
                 }
                 state.cursor_pos = 0;
@@ -172,7 +191,7 @@ fn run_tui_loop_inner(
                 if key.code == KeyCode::End || key.modifiers.contains(KeyModifiers::CONTROL) =>
             {
                 if matches!(state.focus, FocusArea::Messages) && key.code == KeyCode::End {
-                    state.scroll_to_bottom();
+                    state.messages.scroll_to_bottom();
                     continue;
                 }
                 state.cursor_pos = state.input.chars().count();
@@ -444,7 +463,7 @@ fn handle_initial_prompt_key(
             let subscriber = runtime.subscribe();
             state.pending_prompt = Some(prompt);
             state.clear_input();
-            state.processing = true;
+            state.messages.set_processing(true);
             state.status = Some("正在处理首轮输入...".into());
             return Ok(Some((model_label, runtime, subscriber)));
         }
@@ -458,7 +477,7 @@ fn handle_chat_key(
     state: &mut TuiState,
     driver: &mut DriverHandle,
 ) -> Result<(), CliLoopError> {
-    if state.processing {
+    if state.messages.processing {
         state.status = Some("当前轮次仍在处理中，请稍候。".into());
         return Ok(());
     }
@@ -501,6 +520,9 @@ fn handle_slash_command(cmd: &str, state: &mut TuiState) -> Result<(), CliLoopEr
     match cmd.trim() {
         "logs" => {
             state.show_logs = !state.show_logs;
+            if !state.messages.user_scrolled_up {
+                state.messages.pending_auto_scroll = true;
+            }
             state.status = Some(if state.show_logs {
                 "日志面板已开启".into()
             } else {
@@ -526,16 +548,434 @@ struct StreamingTurn {
     text: String,
 }
 
-struct MessageView {
+#[derive(Clone)]
+struct HistoryCache {
+    width: u16,
+    content_key: u64,
     lines: Vec<Line<'static>>,
-    footer: Option<Line<'static>>,
+    visual_line_count: usize,
+}
+
+struct StreamingOverlay {
+    separator: Vec<Line<'static>>,
+    lines: Vec<Line<'static>>,
+    footer_text: Option<String>,
+    visual_line_count: usize,
+}
+
+#[derive(Clone)]
+struct MessagePanel {
+    // --- data ---
+    replay_turns: Vec<TurnLifecycle>,
+    current_turns: Vec<TurnLifecycle>,
+    streaming: Option<StreamingTurn>,
+    processing: bool,
+
+    // --- two-level cache ---
+    history_cache: Option<HistoryCache>,
+    overlay_cache: Option<OverlayCache>,
+
+    // --- scroll ---
+    scroll_offset: usize,
+    line_count: usize,
+    viewport_height: usize,
+    user_scrolled_up: bool,
+    pending_auto_scroll: bool,
+
+    // --- render ---
+    spinner_tick: usize,
+    area: Rect,
+}
+
+#[derive(Clone)]
+struct OverlayCache {
+    width: u16,
+    has_history: bool,
+    thinking_len: usize,
+    text_len: usize,
+    user_message_len: usize,
+    processing: bool,
+    is_streaming: bool,
+    overlay: CachedOverlayData,
+}
+
+#[derive(Clone)]
+struct CachedOverlayData {
+    separator: Vec<Line<'static>>,
+    lines: Vec<Line<'static>>,
+    footer_text: Option<String>,
+    visual_line_count: usize,
+}
+
+impl MessagePanel {
+    fn new(replay_turns: Vec<TurnLifecycle>) -> Self {
+        let has_replay = !replay_turns.is_empty();
+        Self {
+            replay_turns,
+            current_turns: Vec::new(),
+            streaming: None,
+            processing: false,
+            history_cache: None,
+            overlay_cache: None,
+            scroll_offset: 0,
+            line_count: 0,
+            viewport_height: 1,
+            user_scrolled_up: false,
+            pending_auto_scroll: has_replay,
+            spinner_tick: 0,
+            area: Rect::default(),
+        }
+    }
+
+    // --- event-driven updates ---
+
+    fn start_streaming(&mut self, user_message: String) {
+        self.streaming = Some(StreamingTurn {
+            user_message,
+            status_text: Some("Thinking".into()),
+            thinking: String::new(),
+            text: String::new(),
+        });
+        self.processing = true;
+        self.overlay_cache = None;
+        self.user_scrolled_up = false;
+        self.pending_auto_scroll = true;
+    }
+
+    fn push_delta(&mut self, event: StreamEvent) {
+        match event {
+            StreamEvent::ThinkingDelta { text } => {
+                let streaming = self.streaming.get_or_insert_with(StreamingTurn::default);
+                streaming.status_text = Some("Thinking".into());
+                streaming.thinking.push_str(&text);
+                self.overlay_cache = None;
+                if !self.user_scrolled_up {
+                    self.pending_auto_scroll = true;
+                }
+            }
+            StreamEvent::TextDelta { text } => {
+                let streaming = self.streaming.get_or_insert_with(StreamingTurn::default);
+                streaming.status_text = Some("Responding".into());
+                streaming.text.push_str(&text);
+                self.overlay_cache = None;
+                if !self.user_scrolled_up {
+                    self.pending_auto_scroll = true;
+                }
+            }
+            StreamEvent::Log { .. } | StreamEvent::Done => {}
+        }
+    }
+
+    fn complete_turn(&mut self, turn: TurnLifecycle) {
+        self.streaming = None;
+        self.processing = false;
+        self.current_turns.push(turn);
+        self.history_cache = None;
+        self.overlay_cache = None;
+        if !self.user_scrolled_up {
+            self.pending_auto_scroll = true;
+        }
+    }
+
+    fn set_processing(&mut self, processing: bool) {
+        self.processing = processing;
+    }
+
+    fn advance_spinner(&mut self) {
+        self.spinner_tick = self.spinner_tick.wrapping_add(1);
+    }
+
+    // --- scrolling ---
+
+    fn scroll_up(&mut self) {
+        if self.scroll_offset > 0 {
+            self.scroll_offset = self.scroll_offset.saturating_sub(1);
+            self.user_scrolled_up = true;
+        }
+    }
+
+    fn scroll_down(&mut self) {
+        let max = self.max_scroll();
+        if self.scroll_offset < max {
+            self.scroll_offset += 1;
+        }
+        if self.scroll_offset >= max {
+            self.user_scrolled_up = false;
+        }
+    }
+
+    fn page_up(&mut self) {
+        let step = self.viewport_height.max(1);
+        self.scroll_offset = self.scroll_offset.saturating_sub(step);
+        self.user_scrolled_up = self.scroll_offset > 0;
+    }
+
+    fn page_down(&mut self) {
+        let max = self.max_scroll();
+        let step = self.viewport_height.max(1);
+        self.scroll_offset = (self.scroll_offset + step).min(max);
+        if self.scroll_offset >= max {
+            self.user_scrolled_up = false;
+        }
+    }
+
+    fn scroll_to_top(&mut self) {
+        self.scroll_offset = 0;
+        self.user_scrolled_up = true;
+    }
+
+    fn scroll_to_bottom(&mut self) {
+        self.scroll_offset = self.max_scroll();
+        self.user_scrolled_up = false;
+    }
+
+    fn is_mouse_inside(&self, col: u16, row: u16) -> bool {
+        col >= self.area.x
+            && col < self.area.x + self.area.width
+            && row >= self.area.y
+            && row < self.area.y + self.area.height
+    }
+
+    fn invalidate_on_resize(&mut self) {
+        self.history_cache = None;
+        self.overlay_cache = None;
+        if !self.user_scrolled_up {
+            self.pending_auto_scroll = true;
+        }
+    }
+
+    fn max_scroll(&self) -> usize {
+        self.line_count.saturating_sub(self.viewport_height.max(1))
+    }
+
+    fn clamp_scroll(&mut self) {
+        let max = self.max_scroll();
+        if self.scroll_offset > max {
+            self.scroll_offset = max;
+        }
+    }
+
+    // --- rendering ---
+
+    fn draw(&mut self, frame: &mut ratatui::Frame<'_>, area: Rect) {
+        self.area = area;
+        let width = area.width;
+
+        // 1. Build or reuse history cache
+        let history_key = self.history_content_key();
+        let history = match &self.history_cache {
+            Some(cache) if cache.width == width && cache.content_key == history_key => {
+                cache.clone()
+            }
+            _ => {
+                let lines = self.build_history_lines(width);
+                let vlc = visual_line_count(&lines, width);
+                let cache = HistoryCache {
+                    width,
+                    content_key: history_key,
+                    lines,
+                    visual_line_count: vlc,
+                };
+                self.history_cache = Some(cache.clone());
+                cache
+            }
+        };
+
+        // 2. Build or reuse streaming overlay cache
+        let has_history = !history.lines.is_empty();
+        let overlay = self.cached_streaming_overlay(width, has_history);
+
+        // 3. Merge final lines
+        let mut final_lines = history.lines;
+        let mut total_vlc = history.visual_line_count;
+
+        if !overlay.separator.is_empty() || !overlay.lines.is_empty() {
+            total_vlc += overlay.visual_line_count;
+            final_lines.extend(overlay.separator);
+            final_lines.extend(overlay.lines);
+        }
+
+        // 4. Footer
+        let footer = overlay.footer_text.as_deref().map(|text| {
+            padded_plain_line(animated_status_line(text, self.spinner_tick))
+        });
+        let has_footer = footer.is_some() && area.height > 0;
+        let body_area = if has_footer {
+            Rect { x: area.x, y: area.y, width: area.width, height: area.height.saturating_sub(1) }
+        } else {
+            area
+        };
+
+        // 5. Update scroll state
+        self.line_count = total_vlc;
+        self.viewport_height = body_area.height.max(1) as usize;
+        if !self.user_scrolled_up && (self.pending_auto_scroll || self.processing) {
+            self.scroll_offset = self.max_scroll();
+            self.pending_auto_scroll = false;
+        } else {
+            self.clamp_scroll();
+        }
+
+        // 6. Render
+        let panel = Paragraph::new(Text::from(final_lines))
+            .wrap(Wrap { trim: false })
+            .scroll((self.scroll_offset as u16, 0));
+        frame.render_widget(panel, body_area);
+
+        if let Some(footer) = footer {
+            let footer_area = Rect {
+                x: area.x,
+                y: area.y + area.height.saturating_sub(1),
+                width: area.width,
+                height: 1,
+            };
+            frame.render_widget(Paragraph::new(footer), footer_area);
+        }
+    }
+
+    // --- private helpers ---
+
+    fn cached_streaming_overlay(&mut self, width: u16, has_history: bool) -> StreamingOverlay {
+        // Check if cached overlay is still valid
+        let (thinking_len, text_len, user_msg_len, is_streaming) =
+            if let Some(s) = &self.streaming {
+                (s.thinking.len(), s.text.len(), s.user_message.len(), true)
+            } else {
+                (0, 0, 0, false)
+            };
+
+        if let Some(ref cache) = self.overlay_cache {
+            if cache.width == width
+                && cache.has_history == has_history
+                && cache.thinking_len == thinking_len
+                && cache.text_len == text_len
+                && cache.user_message_len == user_msg_len
+                && cache.processing == self.processing
+                && cache.is_streaming == is_streaming
+            {
+                return StreamingOverlay {
+                    separator: cache.overlay.separator.clone(),
+                    lines: cache.overlay.lines.clone(),
+                    footer_text: cache.overlay.footer_text.clone(),
+                    visual_line_count: cache.overlay.visual_line_count,
+                };
+            }
+        }
+
+        let overlay = self.build_streaming_overlay(width, has_history);
+        self.overlay_cache = Some(OverlayCache {
+            width,
+            has_history,
+            thinking_len,
+            text_len,
+            user_message_len: user_msg_len,
+            processing: self.processing,
+            is_streaming,
+            overlay: CachedOverlayData {
+                separator: overlay.separator.clone(),
+                lines: overlay.lines.clone(),
+                footer_text: overlay.footer_text.clone(),
+                visual_line_count: overlay.visual_line_count,
+            },
+        });
+        overlay
+    }
+
+    fn history_content_key(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        self.replay_turns.len().hash(&mut hasher);
+        self.current_turns.len().hash(&mut hasher);
+        hash_turns(&self.replay_turns, &mut hasher);
+        hash_turns(&self.current_turns, &mut hasher);
+        hasher.finish()
+    }
+
+    fn build_history_lines(&self, width: u16) -> Vec<Line<'static>> {
+        let all_turns: Vec<&TurnLifecycle> =
+            self.replay_turns.iter().chain(self.current_turns.iter()).collect();
+
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        for (index, turn) in all_turns.iter().enumerate() {
+            lines.extend(turn_lines(turn, width));
+            if index + 1 < all_turns.len() {
+                lines.push(Line::default());
+            }
+        }
+        lines
+    }
+
+    fn build_streaming_overlay(
+        &self,
+        width: u16,
+        has_history: bool,
+    ) -> StreamingOverlay {
+        let mut separator = Vec::new();
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        let mut footer_text = None;
+
+        if let Some(ref streaming) = self.streaming {
+            let streaming_has_user = !streaming.user_message.is_empty();
+            if has_history {
+                if !streaming_has_user {
+                    separator.push(Line::default());
+                }
+            }
+            if streaming_has_user {
+                lines.extend(user_block_lines(&streaming.user_message, width));
+            }
+            if !streaming.thinking.is_empty() {
+                if streaming_has_user {
+                    lines.push(half_gap_line(width));
+                }
+                lines.extend(padded_plain_lines(inline_markdown_lines(
+                    "Thinking: ",
+                    &streaming.thinking,
+                    theme::thinking_label_style(),
+                    theme::thinking_style(),
+                )));
+            }
+            if !streaming.text.is_empty() {
+                if streaming_has_user || !streaming.thinking.is_empty() {
+                    if streaming_has_user && streaming.thinking.is_empty() {
+                        lines.push(half_gap_line(width));
+                    } else {
+                        ensure_blank_line(&mut lines);
+                    }
+                }
+                lines.extend(padded_plain_lines(markdown_lines(
+                    &streaming.text,
+                    theme::assistant_message_style(),
+                )));
+            }
+            lines = clamp_streaming_lines(lines);
+            if let Some(status_text) = &streaming.status_text {
+                footer_text = Some(status_text.clone());
+            }
+        } else if self.processing {
+            footer_text = Some("Thinking".into());
+        }
+
+        let all_overlay: Vec<Line<'static>> =
+            separator.iter().chain(lines.iter()).cloned().collect();
+        let vlc = if all_overlay.is_empty() {
+            0
+        } else {
+            visual_line_count(&all_overlay, width)
+        };
+
+        StreamingOverlay {
+            separator,
+            lines,
+            footer_text,
+            visual_line_count: vlc,
+        }
+    }
 }
 
 #[derive(Clone)]
 struct TuiState {
+    messages: MessagePanel,
     model_label: String,
-    replay_turns: Vec<TurnLifecycle>,
-    current_turns: Vec<TurnLifecycle>,
     input: String,
     cursor_pos: usize,
     status: Option<String>,
@@ -544,18 +984,9 @@ struct TuiState {
     prompt_seed: Option<String>,
     should_exit: bool,
     focus: FocusArea,
-    message_scroll: usize,
-    message_line_count: usize,
-    message_viewport_height: usize,
-    user_scrolled_up: bool,
-    processing: bool,
     pending_prompt: Option<String>,
-    spinner_tick: usize,
-    streaming_turn: Option<StreamingTurn>,
     log_lines: Vec<String>,
     show_logs: bool,
-    message_area: Rect,
-    pending_auto_scroll: bool,
 }
 
 impl TuiState {
@@ -589,9 +1020,8 @@ impl TuiState {
 
         let cursor_pos = input.chars().count();
         Self {
+            messages: MessagePanel::new(turns),
             model_label,
-            replay_turns: turns,
-            current_turns: Vec::new(),
             input,
             cursor_pos,
             status,
@@ -600,18 +1030,9 @@ impl TuiState {
             prompt_seed,
             should_exit: false,
             focus: FocusArea::Input,
-            message_scroll: 0,
-            message_line_count: 0,
-            message_viewport_height: 1,
-            user_scrolled_up: false,
-            processing: false,
             pending_prompt: None,
-            spinner_tick: 0,
-            streaming_turn: None,
             log_lines: Vec::new(),
             show_logs: false,
-            message_area: Rect::default(),
-            pending_auto_scroll: false,
         }
     }
 
@@ -691,85 +1112,29 @@ impl TuiState {
     fn byte_offset_of_cursor(&self) -> usize {
         self.input.chars().take(self.cursor_pos).map(|c| c.len_utf8()).sum()
     }
-
-    // -- Scrolling --
-
-    fn scroll_up(&mut self) {
-        if self.message_scroll > 0 {
-            self.message_scroll = self.message_scroll.saturating_sub(1);
-            self.user_scrolled_up = true;
-        }
-    }
-
-    fn scroll_down(&mut self) {
-        let max = self.max_message_scroll();
-        if self.message_scroll < max {
-            self.message_scroll += 1;
-        }
-        if self.message_scroll >= max {
-            self.user_scrolled_up = false;
-        }
-    }
-
-    fn page_up(&mut self) {
-        let step = self.message_viewport_height.max(1);
-        self.message_scroll = self.message_scroll.saturating_sub(step);
-        self.user_scrolled_up = self.message_scroll > 0;
-    }
-
-    fn page_down(&mut self) {
-        let max = self.max_message_scroll();
-        let step = self.message_viewport_height.max(1);
-        self.message_scroll = (self.message_scroll + step).min(max);
-        if self.message_scroll >= max {
-            self.user_scrolled_up = false;
-        }
-    }
-
-    fn scroll_to_top(&mut self) {
-        self.message_scroll = 0;
-        self.user_scrolled_up = true;
-    }
-
-    fn scroll_to_bottom(&mut self) {
-        self.message_scroll = self.max_message_scroll();
-        self.user_scrolled_up = false;
-    }
-
-    fn max_message_scroll(&self) -> usize {
-        self.message_line_count.saturating_sub(self.message_viewport_height.max(1))
-    }
-
-    fn clamp_scroll(&mut self) {
-        let max = self.max_message_scroll();
-        if self.message_scroll > max {
-            self.message_scroll = max;
-        }
-    }
 }
 
 /// Auto-scroll when new turns arrive
 fn handle_mouse_event(mouse: MouseEvent, state: &mut TuiState) -> bool {
-    let inside_messages = mouse.column >= state.message_area.x
-        && mouse.column < state.message_area.x + state.message_area.width
-        && mouse.row >= state.message_area.y
-        && mouse.row < state.message_area.y + state.message_area.height;
-
-    if !inside_messages {
+    if !state.messages.is_mouse_inside(mouse.column, mouse.row) {
         return false;
     }
 
     match mouse.kind {
         MouseEventKind::ScrollDown => {
-            state.scroll_down();
+            state.messages.scroll_down();
             true
         }
         MouseEventKind::ScrollUp => {
-            state.scroll_up();
+            state.messages.scroll_up();
             true
         }
         _ => false,
     }
+}
+
+fn handle_resize_event(state: &mut TuiState) {
+    state.messages.invalidate_on_resize();
 }
 
 #[derive(Clone, Copy)]
@@ -880,17 +1245,9 @@ fn submit_turn_to_driver(
     let Some(prompt) = state.pending_prompt.take() else {
         return Ok(());
     };
-    state.streaming_turn = Some(StreamingTurn {
-        user_message: prompt.clone(),
-        status_text: Some("Thinking".into()),
-        thinking: String::new(),
-        text: String::new(),
-    });
+    state.messages.start_streaming(prompt.clone());
     driver::submit_turn(driver, prompt).map_err(CliLoopError::from)?;
-    state.processing = true;
     state.status = Some("正在处理中...".into());
-    state.user_scrolled_up = false;
-    state.pending_auto_scroll = true;
     Ok(())
 }
 
@@ -904,29 +1261,20 @@ fn poll_driver_state(
     };
 
     let mut had_updates = false;
+    let mut delta_count = 0usize;
     loop {
         match driver::poll_driver(driver).map_err(CliLoopError::from)? {
-            DriverPollResult::StreamDelta(event) => match event {
-                StreamEvent::ThinkingDelta { text } => {
-                    let streaming = state.streaming_turn.get_or_insert_with(StreamingTurn::default);
-                    streaming.status_text = Some("Thinking".into());
-                    streaming.thinking.push_str(&text);
+            DriverPollResult::StreamDelta(event) => match &event {
+                StreamEvent::ThinkingDelta { .. } | StreamEvent::TextDelta { .. } => {
+                    state.messages.push_delta(event);
                     had_updates = true;
-                    if !state.user_scrolled_up {
-                        state.pending_auto_scroll = true;
-                    }
-                }
-                StreamEvent::TextDelta { text } => {
-                    let streaming = state.streaming_turn.get_or_insert_with(StreamingTurn::default);
-                    streaming.status_text = Some("Responding".into());
-                    streaming.text.push_str(&text);
-                    had_updates = true;
-                    if !state.user_scrolled_up {
-                        state.pending_auto_scroll = true;
+                    delta_count += 1;
+                    if delta_count >= MAX_DELTAS_PER_FRAME {
+                        break;
                     }
                 }
                 StreamEvent::Log { text } => {
-                    state.log_lines.push(text);
+                    state.log_lines.push(text.clone());
                 }
                 StreamEvent::Done => {}
             },
@@ -935,16 +1283,11 @@ fn poll_driver_state(
                 turn_error,
                 persist_error,
             }) => {
-                state.streaming_turn = None;
-                state.processing = false;
                 for event in events {
                     if let RuntimeEvent::TurnLifecycle { turn } = event {
-                        state.current_turns.push(turn);
+                        state.messages.complete_turn(turn);
                         had_updates = true;
                     }
-                }
-                if !state.user_scrolled_up {
-                    state.pending_auto_scroll = true;
                 }
                 state.status = match (turn_error, persist_error) {
                     (Some(turn_error), Some(persist_error)) => {
@@ -962,104 +1305,6 @@ fn poll_driver_state(
     Ok(had_updates)
 }
 
-fn reconstruct_turns(tape: &SessionTape) -> Vec<TurnLifecycle> {
-    let mut groups: BTreeMap<String, Vec<&session_tape::TapeEntry>> = BTreeMap::new();
-    let mut order: Vec<String> = Vec::new();
-
-    for entry in tape.entries() {
-        if let Some(run_id) = entry.meta.get("run_id").and_then(|v| v.as_str()) {
-            let key = run_id.to_string();
-            if !groups.contains_key(&key) {
-                order.push(key.clone());
-            }
-            groups.entry(key).or_default().push(entry);
-        }
-    }
-
-    order
-        .into_iter()
-        .filter_map(|run_id| {
-            let entries = groups.remove(&run_id)?;
-            let user_message = entries
-                .iter()
-                .find_map(|e| e.as_message().filter(|m| m.role == agent_core::Role::User))
-                .map(|m| m.content)?;
-            let assistant_message = entries
-                .iter()
-                .find_map(|e| e.as_message().filter(|m| m.role == agent_core::Role::Assistant))
-                .map(|m| m.content);
-
-            let thinking = entries.iter().find_map(|e| e.as_thinking().map(|s| s.to_string()));
-
-            let mut tool_invocations = Vec::new();
-            let calls: Vec<_> =
-                entries.iter().filter_map(|e| e.as_tool_call().map(|c| (e.id, c))).collect();
-            for (call_id, call) in &calls {
-                let outcome = entries
-                    .iter()
-                    .find_map(|e| {
-                        let result = e.as_tool_result()?;
-                        if result.invocation_id == call.invocation_id {
-                            Some(ToolInvocationOutcome::Succeeded { result })
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or_else(|| {
-                        let fail_msg = entries
-                            .iter()
-                            .filter(|e| e.kind == "event")
-                            .find_map(|e| {
-                                let ids =
-                                    e.meta.get("source_entry_ids").and_then(|v| v.as_array())?;
-                                if ids.iter().any(|v| v.as_u64() == Some(*call_id)) {
-                                    e.event_data()
-                                        .and_then(|d| d.get("message"))
-                                        .and_then(|v| v.as_str())
-                                        .map(|s| s.to_string())
-                                } else {
-                                    None
-                                }
-                            })
-                            .unwrap_or_else(|| "unknown failure".into());
-                        ToolInvocationOutcome::Failed { message: fail_msg }
-                    });
-                tool_invocations.push(ToolInvocationLifecycle { call: call.clone(), outcome });
-            }
-
-            let failure_message = entries.iter().find_map(|e| {
-                if e.kind == "error" {
-                    e.payload.get("message").and_then(|v| v.as_str()).map(|s| s.to_string())
-                } else if e.kind == "event" && e.event_name() == Some("turn_failed") {
-                    e.event_data()
-                        .and_then(|d| d.get("message"))
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string())
-                } else {
-                    None
-                }
-            });
-
-            let source_entry_ids: Vec<u64> = entries.iter().map(|e| e.id).collect();
-            // Parse first/last date to approximate timestamps
-            let started_at_ms = 0u128;
-            let finished_at_ms = 0u128;
-
-            Some(TurnLifecycle {
-                turn_id: run_id,
-                started_at_ms,
-                finished_at_ms,
-                source_entry_ids,
-                user_message,
-                assistant_message,
-                thinking,
-                tool_invocations,
-                failure_message,
-            })
-        })
-        .collect()
-}
-
 // ---------------------------------------------------------------------------
 // Drawing
 // ---------------------------------------------------------------------------
@@ -1070,7 +1315,7 @@ fn draw_tui(frame: &mut ratatui::Frame<'_>, state: &mut TuiState, registry: &Pro
             // Chat phase: 2 zones — messages (fill) | input bar (3 lines)
             let layout = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Min(4), Constraint::Length(1), Constraint::Length(3)])
+                .constraints([Constraint::Min(4), Constraint::Length(3)])
                 .split(frame.area());
 
             if state.show_logs {
@@ -1083,11 +1328,11 @@ fn draw_tui(frame: &mut ratatui::Frame<'_>, state: &mut TuiState, registry: &Pro
             } else {
                 draw_messages(frame, layout[0], state);
             }
-            draw_input_bar(frame, layout[2], state);
+            draw_input_bar(frame, layout[1], state);
         }
         Phase::SelectProvider => {
             // 3 zones: messages (top) | phase UI (mid) | input bar (bottom)
-            let has_messages = !state.replay_turns.is_empty();
+            let has_messages = !state.messages.replay_turns.is_empty();
             let constraints = if has_messages {
                 vec![Constraint::Percentage(40), Constraint::Min(4), Constraint::Length(3)]
             } else {
@@ -1106,7 +1351,7 @@ fn draw_tui(frame: &mut ratatui::Frame<'_>, state: &mut TuiState, registry: &Pro
         }
         Phase::CreateProvider { step, .. } => {
             let step = step.clone();
-            let has_messages = !state.replay_turns.is_empty();
+            let has_messages = !state.messages.replay_turns.is_empty();
             let constraints = if has_messages {
                 vec![Constraint::Percentage(40), Constraint::Min(4), Constraint::Length(3)]
             } else {
@@ -1127,7 +1372,7 @@ fn draw_tui(frame: &mut ratatui::Frame<'_>, state: &mut TuiState, registry: &Pro
             // Same as Chat — just messages + input bar; status bar already shows the phase
             let layout = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Min(4), Constraint::Length(1), Constraint::Length(3)])
+                .constraints([Constraint::Min(4), Constraint::Length(3)])
                 .split(frame.area());
 
             if state.show_logs {
@@ -1140,97 +1385,35 @@ fn draw_tui(frame: &mut ratatui::Frame<'_>, state: &mut TuiState, registry: &Pro
             } else {
                 draw_messages(frame, layout[0], state);
             }
-            draw_input_bar(frame, layout[2], state);
+            draw_input_bar(frame, layout[1], state);
         }
     }
 }
 
 fn draw_messages(frame: &mut ratatui::Frame<'_>, area: Rect, state: &mut TuiState) {
-    state.message_area = area;
-    let view = message_lines(state, area.width);
-    let has_footer = view.footer.is_some() && area.height > 0;
-    let body_area = if has_footer {
-        Rect { x: area.x, y: area.y, width: area.width, height: area.height.saturating_sub(1) }
-    } else {
-        area
-    };
-
-    let line_count = view.lines.len();
-    state.message_line_count = line_count;
-    state.message_viewport_height = body_area.height.max(1) as usize;
-    if state.pending_auto_scroll && !state.user_scrolled_up {
-        state.message_scroll = state.max_message_scroll();
-        state.pending_auto_scroll = false;
-    } else {
-        state.clamp_scroll();
-    }
-
-    let panel = Paragraph::new(Text::from(view.lines))
-        .wrap(Wrap { trim: false })
-        .scroll((state.message_scroll as u16, 0));
-    frame.render_widget(panel, body_area);
-
-    if let Some(footer) = view.footer {
-        let footer_area = Rect {
-            x: area.x,
-            y: area.y + area.height.saturating_sub(1),
-            width: area.width,
-            height: 1,
-        };
-        frame.render_widget(Paragraph::new(footer), footer_area);
-    }
+    state.messages.draw(frame, area);
 }
 
-fn message_lines(state: &TuiState, width: u16) -> MessageView {
-    let all_turns: Vec<&TurnLifecycle> =
-        state.replay_turns.iter().chain(state.current_turns.iter()).collect();
-
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    for (index, turn) in all_turns.iter().enumerate() {
-        lines.extend(turn_lines(turn, width));
-        if index + 1 < all_turns.len() {
-            lines.push(Line::from(""));
-        }
-    }
-
-    let mut footer = None;
-
-    if let Some(ref streaming) = state.streaming_turn {
-        if !lines.is_empty() {
-            lines.push(Line::from(""));
-            lines.push(Line::from(""));
-        }
-        if !streaming.user_message.is_empty() {
-            lines.extend(user_message_lines(&streaming.user_message));
-            lines.push(Line::from(""));
-        }
-        if !streaming.thinking.is_empty() {
-            lines.extend(padded_plain_lines(inline_markdown_lines(
-                "Thinking: ",
-                &streaming.thinking,
-                theme::thinking_label_style(),
-                theme::thinking_style(),
-            )));
-            lines.push(Line::from(""));
-        }
-        if !streaming.text.is_empty() {
-            lines.extend(padded_plain_lines(markdown_lines(
-                &streaming.text,
-                theme::assistant_message_style(),
-            )));
-        }
-        if let Some(status_text) = &streaming.status_text {
-            footer = Some(animated_status_line(status_text, state.spinner_tick));
-        }
-    } else if state.processing {
-        footer = Some(animated_status_line("Thinking", state.spinner_tick));
-    }
-
-    MessageView { lines, footer }
+struct MessageViewForTest {
+    lines: Vec<Line<'static>>,
+    footer: Option<Line<'static>>,
 }
 
-fn patched_style(base: Style, overlay: Style) -> Style {
-    base.patch(overlay)
+#[cfg(test)]
+fn message_lines(panel: &MessagePanel, width: u16) -> MessageViewForTest {
+    let history = panel.build_history_lines(width);
+    let overlay = panel.build_streaming_overlay(width, !history.is_empty());
+
+    let mut lines = history;
+    lines.extend(overlay.separator);
+    lines.extend(overlay.lines);
+
+    let footer = overlay
+        .footer_text
+        .as_deref()
+        .map(|text| padded_plain_line(animated_status_line(text, panel.spinner_tick)));
+
+    MessageViewForTest { lines, footer }
 }
 
 fn draw_input_bar(frame: &mut ratatui::Frame<'_>, area: Rect, state: &TuiState) {
@@ -1245,15 +1428,15 @@ fn draw_input_bar(frame: &mut ratatui::Frame<'_>, area: Rect, state: &TuiState) 
         frame.render_widget(sep, sep_area);
     }
 
-    let status_text = if state.processing {
+    let status_text = if state.messages.processing {
         String::new()
     } else {
         state.status.clone().unwrap_or_else(|| "就绪".into())
     };
-    let status_style = if state.processing { theme::spinner_style() } else { theme::dim_style() };
+    let status_style = if state.messages.processing { theme::spinner_style() } else { theme::dim_style() };
 
     // Build 3 lines: input | status bar | hints
-    let status_bar = if state.processing {
+    let status_bar = if state.messages.processing {
         format!(" {} · {}", state.model_label, phase_label(&state.phase))
     } else {
         format!(" {} · {} · {status_text}", state.model_label, phase_label(&state.phase))
@@ -1299,241 +1482,43 @@ fn is_wide_char(c: char) -> bool {
         || (0x20000..=0x2A6DF).contains(&cp)
 }
 
-struct MarkdownRenderState {
-    lines: Vec<Line<'static>>,
-    current: Vec<Span<'static>>,
-    style_stack: Vec<Style>,
-    list_depth: usize,
-    pending_prefix: Option<(String, Style)>,
-    quote_depth: usize,
-    in_code_block: bool,
-}
-
-impl MarkdownRenderState {
-    fn new(base_style: Style) -> Self {
-        Self {
-            lines: Vec::new(),
-            current: Vec::new(),
-            style_stack: vec![base_style],
-            list_depth: 0,
-            pending_prefix: None,
-            quote_depth: 0,
-            in_code_block: false,
-        }
-    }
-
-    fn current_style(&self) -> Style {
-        self.style_stack.last().copied().unwrap_or_default()
-    }
-
-    fn push_style(&mut self, style: Style) {
-        self.style_stack.push(style);
-    }
-
-    fn pop_style(&mut self) {
-        if self.style_stack.len() > 1 {
-            let _ = self.style_stack.pop();
-        }
-    }
-
-    fn push_prefix_if_needed(&mut self) {
-        if !self.current.is_empty() {
-            return;
-        }
-        if self.quote_depth > 0 {
-            self.current.push(Span::styled(
-                "│ ".repeat(self.quote_depth),
-                patched_style(self.current_style(), theme::markdown_quote_style()),
-            ));
-        }
-        if let Some((prefix, style)) = self.pending_prefix.take() {
-            self.current.push(Span::styled(prefix, style));
-        }
-    }
-
-    fn push_text(&mut self, text: &str, style: Style) {
-        for (index, segment) in text.split('\n').enumerate() {
-            if !segment.is_empty() {
-                self.push_prefix_if_needed();
-                self.current.push(Span::styled(segment.to_string(), style));
-            }
-            if index + 1 < text.split('\n').count() {
-                self.flush_line(!segment.is_empty());
-            }
-        }
-    }
-
-    fn flush_line(&mut self, allow_empty: bool) {
-        if !self.current.is_empty() || allow_empty {
-            self.lines.push(Line::from(std::mem::take(&mut self.current)));
-        }
-    }
-
-    fn finish(mut self) -> Vec<Line<'static>> {
-        self.flush_line(false);
-        self.lines
-    }
-}
-
-fn heading_prefix(level: HeadingLevel) -> String {
-    let count = match level {
-        HeadingLevel::H1 => 1,
-        HeadingLevel::H2 => 2,
-        HeadingLevel::H3 => 3,
-        HeadingLevel::H4 => 4,
-        HeadingLevel::H5 => 5,
-        HeadingLevel::H6 => 6,
-    };
-    format!("{} ", "#".repeat(count))
-}
-
-fn markdown_lines(content: &str, base_style: Style) -> Vec<Line<'static>> {
-    let options =
-        Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES | Options::ENABLE_TASKLISTS;
-    let parser = Parser::new_ext(content, options);
-    let mut state = MarkdownRenderState::new(base_style);
-
-    for event in parser {
-        match event {
-            MarkdownEvent::Start(tag) => match tag {
-                Tag::Heading { level, .. } => {
-                    state.flush_line(false);
-                    let heading_style =
-                        patched_style(state.current_style(), theme::markdown_heading_style());
-                    state.pending_prefix = Some((heading_prefix(level), heading_style));
-                    state.push_style(heading_style);
-                }
-                Tag::List(_) => {
-                    state.flush_line(false);
-                    state.list_depth += 1;
-                }
-                Tag::Item => {
-                    state.flush_line(false);
-                    let indent = "  ".repeat(state.list_depth.saturating_sub(1));
-                    state.pending_prefix = Some((
-                        format!("{indent}• "),
-                        patched_style(state.current_style(), theme::markdown_bullet_style()),
-                    ));
-                }
-                Tag::BlockQuote(_) => {
-                    state.flush_line(false);
-                    state.quote_depth += 1;
-                }
-                Tag::CodeBlock(_) => {
-                    state.flush_line(false);
-                    state.in_code_block = true;
-                    state.push_style(patched_style(
-                        state.current_style(),
-                        theme::markdown_code_block_style(),
-                    ));
-                }
-                Tag::Emphasis => {
-                    state.push_style(state.current_style().add_modifier(Modifier::ITALIC));
-                }
-                Tag::Strong => {
-                    state.push_style(state.current_style().add_modifier(Modifier::BOLD));
-                }
-                Tag::Strikethrough => {
-                    state.push_style(state.current_style().add_modifier(Modifier::CROSSED_OUT));
-                }
-                _ => {}
-            },
-            MarkdownEvent::End(tag) => match tag {
-                TagEnd::Paragraph | TagEnd::Heading(_) | TagEnd::Item => {
-                    state.flush_line(false);
-                    if matches!(tag, TagEnd::Heading(_)) {
-                        state.pop_style();
-                    }
-                }
-                TagEnd::List(_) => {
-                    state.flush_line(false);
-                    state.list_depth = state.list_depth.saturating_sub(1);
-                }
-                TagEnd::BlockQuote(_) => {
-                    state.flush_line(false);
-                    state.quote_depth = state.quote_depth.saturating_sub(1);
-                }
-                TagEnd::CodeBlock => {
-                    state.flush_line(false);
-                    state.in_code_block = false;
-                    state.pop_style();
-                }
-                TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough => {
-                    state.pop_style();
-                }
-                _ => {}
-            },
-            MarkdownEvent::Text(text) => {
-                let style = state.current_style();
-                state.push_text(text.as_ref(), style);
-            }
-            MarkdownEvent::Code(code) => {
-                state.push_prefix_if_needed();
-                state.current.push(Span::styled(
-                    code.to_string(),
-                    patched_style(state.current_style(), theme::markdown_inline_code_style()),
-                ));
-            }
-            MarkdownEvent::SoftBreak | MarkdownEvent::HardBreak => {
-                state.flush_line(true);
-            }
-            MarkdownEvent::Rule => {
-                state.flush_line(false);
-                state.lines.push(Line::from(Span::styled(
-                    "────────────".to_string(),
-                    patched_style(base_style, theme::separator_style()),
-                )));
-            }
-            MarkdownEvent::TaskListMarker(done) => {
-                state.push_prefix_if_needed();
-                let marker = if done { "[x] " } else { "[ ] " };
-                state.current.push(Span::styled(
-                    marker.to_string(),
-                    patched_style(state.current_style(), theme::markdown_bullet_style()),
-                ));
-            }
-            MarkdownEvent::Html(html) | MarkdownEvent::InlineHtml(html) => {
-                let style = state.current_style();
-                state.push_text(html.as_ref(), style);
-            }
-            MarkdownEvent::FootnoteReference(text) => {
-                state.push_prefix_if_needed();
-                state.current.push(Span::styled(format!("[{text}]"), state.current_style()));
-            }
-            MarkdownEvent::InlineMath(text) | MarkdownEvent::DisplayMath(text) => {
-                state.push_prefix_if_needed();
-                state.current.push(Span::styled(
-                    text.to_string(),
-                    patched_style(state.current_style(), theme::markdown_inline_code_style()),
-                ));
-            }
-        }
-    }
-
-    let lines = state.finish();
+fn visual_line_count(lines: &[Line<'_>], width: u16) -> usize {
     if lines.is_empty() {
-        vec![Line::from(Span::styled(content.to_string(), base_style))]
-    } else {
-        lines
+        return 0;
     }
+
+    let width = width.max(1);
+    let estimated_rows = estimate_wrapped_rows_upper_bound(lines, width);
+    let height = estimated_rows.max(1).min(u16::MAX as usize) as u16;
+    let area = Rect { x: 0, y: 0, width, height };
+    let mut buffer = Buffer::empty(area);
+    for cell in &mut buffer.content {
+        cell.set_symbol("·");
+    }
+
+    Paragraph::new(Text::from(lines.to_vec())).wrap(Wrap { trim: false }).render(area, &mut buffer);
+
+    (0..height)
+        .rev()
+        .find(|row| {
+            let start = *row as usize * width as usize;
+            let end = start + width as usize;
+            buffer.content[start..end].iter().any(|cell| cell.symbol() != "·")
+        })
+        .map(|row| row as usize + 1)
+        .unwrap_or(0)
 }
 
-fn prefixed_markdown_lines(
-    content: &str,
-    first_prefix: &str,
-    rest_prefix: &str,
-    style: Style,
-) -> Vec<Line<'static>> {
-    markdown_lines(content, style)
-        .into_iter()
-        .enumerate()
-        .map(|(index, line)| {
-            let prefix = if index == 0 { first_prefix } else { rest_prefix };
-            let mut spans = vec![Span::styled(prefix.to_string(), style)];
-            spans.extend(line.spans.into_iter());
-            Line::from(spans)
+fn estimate_wrapped_rows_upper_bound(lines: &[Line<'_>], width: u16) -> usize {
+    let _ = width;
+    lines
+        .iter()
+        .map(|line| {
+            let char_count =
+                line.spans.iter().map(|span| span.content.chars().count()).sum::<usize>();
+            char_count.saturating_add(1).max(1)
         })
-        .collect()
+        .sum()
 }
 
 fn tool_header_line(tool_name: &str, style: Style) -> Line<'static> {
@@ -1544,63 +1529,15 @@ fn tool_header_line(tool_name: &str, style: Style) -> Line<'static> {
 }
 
 fn separator_line(width: u16) -> Line<'static> {
-    Line::from(Span::styled("─".repeat(width.min(60) as usize), theme::separator_style()))
+    padded_plain_line(Line::from(Span::styled(
+        "─".repeat(width.min(60) as usize),
+        theme::separator_style(),
+    )))
 }
 
-fn inline_thinking_lines(content: &str) -> Vec<Line<'static>> {
-    inline_markdown_lines(
-        "Thinking: ",
-        content,
-        theme::thinking_label_style(),
-        theme::thinking_style(),
-    )
-}
-
-fn inline_markdown_lines(
-    label: &str,
-    content: &str,
-    label_style: Style,
-    base_style: Style,
-) -> Vec<Line<'static>> {
-    let rendered_lines = markdown_lines(content, base_style);
-    let mut lines = Vec::new();
-
-    for (index, line) in rendered_lines.into_iter().enumerate() {
-        let prefix = if index == 0 { label } else { "" };
-        let mut spans = vec![Span::styled(prefix.to_string(), label_style)];
-        spans.extend(line.spans.into_iter());
-        lines.push(Line::from(spans));
-    }
-
-    if lines.is_empty() {
-        vec![Line::from(Span::styled(label.to_string(), label_style))]
-    } else {
-        lines
-    }
-}
-
-fn padded_plain_line(line: Line<'static>) -> Line<'static> {
-    let mut spans = Vec::with_capacity(line.spans.len() + 2);
-    spans.push(Span::raw(" "));
-    spans.extend(line.spans);
-    spans.push(Span::raw(" "));
-    Line::from(spans)
-}
-
-fn padded_plain_lines(lines: Vec<Line<'static>>) -> Vec<Line<'static>> {
-    lines.into_iter().map(padded_plain_line).collect()
-}
-
-fn padded_message_line(line: Line<'static>, style: Style) -> Line<'static> {
-    let mut spans = Vec::with_capacity(line.spans.len() + 2);
-    spans.push(Span::styled(" ".to_string(), style));
-    spans.extend(
-        line.spans
-            .into_iter()
-            .map(|span| Span::styled(span.content.to_string(), patched_style(span.style, style))),
-    );
-    spans.push(Span::styled(" ".to_string(), style));
-    Line::from(spans)
+fn half_gap_line(width: u16) -> Line<'static> {
+    let _ = width;
+    padded_plain_line(Line::default())
 }
 
 fn animated_status_line(text: &str, tick: usize) -> Line<'static> {
@@ -1609,19 +1546,19 @@ fn animated_status_line(text: &str, tick: usize) -> Line<'static> {
         return Line::default();
     }
     let len = chars.len();
-    let head = (tick / 2) % len;
+    let frame = tick / STATUS_ANIMATION_FRAME_DIVISOR.max(1);
+    let cycle = len + STATUS_ANIMATION_TRAIL_LENGTH + STATUS_ANIMATION_RESTART_PAUSE;
+    let head = frame % cycle;
     Line::from(
         chars
             .into_iter()
             .enumerate()
             .map(|(index, ch)| {
-                let raw_distance = head.abs_diff(index);
-                let distance = raw_distance.min(len.saturating_sub(raw_distance));
-                let style = if index == head {
+                let style = if head < len && index == head {
                     theme::status_head_style()
-                } else if distance == 1 {
+                } else if head > index && head - index == 1 {
                     theme::status_trail_style()
-                } else if distance == 2 {
+                } else if head > index && head - index == 2 {
                     theme::dim_style()
                 } else {
                     theme::status_dim_style()
@@ -1632,24 +1569,21 @@ fn animated_status_line(text: &str, tick: usize) -> Line<'static> {
     )
 }
 
-fn user_message_lines(content: &str) -> Vec<Line<'static>> {
-    markdown_lines(content, theme::user_message_style())
-        .into_iter()
-        .map(|line| padded_message_line(line, theme::user_message_style()))
-        .collect()
-}
-
 fn turn_lines(turn: &TurnLifecycle, width: u16) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    lines.extend(user_message_lines(&turn.user_message));
+    let has_assistant_content =
+        turn.assistant_message.as_ref().is_some_and(|assistant| !assistant.trim().is_empty());
+    let has_tool_section = !turn.tool_invocations.is_empty();
+    let has_thinking_section = turn.thinking.is_some();
+    lines.extend(user_block_lines(&turn.user_message, width));
 
     if let Some(thinking) = &turn.thinking {
-        lines.push(Line::from(""));
+        ensure_blank_line(&mut lines);
         lines.extend(padded_plain_lines(inline_thinking_lines(thinking)));
     }
 
     for invocation in &turn.tool_invocations {
-        lines.push(Line::from(""));
+        ensure_blank_line(&mut lines);
         let tool_name = &invocation.call.tool_name;
         match &invocation.outcome {
             agent_runtime::ToolInvocationOutcome::Succeeded { result } => {
@@ -1672,15 +1606,22 @@ fn turn_lines(turn: &TurnLifecycle, width: u16) -> Vec<Line<'static>> {
         }
     }
 
-    if !turn.tool_invocations.is_empty() {
-        if turn.assistant_message.is_some() {
-            lines.push(Line::from(""));
+    if has_tool_section {
+        if has_assistant_content {
+            ensure_blank_line(&mut lines);
             lines.push(separator_line(width));
         }
     }
 
     if let Some(assistant) = &turn.assistant_message {
-        lines.push(Line::from(""));
+        if assistant.trim().is_empty() {
+            return lines;
+        }
+        if has_tool_section || has_thinking_section {
+            ensure_blank_line(&mut lines);
+        } else {
+            lines.push(half_gap_line(width));
+        }
         lines.extend(padded_plain_lines(markdown_lines(
             assistant,
             theme::assistant_message_style(),
@@ -1695,6 +1636,105 @@ fn turn_lines(turn: &TurnLifecycle, width: u16) -> Vec<Line<'static>> {
     }
 
     lines
+}
+
+fn ensure_blank_line(lines: &mut Vec<Line<'static>>) {
+    let needs_blank = lines.last().is_some_and(|line| !is_blank_line(line));
+    if needs_blank {
+        lines.push(Line::default());
+    }
+}
+
+fn stretch_user_lines_to_full_width(lines: Vec<Line<'static>>, width: u16) -> Vec<Line<'static>> {
+    let target_width = width.max(1) as usize;
+    let fill_style = theme::user_message_style();
+    lines
+        .into_iter()
+        .map(|mut line| {
+            let current_width = line_display_width(&line);
+            if current_width < target_width {
+                line.spans.push(Span::styled(
+                    "\u{00A0}".repeat(target_width - current_width),
+                    fill_style,
+                ));
+            }
+            line
+        })
+        .collect()
+}
+
+fn user_block_lines(content: &str, width: u16) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    lines.push(user_padding_line(width));
+    lines.extend(stretch_user_lines_to_full_width(user_message_lines(content), width));
+    lines.push(user_padding_line(width));
+    lines
+}
+
+fn user_padding_line(width: u16) -> Line<'static> {
+    Line::from(Span::styled("\u{00A0}".repeat(width.max(1) as usize), theme::user_message_style()))
+}
+
+fn clamp_streaming_lines(lines: Vec<Line<'static>>) -> Vec<Line<'static>> {
+    if lines.len() <= STREAMING_PINNED_MAX_LINES {
+        return lines;
+    }
+
+    let keep_tail = STREAMING_PINNED_MAX_LINES.saturating_sub(1);
+    let start = lines.len().saturating_sub(keep_tail);
+    let mut compact = Vec::with_capacity(STREAMING_PINNED_MAX_LINES);
+    compact.push(padded_plain_line(Line::from(Span::styled("…", theme::dim_style()))));
+    compact.extend(lines.into_iter().skip(start));
+    compact
+}
+
+fn line_display_width(line: &Line<'_>) -> usize {
+    line.spans
+        .iter()
+        .flat_map(|span| span.content.chars())
+        .map(|ch| {
+            if ch.is_control() {
+                0
+            } else if is_wide_char(ch) {
+                2
+            } else {
+                1
+            }
+        })
+        .sum()
+}
+
+fn is_blank_line(line: &Line<'_>) -> bool {
+    line.spans.iter().all(|span| span.content.chars().all(|ch| ch.is_whitespace()))
+}
+
+fn hash_turns(turns: &[TurnLifecycle], hasher: &mut DefaultHasher) {
+    for turn in turns {
+        turn.turn_id.hash(hasher);
+        turn.started_at_ms.hash(hasher);
+        turn.finished_at_ms.hash(hasher);
+        turn.source_entry_ids.hash(hasher);
+        turn.user_message.hash(hasher);
+        turn.assistant_message.hash(hasher);
+        turn.thinking.hash(hasher);
+        turn.failure_message.hash(hasher);
+        for invocation in &turn.tool_invocations {
+            invocation.call.tool_name.hash(hasher);
+            invocation.call.invocation_id.hash(hasher);
+            invocation.call.arguments.hash(hasher);
+            match &invocation.outcome {
+                agent_runtime::ToolInvocationOutcome::Succeeded { result } => {
+                    1u8.hash(hasher);
+                    result.invocation_id.hash(hasher);
+                    result.content.hash(hasher);
+                }
+                agent_runtime::ToolInvocationOutcome::Failed { message } => {
+                    2u8.hash(hasher);
+                    message.hash(hasher);
+                }
+            }
+        }
+    }
 }
 
 /// Build a thin section header line: `╶── title ──────────╴`
@@ -1816,7 +1856,7 @@ impl Drop for TerminalRestoreGuard {
 mod tests {
     use crossterm::event::{KeyModifiers, MouseEvent, MouseEventKind};
     use ratatui::style::Color;
-    use ratatui::{backend::TestBackend, buffer::Buffer, layout::Rect, Terminal};
+    use ratatui::{Terminal, backend::TestBackend, buffer::Buffer, layout::Rect};
 
     use agent_core::{ModelDisposition, ModelIdentity};
     use agent_runtime::AgentRuntime;
@@ -1828,8 +1868,8 @@ mod tests {
     };
 
     use super::{
-        draw_tui, resolve_remembered_selection, startup_options, CreateProviderStep, FocusArea,
-        Phase, ProviderDraft, StartupOption, TuiState,
+        CreateProviderStep, FocusArea, Phase, ProviderDraft, StartupOption, TuiState, draw_tui,
+        resolve_remembered_selection, startup_options,
     };
 
     fn buffer_row_text(buffer: &Buffer, y: u16) -> String {
@@ -1884,7 +1924,7 @@ mod tests {
         state.model_label = "local/bootstrap".into();
         state.phase = Phase::Chat;
         state.status = Some("状态正常".into());
-        state.replay_turns.push(agent_runtime::TurnLifecycle {
+        state.messages.replay_turns.push(agent_runtime::TurnLifecycle {
             turn_id: "turn-1".into(),
             started_at_ms: 1,
             finished_at_ms: 2,
@@ -2024,14 +2064,18 @@ mod tests {
         };
 
         let lines = super::turn_lines(&turn, 60);
-        let user_line_one_bg = line_backgrounds(&lines[0]);
-        let user_line_two_bg = line_backgrounds(&lines[1]);
+        let user_line_one =
+            lines.iter().find(|line| line_text(line).contains("用户消息")).expect("应有用户首行");
+        let user_line_two =
+            lines.iter().find(|line| line_text(line).contains("第二行")).expect("应有用户次行");
+        let user_line_one_bg = line_backgrounds(user_line_one);
+        let user_line_two_bg = line_backgrounds(user_line_two);
         let assistant_line =
             lines.iter().find(|line| line_text(line).contains("助手消息")).expect("应有助手消息");
         let assistant_bgs = line_backgrounds(assistant_line);
 
-        assert_eq!(line_text(&lines[0]), " 用户消息 ");
-        assert_eq!(line_text(&lines[1]), " 第二行 ");
+        assert!(line_text(user_line_one).starts_with(" 用户消息 "));
+        assert!(line_text(user_line_two).starts_with(" 第二行 "));
         assert!(user_line_one_bg.iter().all(|bg| *bg == theme::current().user_message_style.bg));
         assert!(user_line_two_bg.iter().all(|bg| *bg == theme::current().user_message_style.bg));
         assert!(assistant_bgs.iter().all(|bg| bg.is_none()));
@@ -2059,12 +2103,133 @@ mod tests {
     }
 
     #[test]
+    fn turn_lines_用户与助手正文之间使用空白间隔() {
+        let turn = agent_runtime::TurnLifecycle {
+            turn_id: "turn-1".into(),
+            started_at_ms: 1,
+            finished_at_ms: 2,
+            source_entry_ids: vec![1],
+            user_message: "用户消息".into(),
+            assistant_message: Some("助手回复".into()),
+            thinking: None,
+            tool_invocations: vec![],
+            failure_message: None,
+        };
+
+        let lines = super::turn_lines(&turn, 60);
+        let rendered = lines.iter().map(line_text).collect::<Vec<_>>();
+        let user_index =
+            rendered.iter().position(|line| line.contains("用户消息")).expect("应有用户消息");
+        let assistant_index =
+            rendered.iter().position(|line| line.contains("助手回复")).expect("应有助手回复");
+
+        assert_eq!(assistant_index, user_index + 3);
+        assert!(rendered[user_index + 2].trim().is_empty());
+    }
+
+    #[test]
+    fn turn_lines_单用户消息会上下各追加一行背景_padding() {
+        let turn = agent_runtime::TurnLifecycle {
+            turn_id: "turn-1".into(),
+            started_at_ms: 1,
+            finished_at_ms: 2,
+            source_entry_ids: vec![1],
+            user_message: "只发一条用户消息".into(),
+            assistant_message: None,
+            thinking: None,
+            tool_invocations: vec![],
+            failure_message: None,
+        };
+
+        let lines = super::turn_lines(&turn, 24);
+        assert!(lines.len() >= 3);
+
+        let first = &lines[0];
+        let middle = &lines[1];
+        let last = lines.last().expect("应有底部 padding 行");
+
+        assert!(line_text(first).trim().is_empty());
+        assert!(line_text(middle).contains("只发一条用户消息"));
+        assert!(line_text(last).trim().is_empty());
+
+        let first_bgs = line_backgrounds(first);
+        let last_bgs = line_backgrounds(last);
+        assert!(first_bgs.iter().all(|bg| *bg == theme::current().user_message_style.bg));
+        assert!(last_bgs.iter().all(|bg| *bg == theme::current().user_message_style.bg));
+    }
+
+    #[test]
+    fn 流式仅用户消息会上下各追加一行背景_padding() {
+        let mut state = TuiState::new(vec![], None, None, None);
+        state.phase = Phase::Chat;
+        state.messages.streaming = Some(super::StreamingTurn {
+            user_message: "单用户消息".into(),
+            status_text: None,
+            thinking: String::new(),
+            text: String::new(),
+        });
+
+        let lines = super::message_lines(&state.messages, 24).lines;
+        assert!(lines.len() >= 3);
+
+        let first = &lines[0];
+        let middle = &lines[1];
+        let last = lines.last().expect("应有底部 padding 行");
+
+        assert!(line_text(first).trim().is_empty());
+        assert!(line_text(middle).contains("单用户消息"));
+        assert!(line_text(last).trim().is_empty());
+
+        let first_bgs = line_backgrounds(first);
+        let last_bgs = line_backgrounds(last);
+        assert!(first_bgs.iter().all(|bg| *bg == theme::current().user_message_style.bg));
+        assert!(last_bgs.iter().all(|bg| *bg == theme::current().user_message_style.bg));
+    }
+
+    #[test]
+    fn 用户背景块与助手正文之间保持空白间隔() {
+        let backend = TestBackend::new(24, 10);
+        let mut terminal = Terminal::new(backend).expect("终端创建成功");
+        let mut state = TuiState::new(vec![], None, None, None);
+        state.phase = Phase::Chat;
+        state.messages.current_turns.push(agent_runtime::TurnLifecycle {
+            turn_id: "turn-1".into(),
+            started_at_ms: 1,
+            finished_at_ms: 2,
+            source_entry_ids: vec![1, 2],
+            user_message: "哦".into(),
+            assistant_message: Some("嗯".into()),
+            thinking: None,
+            tool_invocations: vec![],
+            failure_message: None,
+        });
+        let registry = provider_registry::ProviderRegistry::default();
+
+        terminal.draw(|frame| draw_tui(frame, &mut state, &registry)).expect("绘制成功");
+        let buffer = terminal.backend().buffer().clone();
+        let rows =
+            (0..buffer.area.height).map(|row| buffer_row_text(&buffer, row)).collect::<Vec<_>>();
+        let user_row = rows.iter().position(|row| row.contains('哦')).expect("应渲染用户消息");
+        let assistant_row = rows.iter().position(|row| row.contains('嗯')).expect("应渲染助手消息");
+
+        assert!(assistant_row >= user_row + 3);
+    }
+
+    #[test]
+    fn 用户背景补齐后行宽不会超过目标宽度() {
+        let lines = vec![ratatui::text::Line::from(" 用户 ")];
+        let stretched = super::stretch_user_lines_to_full_width(lines, 12);
+
+        assert_eq!(super::line_display_width(&stretched[0]), 12);
+    }
+
+    #[test]
     fn tui_流式_thinking_会首行内联且保留换行() {
         let backend = TestBackend::new(100, 12);
         let mut terminal = Terminal::new(backend).expect("终端创建成功");
         let mut state = TuiState::new(vec![], None, None, None);
         state.phase = Phase::Chat;
-        state.streaming_turn = Some(super::StreamingTurn {
+        state.messages.streaming = Some(super::StreamingTurn {
             user_message: String::new(),
             status_text: None,
             thinking: "first **bold**\nnext `code`".into(),
@@ -2098,12 +2263,12 @@ mod tests {
 
         super::submit_turn_to_driver(&mut driver, &mut state).expect("提交成功");
 
-        let streaming = state.streaming_turn.expect("应创建进行中轮次");
+        let streaming = state.messages.streaming.expect("应创建进行中轮次");
         assert_eq!(streaming.user_message, "hello world");
         assert_eq!(streaming.status_text.as_deref(), Some("Thinking"));
-        assert!(state.processing);
-        assert!(!state.user_scrolled_up);
-        assert!(state.pending_auto_scroll);
+        assert!(state.messages.processing);
+        assert!(!state.messages.user_scrolled_up);
+        assert!(state.messages.pending_auto_scroll);
     }
 
     #[test]
@@ -2112,9 +2277,9 @@ mod tests {
         let mut terminal = Terminal::new(backend).expect("终端创建成功");
         let mut state = TuiState::new(vec![], None, None, None);
         state.phase = Phase::Chat;
-        state.processing = true;
+        state.messages.processing = true;
         state.status = Some("正在处理中...".into());
-        state.streaming_turn = Some(super::StreamingTurn {
+        state.messages.streaming = Some(super::StreamingTurn {
             user_message: "hello".into(),
             status_text: Some("Thinking".into()),
             thinking: String::new(),
@@ -2132,21 +2297,36 @@ mod tests {
 
     #[test]
     fn 状态动画会从左到右逐步变暗() {
-        let line = super::animated_status_line("Thinking", 3);
+        let line = super::animated_status_line("Thinking", 6);
 
         assert_eq!(line.spans[0].style, theme::status_trail_style());
         assert_eq!(line.spans[1].style, theme::status_head_style());
-        assert_eq!(line.spans[2].style, theme::status_trail_style());
+        assert_eq!(line.spans[2].style, theme::status_dim_style());
         assert_eq!(line.spans[4].style, theme::status_dim_style());
+    }
+
+    #[test]
+    fn 状态动画在尾迹结束前不会从头重新开始() {
+        let text = "Thinking";
+        let end_frame = text.chars().count() - 1;
+        let end_tick = end_frame * super::STATUS_ANIMATION_FRAME_DIVISOR;
+        let after_end_tick = (end_frame + 1) * super::STATUS_ANIMATION_FRAME_DIVISOR;
+        let line_at_end = super::animated_status_line(text, end_tick);
+        let line_after_end = super::animated_status_line(text, after_end_tick);
+
+        assert_eq!(line_at_end.spans[0].style, theme::status_dim_style());
+        assert_eq!(line_at_end.spans[text.chars().count() - 1].style, theme::status_head_style());
+        assert_eq!(line_after_end.spans[0].style, theme::status_dim_style());
+        assert_eq!(line_after_end.spans[1].style, theme::status_dim_style());
     }
 
     #[test]
     fn 鼠标滚轮可以滚动消息列表() {
         let mut state = TuiState::new(vec![], None, None, None);
         state.phase = Phase::Chat;
-        state.message_area = Rect { x: 0, y: 0, width: 80, height: 10 };
-        state.message_line_count = 40;
-        state.message_viewport_height = 10;
+        state.messages.area = Rect { x: 0, y: 0, width: 80, height: 10 };
+        state.messages.line_count = 40;
+        state.messages.viewport_height = 10;
 
         let consumed = super::handle_mouse_event(
             MouseEvent {
@@ -2159,25 +2339,96 @@ mod tests {
         );
 
         assert!(consumed);
-        assert!(state.message_scroll > 0);
+        assert!(state.messages.scroll_offset > 0);
     }
 
     #[test]
     fn 流式状态固定显示在消息列表最底部() {
         let mut state = TuiState::new(vec![], None, None, None);
         state.phase = Phase::Chat;
-        state.processing = true;
-        state.streaming_turn = Some(super::StreamingTurn {
+        state.messages.processing = true;
+        state.messages.streaming = Some(super::StreamingTurn {
             user_message: "hello".into(),
             status_text: Some("Thinking".into()),
             thinking: "first line".into(),
             text: "reply".into(),
         });
 
-        let view = super::message_lines(&state, 60);
+        let view = super::message_lines(&state.messages, 60);
         let footer = view.footer.expect("应有底部状态行");
 
         assert!(line_text(&footer).contains("Thinking"));
+    }
+
+    #[test]
+    fn 消息视图缓存会复用正文并允许_footer_动画继续更新() {
+        let mut state = TuiState::new(vec![], None, None, None);
+        state.phase = Phase::Chat;
+        state.messages.processing = true;
+        state.messages.streaming = Some(super::StreamingTurn {
+            user_message: "hello".into(),
+            status_text: Some("Thinking".into()),
+            thinking: "first line".into(),
+            text: "reply".into(),
+        });
+
+        let first = super::message_lines(&state.messages, 60);
+        let cached_key = state.messages.history_cache.as_ref().map(|c| c.content_key);
+        let first_lines = first.lines.iter().map(line_text).collect::<Vec<_>>();
+        let first_footer = line_text(&first.footer.expect("应有 footer"));
+
+        state.messages.spinner_tick = 3;
+        let second = super::message_lines(&state.messages, 60);
+        let second_lines = second.lines.iter().map(line_text).collect::<Vec<_>>();
+        let second_footer = line_text(&second.footer.expect("应有 footer"));
+
+        assert_eq!(cached_key, state.messages.history_cache.as_ref().map(|c| c.content_key));
+        assert_eq!(first_lines, second_lines);
+        assert_eq!(first_footer, second_footer);
+    }
+
+    #[test]
+    fn 流式_thinking_增量会触发消息区域刷新() {
+        let mut state = TuiState::new(vec![], None, None, None);
+        state.phase = Phase::Chat;
+        state.messages.processing = true;
+        state.messages.streaming = Some(super::StreamingTurn {
+            user_message: "hello".into(),
+            status_text: Some("Thinking".into()),
+            thinking: "first".into(),
+            text: String::new(),
+        });
+
+        let first = super::message_lines(&state.messages, 60);
+        let first_lines = first.lines.iter().map(line_text).collect::<Vec<_>>();
+
+        state.messages.streaming.as_mut().expect("应存在流式轮次").thinking.push_str("\nsecond");
+
+        let second = super::message_lines(&state.messages, 60);
+        let second_lines = second.lines.iter().map(line_text).collect::<Vec<_>>();
+
+        assert_ne!(first_lines, second_lines);
+        assert!(second_lines.iter().any(|line| line.contains("second")));
+    }
+
+    #[test]
+    fn 流式区域会限制最大行数以固定在输入框上方() {
+        let mut state = TuiState::new(vec![], None, None, None);
+        state.phase = Phase::Chat;
+        state.messages.processing = true;
+        state.messages.streaming = Some(super::StreamingTurn {
+            user_message: "hello".into(),
+            status_text: Some("Responding".into()),
+            thinking: String::new(),
+            text: (1..=12).map(|i| format!("第{i}行")).collect::<Vec<_>>().join("\n"),
+        });
+
+        let lines = super::message_lines(&state.messages, 60).lines;
+        let rendered = lines.iter().map(line_text).collect::<Vec<_>>();
+
+        assert!(rendered.len() <= super::STREAMING_PINNED_MAX_LINES);
+        assert!(rendered.iter().any(|line| line.contains('…')));
+        assert!(rendered.iter().any(|line| line.contains("第12行")));
     }
 
     #[test]
@@ -2186,8 +2437,8 @@ mod tests {
         let mut terminal = Terminal::new(backend).expect("终端创建成功");
         let mut state = TuiState::new(vec![], None, None, None);
         state.phase = Phase::Chat;
-        state.pending_auto_scroll = true;
-        state.current_turns.push(agent_runtime::TurnLifecycle {
+        state.messages.pending_auto_scroll = true;
+        state.messages.current_turns.push(agent_runtime::TurnLifecycle {
             turn_id: "turn-1".into(),
             started_at_ms: 1,
             finished_at_ms: 2,
@@ -2202,15 +2453,66 @@ mod tests {
 
         terminal.draw(|frame| draw_tui(frame, &mut state, &registry)).expect("绘制成功");
 
-        assert_eq!(state.message_scroll, state.max_message_scroll());
-        assert!(!state.pending_auto_scroll);
+        assert_eq!(state.messages.scroll_offset, state.messages.max_scroll());
+        assert!(!state.messages.pending_auto_scroll);
     }
 
     #[test]
-    fn 流式轮次与历史消息之间保留两行空白() {
+    fn 首次进入且存在历史消息时会自动滚动到底部() {
+        let backend = TestBackend::new(80, 10);
+        let mut terminal = Terminal::new(backend).expect("终端创建成功");
+        let mut state = TuiState::new(
+            vec![agent_runtime::TurnLifecycle {
+                turn_id: "turn-1".into(),
+                started_at_ms: 1,
+                finished_at_ms: 2,
+                source_entry_ids: vec![1],
+                user_message: "历史提问".into(),
+                assistant_message: Some(
+                    "历史回答第一行\n历史回答第二行\n历史回答第三行\n历史回答第四行".into(),
+                ),
+                thinking: None,
+                tool_invocations: vec![],
+                failure_message: None,
+            }],
+            None,
+            None,
+            None,
+        );
+        state.phase = Phase::Chat;
+        let registry = provider_registry::ProviderRegistry::default();
+
+        terminal.draw(|frame| draw_tui(frame, &mut state, &registry)).expect("绘制成功");
+
+        assert_eq!(state.messages.scroll_offset, state.messages.max_scroll());
+        assert!(!state.messages.pending_auto_scroll);
+    }
+
+    #[test]
+    fn 处理中且未手动上滚时会持续自动跟底() {
+        let backend = TestBackend::new(80, 10);
+        let mut terminal = Terminal::new(backend).expect("终端创建成功");
         let mut state = TuiState::new(vec![], None, None, None);
         state.phase = Phase::Chat;
-        state.replay_turns.push(agent_runtime::TurnLifecycle {
+        state.messages.processing = true;
+        state.messages.streaming = Some(super::StreamingTurn {
+            user_message: "当前输入".into(),
+            status_text: Some("Thinking".into()),
+            thinking: "第一行\n第二行\n第三行\n第四行\n第五行\n第六行".into(),
+            text: "回复\n第二行\n第三行\n第四行".into(),
+        });
+        let registry = provider_registry::ProviderRegistry::default();
+
+        terminal.draw(|frame| draw_tui(frame, &mut state, &registry)).expect("绘制成功");
+
+        assert_eq!(state.messages.scroll_offset, state.messages.max_scroll());
+    }
+
+    #[test]
+    fn 流式轮次与历史消息之间最多只保留一行空白() {
+        let mut state = TuiState::new(vec![], None, None, None);
+        state.phase = Phase::Chat;
+        state.messages.replay_turns.push(agent_runtime::TurnLifecycle {
             turn_id: "turn-1".into(),
             started_at_ms: 1,
             finished_at_ms: 2,
@@ -2221,14 +2523,14 @@ mod tests {
             tool_invocations: vec![],
             failure_message: None,
         });
-        state.streaming_turn = Some(super::StreamingTurn {
+        state.messages.streaming = Some(super::StreamingTurn {
             user_message: "当前输入".into(),
             status_text: Some("Thinking".into()),
             thinking: String::new(),
             text: String::new(),
         });
 
-        let rendered = super::message_lines(&state, 60)
+        let rendered = super::message_lines(&state.messages, 60)
             .lines
             .into_iter()
             .map(|line| line_text(&line))
@@ -2236,12 +2538,65 @@ mod tests {
         let current_index =
             rendered.iter().position(|line| line.contains(" 当前输入 ")).expect("应有当前输入");
 
-        assert_eq!(rendered[current_index - 1], "");
-        assert_eq!(rendered[current_index - 2], "");
+        assert!(rendered[current_index - 1].trim().is_empty());
+        assert!(!rendered[current_index - 2].trim().is_empty());
     }
 
     #[test]
-    fn 聊天布局会在消息区与输入框之间保留固定空白行() {
+    fn markdown_段落之间不再额外保留空行() {
+        let turn = agent_runtime::TurnLifecycle {
+            turn_id: "turn-1".into(),
+            started_at_ms: 1,
+            finished_at_ms: 2,
+            source_entry_ids: vec![1],
+            user_message: "测试".into(),
+            assistant_message: Some("第一段\n\n第二段".into()),
+            thinking: None,
+            tool_invocations: vec![],
+            failure_message: None,
+        };
+
+        let lines = super::turn_lines(&turn, 60);
+        let text_lines = lines.iter().map(line_text).collect::<Vec<_>>();
+        let first_index =
+            text_lines.iter().position(|line| line.contains("第一段")).expect("应有第一段");
+        let second_index =
+            text_lines.iter().position(|line| line.contains("第二段")).expect("应有第二段");
+
+        assert_eq!(second_index, first_index + 1);
+    }
+
+    #[test]
+    fn markdown_单个换行不会被扩成空白段() {
+        let lines =
+            crate::tui_markdown::markdown_lines("第一行\n第二行", theme::assistant_message_style());
+        let text_lines = lines.iter().map(line_text).collect::<Vec<_>>();
+
+        assert_eq!(text_lines, vec!["第一行".to_string(), "第二行".to_string()]);
+    }
+
+    #[test]
+    fn markdown_尾部单个换行不会额外生成空白行() {
+        let lines =
+            crate::tui_markdown::markdown_lines("第一行\n", theme::assistant_message_style());
+        let text_lines = lines.iter().map(line_text).collect::<Vec<_>>();
+
+        assert_eq!(text_lines, vec!["第一行".to_string()]);
+    }
+
+    #[test]
+    fn markdown_连续空行会压缩为单换行显示() {
+        let lines = crate::tui_markdown::markdown_lines(
+            "第一段\n\n\n第二段",
+            theme::assistant_message_style(),
+        );
+        let text_lines = lines.iter().map(line_text).collect::<Vec<_>>();
+
+        assert_eq!(text_lines, vec!["第一段".to_string(), "第二段".to_string()]);
+    }
+
+    #[test]
+    fn 聊天布局会优先把高度分配给消息区() {
         let backend = TestBackend::new(80, 12);
         let mut terminal = Terminal::new(backend).expect("终端创建成功");
         let mut state = TuiState::new(vec![], None, None, None);
@@ -2250,9 +2605,7 @@ mod tests {
 
         terminal.draw(|frame| draw_tui(frame, &mut state, &registry)).expect("绘制成功");
 
-        let buffer = terminal.backend().buffer().clone();
-        let gap_row = buffer_row_text(&buffer, 8);
-        assert!(gap_row.trim().is_empty());
+        assert_eq!(state.messages.viewport_height, 9);
     }
 
     #[test]
@@ -2426,10 +2779,52 @@ mod tests {
         let mut state = TuiState::new(vec![], None, None, None);
         state.phase = Phase::Chat;
         state.focus = FocusArea::Messages;
-        state.message_line_count = 5;
-        state.message_scroll = 10;
-        state.clamp_scroll();
-        assert_eq!(state.message_scroll, 4); // max = 5-1 = 4
+        state.messages.line_count = 5;
+        state.messages.scroll_offset = 10;
+        state.messages.clamp_scroll();
+        assert_eq!(state.messages.scroll_offset, 4); // max = 5-1 = 4
+    }
+
+    #[test]
+    fn 可视行计数会把自动换行折算进滚动高度() {
+        let lines =
+            vec![ratatui::text::Line::from("1234567890"), ratatui::text::Line::from("第二行")];
+
+        let count = super::visual_line_count(&lines, 5);
+
+        assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn draw_messages_自动滚动会基于可视行高度而非原始行数() {
+        let backend = TestBackend::new(20, 10);
+        let mut terminal = Terminal::new(backend).expect("终端创建成功");
+        let mut state = TuiState::new(vec![], None, None, None);
+        state.phase = Phase::Chat;
+        state.messages.pending_auto_scroll = true;
+        state.messages.current_turns.push(agent_runtime::TurnLifecycle {
+            turn_id: "turn-1".into(),
+            started_at_ms: 1,
+            finished_at_ms: 2,
+            source_entry_ids: vec![1],
+            user_message: "问题".into(),
+            assistant_message: Some(
+                "这是一个非常非常非常非常非常非常长的回答，用于触发自动换行并验证滚动高度计算。"
+                    .into(),
+            ),
+            thinking: None,
+            tool_invocations: vec![],
+            failure_message: None,
+        });
+        let registry = provider_registry::ProviderRegistry::default();
+
+        terminal.draw(|frame| draw_tui(frame, &mut state, &registry)).expect("绘制成功");
+
+        let raw_line_count =
+            state.messages.history_cache.as_ref().expect("应有消息视图缓存").lines.len();
+
+        assert!(state.messages.line_count > raw_line_count);
+        assert_eq!(state.messages.scroll_offset, state.messages.max_scroll());
     }
 
     #[test]
@@ -2437,23 +2832,23 @@ mod tests {
         let mut state = TuiState::new(vec![], None, None, None);
         state.phase = Phase::Chat;
         state.focus = FocusArea::Messages;
-        state.message_line_count = 20;
-        state.message_viewport_height = 5;
-        state.message_scroll = 99;
+        state.messages.line_count = 20;
+        state.messages.viewport_height = 5;
+        state.messages.scroll_offset = 99;
 
-        state.clamp_scroll();
+        state.messages.clamp_scroll();
 
-        assert_eq!(state.message_scroll, 15);
+        assert_eq!(state.messages.scroll_offset, 15);
     }
 
     #[test]
     fn spinner_tick_advances_during_processing() {
         let mut state = TuiState::new(vec![], None, None, None);
-        state.processing = true;
-        assert_eq!(state.spinner_tick, 0);
+        state.messages.processing = true;
+        assert_eq!(state.messages.spinner_tick, 0);
         // Simulating what draw_tui does
-        state.spinner_tick = state.spinner_tick.wrapping_add(1);
-        assert_eq!(state.spinner_tick, 1);
+        state.messages.spinner_tick = state.messages.spinner_tick.wrapping_add(1);
+        assert_eq!(state.messages.spinner_tick, 1);
     }
 
     #[test]
@@ -2461,42 +2856,129 @@ mod tests {
         let mut state = TuiState::new(vec![], None, None, None);
         state.phase = Phase::Chat;
         state.focus = FocusArea::Messages;
-        state.message_line_count = 10;
-        state.message_scroll = 3;
+        state.messages.line_count = 10;
+        state.messages.scroll_offset = 3;
 
         // Scrolling up sets the flag
-        state.scroll_up();
-        assert!(state.user_scrolled_up);
+        state.messages.scroll_up();
+        assert!(state.messages.user_scrolled_up);
 
         // Scrolling to bottom resets it
-        state.message_scroll = 8;
-        state.scroll_down();
-        assert_eq!(state.message_scroll, 9);
-        assert!(!state.user_scrolled_up);
+        state.messages.scroll_offset = 8;
+        state.messages.scroll_down();
+        assert_eq!(state.messages.scroll_offset, 9);
+        assert!(!state.messages.user_scrolled_up);
     }
 
     #[test]
     fn auto_scroll_respects_user_scrolled_up() {
         let mut state = TuiState::new(vec![], None, None, None);
         state.phase = Phase::Chat;
-        state.message_line_count = 20;
-        state.message_viewport_height = 1;
-        state.message_scroll = 5;
+        state.messages.line_count = 20;
+        state.messages.viewport_height = 1;
+        state.messages.scroll_offset = 5;
 
-        state.user_scrolled_up = false;
-        state.pending_auto_scroll = true;
-        if state.pending_auto_scroll && !state.user_scrolled_up {
-            state.message_scroll = state.max_message_scroll();
-            state.pending_auto_scroll = false;
+        state.messages.user_scrolled_up = false;
+        state.messages.pending_auto_scroll = true;
+        if state.messages.pending_auto_scroll && !state.messages.user_scrolled_up {
+            state.messages.scroll_offset = state.messages.max_scroll();
+            state.messages.pending_auto_scroll = false;
         }
-        assert_eq!(state.message_scroll, 19);
+        assert_eq!(state.messages.scroll_offset, 19);
 
-        state.message_scroll = 5;
-        state.user_scrolled_up = true;
-        state.pending_auto_scroll = true;
-        if state.pending_auto_scroll && !state.user_scrolled_up {
-            state.message_scroll = state.max_message_scroll();
+        state.messages.scroll_offset = 5;
+        state.messages.user_scrolled_up = true;
+        state.messages.pending_auto_scroll = true;
+        if state.messages.pending_auto_scroll && !state.messages.user_scrolled_up {
+            state.messages.scroll_offset = state.messages.max_scroll();
         }
-        assert_eq!(state.message_scroll, 5);
+        assert_eq!(state.messages.scroll_offset, 5);
+    }
+
+    #[test]
+    fn 切换日志面板时未手动上滚会触发自动跟底() {
+        let mut state = TuiState::new(vec![], None, None, None);
+        state.messages.user_scrolled_up = false;
+        state.messages.pending_auto_scroll = false;
+
+        super::handle_slash_command("logs", &mut state).expect("命令执行成功");
+
+        assert!(state.messages.pending_auto_scroll);
+    }
+
+    #[test]
+    fn 窗口尺寸变化时未手动上滚会触发自动跟底() {
+        let mut state = TuiState::new(vec![], None, None, None);
+        state.messages.user_scrolled_up = false;
+        state.messages.pending_auto_scroll = false;
+        state.messages.history_cache = Some(super::HistoryCache {
+            width: 80,
+            content_key: 1,
+            lines: vec![ratatui::text::Line::from("缓存内容")],
+            visual_line_count: 1,
+        });
+
+        super::handle_resize_event(&mut state);
+
+        assert!(state.messages.pending_auto_scroll);
+        assert!(state.messages.history_cache.is_none());
+    }
+
+    #[test]
+    fn 历史重放自动到底时应显示最后一轮助手消息() {
+        let backend = TestBackend::new(80, 12);
+        let mut terminal = Terminal::new(backend).expect("终端创建成功");
+        let turns = vec![
+            agent_runtime::TurnLifecycle {
+                turn_id: "turn-1".into(),
+                started_at_ms: 1,
+                finished_at_ms: 2,
+                source_entry_ids: vec![1, 2],
+                user_message: "hello world".into(),
+                assistant_message: Some("Hello world!".into()),
+                thinking: None,
+                tool_invocations: vec![],
+                failure_message: None,
+            },
+            agent_runtime::TurnLifecycle {
+                turn_id: "turn-2".into(),
+                started_at_ms: 3,
+                finished_at_ms: 4,
+                source_entry_ids: vec![3, 4],
+                user_message: "你能干什么".into(),
+                assistant_message: Some("我可以帮你做很多事，常见的有：\n\n1. 回答问题\n2. 写作和改写\n3. 编程相关\n4. 学习和办公\n5. 中文交流\n\n如果你愿意，我也可以直接演示一下。".into()),
+                thinking: None,
+                tool_invocations: vec![],
+                failure_message: None,
+            },
+            agent_runtime::TurnLifecycle {
+                turn_id: "turn-3".into(),
+                started_at_ms: 5,
+                finished_at_ms: 6,
+                source_entry_ids: vec![5, 6],
+                user_message: "哦".into(),
+                assistant_message: Some("嗯，我在。\n你想聊点什么，或者要我帮你做什么？".into()),
+                thinking: None,
+                tool_invocations: vec![],
+                failure_message: None,
+            },
+        ];
+        let mut state = TuiState::new(turns, None, None, None);
+        state.phase = Phase::Chat;
+        let built = super::message_lines(&state.messages, 80);
+        assert!(
+            built.lines.iter().any(|line| line_text(line).contains("嗯，我在")),
+            "消息构建阶段已丢失最后 assistant 行"
+        );
+        let built_text = built.lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+        assert!(built_text.contains("你想聊点什么"), "构建内容缺少最后 assistant 第二行");
+        let registry = provider_registry::ProviderRegistry::default();
+
+        terminal.draw(|frame| draw_tui(frame, &mut state, &registry)).expect("绘制成功");
+
+        let buffer = terminal.backend().buffer().clone();
+        let text = buffer.content.iter().map(|cell| cell.symbol()).collect::<String>();
+        let compact = text.replace(' ', "");
+        assert!(compact.contains("嗯，我在"));
     }
 }
