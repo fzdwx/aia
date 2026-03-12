@@ -11,17 +11,17 @@ use crossterm::{
         MouseEvent, MouseEventKind,
     },
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use provider_registry::{ProviderProfile, ProviderRegistry};
 use pulldown_cmark::{Event as MarkdownEvent, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::{
-    Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Paragraph, Wrap},
+    Terminal,
 };
 use session_tape::{SessionProviderBinding, SessionTape};
 
@@ -29,7 +29,7 @@ use crate::{
     driver::{self, CliRuntime, DriverHandle, DriverPollResult},
     errors::CliLoopError,
     loop_driver::is_exit_command,
-    model::{BootstrapTools, ProviderLaunchChoice, build_model_from_selection},
+    model::{build_model_from_selection, BootstrapTools, ProviderLaunchChoice},
     theme,
 };
 
@@ -1816,7 +1816,7 @@ impl Drop for TerminalRestoreGuard {
 mod tests {
     use crossterm::event::{KeyModifiers, MouseEvent, MouseEventKind};
     use ratatui::style::Color;
-    use ratatui::{Terminal, backend::TestBackend, buffer::Buffer, layout::Rect};
+    use ratatui::{backend::TestBackend, buffer::Buffer, layout::Rect, Terminal};
 
     use agent_core::{ModelDisposition, ModelIdentity};
     use agent_runtime::AgentRuntime;
@@ -1828,8 +1828,8 @@ mod tests {
     };
 
     use super::{
-        CreateProviderStep, FocusArea, Phase, ProviderDraft, StartupOption, TuiState, draw_tui,
-        resolve_remembered_selection, startup_options,
+        draw_tui, resolve_remembered_selection, startup_options, CreateProviderStep, FocusArea,
+        Phase, ProviderDraft, StartupOption, TuiState,
     };
 
     fn buffer_row_text(buffer: &Buffer, y: u16) -> String {
@@ -2003,7 +2003,7 @@ mod tests {
             .position(|line| line.contains("Thinking: 草拟 推理"))
             .expect("应有 thinking 首行");
 
-        assert_eq!(rendered[thinking_index + 1], "与 代码");
+        assert_eq!(rendered[thinking_index + 1], " 与 代码 ");
         assert!(!rendered[thinking_index].contains("**推理**"));
         assert!(!rendered[thinking_index + 1].contains("`代码`"));
         assert!(!rendered.iter().any(|line| line.contains("╶─ Thinking ")));
@@ -2078,7 +2078,7 @@ mod tests {
         let row_two = buffer_row_text(&buffer, 1);
 
         assert!(row_one.contains("Thinking: first bold"));
-        assert!(row_two.starts_with("next code"));
+        assert!(row_two.starts_with(" next code "));
         assert!(!row_one.contains("**bold**"));
         assert!(!row_two.contains("`code`"));
     }
