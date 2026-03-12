@@ -35,7 +35,9 @@ the shared driver boundary has also been tightened so it no longer leaks cli-spe
 
 on shutdown, the shared driver now only finalizes and persists session state; it no longer injects a hard-coded handoff summary on exit.
 
-the current tui message flow now renders markdown content into terminal lines and keeps a single scrollable message list with auto-follow unless the user scrolls upward.
+the current tui message flow now renders markdown content into terminal lines and keeps a single scrollable message list with keyboard and mouse-wheel scrolling. submitted user messages are echoed optimistically before the round completes, streaming status stays pinned to the bottom of the message pane above the input bar, and the list auto-follows to the latest content unless the user explicitly scrolls upward.
+
+the tui now also has a minimal theme system, with `aura` as the first built-in theme. aura currently drives assistant text, user message bubbles, thinking text, tool blocks, separators, and footer status animation through semantic style mappings instead of scattered hard-coded colors.
 
 on startup, `aia` now enters a terminal provider flow: create a provider, select a saved provider, or fall back to the local bootstrap model. local provider data is stored in `.aia/providers.json`, and `.aia/` is ignored to reduce accidental commits.
 
