@@ -55,37 +55,11 @@ impl OpenAiResponsesModel {
             .available_tools
             .iter()
             .map(|tool| {
-                let properties = tool
-                    .parameters
-                    .iter()
-                    .map(|parameter| {
-                        (
-                            parameter.name.clone(),
-                            json!({
-                                "type": "string",
-                                "description": parameter.description,
-                            }),
-                        )
-                    })
-                    .collect::<serde_json::Map<String, Value>>();
-
-                let required = tool
-                    .parameters
-                    .iter()
-                    .filter(|parameter| parameter.required)
-                    .map(|parameter| parameter.name.clone())
-                    .collect::<Vec<_>>();
-
                 json!({
                     "type": "function",
                     "name": tool.name,
                     "description": tool.description,
-                    "parameters": {
-                        "type": "object",
-                        "properties": properties,
-                        "required": required,
-                        "additionalProperties": false,
-                    }
+                    "parameters": tool.parameters,
                 })
             })
             .collect::<Vec<_>>();
@@ -139,7 +113,7 @@ impl OpenAiResponsesModel {
                     segments.push(CompletionSegment::ToolUse(
                         ToolCall::new(name)
                             .with_invocation_id(invocation_id)
-                            .with_arguments(parse_tool_arguments(&arguments)?),
+                            .with_arguments_value(parse_tool_arguments(&arguments)?),
                     ));
                 }
                 ResponsesOutput::Other => {}
@@ -305,7 +279,7 @@ impl LanguageModel for OpenAiResponsesModel {
         for (id, name, args) in tool_calls {
             let arguments = parse_tool_arguments(&args).unwrap_or_default();
             segments.push(CompletionSegment::ToolUse(
-                ToolCall::new(name).with_invocation_id(id).with_arguments(arguments),
+                ToolCall::new(name).with_invocation_id(id).with_arguments_value(arguments),
             ));
         }
         sink(StreamEvent::Done);
@@ -322,23 +296,13 @@ fn role_name(role: &Role) -> &'static str {
     }
 }
 
-fn parse_tool_arguments(arguments: &str) -> Result<Vec<(String, String)>, OpenAiAdapterError> {
+fn parse_tool_arguments(arguments: &str) -> Result<Value, OpenAiAdapterError> {
     let value: Value = serde_json::from_str(arguments)
         .map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
-    let Some(object) = value.as_object() else {
+    if !value.is_object() {
         return Err(OpenAiAdapterError::new("工具参数必须是对象"));
-    };
-
-    Ok(object
-        .iter()
-        .map(|(key, value)| {
-            let text = match value {
-                Value::String(inner) => inner.clone(),
-                other => other.to_string(),
-            };
-            (key.clone(), text)
-        })
-        .collect())
+    }
+    Ok(value)
 }
 
 fn extract_stream_text(value: &Value) -> Option<String> {

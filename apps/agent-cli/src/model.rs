@@ -1,6 +1,7 @@
 use agent_core::{
     Completion, CompletionRequest, CoreError, LanguageModel, ModelDisposition, ModelIdentity,
-    StreamEvent, ToolCall, ToolDefinition, ToolExecutor, ToolResult,
+    StreamEvent, ToolCall, ToolDefinition, ToolExecutionContext, ToolExecutor, ToolOutputDelta,
+    ToolResult,
 };
 use openai_adapter::{OpenAiResponsesConfig, OpenAiResponsesModel};
 use provider_registry::ProviderProfile;
@@ -113,7 +114,12 @@ impl ToolExecutor for BootstrapTools {
         ]
     }
 
-    fn call(&self, call: &ToolCall) -> Result<ToolResult, Self::Error> {
+    fn call(
+        &self,
+        call: &ToolCall,
+        _output: &mut dyn FnMut(ToolOutputDelta),
+        _context: &ToolExecutionContext,
+    ) -> Result<ToolResult, Self::Error> {
         Ok(ToolResult::from_call(call, "起步阶段尚未接入真实工具执行器"))
     }
 }

@@ -7,7 +7,8 @@ use std::{
 
 use agent_core::{
     Completion, CompletionRequest, CompletionSegment, LanguageModel, Message, ModelIdentity, Role,
-    StreamEvent, ToolCall, ToolDefinition, ToolExecutor, ToolResult,
+    StreamEvent, ToolCall, ToolDefinition, ToolExecutionContext, ToolExecutor, ToolOutputDelta,
+    ToolResult,
 };
 use serde_json::json;
 use session_tape::{Anchor, Handoff, SessionTape, TapeEntry};
@@ -19,6 +20,7 @@ pub struct AgentRuntime<M, T> {
     model_identity: ModelIdentity,
     instructions: Option<String>,
     disabled_tools: BTreeSet<String>,
+    workspace_root: Option<std::path::PathBuf>,
     events: Vec<RuntimeEvent>,
     subscribers: BTreeMap<RuntimeSubscriberId, usize>,
     next_subscriber_id: RuntimeSubscriberId,
@@ -77,6 +79,7 @@ where
             model_identity,
             instructions: None,
             disabled_tools: BTreeSet::new(),
+            workspace_root: None,
             events: Vec::new(),
             subscribers: BTreeMap::new(),
             next_subscriber_id: 1,
@@ -85,6 +88,11 @@ where
 
     pub fn with_instructions(mut self, instructions: impl Into<String>) -> Self {
         self.instructions = Some(instructions.into());
+        self
+    }
+
+    pub fn with_workspace_root(mut self, workspace_root: impl Into<std::path::PathBuf>) -> Self {
+        self.workspace_root = Some(workspace_root.into());
         self
     }
 
@@ -215,7 +223,20 @@ where
                     return Err(runtime_error);
                 }
 
-                match self.tools.call(call) {
+                match self.tools.call(
+                    call,
+                    &mut |delta: ToolOutputDelta| {
+                        on_delta(StreamEvent::ToolOutputDelta {
+                            invocation_id: call.invocation_id.clone(),
+                            stream: delta.stream,
+                            text: delta.text,
+                        });
+                    },
+                    &ToolExecutionContext {
+                        run_id: turn_id.clone(),
+                        workspace_root: self.workspace_root.clone(),
+                    },
+                ) {
                     Ok(result) => {
                         if result.invocation_id != call.invocation_id
                             || result.tool_name != call.tool_name
@@ -493,7 +514,8 @@ mod tests {
 
     use agent_core::{
         Completion, CompletionRequest, CompletionSegment, CoreError, LanguageModel, Message,
-        ModelDisposition, ModelIdentity, Role, ToolCall, ToolDefinition, ToolExecutor, ToolResult,
+        ModelDisposition, ModelIdentity, Role, ToolCall, ToolDefinition, ToolExecutionContext,
+        ToolExecutor, ToolOutputDelta, ToolResult,
     };
     use serde_json::json;
     use session_tape::SessionTape;
@@ -560,7 +582,12 @@ mod tests {
             vec![ToolDefinition::new("search", "搜索代码")]
         }
 
-        fn call(&self, call: &ToolCall) -> Result<ToolResult, Self::Error> {
+        fn call(
+            &self,
+            call: &ToolCall,
+            _output: &mut dyn FnMut(ToolOutputDelta),
+            _context: &ToolExecutionContext,
+        ) -> Result<ToolResult, Self::Error> {
             Ok(ToolResult::from_call(call, "未实现"))
         }
     }
@@ -574,7 +601,12 @@ mod tests {
             vec![ToolDefinition::new("search", "搜索代码")]
         }
 
-        fn call(&self, _call: &ToolCall) -> Result<ToolResult, Self::Error> {
+        fn call(
+            &self,
+            _call: &ToolCall,
+            _output: &mut dyn FnMut(ToolOutputDelta),
+            _context: &ToolExecutionContext,
+        ) -> Result<ToolResult, Self::Error> {
             Ok(ToolResult {
                 invocation_id: "wrong-id".into(),
                 tool_name: "search".into(),

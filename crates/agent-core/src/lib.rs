@@ -5,6 +5,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Role {
@@ -52,44 +53,57 @@ impl ModelIdentity {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ToolParameter {
-    pub name: String,
-    pub description: String,
-    pub required: bool,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ToolDefinition {
     pub name: String,
     pub description: String,
-    pub parameters: Vec<ToolParameter>,
+    pub parameters: Value,
 }
 
 impl ToolDefinition {
     pub fn new(name: impl Into<String>, description: impl Into<String>) -> Self {
-        Self { name: name.into(), description: description.into(), parameters: Vec::new() }
+        Self {
+            name: name.into(),
+            description: description.into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false,
+            }),
+        }
     }
 
+    /// Backwards-compatible builder: adds a string parameter to the JSON Schema.
     pub fn with_parameter(
         mut self,
         name: impl Into<String>,
         description: impl Into<String>,
         required: bool,
     ) -> Self {
-        self.parameters.push(ToolParameter {
-            name: name.into(),
-            description: description.into(),
-            required,
-        });
+        let name = name.into();
+        let description = description.into();
+        if let Some(obj) = self.parameters.as_object_mut() {
+            if let Some(props) = obj.get_mut("properties").and_then(|v| v.as_object_mut()) {
+                props.insert(
+                    name.clone(),
+                    serde_json::json!({ "type": "string", "description": description }),
+                );
+            }
+            if required {
+                if let Some(req) = obj.get_mut("required").and_then(|v| v.as_array_mut()) {
+                    req.push(Value::String(name));
+                }
+            }
+        }
         self
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolCall {
     pub invocation_id: String,
     pub tool_name: String,
-    pub arguments: Vec<(String, String)>,
+    pub arguments: Value,
 }
 
 impl ToolCall {
@@ -97,7 +111,7 @@ impl ToolCall {
         Self {
             invocation_id: next_tool_invocation_id(),
             tool_name: tool_name.into(),
-            arguments: Vec::new(),
+            arguments: Value::Object(serde_json::Map::new()),
         }
     }
 
@@ -106,16 +120,30 @@ impl ToolCall {
         self
     }
 
+    /// Backwards-compatible builder: inserts a string key-value into the arguments object.
     pub fn with_argument(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        self.arguments.push((name.into(), value.into()));
+        if let Some(obj) = self.arguments.as_object_mut() {
+            obj.insert(name.into(), Value::String(value.into()));
+        }
         self
     }
 
-    pub fn with_arguments(mut self, arguments: Vec<(String, String)>) -> Self {
+    /// Set the entire arguments value (must be a JSON object).
+    pub fn with_arguments_value(mut self, arguments: Value) -> Self {
         self.arguments = arguments;
         self
     }
 }
+
+impl PartialEq for ToolCall {
+    fn eq(&self, other: &Self) -> bool {
+        self.invocation_id == other.invocation_id
+            && self.tool_name == other.tool_name
+            && self.arguments == other.arguments
+    }
+}
+
+impl Eq for ToolCall {}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ToolResult {
@@ -183,10 +211,37 @@ pub struct CompletionRequest {
     pub available_tools: Vec<ToolDefinition>,
 }
 
+// ---------------------------------------------------------------------------
+// Streaming
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ToolOutputStream {
+    Stdout,
+    Stderr,
+}
+
+#[derive(Clone, Debug)]
+pub struct ToolOutputDelta {
+    pub stream: ToolOutputStream,
+    pub text: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct ToolExecutionContext {
+    pub run_id: String,
+    pub workspace_root: Option<std::path::PathBuf>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StreamEvent {
     ThinkingDelta { text: String },
     TextDelta { text: String },
+    ToolOutputDelta {
+        invocation_id: String,
+        stream: ToolOutputStream,
+        text: String,
+    },
     Log { text: String },
     Done,
 }
@@ -211,38 +266,13 @@ pub trait ToolExecutor {
     type Error: std::error::Error;
 
     fn definitions(&self) -> Vec<ToolDefinition>;
-    fn call(&self, call: &ToolCall) -> Result<ToolResult, Self::Error>;
-}
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub enum ToolSpecTarget {
-    Internal,
-    Claude,
-    Codex,
-    Mcp,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct PortableToolSpec {
-    pub target: ToolSpecTarget,
-    pub name: String,
-    pub description: String,
-    pub parameter_names: Vec<String>,
-}
-
-impl PortableToolSpec {
-    pub fn from_definition(definition: &ToolDefinition, target: ToolSpecTarget) -> Self {
-        Self {
-            target,
-            name: definition.name.clone(),
-            description: definition.description.clone(),
-            parameter_names: definition
-                .parameters
-                .iter()
-                .map(|parameter| parameter.name.clone())
-                .collect(),
-        }
-    }
+    fn call(
+        &self,
+        call: &ToolCall,
+        output: &mut dyn FnMut(ToolOutputDelta),
+        context: &ToolExecutionContext,
+    ) -> Result<ToolResult, Self::Error>;
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -279,15 +309,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn 便携工具规范保留参数名() {
+    fn 工具定义用_json_schema_构建参数() {
         let definition = ToolDefinition::new("search", "搜索代码")
             .with_parameter("query", "要搜索的关键字", true)
             .with_parameter("path", "限定路径", false);
 
-        let spec = PortableToolSpec::from_definition(&definition, ToolSpecTarget::Mcp);
-
-        assert_eq!(spec.name, "search");
-        assert_eq!(spec.parameter_names, vec!["query", "path"]);
+        assert_eq!(definition.parameters["properties"]["query"]["type"], "string");
+        assert_eq!(definition.parameters["properties"]["path"]["description"], "限定路径");
+        assert_eq!(definition.parameters["required"], serde_json::json!(["query"]));
     }
 
     #[test]
@@ -310,6 +339,13 @@ mod tests {
 
         assert_ne!(first.invocation_id, second.invocation_id);
         assert!(first.invocation_id.starts_with("tool-call-"));
+    }
+
+    #[test]
+    fn 工具调用参数为_json_对象() {
+        let call = ToolCall::new("search").with_argument("query", "runtime");
+
+        assert_eq!(call.arguments["query"], "runtime");
     }
 
     #[test]

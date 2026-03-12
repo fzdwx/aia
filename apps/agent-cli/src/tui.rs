@@ -662,7 +662,7 @@ impl MessagePanel {
                     self.pending_auto_scroll = true;
                 }
             }
-            StreamEvent::Log { .. } | StreamEvent::Done => {}
+            StreamEvent::ToolOutputDelta { .. } | StreamEvent::Log { .. } | StreamEvent::Done => {}
         }
     }
 
@@ -1273,6 +1273,9 @@ fn poll_driver_state(
                         break;
                     }
                 }
+                StreamEvent::ToolOutputDelta { text, .. } => {
+                    state.log_lines.push(text.clone());
+                }
                 StreamEvent::Log { text } => {
                     state.log_lines.push(text.clone());
                 }
@@ -1721,7 +1724,7 @@ fn hash_turns(turns: &[TurnLifecycle], hasher: &mut DefaultHasher) {
         for invocation in &turn.tool_invocations {
             invocation.call.tool_name.hash(hasher);
             invocation.call.invocation_id.hash(hasher);
-            invocation.call.arguments.hash(hasher);
+            invocation.call.arguments.to_string().hash(hasher);
             match &invocation.outcome {
                 agent_runtime::ToolInvocationOutcome::Succeeded { result } => {
                     1u8.hash(hasher);
