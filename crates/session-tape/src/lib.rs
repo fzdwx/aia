@@ -48,13 +48,7 @@ fn default_meta() -> Value {
 
 impl TapeEntry {
     fn new(kind: &str, payload: Value) -> Self {
-        Self {
-            id: 0,
-            kind: kind.to_string(),
-            payload,
-            meta: default_meta(),
-            date: now_iso8601(),
-        }
+        Self { id: 0, kind: kind.to_string(), payload, meta: default_meta(), date: now_iso8601() }
     }
 
     pub fn message(msg: &Message) -> Self {
@@ -137,32 +131,28 @@ impl TapeEntry {
     }
 
     pub fn anchor_name(&self) -> Option<&str> {
-        if self.kind == "anchor" {
-            self.payload.get("name").and_then(|v| v.as_str())
-        } else {
-            None
-        }
+        if self.kind == "anchor" { self.payload.get("name").and_then(|v| v.as_str()) } else { None }
     }
 
     pub fn anchor_state(&self) -> Option<&Value> {
-        if self.kind == "anchor" {
-            self.payload.get("state")
-        } else {
-            None
-        }
+        if self.kind == "anchor" { self.payload.get("state") } else { None }
     }
 
     pub fn event_name(&self) -> Option<&str> {
-        if self.kind == "event" {
-            self.payload.get("name").and_then(|v| v.as_str())
-        } else {
-            None
-        }
+        if self.kind == "event" { self.payload.get("name").and_then(|v| v.as_str()) } else { None }
     }
 
     pub fn event_data(&self) -> Option<&Value> {
-        if self.kind == "event" {
-            self.payload.get("data")
+        if self.kind == "event" { self.payload.get("data") } else { None }
+    }
+
+    pub fn thinking(content: &str) -> Self {
+        TapeEntry::new("thinking", serde_json::json!({"content": content}))
+    }
+
+    pub fn as_thinking(&self) -> Option<&str> {
+        if self.kind == "thinking" {
+            self.payload.get("content").and_then(|v| v.as_str())
         } else {
             None
         }
@@ -275,9 +265,7 @@ impl SessionTape {
             .filter(|entry| entry.kind == "event")
             .filter(|entry| entry.event_name() == Some("provider_binding"))
             .find_map(|entry| {
-                entry
-                    .event_data()
-                    .and_then(|data| serde_json::from_value(data.clone()).ok())
+                entry.event_data().and_then(|data| serde_json::from_value(data.clone()).ok())
             })
     }
 
@@ -335,9 +323,7 @@ impl SessionTape {
         let mut results: Vec<&TapeEntry> = self
             .entries
             .iter()
-            .filter(|entry| {
-                entry.id > lower_bound && upper_bound.is_none_or(|ub| entry.id < ub)
-            })
+            .filter(|entry| entry.id > lower_bound && upper_bound.is_none_or(|ub| entry.id < ub))
             .collect();
         if let Some(start) = query.start_date.as_ref() {
             results.retain(|entry| !entry.date.is_empty() && entry.date.as_str() >= start.as_str());
@@ -877,9 +863,7 @@ fn decode_persisted_line(line: &str) -> Result<TapeEntry, SessionTapeError> {
     if let Ok(legacy) = serde_json::from_str::<LegacyEntry>(line) {
         return Ok(convert_legacy(legacy));
     }
-    Err(SessionTapeError::from_serde(
-        serde_json::from_str::<Value>(line).unwrap_err(),
-    ))
+    Err(SessionTapeError::from_serde(serde_json::from_str::<Value>(line).unwrap_err()))
 }
 
 // ---------------------------------------------------------------------------
@@ -887,6 +871,11 @@ fn decode_persisted_line(line: &str) -> Result<TapeEntry, SessionTapeError> {
 // ---------------------------------------------------------------------------
 
 fn project_message(entry: &TapeEntry) -> Option<Message> {
+    // Thinking entries are display-only — never injected into conversation context.
+    if entry.kind == "thinking" {
+        return None;
+    }
+
     if let Some(message) = entry.as_message() {
         return Some(message);
     }
@@ -1003,10 +992,8 @@ mod tests {
     fn 锚点以追加条目形式保留在磁带中() {
         let mut tape = SessionTape::new();
         tape.append(Message::new(Role::User, "第一轮"));
-        let anchor = tape.anchor(
-            "discovery",
-            Some(json!({"summary": "发现完成", "next_steps": ["进入实现"]})),
-        );
+        let anchor = tape
+            .anchor("discovery", Some(json!({"summary": "发现完成", "next_steps": ["进入实现"]})));
         tape.append(Message::new(Role::Assistant, "第二轮"));
 
         assert_eq!(anchor.entry_id, 2);
@@ -1020,10 +1007,8 @@ mod tests {
         let mut tape = SessionTape::new();
         tape.append(Message::new(Role::User, "第一轮"));
         tape.append(Message::new(Role::Assistant, "第一轮回复"));
-        let anchor = tape.anchor(
-            "implement",
-            Some(json!({"summary": "实现开始", "next_steps": ["写代码"]})),
-        );
+        let anchor = tape
+            .anchor("implement", Some(json!({"summary": "实现开始", "next_steps": ["写代码"]})));
         tape.append(Message::new(Role::User, "第二轮"));
 
         let view = tape.assemble_view(Some(&anchor));
@@ -1040,10 +1025,8 @@ mod tests {
         tape.append(Message::new(Role::User, "开始"));
         tape.append(Message::new(Role::Assistant, "完成发现"));
 
-        let handoff = tape.handoff(
-            "handoff",
-            json!({"summary": "移交给实现阶段", "next_steps": ["实现运行时"]}),
-        );
+        let handoff = tape
+            .handoff("handoff", json!({"summary": "移交给实现阶段", "next_steps": ["实现运行时"]}));
 
         assert_eq!(
             handoff.anchor.state.get("summary").and_then(|v| v.as_str()),
@@ -1105,8 +1088,7 @@ mod tests {
     fn 工具结果投影到默认视图时保留调用标识() {
         let mut tape = SessionTape::new();
         let call = ToolCall::new("search_code").with_argument("query", "session-tape");
-        let _ = tape
-            .append_entry(TapeEntry::tool_result(&ToolResult::from_call(&call, "ok")));
+        let _ = tape.append_entry(TapeEntry::tool_result(&ToolResult::from_call(&call, "ok")));
 
         let messages = tape.default_messages();
 
@@ -1174,8 +1156,7 @@ mod tests {
         let e1 = TapeEntry {
             id: 0,
             kind: "message".into(),
-            payload: serde_json::to_value(&Message::new(Role::User, "alpha start"))
-                .unwrap(),
+            payload: serde_json::to_value(&Message::new(Role::User, "alpha start")).unwrap(),
             meta: super::default_meta(),
             date: "2026-03-10T00:00:00Z".into(),
         };
@@ -1188,8 +1169,11 @@ mod tests {
         let e3 = TapeEntry {
             id: 0,
             kind: "message".into(),
-            payload: serde_json::to_value(&Message::new(Role::Assistant, "alpha implementation note"))
-                .unwrap(),
+            payload: serde_json::to_value(&Message::new(
+                Role::Assistant,
+                "alpha implementation note",
+            ))
+            .unwrap(),
             meta: super::default_meta(),
             date: "2026-03-12T00:00:00Z".into(),
         };
@@ -1215,8 +1199,7 @@ mod tests {
         let e6 = TapeEntry {
             id: 0,
             kind: "message".into(),
-            payload: serde_json::to_value(&Message::new(Role::User, "omega finish"))
-                .unwrap(),
+            payload: serde_json::to_value(&Message::new(Role::User, "omega finish")).unwrap(),
             meta: super::default_meta(),
             date: "2026-03-15T00:00:00Z".into(),
         };
@@ -1247,7 +1230,8 @@ mod tests {
         tape.append(Message::new(Role::User, "base"));
         let mut fork = tape.fork("session-branch");
         fork.append(Message::new(Role::Assistant, "branch reply"));
-        let handoff = fork.handoff("handoff", json!({"summary": "分叉交接", "next_steps": ["合并回主线"]}));
+        let handoff =
+            fork.handoff("handoff", json!({"summary": "分叉交接", "next_steps": ["合并回主线"]}));
 
         let merged_ids = fork.merge_into(&mut tape).expect("合并成功");
 

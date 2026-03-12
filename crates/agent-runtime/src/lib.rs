@@ -7,10 +7,10 @@ use std::{
 
 use agent_core::{
     Completion, CompletionRequest, CompletionSegment, LanguageModel, Message, ModelIdentity, Role,
-    ToolCall, ToolDefinition, ToolExecutor, ToolResult,
+    StreamEvent, ToolCall, ToolDefinition, ToolExecutor, ToolResult,
 };
-use session_tape::{Anchor, Handoff, SessionTape, TapeEntry};
 use serde_json::json;
+use session_tape::{Anchor, Handoff, SessionTape, TapeEntry};
 
 pub struct AgentRuntime<M, T> {
     model: M,
@@ -40,6 +40,7 @@ pub struct TurnLifecycle {
     pub source_entry_ids: Vec<u64>,
     pub user_message: String,
     pub assistant_message: Option<String>,
+    pub thinking: Option<String>,
     pub tool_invocations: Vec<ToolInvocationLifecycle>,
     pub failure_message: Option<String>,
 }
@@ -91,12 +92,19 @@ where
         &mut self,
         user_input: impl Into<String>,
     ) -> Result<TurnOutput, RuntimeError> {
+        self.handle_turn_streaming(user_input, |_| {})
+    }
+
+    pub fn handle_turn_streaming(
+        &mut self,
+        user_input: impl Into<String>,
+        mut on_delta: impl FnMut(StreamEvent),
+    ) -> Result<TurnOutput, RuntimeError> {
         let turn_id = next_turn_id();
         let started_at_ms = now_timestamp_ms();
         let user_message = Message::new(Role::User, user_input.into());
-        let user_entry_id = self.tape.append_entry(
-            TapeEntry::message(&user_message).with_run_id(&turn_id),
-        );
+        let user_entry_id =
+            self.tape.append_entry(TapeEntry::message(&user_message).with_run_id(&turn_id));
         let mut source_entry_ids = vec![user_entry_id];
         self.publish_event(RuntimeEvent::UserMessage { content: user_message.content.clone() });
         let view = self.tape.default_view();
@@ -113,14 +121,17 @@ where
             available_tools: self.visible_tools(),
         };
 
-        let completion = match self.model.complete(request) {
+        let completion = match self.model.complete_streaming(request, &mut on_delta) {
             Ok(completion) => completion,
             Err(error) => {
                 let runtime_error = RuntimeError::model(error);
                 let failure_event_id = self.tape.append_entry(
-                    TapeEntry::event("turn_failed", Some(json!({"message": runtime_error.to_string()})))
-                        .with_run_id(&turn_id)
-                        .with_meta("source_entry_ids", json!([user_entry_id])),
+                    TapeEntry::event(
+                        "turn_failed",
+                        Some(json!({"message": runtime_error.to_string()})),
+                    )
+                    .with_run_id(&turn_id)
+                    .with_meta("source_entry_ids", json!([user_entry_id])),
                 );
                 source_entry_ids.push(failure_event_id);
                 self.publish_event(RuntimeEvent::TurnFailed { message: runtime_error.to_string() });
@@ -131,17 +142,26 @@ where
                     source_entry_ids,
                     user_message: user_message.content.clone(),
                     assistant_message: None,
+                    thinking: None,
                     tool_invocations: Vec::new(),
                     failure_message: Some(runtime_error.to_string()),
                 });
                 return Err(runtime_error);
             }
         };
+
+        // Extract and persist thinking content
+        let thinking = completion.thinking_text();
+        if let Some(ref thinking_text) = thinking {
+            let thinking_entry_id =
+                self.tape.append_entry(TapeEntry::thinking(thinking_text).with_run_id(&turn_id));
+            source_entry_ids.push(thinking_entry_id);
+        }
+
         let assistant_text = completion.plain_text();
         let assistant_message = Message::new(Role::Assistant, assistant_text.clone());
-        let assistant_entry_id = self.tape.append_entry(
-            TapeEntry::message(&assistant_message).with_run_id(&turn_id),
-        );
+        let assistant_entry_id =
+            self.tape.append_entry(TapeEntry::message(&assistant_message).with_run_id(&turn_id));
         source_entry_ids.push(assistant_entry_id);
         self.publish_event(RuntimeEvent::AssistantMessage { content: assistant_text.clone() });
         let mut tool_invocations = Vec::new();
@@ -152,16 +172,21 @@ where
             .collect::<BTreeSet<_>>();
         for segment in &completion.segments {
             if let CompletionSegment::ToolUse(call) = segment {
-                let tool_call_entry_id = self.tape.append_entry(
-                    TapeEntry::tool_call(call).with_run_id(&turn_id),
-                );
+                let tool_call_entry_id =
+                    self.tape.append_entry(TapeEntry::tool_call(call).with_run_id(&turn_id));
                 source_entry_ids.push(tool_call_entry_id);
                 if !available_tool_names.contains(&call.tool_name) {
                     let runtime_error = RuntimeError::tool_unavailable(call.tool_name.clone());
                     let reject_event_id = self.tape.append_entry(
-                        TapeEntry::event("tool_call_rejected", Some(json!({"message": runtime_error.to_string()})))
-                            .with_run_id(&turn_id)
-                            .with_meta("source_entry_ids", json!([assistant_entry_id, tool_call_entry_id])),
+                        TapeEntry::event(
+                            "tool_call_rejected",
+                            Some(json!({"message": runtime_error.to_string()})),
+                        )
+                        .with_run_id(&turn_id)
+                        .with_meta(
+                            "source_entry_ids",
+                            json!([assistant_entry_id, tool_call_entry_id]),
+                        ),
                     );
                     source_entry_ids.push(reject_event_id);
                     self.publish_event(RuntimeEvent::ToolInvocation {
@@ -183,6 +208,7 @@ where
                         source_entry_ids,
                         user_message: user_message.content.clone(),
                         assistant_message: Some(assistant_text.clone()),
+                        thinking: thinking.clone(),
                         tool_invocations,
                         failure_message: Some(runtime_error.to_string()),
                     });
@@ -196,9 +222,15 @@ where
                         {
                             let runtime_error = RuntimeError::tool_result_mismatch(call, &result);
                             let reject_event_id = self.tape.append_entry(
-                                TapeEntry::event("tool_result_rejected", Some(json!({"message": runtime_error.to_string()})))
-                                    .with_run_id(&turn_id)
-                                    .with_meta("source_entry_ids", json!([assistant_entry_id, tool_call_entry_id])),
+                                TapeEntry::event(
+                                    "tool_result_rejected",
+                                    Some(json!({"message": runtime_error.to_string()})),
+                                )
+                                .with_run_id(&turn_id)
+                                .with_meta(
+                                    "source_entry_ids",
+                                    json!([assistant_entry_id, tool_call_entry_id]),
+                                ),
                             );
                             source_entry_ids.push(reject_event_id);
                             self.publish_event(RuntimeEvent::ToolInvocation {
@@ -220,20 +252,31 @@ where
                                 source_entry_ids,
                                 user_message: user_message.content.clone(),
                                 assistant_message: Some(assistant_text.clone()),
+                                thinking: thinking.clone(),
                                 tool_invocations,
                                 failure_message: Some(runtime_error.to_string()),
                             });
                             return Err(runtime_error);
                         }
 
-                        let tool_result_entry_id = self.tape.append_entry(
-                            TapeEntry::tool_result(&result).with_run_id(&turn_id),
-                        );
+                        let tool_result_entry_id = self
+                            .tape
+                            .append_entry(TapeEntry::tool_result(&result).with_run_id(&turn_id));
                         source_entry_ids.push(tool_result_entry_id);
                         let tool_result_event_id = self.tape.append_entry(
-                            TapeEntry::event("tool_result_recorded", Some(json!({"tool_name": result.tool_name.clone()})))
-                                .with_run_id(&turn_id)
-                                .with_meta("source_entry_ids", json!([assistant_entry_id, tool_call_entry_id, tool_result_entry_id])),
+                            TapeEntry::event(
+                                "tool_result_recorded",
+                                Some(json!({"tool_name": result.tool_name.clone()})),
+                            )
+                            .with_run_id(&turn_id)
+                            .with_meta(
+                                "source_entry_ids",
+                                json!([
+                                    assistant_entry_id,
+                                    tool_call_entry_id,
+                                    tool_result_entry_id
+                                ]),
+                            ),
                         );
                         source_entry_ids.push(tool_result_event_id);
                         self.publish_event(RuntimeEvent::ToolInvocation {
@@ -248,9 +291,15 @@ where
                     Err(error) => {
                         let runtime_error = RuntimeError::tool(error);
                         let failure_event_id = self.tape.append_entry(
-                            TapeEntry::event("tool_call_failed", Some(json!({"message": runtime_error.to_string()})))
-                                .with_run_id(&turn_id)
-                                .with_meta("source_entry_ids", json!([assistant_entry_id, tool_call_entry_id])),
+                            TapeEntry::event(
+                                "tool_call_failed",
+                                Some(json!({"message": runtime_error.to_string()})),
+                            )
+                            .with_run_id(&turn_id)
+                            .with_meta(
+                                "source_entry_ids",
+                                json!([assistant_entry_id, tool_call_entry_id]),
+                            ),
                         );
                         source_entry_ids.push(failure_event_id);
                         self.publish_event(RuntimeEvent::ToolInvocation {
@@ -272,6 +321,7 @@ where
                             source_entry_ids,
                             user_message: user_message.content.clone(),
                             assistant_message: Some(assistant_text.clone()),
+                            thinking: thinking.clone(),
                             tool_invocations,
                             failure_message: Some(runtime_error.to_string()),
                         });
@@ -288,6 +338,7 @@ where
             source_entry_ids,
             user_message: user_message.content,
             assistant_message: Some(assistant_text.clone()),
+            thinking,
             tool_invocations,
             failure_message: None,
         });
@@ -351,7 +402,11 @@ where
 fn next_turn_id() -> String {
     static NEXT_TURN_ID: AtomicU64 = AtomicU64::new(1);
     let id = NEXT_TURN_ID.fetch_add(1, Ordering::Relaxed);
-    format!("turn-{id}")
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("系统时间应晚于 UNIX_EPOCH")
+        .as_millis();
+    format!("turn-{now_ms}-{id}")
 }
 
 fn now_timestamp_ms() -> u128 {
@@ -365,9 +420,7 @@ fn anchor_state_message(anchor: &Anchor) -> Message {
     let next_steps = state
         .get("next_steps")
         .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join("、")
-        })
+        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join("、"))
         .unwrap_or_default();
     let source_entry_ids = state
         .get("source_entry_ids")
@@ -549,10 +602,8 @@ mod tests {
         let mut runtime = AgentRuntime::new(StubModel, StubTools, identity);
         runtime.handle_turn("开始").expect("运行成功");
 
-        let handoff = runtime.handoff(
-            "handoff",
-            json!({"summary": "发现阶段结束", "next_steps": ["进入实现"]}),
-        );
+        let handoff = runtime
+            .handoff("handoff", json!({"summary": "发现阶段结束", "next_steps": ["进入实现"]}));
 
         assert_eq!(
             handoff.anchor.state.get("summary").and_then(|v| v.as_str()),
@@ -818,6 +869,7 @@ mod tests {
                     source_entry_ids,
                     user_message,
                     assistant_message: Some(assistant_message),
+                    thinking: None,
                     tool_invocations,
                     failure_message: None,
                 }
@@ -857,6 +909,7 @@ mod tests {
                     source_entry_ids,
                     user_message,
                     assistant_message: Some(assistant_message),
+                    thinking: _,
                     tool_invocations,
                     failure_message: Some(failure_message),
                 }
