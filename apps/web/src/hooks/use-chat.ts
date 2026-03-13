@@ -46,6 +46,7 @@ export function useChat() {
               thinkingText: "",
               assistantText: "",
               status: "waiting",
+              toolOutputs: [],
             })
           } else {
             setStreamingTurn((prev) =>
@@ -68,6 +69,26 @@ export function useChat() {
                 ? { ...prev, assistantText: prev.assistantText + data.text }
                 : null,
             )
+          } else if (data.kind === "tool_output_delta") {
+            setStreamingTurn((prev) => {
+              if (!prev) return null
+              const outputs = [...prev.toolOutputs]
+              const idx = outputs.findIndex(
+                (t) => t.invocationId === data.invocation_id,
+              )
+              if (idx >= 0) {
+                outputs[idx] = {
+                  ...outputs[idx],
+                  output: outputs[idx].output + data.text,
+                }
+              } else {
+                outputs.push({
+                  invocationId: data.invocation_id,
+                  output: data.text,
+                })
+              }
+              return { ...prev, toolOutputs: outputs }
+            })
           }
           break
         }

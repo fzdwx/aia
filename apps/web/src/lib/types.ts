@@ -71,12 +71,19 @@ export type SseEvent =
 // Mirrors Rust TurnStatus
 export type TurnStatus = "waiting" | "thinking" | "working" | "generating"
 
+// Streaming tool output accumulator
+export type StreamingToolOutput = {
+  invocationId: string
+  output: string
+}
+
 // Streaming turn accumulator state
 export type StreamingTurn = {
   userMessage: string
   thinkingText: string
   assistantText: string
   status: TurnStatus
+  toolOutputs: StreamingToolOutput[]
 }
 
 export type ChatState = "idle" | "active"

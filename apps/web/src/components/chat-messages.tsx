@@ -1,7 +1,11 @@
 import { Fragment, useEffect, useRef, useState } from "react"
 import { ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { StreamingTurn, TurnBlock, TurnLifecycle } from "@/lib/types"
+import type {
+  StreamingTurn,
+  TurnBlock,
+  TurnLifecycle,
+} from "@/lib/types"
 
 type ChatMessagesProps = {
   turns: TurnLifecycle[]
@@ -192,11 +196,32 @@ const STATUS_LABELS: Record<StreamingTurn["status"], string> = {
 
 function StatusIndicator({ status }: { status: StreamingTurn["status"] }) {
   return (
-    <div className="flex items-center gap-2.5 py-1">
-      <span className="shimmer-bar" />
-      <span className="text-[12px] font-medium tracking-wide text-muted-foreground/70">
+    <div className="py-1">
+      <span className="shimmer-text text-[12px] font-medium tracking-wide">
         {STATUS_LABELS[status]}
       </span>
+    </div>
+  )
+}
+
+function StreamingToolBlock({
+  invocationId,
+  output,
+}: {
+  invocationId: string
+  output: string
+}) {
+  return (
+    <div className="mb-3 rounded-lg border border-border/30 bg-muted/30 px-3 py-2">
+      <div className="flex items-center gap-2 text-[12px] font-medium text-muted-foreground">
+        <span className="size-1.5 rounded-full bg-amber-500/70 animate-pulse" />
+        <span className="font-mono">{invocationId}</span>
+      </div>
+      {output && (
+        <pre className="mt-1.5 max-h-[120px] overflow-auto text-[12px] leading-relaxed text-muted-foreground/70">
+          {output}
+        </pre>
+      )}
     </div>
   )
 }
@@ -228,6 +253,13 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
         {streaming.thinkingText && (
           <ThinkingBlock content={streaming.thinkingText} />
         )}
+        {streaming.toolOutputs.map((tool) => (
+          <StreamingToolBlock
+            key={tool.invocationId}
+            invocationId={tool.invocationId}
+            output={tool.output}
+          />
+        ))}
         {streaming.assistantText ? (
           <div className="text-[14px] leading-[1.75] text-foreground/85">
             <MarkdownContent content={streaming.assistantText} />
@@ -250,7 +282,7 @@ export function ChatMessages({
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [turns.length, streamingTurn?.assistantText])
+  }, [turns.length, streamingTurn?.assistantText, streamingTurn?.toolOutputs.length])
 
   if (turns.length === 0 && !streamingTurn) {
     return (

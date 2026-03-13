@@ -166,32 +166,34 @@ pre {
   }
 }
 
-.shimmer-bar {
-  display: inline-block;
-  width: 36px;
-  height: 4px;
-  border-radius: 2px;
+.shimmer-text {
   background: linear-gradient(
     90deg,
-    oklch(0.30 0 0) 0%,
-    oklch(0.50 0 0) 40%,
-    oklch(0.65 0 0) 50%,
-    oklch(0.50 0 0) 60%,
-    oklch(0.30 0 0) 100%
+    oklch(0.45 0 0) 0%,
+    oklch(0.65 0 0) 40%,
+    oklch(0.80 0 0) 50%,
+    oklch(0.65 0 0) 60%,
+    oklch(0.45 0 0) 100%
   );
   background-size: 200% 100%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
   animation: shimmer 1.8s ease-in-out infinite;
 }
 
-.light .shimmer-bar {
+.light .shimmer-text {
   background: linear-gradient(
     90deg,
-    oklch(0.75 0 0) 0%,
-    oklch(0.55 0 0) 40%,
-    oklch(0.40 0 0) 50%,
-    oklch(0.55 0 0) 60%,
-    oklch(0.75 0 0) 100%
+    oklch(0.60 0 0) 0%,
+    oklch(0.40 0 0) 40%,
+    oklch(0.25 0 0) 50%,
+    oklch(0.40 0 0) 60%,
+    oklch(0.60 0 0) 100%
   );
   background-size: 200% 100%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
   animation: shimmer 1.8s ease-in-out infinite;
 }
