@@ -292,6 +292,7 @@ fn 查询可按锚点区间日期类型文本与数量切片() {
             tool_name: "search".into(),
             content: "alpha result".into(),
             response_id: None,
+            details: None,
         })
         .unwrap(),
         meta: default_meta(),

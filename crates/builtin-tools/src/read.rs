@@ -4,16 +4,16 @@ use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
 
-pub struct ReadFileTool;
+pub struct ReadTool;
 
-impl Tool for ReadFileTool {
+impl Tool for ReadTool {
     fn name(&self) -> &str {
-        "read_file"
+        "read"
     }
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
-            name: "read_file".into(),
+            name: "read".into(),
             description: "Read a file with line numbers".into(),
             parameters: serde_json::json!({
                 "type": "object",
@@ -51,6 +51,8 @@ impl Tool for ReadFileTool {
         let content = fs::read_to_string(&path)
             .map_err(|e| CoreError::new(format!("failed to read {}: {e}", path.display())))?;
 
+        let total_lines = content.lines().count();
+
         let selected: String = content
             .lines()
             .enumerate()
@@ -60,6 +62,12 @@ impl Tool for ReadFileTool {
             .collect::<Vec<_>>()
             .join("\n");
 
-        Ok(ToolResult::from_call(call, selected))
+        let lines_read = selected.lines().count();
+
+        Ok(ToolResult::from_call(call, selected).with_details(serde_json::json!({
+            "file_path": path.display().to_string(),
+            "lines_read": lines_read,
+            "total_lines": total_lines,
+        })))
     }
 }

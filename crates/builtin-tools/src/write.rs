@@ -4,16 +4,16 @@ use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
 
-pub struct WriteFileTool;
+pub struct WriteTool;
 
-impl Tool for WriteFileTool {
+impl Tool for WriteTool {
     fn name(&self) -> &str {
-        "write_file"
+        "write"
     }
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
-            name: "write_file".into(),
+            name: "write".into(),
             description: "Create or overwrite a file".into(),
             parameters: serde_json::json!({
                 "type": "object",
@@ -49,9 +49,14 @@ impl Tool for WriteFileTool {
         }
 
         let bytes = content.len();
+        let lines = content.lines().count();
         fs::write(&path, &content)
             .map_err(|e| CoreError::new(format!("failed to write {}: {e}", path.display())))?;
 
-        Ok(ToolResult::from_call(call, format!("Wrote {bytes} bytes to {}", path.display())))
+        Ok(ToolResult::from_call(call, format!("Wrote {bytes} bytes to {}", path.display()))
+            .with_details(serde_json::json!({
+                "file_path": path.display().to_string(),
+                "lines": lines,
+            })))
     }
 }

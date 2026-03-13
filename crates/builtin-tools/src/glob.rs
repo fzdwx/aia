@@ -73,9 +73,13 @@ impl Tool for GlobTool {
 
         entries.sort_by(|a, b| b.1.cmp(&a.1));
 
+        let match_count = entries.len();
         let result =
             entries.iter().map(|(p, _)| p.display().to_string()).collect::<Vec<_>>().join("\n");
 
-        Ok(ToolResult::from_call(call, result))
+        Ok(ToolResult::from_call(call, result).with_details(serde_json::json!({
+            "pattern": pattern,
+            "matches": match_count,
+        })))
     }
 }

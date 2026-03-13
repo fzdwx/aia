@@ -132,6 +132,8 @@ pub struct ToolResult {
     pub content: String,
     #[serde(default)]
     pub response_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<Value>,
 }
 
 impl ToolResult {
@@ -141,7 +143,13 @@ impl ToolResult {
             tool_name: call.tool_name.clone(),
             content: content.into(),
             response_id: call.response_id.clone(),
+            details: None,
         }
+    }
+
+    pub fn with_details(mut self, details: Value) -> Self {
+        self.details = Some(details);
+        self
     }
 }
 

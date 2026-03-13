@@ -90,6 +90,10 @@ impl Tool for GrepTool {
             }
         }
 
-        Ok(ToolResult::from_call(call, matched_files.join("\n")))
+        let match_count = matched_files.len();
+        Ok(ToolResult::from_call(call, matched_files.join("\n")).with_details(serde_json::json!({
+            "pattern": pattern,
+            "matches": match_count,
+        })))
     }
 }

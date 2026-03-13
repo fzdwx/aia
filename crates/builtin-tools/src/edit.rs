@@ -4,16 +4,16 @@ use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
 
-pub struct EditFileTool;
+pub struct EditTool;
 
-impl Tool for EditFileTool {
+impl Tool for EditTool {
     fn name(&self) -> &str {
-        "edit_file"
+        "edit"
     }
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
-            name: "edit_file".into(),
+            name: "edit".into(),
             description: "Replace exact text in a file (must match uniquely)".into(),
             parameters: serde_json::json!({
                 "type": "object",
@@ -59,7 +59,15 @@ impl Tool for EditFileTool {
                 fs::write(&path, &new_content).map_err(|e| {
                     CoreError::new(format!("failed to write {}: {e}", path.display()))
                 })?;
-                Ok(ToolResult::from_call(call, format!("Edited {}", path.display())))
+                let old_lines = old_string.lines().count();
+                let new_lines = new_string.lines().count();
+                Ok(ToolResult::from_call(call, format!("Edited {}", path.display())).with_details(
+                    serde_json::json!({
+                        "file_path": path.display().to_string(),
+                        "added": new_lines,
+                        "removed": old_lines,
+                    }),
+                ))
             }
             n => Err(CoreError::new(format!(
                 "old_string found {n} times; provide more context to make it unique"
