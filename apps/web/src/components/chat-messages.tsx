@@ -359,43 +359,26 @@ function StreamingToolGroup({
 }
 
 // --- Block grouping ---
-// Merge all thinking and tool blocks that aren't separated by assistant text.
-// Pattern: [thinking, tool, thinking, tool, ..., text] → [merged_thinking, merged_tools, text]
 
 type BlockGroup =
   | { type: "single"; block: TurnBlock }
   | { type: "tools"; invocations: ToolInvocationLifecycle[] }
-  | { type: "thinking"; content: string }
 
 function groupBlocks(blocks: TurnBlock[]): BlockGroup[] {
   const result: BlockGroup[] = []
-  let pendingThinking = ""
-  let pendingTools: ToolInvocationLifecycle[] = []
-
-  const flushPending = () => {
-    if (pendingThinking) {
-      result.push({ type: "thinking", content: pendingThinking })
-      pendingThinking = ""
-    }
-    if (pendingTools.length > 0) {
-      result.push({ type: "tools", invocations: pendingTools })
-      pendingTools = []
-    }
-  }
 
   for (const block of blocks) {
-    if (block.kind === "thinking") {
-      pendingThinking += (pendingThinking ? "\n" : "") + block.content
-    } else if (block.kind === "tool_invocation") {
-      pendingTools.push(block.invocation)
+    if (block.kind === "tool_invocation") {
+      const last = result[result.length - 1]
+      if (last && last.type === "tools") {
+        last.invocations.push(block.invocation)
+      } else {
+        result.push({ type: "tools", invocations: [block.invocation] })
+      }
     } else {
-      // assistant text or failure — flush accumulated thinking/tools first
-      flushPending()
       result.push({ type: "single", block })
     }
   }
-
-  flushPending()
   return result
 }
 
