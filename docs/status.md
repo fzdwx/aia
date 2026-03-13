@@ -3,7 +3,7 @@
 ## 当前阶段
 
 - 阶段：真实模型适配
-- 当前步骤：已将 `session-tape` 的 TapeEntry 改为扁平 `{id, kind, payload, meta, date}` 模型，一比一对齐 republic 数据模型；运行时不再将 TurnRecord 写入磁带，TUI 改为按 `meta.run_id` 从 entries 重建历史轮次；下一步继续推进工具协议映射与 MCP 接入
+- 当前步骤：TUI 重构阶段 A（止血）已基本完成，消息面板已组件化为 `MessagePanel`，历史与流式渲染通过两级缓存分离，流式期间不再触发全量 Markdown 重排；主线焦点回到工具协议映射与 MCP 接入
 
 ## 已完成
 
@@ -50,6 +50,9 @@
 - 完成消息列表鼠标滚动、底部固定流式状态栏与更平滑的 Aura 状态亮暗动画
 - 完成消息列表基于最新视口信息的自动跟底修复，并把流式轮次与历史消息的间隔提升为双空行
 - 完成 stream turn 状态文案去除省略号、统一块级轻量 padding，以及消息区与输入框之间的固定垂直间距
+- 完成 `tui_markdown` 与 `tui_timeline` 模块抽取，开始收敛 TUI 纯逻辑边界
+- 完成消息视图 render cache 首版接入，spinner 动画不再触发整段时间线重建
+- 完成消息区段落空行保留、统一左侧起始间距与更强的自动跟底修复，继续收敛 TUI 可读性与流式稳定性
 - 完成对外产品名与本地隐藏目录从 `like` 统一重命名为 `aia`
 - 完成 `session-tape` 的命名锚点、查询切片、命名磁带存储抽象与 fork / merge 语义补齐
 - 完成 `.aia/session.jsonl` 旧格式兼容门面保留，避免当前 CLI 会话文件被隐式迁移
@@ -59,22 +62,28 @@
 - 运行时不再将 TurnRecord 写入磁带，遵循 "derivatives never replace original facts"
 - TUI 改为从 entries 按 `meta.run_id` 分组重建历史轮次
 - 旧格式 JSONL 载入时自动转换为扁平 entry，写出始终为新格式
+- 完成 TUI 消息面板组件化（`MessagePanel`），将消息渲染状态与行为从 `TuiState` 中内聚提取
+- 完成两级渲染缓存：`HistoryCache`（仅在 turn 完成或 resize 时失效）+ `OverlayCache`（仅在新 delta 到达时失效），流式期间每帧成本从 O(N × markdown_parse) 降至 O(hash) + O(流式增量)
+- 完成每帧 delta 上限（`MAX_DELTAS_PER_FRAME = 64`），防止突发 delta 阻塞渲染
+- 完成流式状态标签统一为英文现在分词：Waiting / Thinking / Generating
 
 ## 正在进行
 
 - 统一工具规范向外部协议的映射收敛，并继续把共享 driver 往客户端无关边界推进；磁带核心已补齐，现在没有必要跳过协议层直接堆完整界面
+- TUI 重构阶段 A（止血）已基本完成；阶段 B（拆状态机：Action / Reducer / Effect）作为次优先穿插推进，不压过协议主线
 
 ## 下一步
 
 1. 把统一工具规范往外映射到标准协议方向
 2. 推进 MCP 风格工具协议接入
 3. 继续把运行时与客户端层接到更完整的命名磁带能力，但不破坏现有兼容门面
-4. 继续收敛共享 driver 与启动编排边界，减少 `app.rs` 与 `tui.rs` 的重复职责
-5. 把当前最小 TUI 继续扩展为更完整的终端界面
+4. 按 `docs/tui-plan.md` 推进阶段 B（拆状态机：Action / Reducer / Effect），穿插在协议主线之间
+5. 继续收敛共享 driver、启动编排与 TUI reducer 边界，减少 `app.rs` 与 `tui.rs` 的重复职责
+6. 在协议边界更稳之后，再把当前最小 TUI 扩展为更完整的终端界面
 
 ## 为什么当前先不直接做完整界面
 
-因为界面依赖稳定的运行时、会话模型和工具协议；现在虽然磁带核心已经补齐，但如果跳过工具协议映射与 MCP 接入直接堆界面，仍会把后续协议边界和客户端职责锁死。
+因为界面依赖稳定的运行时、会话模型和工具协议；现在虽然磁带核心已经补齐，但如果跳过工具协议映射与 MCP 接入直接堆界面，仍会把后续协议边界和客户端职责锁死。当前 TUI 重构也只先做边界收敛和性能止血，不把它提升为压过协议层的主线。
 
 ## 阻塞
 

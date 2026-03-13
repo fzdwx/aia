@@ -1,13 +1,14 @@
 use std::{env, error::Error, io, io::IsTerminal};
 
 use agent_runtime::AgentRuntime;
+use builtin_tools::build_tool_registry;
 use provider_registry::ProviderRegistry;
 use session_tape::{SessionProviderBinding, SessionTape, default_session_path};
 
 use crate::{
     errors::CliLoopError,
     loop_driver::run_agent_loop,
-    model::{BootstrapTools, ProviderLaunchChoice, build_model_from_selection},
+    model::{ProviderLaunchChoice, build_model_from_selection},
     tui::run_tui_loop,
 };
 
@@ -31,7 +32,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
 
     let selection = choose_non_interactive_provider(&registry, &tape);
     let (identity, model) = build_model_from_selection(selection)?;
-    let tools = BootstrapTools;
+    let tools = build_tool_registry();
     let current_model_provider = identity.provider.clone();
     let current_model_name = identity.name.clone();
     let mut runtime = AgentRuntime::with_tape(model, tools, identity, tape)

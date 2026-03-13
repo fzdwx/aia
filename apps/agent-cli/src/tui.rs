@@ -28,11 +28,13 @@ use ratatui::{
 };
 use session_tape::{SessionProviderBinding, SessionTape};
 
+use builtin_tools::build_tool_registry;
+
 use crate::{
     driver::{self, CliRuntime, DriverHandle, DriverPollResult},
     errors::CliLoopError,
     loop_driver::is_exit_command,
-    model::{BootstrapTools, ProviderLaunchChoice, build_model_from_selection},
+    model::{ProviderLaunchChoice, build_model_from_selection},
     theme,
     tui_markdown::{
         inline_markdown_lines, inline_thinking_lines, markdown_lines, padded_plain_line,
@@ -454,7 +456,7 @@ fn handle_initial_prompt_key(
             let model_label = format!("{}/{}", identity.provider, identity.name);
             let mut runtime = AgentRuntime::with_tape(
                 model,
-                BootstrapTools,
+                build_tool_registry(),
                 identity,
                 tape_slot.take().unwrap_or_default(),
             )

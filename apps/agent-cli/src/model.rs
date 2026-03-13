@@ -1,8 +1,9 @@
 use agent_core::{
     Completion, CompletionRequest, CoreError, LanguageModel, ModelDisposition, ModelIdentity,
-    StreamEvent, ToolCall, ToolDefinition, ToolExecutionContext, ToolExecutor, ToolOutputDelta,
-    ToolResult,
+    StreamEvent, ToolCall,
 };
+#[cfg(test)]
+use agent_core::{ToolDefinition, ToolExecutionContext, ToolExecutor, ToolOutputDelta, ToolResult};
 use openai_adapter::{OpenAiResponsesConfig, OpenAiResponsesModel};
 use provider_registry::ProviderProfile;
 
@@ -94,8 +95,10 @@ impl LanguageModel for BootstrapModel {
     }
 }
 
+#[cfg(test)]
 pub struct BootstrapTools;
 
+#[cfg(test)]
 impl ToolExecutor for BootstrapTools {
     type Error = CoreError;
 

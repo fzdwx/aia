@@ -7,12 +7,14 @@ license.workspace = true
 [dependencies]
 agent-core = { path = "../../crates/agent-core" }
 agent-runtime = { path = "../../crates/agent-runtime" }
+builtin-tools = { path = "../../crates/builtin-tools" }
 openai-adapter = { path = "../../crates/openai-adapter" }
 provider-registry = { path = "../../crates/provider-registry" }
 session-tape = { path = "../../crates/session-tape" }
 crossterm = "0.28"
 pulldown-cmark = "0.12"
 ratatui = "0.29"
+serde_json = "1"
 
 [[bin]]
 name = "aia"

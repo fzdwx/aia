@@ -1,6 +1,11 @@
 use std::{
+    collections::BTreeMap,
     fmt,
-    sync::atomic::{AtomicU64, Ordering},
+    path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -135,6 +140,27 @@ impl ToolCall {
     }
 }
 
+impl ToolCall {
+    /// Extract a required string argument, returning `CoreError` if missing.
+    pub fn str_arg(&self, name: &str) -> Result<String, CoreError> {
+        self.arguments
+            .get(name)
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .ok_or_else(|| CoreError::new(format!("missing required argument: {name}")))
+    }
+
+    /// Extract an optional string argument.
+    pub fn opt_str_arg(&self, name: &str) -> Option<String> {
+        self.arguments.get(name).and_then(|v| v.as_str()).map(String::from)
+    }
+
+    /// Extract an optional usize argument (from a JSON integer).
+    pub fn opt_usize_arg(&self, name: &str) -> Option<usize> {
+        self.arguments.get(name).and_then(|v| v.as_u64()).map(|n| n as usize)
+    }
+}
+
 impl PartialEq for ToolCall {
     fn eq(&self, other: &Self) -> bool {
         self.invocation_id == other.invocation_id
@@ -228,9 +254,48 @@ pub struct ToolOutputDelta {
 }
 
 #[derive(Clone, Debug)]
+pub struct AbortSignal(Arc<AtomicBool>);
+
+impl AbortSignal {
+    pub fn new() -> Self {
+        Self(Arc::new(AtomicBool::new(false)))
+    }
+
+    pub fn abort(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    pub fn is_aborted(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+}
+
+impl Default for AbortSignal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct ToolExecutionContext {
     pub run_id: String,
     pub workspace_root: Option<std::path::PathBuf>,
+    pub abort: AbortSignal,
+}
+
+impl ToolExecutionContext {
+    /// Resolve a raw path: absolute paths pass through; relative paths are
+    /// joined to `workspace_root` (if set), otherwise returned as-is.
+    pub fn resolve_path(&self, raw: &str) -> PathBuf {
+        let path = Path::new(raw);
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else if let Some(root) = &self.workspace_root {
+            root.join(path)
+        } else {
+            path.to_path_buf()
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -273,6 +338,76 @@ pub trait ToolExecutor {
         output: &mut dyn FnMut(ToolOutputDelta),
         context: &ToolExecutionContext,
     ) -> Result<ToolResult, Self::Error>;
+}
+
+// ---------------------------------------------------------------------------
+// Tool trait + ToolRegistry
+// ---------------------------------------------------------------------------
+
+/// A single self-contained tool: provides its own definition and execution logic.
+pub trait Tool: Send {
+    fn name(&self) -> &str;
+
+    fn definition(&self) -> ToolDefinition;
+
+    fn call(
+        &self,
+        tool_call: &ToolCall,
+        output: &mut dyn FnMut(ToolOutputDelta),
+        context: &ToolExecutionContext,
+    ) -> Result<ToolResult, CoreError>;
+}
+
+/// A collection of `Tool` objects, addressable by name. Implements `ToolExecutor`.
+pub struct ToolRegistry {
+    tools: BTreeMap<String, Box<dyn Tool>>,
+}
+
+impl ToolRegistry {
+    pub fn new() -> Self {
+        Self { tools: BTreeMap::new() }
+    }
+
+    /// Register a tool. If a tool with the same name already exists, the old
+    /// one is returned.
+    pub fn register(&mut self, tool: Box<dyn Tool>) -> Option<Box<dyn Tool>> {
+        let name = tool.name().to_owned();
+        self.tools.insert(name, tool)
+    }
+
+    pub fn len(&self) -> usize {
+        self.tools.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.tools.is_empty()
+    }
+}
+
+impl Default for ToolRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ToolExecutor for ToolRegistry {
+    type Error = CoreError;
+
+    fn definitions(&self) -> Vec<ToolDefinition> {
+        self.tools.values().map(|t| t.definition()).collect()
+    }
+
+    fn call(
+        &self,
+        call: &ToolCall,
+        output: &mut dyn FnMut(ToolOutputDelta),
+        context: &ToolExecutionContext,
+    ) -> Result<ToolResult, CoreError> {
+        match self.tools.get(&call.tool_name) {
+            Some(tool) => tool.call(call, output, context),
+            None => Err(CoreError::new(format!("unknown tool: {}", call.tool_name))),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -356,5 +491,146 @@ mod tests {
         assert_eq!(result.invocation_id, call.invocation_id);
         assert_eq!(result.tool_name, "search");
         assert_eq!(result.content, "ok");
+    }
+
+    // --- ToolCall helper methods ---
+
+    #[test]
+    fn str_arg_返回必填字符串参数() {
+        let call = ToolCall::new("t").with_argument("name", "hello");
+        assert_eq!(call.str_arg("name").unwrap(), "hello");
+    }
+
+    #[test]
+    fn str_arg_缺失时返回错误() {
+        let call = ToolCall::new("t");
+        assert!(call.str_arg("missing").is_err());
+    }
+
+    #[test]
+    fn opt_str_arg_返回存在的参数() {
+        let call = ToolCall::new("t").with_argument("path", "/tmp");
+        assert_eq!(call.opt_str_arg("path"), Some("/tmp".to_string()));
+        assert_eq!(call.opt_str_arg("missing"), None);
+    }
+
+    #[test]
+    fn opt_usize_arg_解析整数参数() {
+        let call = ToolCall::new("t").with_arguments_value(serde_json::json!({"limit": 100}));
+        assert_eq!(call.opt_usize_arg("limit"), Some(100));
+        assert_eq!(call.opt_usize_arg("missing"), None);
+    }
+
+    // --- ToolExecutionContext::resolve_path ---
+
+    #[test]
+    fn resolve_path_绝对路径直接返回() {
+        let ctx = ToolExecutionContext {
+            run_id: "r1".into(),
+            workspace_root: Some(PathBuf::from("/workspace")),
+            abort: AbortSignal::new(),
+        };
+        assert_eq!(ctx.resolve_path("/etc/hosts"), PathBuf::from("/etc/hosts"));
+    }
+
+    #[test]
+    fn resolve_path_相对路径拼接_workspace_root() {
+        let ctx = ToolExecutionContext {
+            run_id: "r1".into(),
+            workspace_root: Some(PathBuf::from("/workspace")),
+            abort: AbortSignal::new(),
+        };
+        assert_eq!(ctx.resolve_path("src/main.rs"), PathBuf::from("/workspace/src/main.rs"));
+    }
+
+    #[test]
+    fn resolve_path_无_workspace_root_时返回原样() {
+        let ctx = ToolExecutionContext { run_id: "r1".into(), workspace_root: None, abort: AbortSignal::new() };
+        assert_eq!(ctx.resolve_path("src/main.rs"), PathBuf::from("src/main.rs"));
+    }
+
+    // --- ToolRegistry ---
+
+    struct EchoTool;
+
+    impl Tool for EchoTool {
+        fn name(&self) -> &str {
+            "echo"
+        }
+
+        fn definition(&self) -> ToolDefinition {
+            ToolDefinition::new("echo", "回显输入")
+                .with_parameter("text", "要回显的文本", true)
+        }
+
+        fn call(
+            &self,
+            tool_call: &ToolCall,
+            _output: &mut dyn FnMut(ToolOutputDelta),
+            _context: &ToolExecutionContext,
+        ) -> Result<ToolResult, CoreError> {
+            let text = tool_call.str_arg("text")?;
+            Ok(ToolResult::from_call(tool_call, text))
+        }
+    }
+
+    #[test]
+    fn 注册表收集工具定义() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(EchoTool));
+        let defs = registry.definitions();
+        assert_eq!(defs.len(), 1);
+        assert_eq!(defs[0].name, "echo");
+    }
+
+    #[test]
+    fn 注册表按名称分派工具调用() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(EchoTool));
+
+        let call = ToolCall::new("echo").with_argument("text", "你好");
+        let ctx = ToolExecutionContext { run_id: "r1".into(), workspace_root: None, abort: AbortSignal::new() };
+        let result = ToolExecutor::call(&registry, &call, &mut |_| {}, &ctx).unwrap();
+        assert_eq!(result.content, "你好");
+    }
+
+    #[test]
+    fn 注册表未知工具返回错误() {
+        let registry = ToolRegistry::new();
+        let call = ToolCall::new("nonexistent");
+        let ctx = ToolExecutionContext { run_id: "r1".into(), workspace_root: None, abort: AbortSignal::new() };
+        let err = ToolExecutor::call(&registry, &call, &mut |_| {}, &ctx).unwrap_err();
+        assert!(err.to_string().contains("unknown tool"));
+    }
+
+    #[test]
+    fn 注册表同名覆盖返回旧工具() {
+        let mut registry = ToolRegistry::new();
+        assert!(registry.register(Box::new(EchoTool)).is_none());
+        assert!(registry.register(Box::new(EchoTool)).is_some());
+        assert_eq!(registry.len(), 1);
+    }
+
+    #[test]
+    fn 空注册表返回空定义列表() {
+        let registry = ToolRegistry::new();
+        assert!(registry.is_empty());
+        assert!(registry.definitions().is_empty());
+    }
+
+    // --- AbortSignal ---
+
+    #[test]
+    fn abort_signal_初始未中止() {
+        let signal = AbortSignal::new();
+        assert!(!signal.is_aborted());
+    }
+
+    #[test]
+    fn abort_signal_触发后可检测() {
+        let signal = AbortSignal::new();
+        let cloned = signal.clone();
+        signal.abort();
+        assert!(cloned.is_aborted());
     }
 }

@@ -6,9 +6,9 @@ use std::{
 };
 
 use agent_core::{
-    Completion, CompletionRequest, CompletionSegment, LanguageModel, Message, ModelIdentity, Role,
-    StreamEvent, ToolCall, ToolDefinition, ToolExecutionContext, ToolExecutor, ToolOutputDelta,
-    ToolResult,
+    AbortSignal, Completion, CompletionRequest, CompletionSegment, LanguageModel, Message,
+    ModelIdentity, Role, StreamEvent, ToolCall, ToolDefinition, ToolExecutionContext, ToolExecutor,
+    ToolOutputDelta, ToolResult,
 };
 use serde_json::json;
 use session_tape::{Anchor, Handoff, SessionTape, TapeEntry};
@@ -235,6 +235,7 @@ where
                     &ToolExecutionContext {
                         run_id: turn_id.clone(),
                         workspace_root: self.workspace_root.clone(),
+                        abort: AbortSignal::new(),
                     },
                 ) {
                     Ok(result) => {

@@ -1,0 +1,16 @@
+[package]
+name = "builtin-tools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+agent-core = { path = "../agent-core" }
+globset = "0.4"
+grep-regex = "0.1"
+grep-searcher = "0.1"
+ignore = "0.4"
+serde_json = "1"
+
+[lib]
+path = "src/lib.rs"

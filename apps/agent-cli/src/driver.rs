@@ -5,13 +5,13 @@ use std::{
     thread,
 };
 
-use agent_core::{LanguageModel, StreamEvent};
+use agent_core::{LanguageModel, StreamEvent, ToolRegistry};
 use agent_runtime::{AgentRuntime, RuntimeError, RuntimeEvent, RuntimeSubscriberId};
 use session_tape::SessionTapeError;
 
-use crate::model::{BootstrapTools, CliModel};
+use crate::model::CliModel;
 
-pub type CliRuntime = AgentRuntime<CliModel, BootstrapTools>;
+pub type CliRuntime = AgentRuntime<CliModel, ToolRegistry>;
 
 pub struct DriverHandle {
     sender: Sender<DriverCommand>,
@@ -145,11 +145,15 @@ where
     Ok(())
 }
 
-pub fn spawn_driver(
-    mut runtime: CliRuntime,
+pub fn spawn_driver<M, T>(
+    mut runtime: AgentRuntime<M, T>,
     subscriber: RuntimeSubscriberId,
     session_path: PathBuf,
-) -> DriverHandle {
+) -> DriverHandle
+where
+    M: LanguageModel + Send + 'static,
+    T: agent_core::ToolExecutor + Send + 'static,
+{
     let (command_sender, command_receiver) = mpsc::channel::<DriverCommand>();
     let (response_sender, response_receiver) = mpsc::channel::<DriverResponse>();
 

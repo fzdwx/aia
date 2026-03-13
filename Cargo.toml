@@ -3,6 +3,7 @@ members = [
   "apps/agent-cli",
   "crates/agent-core",
   "crates/agent-runtime",
+  "crates/builtin-tools",
   "crates/openai-adapter",
   "crates/provider-registry",
   "crates/session-tape",
