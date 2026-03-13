@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react"
-import { ChevronDown } from "lucide-react"
+import { Check, ChevronRight, X as XIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat-store"
 import type {
@@ -72,31 +72,35 @@ function MarkdownContent({ content }: { content: string }) {
   )
 }
 
+// --- Thinking block: compact collapsible label ---
+
 function ThinkingBlock({ content }: { content: string }) {
   const [open, setOpen] = useState(false)
 
   return (
-    <div className="mb-3 rounded-lg border border-border/30 bg-muted/30">
+    <div className="mb-2">
       <button
         onClick={() => setOpen(!open)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+        className="flex items-center gap-1.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
       >
-        <ChevronDown
+        <ChevronRight
           className={cn(
             "size-3.5 transition-transform",
-            !open && "-rotate-90",
+            open && "rotate-90",
           )}
         />
-        Thinking
+        <span className="font-medium">Thought</span>
       </button>
       {open && (
-        <div className="border-t border-border/20 px-3 py-2 text-[13px] leading-relaxed text-muted-foreground/80">
+        <div className="mt-1.5 ml-5 border-l-2 border-border/30 pl-3 text-[13px] leading-relaxed text-muted-foreground/80">
           <MarkdownContent content={content} />
         </div>
       )}
     </div>
   )
 }
+
+// --- Tool invocation: flat indented row ---
 
 function ToolInvocationBlock({
   block,
@@ -106,30 +110,27 @@ function ToolInvocationBlock({
   const { call, outcome } = block.invocation
   const succeeded = outcome.status === "succeeded"
 
+  // Derive a friendly label from tool name + first arg
+  const firstArg = Object.values(call.arguments)[0]
+  const argLabel = typeof firstArg === "string" ? firstArg : null
+  const label = argLabel
+    ? `${call.tool_name} ${argLabel}`
+    : call.tool_name
+
   return (
-    <div className="mb-3 rounded-lg border border-border/30 bg-muted/30 px-3 py-2">
-      <div className="flex items-center gap-2 text-[12px] font-medium text-muted-foreground">
-        <span
-          className={cn(
-            "size-1.5 rounded-full",
-            succeeded ? "bg-green-500" : "bg-destructive",
-          )}
-        />
-        <span className="font-mono">{call.tool_name}</span>
-      </div>
+    <div className="flex items-center gap-2 py-0.5 pl-5 text-[13px] text-muted-foreground">
+      <span>{label}</span>
       {succeeded && (
-        <pre className="mt-1.5 max-h-[120px] overflow-auto text-[12px] leading-relaxed text-muted-foreground/70">
-          {outcome.result.content}
-        </pre>
+        <Check className="size-3.5 text-foreground/50" />
       )}
       {!succeeded && outcome.status === "failed" && (
-        <p className="mt-1.5 text-[12px] text-destructive/80">
-          {outcome.message}
-        </p>
+        <XIcon className="size-3.5 text-destructive/70" />
       )}
     </div>
   )
 }
+
+// --- Block renderer ---
 
 function BlockRenderer({ block }: { block: TurnBlock }) {
   switch (block.kind) {
@@ -152,7 +153,42 @@ function BlockRenderer({ block }: { block: TurnBlock }) {
   }
 }
 
+// --- Group consecutive tool blocks with a summary header ---
+
+function groupBlocks(blocks: TurnBlock[]) {
+  const groups: { type: "single"; block: TurnBlock }[] | { type: "tools"; blocks: TurnBlock[] }[] = []
+  type Group = { type: "single"; block: TurnBlock } | { type: "tools"; blocks: TurnBlock[] }
+  const result: Group[] = []
+
+  for (const block of blocks) {
+    if (block.kind === "tool_invocation") {
+      const last = result[result.length - 1]
+      if (last && last.type === "tools") {
+        last.blocks.push(block)
+      } else {
+        result.push({ type: "tools", blocks: [block] })
+      }
+    } else {
+      result.push({ type: "single", block })
+    }
+  }
+  void groups
+  return result
+}
+
+function ToolGroupHeader({ count }: { count: number }) {
+  return (
+    <div className="mb-0.5 text-[13px] text-muted-foreground">
+      <span>Ran {count} tool{count > 1 ? "s" : ""}</span>
+    </div>
+  )
+}
+
+// --- Turn view ---
+
 function TurnView({ turn }: { turn: TurnLifecycle }) {
+  const grouped = groupBlocks(turn.blocks)
+
   return (
     <div className="mb-8 last:mb-0 animate-[message-in_250ms_ease-out_both]">
       {/* User message */}
@@ -174,30 +210,48 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
             aia
           </span>
         </div>
-        {turn.blocks.map((block, i) => (
-          <BlockRenderer key={i} block={block} />
-        ))}
+        {grouped.map((group, i) => {
+          if (group.type === "single") {
+            return <BlockRenderer key={i} block={group.block} />
+          }
+          return (
+            <div key={i} className="mb-3">
+              <ToolGroupHeader count={group.blocks.length} />
+              {group.blocks.map((block, j) => (
+                <BlockRenderer key={j} block={block} />
+              ))}
+            </div>
+          )
+        })}
       </div>
     </div>
   )
 }
 
+// --- Status indicator (more prominent) ---
+
 const STATUS_LABELS: Record<StreamingTurn["status"], string> = {
-  waiting: "Waiting",
-  thinking: "Thinking",
-  working: "Working",
-  generating: "Generating",
+  waiting: "Waiting...",
+  thinking: "Thinking...",
+  working: "Working...",
+  generating: "Generating...",
 }
 
 function StatusIndicator({ status }: { status: StreamingTurn["status"] }) {
   return (
-    <div className="py-1">
-      <span className="shimmer-text text-[12px] font-medium tracking-wide">
+    <div className="flex items-center gap-2.5 py-2">
+      <span className="relative flex size-2.5">
+        <span className="absolute inline-flex size-full animate-ping rounded-full bg-foreground/30" />
+        <span className="relative inline-flex size-2.5 rounded-full bg-foreground/60" />
+      </span>
+      <span className="shimmer-text text-[14px] font-medium">
         {STATUS_LABELS[status]}
       </span>
     </div>
   )
 }
+
+// --- Streaming tool block: flat row with pulse dot ---
 
 function StreamingToolBlock({
   invocationId,
@@ -207,19 +261,17 @@ function StreamingToolBlock({
   output: string
 }) {
   return (
-    <div className="mb-3 rounded-lg border border-border/30 bg-muted/30 px-3 py-2">
-      <div className="flex items-center gap-2 text-[12px] font-medium text-muted-foreground">
-        <span className="size-1.5 rounded-full bg-amber-500/70 animate-pulse" />
-        <span className="font-mono">{invocationId}</span>
-      </div>
+    <div className="flex items-center gap-2 py-0.5 pl-5 text-[13px] text-muted-foreground">
+      <span className="size-1.5 rounded-full bg-amber-500/70 animate-pulse" />
+      <span>{invocationId}</span>
       {output && (
-        <pre className="mt-1.5 max-h-[120px] overflow-auto text-[12px] leading-relaxed text-muted-foreground/70">
-          {output}
-        </pre>
+        <span className="truncate text-muted-foreground/50">{output.split("\n")[0]}</span>
       )}
     </div>
   )
 }
+
+// --- Streaming view ---
 
 function StreamingView({ streaming }: { streaming: StreamingTurn }) {
   return (
@@ -248,13 +300,17 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
         {streaming.thinkingText && (
           <ThinkingBlock content={streaming.thinkingText} />
         )}
-        {streaming.toolOutputs.map((tool) => (
-          <StreamingToolBlock
-            key={tool.invocationId}
-            invocationId={tool.invocationId}
-            output={tool.output}
-          />
-        ))}
+        {streaming.toolOutputs.length > 0 && (
+          <div className="mb-2">
+            {streaming.toolOutputs.map((tool) => (
+              <StreamingToolBlock
+                key={tool.invocationId}
+                invocationId={tool.invocationId}
+                output={tool.output}
+              />
+            ))}
+          </div>
+        )}
         {streaming.assistantText ? (
           <div className="text-[14px] leading-[1.75] text-foreground/85">
             <MarkdownContent content={streaming.assistantText} />
