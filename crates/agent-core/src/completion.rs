@@ -11,12 +11,20 @@ pub enum ModelDisposition {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ModelLimit {
+    pub context: Option<u32>,
+    pub output: Option<u32>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ModelIdentity {
     pub provider: String,
     pub name: String,
     pub disposition: ModelDisposition,
     #[serde(default)]
     pub reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub limit: Option<ModelLimit>,
 }
 
 impl ModelIdentity {
@@ -25,11 +33,22 @@ impl ModelIdentity {
         name: impl Into<String>,
         disposition: ModelDisposition,
     ) -> Self {
-        Self { provider: provider.into(), name: name.into(), disposition, reasoning_effort: None }
+        Self {
+            provider: provider.into(),
+            name: name.into(),
+            disposition,
+            reasoning_effort: None,
+            limit: None,
+        }
     }
 
     pub fn with_reasoning_effort(mut self, effort: Option<String>) -> Self {
         self.reasoning_effort = effort;
+        self
+    }
+
+    pub fn with_limit(mut self, limit: Option<ModelLimit>) -> Self {
+        self.limit = limit;
         self
     }
 }
@@ -95,5 +114,6 @@ pub struct CompletionRequest {
     pub instructions: Option<String>,
     pub conversation: Vec<ConversationItem>,
     pub resume_checkpoint: Option<ModelCheckpoint>,
+    pub max_output_tokens: Option<u32>,
     pub available_tools: Vec<ToolDefinition>,
 }

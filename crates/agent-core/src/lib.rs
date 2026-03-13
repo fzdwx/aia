@@ -11,7 +11,7 @@ mod tests;
 
 pub use completion::{
     Completion, CompletionRequest, CompletionSegment, ModelCheckpoint, ModelDisposition,
-    ModelIdentity,
+    ModelIdentity, ModelLimit,
 };
 pub use conversation::{ConversationItem, Message, Role};
 pub use error::CoreError;
