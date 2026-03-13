@@ -38,6 +38,8 @@
 - 完成 Vite 开发代理配置（`/api` → `http://localhost:3434`）
 - 完成 justfile 开发命令（`just dev` 同时启动前后端）
 - 完成移除 `apps/agent-cli` 包，并同步清理工作区与文档中的 CLI 主入口叙事
+- 完成核心 Rust crates 的内部模块化收口：`provider-registry`、`agent-core`、`session-tape`、`openai-adapter`、`agent-runtime` 已从单文件主入口拆为薄 `lib.rs` + 职责模块
+- 完成 `provider-registry` 与 `apps/agent-server` 之间的 provider 多模型配置接口对齐，并兼容旧单模型本地落盘格式
 
 ## 正在进行
 

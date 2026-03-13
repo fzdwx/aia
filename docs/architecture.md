@@ -29,6 +29,12 @@ README 里真正难的是这些能力：
 
 ## 模块边界
 
+### Rust crate 内部组织约定
+
+- 各 crate 的 `lib.rs` 保持为薄 façade，只负责 `mod` 声明与稳定 `pub use`
+- 领域模型、协议映射、存储后端、兼容层、错误与测试分别落到独立模块，避免继续把实现堆在单个入口文件
+- 内部模块化不改变 crate 级职责边界；跨 crate 的公开抽象仍以 `agent-core`、`session-tape`、`agent-runtime`、`provider-registry`、`openai-adapter` 的现有职责划分为准
+
 ### `agent-core`
 
 负责纯领域抽象：
@@ -98,9 +104,11 @@ README 里真正难的是这些能力：
 负责本地 provider 管理：
 
 - 保存 provider 档案
+- 一个 provider 下可维护多个 `ModelConfig`，并记住 `active_model`
 - 保存 provider 所属协议类型（Responses / OpenAI 兼容 Chat Completions）
 - 记录当前活动 provider
 - 从磁盘载入与写回 `.aia/providers.json`
+- 兼容旧单模型落盘格式，并在载入 / 写入时把活动模型归一到有效 `ModelConfig`
 - 保持 provider 持久化逻辑不泄漏进应用壳层
 
 ### `openai-adapter`
