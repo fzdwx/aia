@@ -359,6 +359,8 @@ function StreamingToolGroup({
 }
 
 // --- Block grouping ---
+// Merge all thinking and tool blocks that aren't separated by assistant text.
+// Pattern: [thinking, tool, thinking, tool, ..., text] → [merged_thinking, merged_tools, text]
 
 type BlockGroup =
   | { type: "single"; block: TurnBlock }
@@ -367,26 +369,33 @@ type BlockGroup =
 
 function groupBlocks(blocks: TurnBlock[]): BlockGroup[] {
   const result: BlockGroup[] = []
+  let pendingThinking = ""
+  let pendingTools: ToolInvocationLifecycle[] = []
+
+  const flushPending = () => {
+    if (pendingThinking) {
+      result.push({ type: "thinking", content: pendingThinking })
+      pendingThinking = ""
+    }
+    if (pendingTools.length > 0) {
+      result.push({ type: "tools", invocations: pendingTools })
+      pendingTools = []
+    }
+  }
 
   for (const block of blocks) {
-    if (block.kind === "tool_invocation") {
-      const last = result[result.length - 1]
-      if (last && last.type === "tools") {
-        last.invocations.push(block.invocation)
-      } else {
-        result.push({ type: "tools", invocations: [block.invocation] })
-      }
-    } else if (block.kind === "thinking") {
-      const last = result[result.length - 1]
-      if (last && last.type === "thinking") {
-        last.content += "\n" + block.content
-      } else {
-        result.push({ type: "thinking", content: block.content })
-      }
+    if (block.kind === "thinking") {
+      pendingThinking += (pendingThinking ? "\n" : "") + block.content
+    } else if (block.kind === "tool_invocation") {
+      pendingTools.push(block.invocation)
     } else {
+      // assistant text or failure — flush accumulated thinking/tools first
+      flushPending()
       result.push({ type: "single", block })
     }
   }
+
+  flushPending()
   return result
 }
 
@@ -465,6 +474,9 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
         {grouped.map((group, i) => {
           if (group.type === "tools") {
             return <ToolGroupView key={i} invocations={group.invocations} />
+          }
+          if (group.type === "thinking") {
+            return <ThinkingBlock key={i} content={group.content} />
           }
           return <BlockRenderer key={i} block={group.block} />
         })}

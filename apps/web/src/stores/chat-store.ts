@@ -1,6 +1,5 @@
 import { create } from "zustand"
 import {
-  connectEvents,
   fetchHistory,
   fetchProviders,
   listProviders as apiListProviders,

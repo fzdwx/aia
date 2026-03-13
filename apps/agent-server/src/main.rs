@@ -52,6 +52,13 @@ fn choose_provider(registry: &ProviderRegistry, tape: &SessionTape) -> ProviderL
 async fn main() {
     let store_path = provider_registry::default_registry_path();
     let session_path = default_session_path();
+    let workspace_root = match std::env::current_dir() {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("workspace 根目录获取失败: {error}");
+            return;
+        }
+    };
 
     let registry = ProviderRegistry::load_or_default(&store_path).expect("provider 注册表加载失败");
     let tape = SessionTape::load_jsonl_or_default(&session_path).expect("session 磁带加载失败");
@@ -63,6 +70,7 @@ async fn main() {
 
     let mut runtime = AgentRuntime::with_tape(model, tools, identity, tape)
         .with_instructions("你是 aia 的助手。给出清晰、结构化的答案。")
+        .with_workspace_root(workspace_root)
         .with_max_turn_steps(SERVER_DEFAULT_MAX_TURN_STEPS)
         .with_max_tool_calls_per_turn(SERVER_DEFAULT_MAX_TOOL_CALLS_PER_TURN);
 
