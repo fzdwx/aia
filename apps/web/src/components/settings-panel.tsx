@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, type FormEvent } from "react"
 import { ArrowLeft, Pencil, Plus, Trash2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -103,7 +103,17 @@ export function SettingsPanel() {
 
   const hasValidModel = models.some((m) => m.id.trim())
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleKindChange(value: string | null) {
+    if (value) setKind(value)
+  }
+
+  function handleReasoningEffortChange(index: number, value: string | null) {
+    if (value) {
+      updateModelRow(index, { reasoning_effort: value })
+    }
+  }
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (!hasValidModel) return
     setSubmitting(true)
@@ -280,7 +290,7 @@ export function SettingsPanel() {
                     <label className="mb-1 block text-[12px] text-muted-foreground">
                       Protocol
                     </label>
-                    <Select value={kind} onValueChange={setKind}>
+                    <Select value={kind} onValueChange={handleKindChange}>
                       <SelectTrigger className="h-8 w-full text-[13px]">
                         <SelectValue />
                       </SelectTrigger>
@@ -382,8 +392,8 @@ export function SettingsPanel() {
                           {row.supports_reasoning && (
                             <Select
                               value={row.reasoning_effort}
-                              onValueChange={(v: string) =>
-                                updateModelRow(i, { reasoning_effort: v })
+                              onValueChange={(value) =>
+                                handleReasoningEffortChange(i, value)
                               }
                             >
                               <SelectTrigger
