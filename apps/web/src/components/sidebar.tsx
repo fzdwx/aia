@@ -27,7 +27,7 @@ export function Sidebar() {
               <span
                 className={cn(
                   "size-1.5 rounded-full",
-                  provider.connected ? "bg-green-500" : "bg-destructive",
+                  provider.connected ? "bg-green-500" : "bg-destructive"
                 )}
               />
               <span className="text-[12px] font-medium text-foreground/80">
@@ -49,7 +49,7 @@ export function Sidebar() {
           onClick={() => setView(view === "settings" ? "chat" : "settings")}
           className={cn(
             "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] text-muted-foreground transition-colors duration-150 hover:bg-accent/50 hover:text-foreground/80",
-            view === "settings" && "bg-accent/50 text-foreground/80",
+            view === "settings" && "bg-accent/50 text-foreground/80"
           )}
         >
           <Settings className="size-[14px] opacity-40" />

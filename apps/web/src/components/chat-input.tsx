@@ -29,7 +29,7 @@ export function ChatInput() {
   }
 
   return (
-    <div className="relative shrink-0 border-t border-border/30 px-4 pb-4 pt-3">
+    <div className="relative shrink-0 border-t border-border/30 px-4 pt-3 pb-4">
       {/* Fade gradient above input */}
       <div className="pointer-events-none absolute -top-10 right-0 left-0 h-10 bg-gradient-to-t from-background to-transparent" />
 
@@ -53,7 +53,7 @@ export function ChatInput() {
               "flex size-7 shrink-0 items-center justify-center rounded-lg transition-all duration-150",
               canSend
                 ? "bg-foreground text-background hover:opacity-80"
-                : "bg-muted text-muted-foreground/30",
+                : "bg-muted text-muted-foreground/30"
             )}
           >
             <ArrowUp className="size-4" strokeWidth={2.5} />
