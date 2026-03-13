@@ -7,7 +7,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use agent_core::{Message, Role, ToolCall, ToolResult};
+use agent_core::{ConversationItem, Message, ModelCheckpoint, Role, ToolCall, ToolResult};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -22,7 +22,17 @@ pub fn default_session_path() -> std::path::PathBuf {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum SessionProviderBinding {
     Bootstrap,
-    Provider { name: String, model: String, base_url: String },
+    Provider {
+        name: String,
+        model: String,
+        base_url: String,
+        #[serde(default = "default_provider_protocol")]
+        protocol: String,
+    },
+}
+
+fn default_provider_protocol() -> String {
+    "openai-responses".into()
 }
 
 // ---------------------------------------------------------------------------
@@ -190,6 +200,13 @@ pub struct SessionView {
     pub origin_anchor: Option<Anchor>,
     pub entries: Vec<TapeEntry>,
     pub messages: Vec<Message>,
+    pub conversation: Vec<ConversationItem>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct StoredModelCheckpoint {
+    pub checkpoint: ModelCheckpoint,
+    pub checkpoint_entry_id: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -269,6 +286,38 @@ impl SessionTape {
             })
     }
 
+    pub fn record_model_checkpoint(
+        &mut self,
+        checkpoint: &ModelCheckpoint,
+        checkpoint_entry_id: u64,
+        run_id: &str,
+    ) -> u64 {
+        self.append_entry(
+            TapeEntry::event(
+                "model_checkpoint",
+                Some(
+                    serde_json::to_value(StoredModelCheckpoint {
+                        checkpoint: checkpoint.clone(),
+                        checkpoint_entry_id,
+                    })
+                    .unwrap_or_default(),
+                ),
+            )
+            .with_run_id(run_id),
+        )
+    }
+
+    pub fn latest_model_checkpoint(&self) -> Option<StoredModelCheckpoint> {
+        self.entries
+            .iter()
+            .rev()
+            .filter(|entry| entry.kind == "event")
+            .filter(|entry| entry.event_name() == Some("model_checkpoint"))
+            .find_map(|entry| {
+                entry.event_data().and_then(|data| serde_json::from_value(data.clone()).ok())
+            })
+    }
+
     pub fn handoff(&mut self, name: impl Into<String>, state: Value) -> Handoff {
         let name = name.into();
         let anchor = self.anchor(&name, Some(state));
@@ -288,8 +337,9 @@ impl SessionTape {
         let entries =
             self.entries.iter().filter(|entry| entry.id > lower_bound).cloned().collect::<Vec<_>>();
         let messages = entries.iter().filter_map(project_message).collect::<Vec<_>>();
+        let conversation = entries.iter().filter_map(project_conversation_item).collect::<Vec<_>>();
 
-        SessionView { origin_anchor: anchor.cloned(), entries, messages }
+        SessionView { origin_anchor: anchor.cloned(), entries, messages, conversation }
     }
 
     pub fn view_from(&self, anchor: Option<&Anchor>) -> Vec<Message> {
@@ -303,6 +353,14 @@ impl SessionTape {
 
     pub fn default_messages(&self) -> Vec<Message> {
         self.default_view().messages
+    }
+
+    pub fn conversation_since(&self, entry_id: u64) -> Vec<ConversationItem> {
+        self.entries
+            .iter()
+            .filter(|entry| entry.id > entry_id)
+            .filter_map(project_conversation_item)
+            .collect()
     }
 
     pub fn tape_name(&self) -> &str {
@@ -888,6 +946,20 @@ fn project_message(entry: &TapeEntry) -> Option<Message> {
     })
 }
 
+fn project_conversation_item(entry: &TapeEntry) -> Option<ConversationItem> {
+    if entry.kind == "thinking" {
+        return None;
+    }
+
+    if let Some(message) = entry.as_message() {
+        return Some(ConversationItem::Message(message));
+    }
+    if let Some(call) = entry.as_tool_call() {
+        return Some(ConversationItem::ToolCall(call));
+    }
+    entry.as_tool_result().map(ConversationItem::ToolResult)
+}
+
 fn now_iso8601() -> String {
     let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
     let day_secs = (secs % 86400) as u32;
@@ -953,7 +1025,7 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use agent_core::{Message, Role, ToolCall, ToolResult};
+    use agent_core::{ConversationItem, Message, ModelCheckpoint, Role, ToolCall, ToolResult};
     use serde_json::json;
 
     use super::{SessionProviderBinding, SessionTape, TapeEntry, TapeQuery};
@@ -976,6 +1048,7 @@ mod tests {
             name: "main".into(),
             model: "gpt-4.1-mini".into(),
             base_url: "https://api.openai.com/v1".into(),
+            protocol: "openai-responses".into(),
         });
 
         assert_eq!(
@@ -984,7 +1057,30 @@ mod tests {
                 name: "main".into(),
                 model: "gpt-4.1-mini".into(),
                 base_url: "https://api.openai.com/v1".into(),
+                protocol: "openai-responses".into(),
             })
+        );
+    }
+
+    #[test]
+    fn 旧版_provider_绑定缺少协议字段时仍可恢复() {
+        let binding: SessionProviderBinding = serde_json::from_value(serde_json::json!({
+            "Provider": {
+                "name": "main",
+                "model": "gpt-4.1-mini",
+                "base_url": "https://api.openai.com/v1"
+            }
+        }))
+        .expect("旧格式应可反序列化");
+
+        assert_eq!(
+            binding,
+            SessionProviderBinding::Provider {
+                name: "main".into(),
+                model: "gpt-4.1-mini".into(),
+                base_url: "https://api.openai.com/v1".into(),
+                protocol: "openai-responses".into(),
+            }
         );
     }
 
@@ -1098,6 +1194,50 @@ mod tests {
     }
 
     #[test]
+    fn 默认视图会保留结构化工具调用与结果() {
+        let mut tape = SessionTape::new();
+        tape.append(Message::new(Role::User, "开始"));
+        let call =
+            ToolCall::new("search").with_invocation_id("call-1").with_argument("query", "runtime");
+        let _ = tape.append_entry(TapeEntry::tool_call(&call));
+        let _ = tape.append_entry(TapeEntry::tool_result(&ToolResult::from_call(&call, "ok")));
+
+        let view = tape.default_view();
+
+        assert!(matches!(
+            &view.conversation[0],
+            ConversationItem::Message(message) if message.content == "开始"
+        ));
+        assert!(matches!(
+            &view.conversation[1],
+            ConversationItem::ToolCall(tool_call)
+                if tool_call.tool_name == "search" && tool_call.invocation_id == "call-1"
+        ));
+        assert!(matches!(
+            &view.conversation[2],
+            ConversationItem::ToolResult(result)
+                if result.tool_name == "search"
+                    && result.invocation_id == "call-1"
+                    && result.content == "ok"
+        ));
+    }
+
+    #[test]
+    fn 会记住最近一次模型检查点() {
+        let mut tape = SessionTape::new();
+        let first = ModelCheckpoint::new("openai-responses", "resp_1");
+        let second = ModelCheckpoint::new("openai-responses", "resp_2");
+
+        let _ = tape.record_model_checkpoint(&first, 3, "turn-1");
+        let _ = tape.record_model_checkpoint(&second, 8, "turn-2");
+
+        assert_eq!(
+            tape.latest_model_checkpoint(),
+            Some(super::StoredModelCheckpoint { checkpoint: second, checkpoint_entry_id: 8 })
+        );
+    }
+
+    #[test]
     fn 保存并载入新格式_jsonl() {
         let path = temp_file("new-format");
         let mut tape = SessionTape::new();
@@ -1186,6 +1326,7 @@ mod tests {
                 invocation_id: "tool-call-1".into(),
                 tool_name: "search".into(),
                 content: "alpha result".into(),
+                response_id: None,
             })
             .unwrap(),
             meta: super::default_meta(),

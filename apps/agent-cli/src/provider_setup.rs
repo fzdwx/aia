@@ -2,7 +2,7 @@
 
 use std::io::{BufRead, Write};
 
-use provider_registry::{ProviderProfile, ProviderRegistry};
+use provider_registry::{ProviderKind, ProviderProfile, ProviderRegistry};
 
 use crate::{errors::CliSetupError, model::ProviderLaunchChoice};
 
@@ -16,7 +16,7 @@ pub fn choose_provider_via_tui<R: BufRead, W: Write>(
 
     loop {
         if registry.providers().is_empty() {
-            writeln!(writer, "1) 创建 OpenAI Responses provider")?;
+            writeln!(writer, "1) 创建 OpenAI provider")?;
             writeln!(writer, "2) 使用本地 bootstrap")?;
             let choice = prompt_line(reader, writer, "请选择 [1-2]", None)?;
 
@@ -50,7 +50,7 @@ pub fn choose_provider_via_tui<R: BufRead, W: Write>(
 
         let create_index = registry.providers().len() + 1;
         let bootstrap_index = registry.providers().len() + 2;
-        writeln!(writer, "{}) 创建新的 OpenAI Responses provider", create_index)?;
+        writeln!(writer, "{}) 创建新的 OpenAI provider", create_index)?;
         writeln!(writer, "{}) 使用本地 bootstrap", bootstrap_index)?;
 
         let choice = prompt_line(
@@ -91,12 +91,37 @@ fn create_openai_provider<R: BufRead, W: Write>(
     reader: &mut R,
     writer: &mut W,
 ) -> Result<ProviderProfile, CliSetupError> {
+    let kind = prompt_provider_kind(reader, writer)?;
     let name = prompt_required_line(reader, writer, "provider 名称")?;
     let model = prompt_required_line(reader, writer, "模型名称")?;
     let api_key = prompt_required_line(reader, writer, "API Key")?;
     let base_url = prompt_line(reader, writer, "Base URL", Some("https://api.openai.com/v1"))?;
 
-    Ok(ProviderProfile::openai_responses(name, base_url, api_key, model))
+    Ok(match kind {
+        ProviderKind::OpenAiResponses => {
+            ProviderProfile::openai_responses(name, base_url, api_key, model)
+        }
+        ProviderKind::OpenAiChatCompletions => {
+            ProviderProfile::openai_chat_completions(name, base_url, api_key, model)
+        }
+    })
+}
+
+fn prompt_provider_kind<R: BufRead, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+) -> Result<ProviderKind, CliSetupError> {
+    loop {
+        writeln!(writer, "请选择协议：")?;
+        writeln!(writer, "1) OpenAI Responses")?;
+        writeln!(writer, "2) OpenAI 兼容 Chat Completions")?;
+        let choice = prompt_line(reader, writer, "请选择 [1-2]", Some("1"))?;
+        match choice.as_str() {
+            "1" => return Ok(ProviderKind::OpenAiResponses),
+            "2" => return Ok(ProviderKind::OpenAiChatCompletions),
+            _ => writeln!(writer, "无效选项，请重试。")?,
+        }
+    }
 }
 
 fn prompt_required_line<R: BufRead, W: Write>(
@@ -172,7 +197,7 @@ mod tests {
     fn 首次启动可通过终端创建_openai_provider() {
         let path = temp_file("create-provider");
         let mut registry = ProviderRegistry::default();
-        let input = b"1\nmain\ngpt-4.1-mini\nsecret\n\n";
+        let input = b"1\n1\nmain\ngpt-4.1-mini\nsecret\n\n";
         let mut reader = Cursor::new(input.as_slice());
         let mut output = Vec::new();
 
@@ -193,6 +218,31 @@ mod tests {
 
         let restored = ProviderRegistry::load_or_default(&path).expect("载入成功");
         assert_eq!(restored.providers().len(), 1);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn 首次启动可通过终端创建_chat_completions_provider() {
+        let path = temp_file("create-chat-provider");
+        let mut registry = ProviderRegistry::default();
+        let input = b"1\n2\ncompat\nminum-security-llm\nsecret\nhttp://127.0.0.1:8000/v1\n";
+        let mut reader = Cursor::new(input.as_slice());
+        let mut output = Vec::new();
+
+        let selection = choose_provider_via_tui(&mut reader, &mut output, &mut registry, &path)
+            .expect("创建成功");
+
+        assert_eq!(
+            selection,
+            ProviderLaunchChoice::OpenAi(
+                provider_registry::ProviderProfile::openai_chat_completions(
+                    "compat",
+                    "http://127.0.0.1:8000/v1",
+                    "secret",
+                    "minum-security-llm"
+                )
+            )
+        );
         let _ = fs::remove_file(path);
     }
 

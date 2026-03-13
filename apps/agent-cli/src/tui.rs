@@ -7,18 +7,18 @@ use std::{
 };
 
 use agent_core::StreamEvent;
-use agent_runtime::{AgentRuntime, RuntimeEvent, RuntimeSubscriberId, TurnLifecycle};
+use agent_runtime::{AgentRuntime, RuntimeEvent, RuntimeSubscriberId, TurnBlock, TurnLifecycle};
 use crossterm::{
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
         MouseEvent, MouseEventKind,
     },
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{disable_raw_mode, enable_raw_mode},
 };
-use provider_registry::{ProviderProfile, ProviderRegistry};
+use provider_registry::{ProviderKind, ProviderProfile, ProviderRegistry};
 use ratatui::{
-    Terminal,
+    Terminal, TerminalOptions, Viewport,
     backend::CrosstermBackend,
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
@@ -48,7 +48,8 @@ const MAX_DELTAS_PER_FRAME: usize = 64;
 const STATUS_ANIMATION_FRAME_DIVISOR: usize = 6;
 const STATUS_ANIMATION_TRAIL_LENGTH: usize = 2;
 const STATUS_ANIMATION_RESTART_PAUSE: usize = 2;
-const STREAMING_PINNED_MAX_LINES: usize = 6;
+const MAX_RENDERED_MESSAGE_CHARS: usize = 1200;
+const TUI_INLINE_VIEWPORT_HEIGHT: u16 = 18;
 
 pub fn run_tui_loop(
     mut registry: ProviderRegistry,
@@ -66,10 +67,13 @@ pub fn run_tui_loop(
 
     let mut stdout = io::stdout();
     enable_raw_mode()?;
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(stdout, EnableMouseCapture)?;
     let guard = TerminalRestoreGuard;
     let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
+    let mut terminal = Terminal::with_options(
+        backend,
+        TerminalOptions { viewport: Viewport::Inline(TUI_INLINE_VIEWPORT_HEIGHT) },
+    )?;
 
     let loop_result = run_tui_loop_inner(
         &mut terminal,
@@ -300,22 +304,27 @@ fn handle_select_provider_key(
                         name: profile.name.clone(),
                         model: profile.model.clone(),
                         base_url: profile.base_url.clone(),
+                        protocol: profile.kind.protocol_name().into(),
                     },
                 )?;
                 state.set_input(state.prompt_seed.clone().unwrap_or_default());
-                state.model_label = format!("openai/{}", profile.model);
+                state.model_label =
+                    format!("{}/{}", provider_label_prefix(&profile.kind), profile.model);
                 state.phase =
                     Phase::InitialPrompt { selection: ProviderLaunchChoice::OpenAi(profile) };
                 state.status =
                     Some("当前会话已沿用该 provider，请输入首条问题；按 F2 可替换。".into());
             }
-            StartupOption::CreateOpenAi => {
+            StartupOption::CreateProvider => {
                 state.clear_input();
                 state.phase = Phase::CreateProvider {
-                    step: CreateProviderStep::Name,
+                    step: CreateProviderStep::Protocol,
                     draft: ProviderDraft::default(),
                 };
-                state.status = Some("请输入 provider 名称。".into());
+                state.status = Some(
+                    "请选择 provider 协议。输入 1 为 Responses，输入 2 为 Chat Completions。"
+                        .into(),
+                );
             }
             StartupOption::Bootstrap => {
                 persist_provider_binding(
@@ -354,6 +363,26 @@ fn handle_create_provider_key(
         KeyCode::Enter => {
             let value = state.input.trim().to_string();
             match step {
+                CreateProviderStep::Protocol => match value.as_str() {
+                    "" | "1" => {
+                        draft.kind = Some(ProviderKind::OpenAiResponses);
+                        state.clear_input();
+                        step = CreateProviderStep::Name;
+                        state.status = Some("请输入 provider 名称。".into());
+                        state.phase = Phase::CreateProvider { step, draft };
+                    }
+                    "2" => {
+                        draft.kind = Some(ProviderKind::OpenAiChatCompletions);
+                        state.clear_input();
+                        step = CreateProviderStep::Name;
+                        state.status = Some("请输入 provider 名称。".into());
+                        state.phase = Phase::CreateProvider { step, draft };
+                    }
+                    _ => {
+                        state.status =
+                            Some("请输入 1（Responses）或 2（Chat Completions）。".into());
+                    }
+                },
                 CreateProviderStep::Name => {
                     if value.is_empty() {
                         state.status = Some("provider 名称不能为空。".into());
@@ -390,12 +419,23 @@ fn handle_create_provider_key(
                 CreateProviderStep::BaseUrl => {
                     draft.base_url =
                         if value.is_empty() { "https://api.openai.com/v1".into() } else { value };
-                    let profile = ProviderProfile::openai_responses(
-                        draft.name.clone(),
-                        draft.base_url.clone(),
-                        draft.api_key.clone(),
-                        draft.model.clone(),
-                    );
+                    let profile =
+                        match draft.kind.as_ref().unwrap_or(&ProviderKind::OpenAiResponses) {
+                            ProviderKind::OpenAiResponses => ProviderProfile::openai_responses(
+                                draft.name.clone(),
+                                draft.base_url.clone(),
+                                draft.api_key.clone(),
+                                draft.model.clone(),
+                            ),
+                            ProviderKind::OpenAiChatCompletions => {
+                                ProviderProfile::openai_chat_completions(
+                                    draft.name.clone(),
+                                    draft.base_url.clone(),
+                                    draft.api_key.clone(),
+                                    draft.model.clone(),
+                                )
+                            }
+                        };
                     registry.upsert(profile.clone());
                     registry.set_active(&profile.name).map_err(io_error)?;
                     registry.save(store_path).map_err(io_error)?;
@@ -406,10 +446,12 @@ fn handle_create_provider_key(
                             name: profile.name.clone(),
                             model: profile.model.clone(),
                             base_url: profile.base_url.clone(),
+                            protocol: profile.kind.protocol_name().into(),
                         },
                     )?;
                     state.set_input(state.prompt_seed.clone().unwrap_or_default());
-                    state.model_label = format!("openai/{}", profile.model);
+                    state.model_label =
+                        format!("{}/{}", provider_label_prefix(&profile.kind), profile.model);
                     state.phase =
                         Phase::InitialPrompt { selection: ProviderLaunchChoice::OpenAi(profile) };
                     state.status = Some("provider 已创建并绑定到当前会话；按 F2 可替换。".into());
@@ -598,6 +640,7 @@ struct OverlayCache {
     user_message_len: usize,
     processing: bool,
     is_streaming: bool,
+    spinner_tick: usize,
     overlay: CachedOverlayData,
 }
 
@@ -772,12 +815,8 @@ impl MessagePanel {
             _ => {
                 let lines = self.build_history_lines(width);
                 let vlc = visual_line_count(&lines, width);
-                let cache = HistoryCache {
-                    width,
-                    content_key: history_key,
-                    lines,
-                    visual_line_count: vlc,
-                };
+                let cache =
+                    HistoryCache { width, content_key: history_key, lines, visual_line_count: vlc };
                 self.history_cache = Some(cache.clone());
                 cache
             }
@@ -798,15 +837,7 @@ impl MessagePanel {
         }
 
         // 4. Footer
-        let footer = overlay.footer_text.as_deref().map(|text| {
-            padded_plain_line(animated_status_line(text, self.spinner_tick))
-        });
-        let has_footer = footer.is_some() && area.height > 0;
-        let body_area = if has_footer {
-            Rect { x: area.x, y: area.y, width: area.width, height: area.height.saturating_sub(1) }
-        } else {
-            area
-        };
+        let body_area = area;
 
         // 5. Update scroll state
         self.line_count = total_vlc;
@@ -823,28 +854,18 @@ impl MessagePanel {
             .wrap(Wrap { trim: false })
             .scroll((self.scroll_offset as u16, 0));
         frame.render_widget(panel, body_area);
-
-        if let Some(footer) = footer {
-            let footer_area = Rect {
-                x: area.x,
-                y: area.y + area.height.saturating_sub(1),
-                width: area.width,
-                height: 1,
-            };
-            frame.render_widget(Paragraph::new(footer), footer_area);
-        }
     }
 
     // --- private helpers ---
 
     fn cached_streaming_overlay(&mut self, width: u16, has_history: bool) -> StreamingOverlay {
         // Check if cached overlay is still valid
-        let (thinking_len, text_len, user_msg_len, is_streaming) =
-            if let Some(s) = &self.streaming {
-                (s.thinking.len(), s.text.len(), s.user_message.len(), true)
-            } else {
-                (0, 0, 0, false)
-            };
+        let (thinking_len, text_len, user_msg_len, is_streaming) = if let Some(s) = &self.streaming
+        {
+            (s.thinking.len(), s.text.len(), s.user_message.len(), true)
+        } else {
+            (0, 0, 0, false)
+        };
 
         if let Some(ref cache) = self.overlay_cache {
             if cache.width == width
@@ -854,6 +875,7 @@ impl MessagePanel {
                 && cache.user_message_len == user_msg_len
                 && cache.processing == self.processing
                 && cache.is_streaming == is_streaming
+                && cache.spinner_tick == self.spinner_tick
             {
                 return StreamingOverlay {
                     separator: cache.overlay.separator.clone(),
@@ -873,6 +895,7 @@ impl MessagePanel {
             user_message_len: user_msg_len,
             processing: self.processing,
             is_streaming,
+            spinner_tick: self.spinner_tick,
             overlay: CachedOverlayData {
                 separator: overlay.separator.clone(),
                 lines: overlay.lines.clone(),
@@ -906,14 +929,9 @@ impl MessagePanel {
         lines
     }
 
-    fn build_streaming_overlay(
-        &self,
-        width: u16,
-        has_history: bool,
-    ) -> StreamingOverlay {
+    fn build_streaming_overlay(&self, width: u16, has_history: bool) -> StreamingOverlay {
         let mut separator = Vec::new();
         let mut lines: Vec<Line<'static>> = Vec::new();
-        let mut footer_text = None;
 
         if let Some(ref streaming) = self.streaming {
             let streaming_has_user = !streaming.user_message.is_empty();
@@ -923,7 +941,10 @@ impl MessagePanel {
                 }
             }
             if streaming_has_user {
-                lines.extend(user_block_lines(&streaming.user_message, width));
+                lines.extend(user_block_lines(
+                    &truncate_message_for_display(&streaming.user_message),
+                    width,
+                ));
             }
             if !streaming.thinking.is_empty() {
                 if streaming_has_user {
@@ -931,7 +952,7 @@ impl MessagePanel {
                 }
                 lines.extend(padded_plain_lines(inline_markdown_lines(
                     "Thinking: ",
-                    &streaming.thinking,
+                    &truncate_message_for_display(&streaming.thinking),
                     theme::thinking_label_style(),
                     theme::thinking_style(),
                 )));
@@ -945,32 +966,23 @@ impl MessagePanel {
                     }
                 }
                 lines.extend(padded_plain_lines(markdown_lines(
-                    &streaming.text,
+                    &truncate_message_for_display(&streaming.text),
                     theme::assistant_message_style(),
                 )));
             }
-            lines = clamp_streaming_lines(lines);
             if let Some(status_text) = &streaming.status_text {
-                footer_text = Some(status_text.clone());
+                ensure_blank_line(&mut lines);
+                lines.push(padded_plain_line(animated_status_line(status_text, self.spinner_tick)));
             }
         } else if self.processing {
-            footer_text = Some("Waiting".into());
+            lines.push(padded_plain_line(animated_status_line("Waiting", self.spinner_tick)));
         }
 
         let all_overlay: Vec<Line<'static>> =
             separator.iter().chain(lines.iter()).cloned().collect();
-        let vlc = if all_overlay.is_empty() {
-            0
-        } else {
-            visual_line_count(&all_overlay, width)
-        };
+        let vlc = if all_overlay.is_empty() { 0 } else { visual_line_count(&all_overlay, width) };
 
-        StreamingOverlay {
-            separator,
-            lines,
-            footer_text,
-            visual_line_count: vlc,
-        }
+        StreamingOverlay { separator, lines, footer_text: None, visual_line_count: vlc }
     }
 }
 
@@ -1007,7 +1019,7 @@ impl TuiState {
                     .or(Some("已记住上次使用的 bootstrap；按 F2 可替换 provider。".into())),
             ),
             Some(ProviderLaunchChoice::OpenAi(profile)) => (
-                format!("openai/{}", profile.model),
+                format!("{}/{}", provider_label_prefix(&profile.kind), profile.model),
                 Phase::InitialPrompt { selection: ProviderLaunchChoice::OpenAi(profile) },
                 prompt_seed.clone().unwrap_or_default(),
                 startup_notice.or(Some("已记住当前会话上次使用的 provider；按 F2 可替换。".into())),
@@ -1164,6 +1176,7 @@ enum Phase {
 
 #[derive(Clone)]
 enum CreateProviderStep {
+    Protocol,
     Name,
     Model,
     ApiKey,
@@ -1172,6 +1185,7 @@ enum CreateProviderStep {
 
 #[derive(Clone, Default)]
 struct ProviderDraft {
+    kind: Option<ProviderKind>,
     name: String,
     model: String,
     api_key: String,
@@ -1181,14 +1195,14 @@ struct ProviderDraft {
 #[derive(Clone)]
 enum StartupOption {
     Existing(ProviderProfile),
-    CreateOpenAi,
+    CreateProvider,
     Bootstrap,
 }
 
 fn startup_options(registry: &ProviderRegistry) -> Vec<StartupOption> {
     let mut options =
         registry.providers().iter().cloned().map(StartupOption::Existing).collect::<Vec<_>>();
-    options.push(StartupOption::CreateOpenAi);
+    options.push(StartupOption::CreateProvider);
     options.push(StartupOption::Bootstrap);
     options
 }
@@ -1199,11 +1213,14 @@ fn selection_from_binding(
 ) -> Option<ProviderLaunchChoice> {
     match binding {
         SessionProviderBinding::Bootstrap => Some(ProviderLaunchChoice::Bootstrap),
-        SessionProviderBinding::Provider { name, model, base_url } => registry
+        SessionProviderBinding::Provider { name, model, base_url, protocol } => registry
             .providers()
             .iter()
             .find(|provider| {
-                provider.name == *name && provider.model == *model && provider.base_url == *base_url
+                provider.name == *name
+                    && provider.model == *model
+                    && provider.base_url == *base_url
+                    && provider.kind.protocol_name() == protocol.as_str()
             })
             .cloned()
             .map(ProviderLaunchChoice::OpenAi),
@@ -1221,6 +1238,13 @@ fn resolve_remembered_selection(
     match selection_from_binding(&binding, registry) {
         Some(selection) => (Some(selection), None),
         None => (None, Some("当前会话记住的 provider 已缺失或配置已变化，请重新选择。".into())),
+    }
+}
+
+fn provider_label_prefix(kind: &ProviderKind) -> &'static str {
+    match kind {
+        ProviderKind::OpenAiResponses => "openai-responses",
+        ProviderKind::OpenAiChatCompletions => "openai-chat",
     }
 }
 
@@ -1399,6 +1423,7 @@ fn draw_messages(frame: &mut ratatui::Frame<'_>, area: Rect, state: &mut TuiStat
     state.messages.draw(frame, area);
 }
 
+#[cfg(test)]
 struct MessageViewForTest {
     lines: Vec<Line<'static>>,
     footer: Option<Line<'static>>,
@@ -1438,7 +1463,8 @@ fn draw_input_bar(frame: &mut ratatui::Frame<'_>, area: Rect, state: &TuiState) 
     } else {
         state.status.clone().unwrap_or_else(|| "就绪".into())
     };
-    let status_style = if state.messages.processing { theme::spinner_style() } else { theme::dim_style() };
+    let status_style =
+        if state.messages.processing { theme::spinner_style() } else { theme::dim_style() };
 
     // Build 3 lines: input | status bar | hints
     let status_bar = if state.messages.processing {
@@ -1533,13 +1559,6 @@ fn tool_header_line(tool_name: &str, style: Style) -> Line<'static> {
     ])
 }
 
-fn separator_line(width: u16) -> Line<'static> {
-    padded_plain_line(Line::from(Span::styled(
-        "─".repeat(width.min(60) as usize),
-        theme::separator_style(),
-    )))
-}
-
 fn half_gap_line(width: u16) -> Line<'static> {
     let _ = width;
     padded_plain_line(Line::default())
@@ -1576,71 +1595,102 @@ fn animated_status_line(text: &str, tick: usize) -> Line<'static> {
 
 fn turn_lines(turn: &TurnLifecycle, width: u16) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    let has_assistant_content =
-        turn.assistant_message.as_ref().is_some_and(|assistant| !assistant.trim().is_empty());
-    let has_tool_section = !turn.tool_invocations.is_empty();
-    let has_thinking_section = turn.thinking.is_some();
-    lines.extend(user_block_lines(&turn.user_message, width));
+    let user_message = truncate_message_for_display(&turn.user_message);
+    lines.extend(user_block_lines(&user_message, width));
 
-    if let Some(thinking) = &turn.thinking {
-        ensure_blank_line(&mut lines);
-        lines.extend(padded_plain_lines(inline_thinking_lines(thinking)));
+    let has_body_blocks = !turn.blocks.is_empty()
+        || turn.thinking.is_some()
+        || !turn.tool_invocations.is_empty()
+        || turn.assistant_message.as_ref().is_some_and(|value| !value.trim().is_empty())
+        || turn.failure_message.is_some();
+    if has_body_blocks {
+        lines.push(Line::default());
     }
 
-    for invocation in &turn.tool_invocations {
-        ensure_blank_line(&mut lines);
-        let tool_name = &invocation.call.tool_name;
-        match &invocation.outcome {
-            agent_runtime::ToolInvocationOutcome::Succeeded { result } => {
-                lines.push(padded_plain_line(tool_header_line(tool_name, theme::tool_style())));
-                lines.extend(padded_plain_lines(prefixed_markdown_lines(
-                    &result.content,
-                    "  └ ",
-                    "    ",
-                    theme::dim_style(),
+    if !turn.blocks.is_empty() {
+        for block in &turn.blocks {
+            if lines.last().is_some_and(|line| !is_blank_line(line)) {
+                ensure_blank_line(&mut lines);
+            }
+            lines.extend(turn_block_lines(block, width));
+        }
+    } else {
+        if let Some(thinking) = &turn.thinking {
+            ensure_blank_line(&mut lines);
+            lines.extend(padded_plain_lines(inline_thinking_lines(&truncate_message_for_display(
+                thinking,
+            ))));
+        }
+
+        for invocation in &turn.tool_invocations {
+            ensure_blank_line(&mut lines);
+            lines.extend(tool_invocation_lines(invocation));
+        }
+
+        if let Some(assistant) = &turn.assistant_message {
+            if !assistant.trim().is_empty() {
+                ensure_blank_line(&mut lines);
+                lines.extend(padded_plain_lines(markdown_lines(
+                    &truncate_message_for_display(assistant),
+                    theme::assistant_message_style(),
                 )));
             }
-            agent_runtime::ToolInvocationOutcome::Failed { message } => {
-                lines
-                    .push(padded_plain_line(tool_header_line(tool_name, theme::tool_fail_style())));
-                lines.push(padded_plain_line(Line::from(Span::styled(
-                    format!("  └ [失败] {message}"),
-                    theme::fail_style(),
-                ))));
-            }
         }
-    }
 
-    if has_tool_section {
-        if has_assistant_content {
-            ensure_blank_line(&mut lines);
-            lines.push(separator_line(width));
+        if let Some(failure) = &turn.failure_message {
+            lines.push(padded_plain_line(Line::from(Span::styled(
+                format!("[失败] {}", truncate_message_for_display(failure)),
+                theme::fail_style(),
+            ))));
         }
-    }
-
-    if let Some(assistant) = &turn.assistant_message {
-        if assistant.trim().is_empty() {
-            return lines;
-        }
-        if has_tool_section || has_thinking_section {
-            ensure_blank_line(&mut lines);
-        } else {
-            lines.push(half_gap_line(width));
-        }
-        lines.extend(padded_plain_lines(markdown_lines(
-            assistant,
-            theme::assistant_message_style(),
-        )));
-    }
-
-    if let Some(failure) = &turn.failure_message {
-        lines.push(padded_plain_line(Line::from(Span::styled(
-            format!("[失败] {failure}"),
-            theme::fail_style(),
-        ))));
     }
 
     lines
+}
+
+fn turn_block_lines(block: &TurnBlock, _width: u16) -> Vec<Line<'static>> {
+    match block {
+        TurnBlock::Thinking { content } => {
+            padded_plain_lines(inline_thinking_lines(&truncate_message_for_display(content)))
+        }
+        TurnBlock::Assistant { content } => padded_plain_lines(markdown_lines(
+            &truncate_message_for_display(content),
+            theme::assistant_message_style(),
+        )),
+        TurnBlock::ToolInvocation { invocation } => tool_invocation_lines(invocation),
+        TurnBlock::Failure { message } => vec![padded_plain_line(Line::from(Span::styled(
+            format!("[失败] {}", truncate_message_for_display(message)),
+            theme::fail_style(),
+        )))],
+    }
+}
+
+fn tool_invocation_lines(
+    invocation: &agent_runtime::ToolInvocationLifecycle,
+) -> Vec<Line<'static>> {
+    let tool_name = &invocation.call.tool_name;
+    match &invocation.outcome {
+        agent_runtime::ToolInvocationOutcome::Succeeded { result } => {
+            let mut lines =
+                vec![padded_plain_line(tool_header_line(tool_name, theme::tool_style()))];
+            lines.extend(padded_plain_lines(prefixed_markdown_lines(
+                &truncate_message_for_display(&result.content),
+                "  └ ",
+                "    ",
+                theme::dim_style(),
+            )));
+            lines
+        }
+        agent_runtime::ToolInvocationOutcome::Failed { message } => {
+            vec![
+                padded_plain_line(tool_header_line(tool_name, theme::tool_fail_style())),
+                padded_plain_line(Line::from(Span::styled(
+                    format!("  └ [失败] {}", truncate_message_for_display(message)),
+                    theme::fail_style(),
+                ))),
+            ]
+        }
+    }
 }
 
 fn ensure_blank_line(lines: &mut Vec<Line<'static>>) {
@@ -1676,21 +1726,21 @@ fn user_block_lines(content: &str, width: u16) -> Vec<Line<'static>> {
     lines
 }
 
-fn user_padding_line(width: u16) -> Line<'static> {
-    Line::from(Span::styled("\u{00A0}".repeat(width.max(1) as usize), theme::user_message_style()))
-}
-
-fn clamp_streaming_lines(lines: Vec<Line<'static>>) -> Vec<Line<'static>> {
-    if lines.len() <= STREAMING_PINNED_MAX_LINES {
-        return lines;
+fn truncate_message_for_display(content: &str) -> String {
+    let char_count = content.chars().count();
+    if char_count <= MAX_RENDERED_MESSAGE_CHARS {
+        return content.to_string();
     }
 
-    let keep_tail = STREAMING_PINNED_MAX_LINES.saturating_sub(1);
-    let start = lines.len().saturating_sub(keep_tail);
-    let mut compact = Vec::with_capacity(STREAMING_PINNED_MAX_LINES);
-    compact.push(padded_plain_line(Line::from(Span::styled("…", theme::dim_style()))));
-    compact.extend(lines.into_iter().skip(start));
-    compact
+    let preview = content.chars().take(MAX_RENDERED_MESSAGE_CHARS).collect::<String>();
+    format!(
+        "{preview}\n\n… (message too long, showing first {} characters)",
+        MAX_RENDERED_MESSAGE_CHARS
+    )
+}
+
+fn user_padding_line(width: u16) -> Line<'static> {
+    Line::from(Span::styled("\u{00A0}".repeat(width.max(1) as usize), theme::user_message_style()))
 }
 
 fn line_display_width(line: &Line<'_>) -> usize {
@@ -1720,6 +1770,39 @@ fn hash_turns(turns: &[TurnLifecycle], hasher: &mut DefaultHasher) {
         turn.finished_at_ms.hash(hasher);
         turn.source_entry_ids.hash(hasher);
         turn.user_message.hash(hasher);
+        for block in &turn.blocks {
+            match block {
+                TurnBlock::Thinking { content } => {
+                    1u8.hash(hasher);
+                    content.hash(hasher);
+                }
+                TurnBlock::Assistant { content } => {
+                    2u8.hash(hasher);
+                    content.hash(hasher);
+                }
+                TurnBlock::ToolInvocation { invocation } => {
+                    3u8.hash(hasher);
+                    invocation.call.tool_name.hash(hasher);
+                    invocation.call.invocation_id.hash(hasher);
+                    invocation.call.arguments.to_string().hash(hasher);
+                    match &invocation.outcome {
+                        agent_runtime::ToolInvocationOutcome::Succeeded { result } => {
+                            1u8.hash(hasher);
+                            result.invocation_id.hash(hasher);
+                            result.content.hash(hasher);
+                        }
+                        agent_runtime::ToolInvocationOutcome::Failed { message } => {
+                            2u8.hash(hasher);
+                            message.hash(hasher);
+                        }
+                    }
+                }
+                TurnBlock::Failure { message } => {
+                    4u8.hash(hasher);
+                    message.hash(hasher);
+                }
+            }
+        }
         turn.assistant_message.hash(hasher);
         turn.thinking.hash(hasher);
         turn.failure_message.hash(hasher);
@@ -1797,10 +1880,15 @@ fn draw_provider_selection(
         let content = match option {
             StartupOption::Existing(profile) => {
                 let mark = if active_name == Some(profile.name.as_str()) { " *当前" } else { "" };
-                format!("{prefix}使用 provider: {} ({}){mark}", profile.name, profile.model)
+                format!(
+                    "{prefix}使用 provider: {} ({}/{}){mark}",
+                    profile.name,
+                    provider_label_prefix(&profile.kind),
+                    profile.model
+                )
             }
-            StartupOption::CreateOpenAi => {
-                format!("{prefix}创建新的 OpenAI Responses provider")
+            StartupOption::CreateProvider => {
+                format!("{prefix}创建新的 OpenAI provider")
             }
             StartupOption::Bootstrap => format!("{prefix}使用本地 bootstrap"),
         };
@@ -1818,6 +1906,9 @@ fn draw_provider_creation(
     step: &CreateProviderStep,
 ) {
     let prompt = match step {
+        CreateProviderStep::Protocol => {
+            "请选择协议：1=OpenAI Responses，2=OpenAI 兼容 Chat Completions"
+        }
         CreateProviderStep::Name => "请输入 provider 名称",
         CreateProviderStep::Model => "请输入模型名称",
         CreateProviderStep::ApiKey => "请输入 API Key",
@@ -1849,7 +1940,7 @@ impl Drop for TerminalRestoreGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
         let mut stdout = io::stdout();
-        let _ = execute!(stdout, DisableMouseCapture, LeaveAlternateScreen);
+        let _ = execute!(stdout, DisableMouseCapture);
     }
 }
 
@@ -1886,7 +1977,7 @@ mod tests {
         let registry = provider_registry::ProviderRegistry::default();
         let options = startup_options(&registry);
 
-        assert!(matches!(options[0], StartupOption::CreateOpenAi));
+        assert!(matches!(options[0], StartupOption::CreateProvider));
         assert!(matches!(options[1], StartupOption::Bootstrap));
     }
 
@@ -1913,6 +2004,7 @@ mod tests {
             name: "main".into(),
             model: "gpt-4.1-mini".into(),
             base_url: "https://api.openai.com/v1".into(),
+            protocol: "openai-responses".into(),
         });
 
         let (selection, notice) = resolve_remembered_selection(&tape, &registry);
@@ -1935,6 +2027,7 @@ mod tests {
             finished_at_ms: 2,
             source_entry_ids: vec![1, 2, 3],
             user_message: "你好".into(),
+            blocks: vec![],
             assistant_message: Some("已收到：你好".into()),
             thinking: None,
             tool_invocations: vec![],
@@ -1988,6 +2081,7 @@ mod tests {
             finished_at_ms: 2,
             source_entry_ids: vec![1],
             user_message: "请总结下面内容".into(),
+            blocks: vec![],
             assistant_message: Some(
                 "# 标题\n\n- 第一项\n- 第二项\n\n`命令`\n\n```rust\nfn main() {}\n```".into(),
             ),
@@ -2006,6 +2100,29 @@ mod tests {
     }
 
     #[test]
+    fn turn_lines_超长助手消息会截断并提示() {
+        let turn = agent_runtime::TurnLifecycle {
+            turn_id: "turn-1".into(),
+            started_at_ms: 1,
+            finished_at_ms: 2,
+            source_entry_ids: vec![1],
+            user_message: "请输出长消息".into(),
+            blocks: vec![],
+            assistant_message: Some("甲".repeat(super::MAX_RENDERED_MESSAGE_CHARS + 50)),
+            thinking: None,
+            tool_invocations: vec![],
+            failure_message: None,
+        };
+
+        let lines = super::turn_lines(&turn, 60);
+        let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+
+        assert!(text.contains("甲甲甲"));
+        assert!(text.contains("message too long"));
+        assert!(!text.contains(&"甲".repeat(super::MAX_RENDERED_MESSAGE_CHARS + 10)));
+    }
+
+    #[test]
     fn turn_lines_会渲染_thinking_块() {
         let turn = agent_runtime::TurnLifecycle {
             turn_id: "turn-1".into(),
@@ -2013,6 +2130,7 @@ mod tests {
             finished_at_ms: 2,
             source_entry_ids: vec![1],
             user_message: "请分析".into(),
+            blocks: vec![],
             assistant_message: Some("结论".into()),
             thinking: Some("先分析上下文，再给出答案".into()),
             tool_invocations: vec![],
@@ -2035,6 +2153,7 @@ mod tests {
             finished_at_ms: 2,
             source_entry_ids: vec![1],
             user_message: "请分析".into(),
+            blocks: vec![],
             assistant_message: Some("正式回答".into()),
             thinking: Some("草拟 **推理**\n与 `代码`".into()),
             tool_invocations: vec![],
@@ -2062,6 +2181,7 @@ mod tests {
             finished_at_ms: 2,
             source_entry_ids: vec![1],
             user_message: "用户消息\n第二行".into(),
+            blocks: vec![],
             assistant_message: Some("助手消息".into()),
             thinking: None,
             tool_invocations: vec![],
@@ -2094,6 +2214,7 @@ mod tests {
             finished_at_ms: 2,
             source_entry_ids: vec![1],
             user_message: "你好".into(),
+            blocks: vec![],
             assistant_message: Some("正式回答".into()),
             thinking: None,
             tool_invocations: vec![],
@@ -2115,6 +2236,7 @@ mod tests {
             finished_at_ms: 2,
             source_entry_ids: vec![1],
             user_message: "用户消息".into(),
+            blocks: vec![],
             assistant_message: Some("助手回复".into()),
             thinking: None,
             tool_invocations: vec![],
@@ -2140,6 +2262,7 @@ mod tests {
             finished_at_ms: 2,
             source_entry_ids: vec![1],
             user_message: "只发一条用户消息".into(),
+            blocks: vec![],
             assistant_message: None,
             thinking: None,
             tool_invocations: vec![],
@@ -2203,6 +2326,7 @@ mod tests {
             finished_at_ms: 2,
             source_entry_ids: vec![1, 2],
             user_message: "哦".into(),
+            blocks: vec![],
             assistant_message: Some("嗯".into()),
             thinking: None,
             tool_invocations: vec![],
@@ -2217,7 +2341,7 @@ mod tests {
         let user_row = rows.iter().position(|row| row.contains('哦')).expect("应渲染用户消息");
         let assistant_row = rows.iter().position(|row| row.contains('嗯')).expect("应渲染助手消息");
 
-        assert!(assistant_row >= user_row + 3);
+        assert!(assistant_row >= user_row + 2);
     }
 
     #[test]
@@ -2360,13 +2484,18 @@ mod tests {
         });
 
         let view = super::message_lines(&state.messages, 60);
-        let footer = view.footer.expect("应有底部状态行");
+        let last_non_empty = view
+            .lines
+            .iter()
+            .rev()
+            .find(|line| !line_text(line).trim().is_empty())
+            .expect("应有底部状态行");
 
-        assert!(line_text(&footer).contains("Thinking"));
+        assert!(line_text(last_non_empty).contains("Thinking"));
     }
 
     #[test]
-    fn 消息视图缓存会复用正文并允许_footer_动画继续更新() {
+    fn 消息视图缓存会复用正文并允许状态行动画继续更新() {
         let mut state = TuiState::new(vec![], None, None, None);
         state.phase = Phase::Chat;
         state.messages.processing = true;
@@ -2380,16 +2509,17 @@ mod tests {
         let first = super::message_lines(&state.messages, 60);
         let cached_key = state.messages.history_cache.as_ref().map(|c| c.content_key);
         let first_lines = first.lines.iter().map(line_text).collect::<Vec<_>>();
-        let first_footer = line_text(&first.footer.expect("应有 footer"));
-
-        state.messages.spinner_tick = 3;
+        let first_status = first.lines.last().expect("应有状态行").clone();
+        state.messages.spinner_tick = super::STATUS_ANIMATION_FRAME_DIVISOR;
         let second = super::message_lines(&state.messages, 60);
         let second_lines = second.lines.iter().map(line_text).collect::<Vec<_>>();
-        let second_footer = line_text(&second.footer.expect("应有 footer"));
+        let second_status = second.lines.last().expect("应有状态行").clone();
 
         assert_eq!(cached_key, state.messages.history_cache.as_ref().map(|c| c.content_key));
         assert_eq!(first_lines, second_lines);
-        assert_eq!(first_footer, second_footer);
+        assert_ne!(first_status, second_status);
+        assert!(first.footer.is_none());
+        assert!(second.footer.is_none());
     }
 
     #[test]
@@ -2417,7 +2547,7 @@ mod tests {
     }
 
     #[test]
-    fn 流式区域会限制最大行数以固定在输入框上方() {
+    fn 流式区域会并入消息列表而不是单独截断() {
         let mut state = TuiState::new(vec![], None, None, None);
         state.phase = Phase::Chat;
         state.messages.processing = true;
@@ -2431,9 +2561,32 @@ mod tests {
         let lines = super::message_lines(&state.messages, 60).lines;
         let rendered = lines.iter().map(line_text).collect::<Vec<_>>();
 
-        assert!(rendered.len() <= super::STREAMING_PINNED_MAX_LINES);
-        assert!(rendered.iter().any(|line| line.contains('…')));
+        assert!(rendered.iter().any(|line| line.contains("第1行")));
         assert!(rendered.iter().any(|line| line.contains("第12行")));
+        assert!(rendered.iter().any(|line| line.contains("Generating")));
+    }
+
+    #[test]
+    fn 流式超长消息会截断并提示() {
+        let mut state = TuiState::new(vec![], None, None, None);
+        state.phase = Phase::Chat;
+        state.messages.processing = true;
+        state.messages.streaming = Some(super::StreamingTurn {
+            user_message: "用户输入".into(),
+            status_text: Some("Generating".into()),
+            thinking: String::new(),
+            text: "乙".repeat(super::MAX_RENDERED_MESSAGE_CHARS + 80),
+        });
+
+        let rendered = super::message_lines(&state.messages, 60)
+            .lines
+            .iter()
+            .map(line_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("message too long"));
+        assert!(!rendered.contains(&"乙".repeat(super::MAX_RENDERED_MESSAGE_CHARS + 20)));
     }
 
     #[test]
@@ -2449,6 +2602,7 @@ mod tests {
             finished_at_ms: 2,
             source_entry_ids: vec![1],
             user_message: "第一行\n第二行\n第三行\n第四行\n第五行".into(),
+            blocks: vec![],
             assistant_message: Some("回复\n第二行\n第三行".into()),
             thinking: None,
             tool_invocations: vec![],
@@ -2473,6 +2627,7 @@ mod tests {
                 finished_at_ms: 2,
                 source_entry_ids: vec![1],
                 user_message: "历史提问".into(),
+                blocks: vec![],
                 assistant_message: Some(
                     "历史回答第一行\n历史回答第二行\n历史回答第三行\n历史回答第四行".into(),
                 ),
@@ -2523,6 +2678,7 @@ mod tests {
             finished_at_ms: 2,
             source_entry_ids: vec![1],
             user_message: "历史消息".into(),
+            blocks: vec![],
             assistant_message: Some("历史回复".into()),
             thinking: None,
             tool_invocations: vec![],
@@ -2555,6 +2711,7 @@ mod tests {
             finished_at_ms: 2,
             source_entry_ids: vec![1],
             user_message: "测试".into(),
+            blocks: vec![],
             assistant_message: Some("第一段\n\n第二段".into()),
             thinking: None,
             tool_invocations: vec![],
@@ -2622,6 +2779,7 @@ mod tests {
             finished_at_ms: 2,
             source_entry_ids: vec![1],
             user_message: "请继续".into(),
+            blocks: vec![],
             assistant_message: Some("正式回答".into()),
             thinking: None,
             tool_invocations: vec![agent_runtime::ToolInvocationLifecycle {
@@ -2639,11 +2797,45 @@ mod tests {
         assert!(text.contains(" • tool search_code "));
         assert!(text.contains("   └ 搜索结果 "));
         assert!(text.contains("     第二行 "));
-        assert!(text.contains("────────"));
-
-        let tool_index = text.find("• tool search_code").expect("应有工具调用");
         let assistant_index = text.find("正式回答").expect("应有回答正文");
+        let tool_index = text.find(" • tool search_code ").expect("应有工具块");
         assert!(tool_index < assistant_index);
+    }
+
+    #[test]
+    fn turn_lines_会按顺序块交错渲染消息() {
+        let call = agent_core::ToolCall::new("search_code").with_invocation_id("call-1");
+        let invocation = agent_runtime::ToolInvocationLifecycle {
+            call: call.clone(),
+            outcome: agent_runtime::ToolInvocationOutcome::Succeeded {
+                result: agent_core::ToolResult::from_call(&call, "第一次工具结果"),
+            },
+        };
+        let turn = agent_runtime::TurnLifecycle {
+            turn_id: "turn-1".into(),
+            started_at_ms: 1,
+            finished_at_ms: 2,
+            source_entry_ids: vec![1],
+            user_message: "请继续".into(),
+            blocks: vec![
+                agent_runtime::TurnBlock::Thinking { content: "先想一轮".into() },
+                agent_runtime::TurnBlock::ToolInvocation { invocation },
+                agent_runtime::TurnBlock::Assistant { content: "再给回答".into() },
+            ],
+            assistant_message: Some("再给回答".into()),
+            thinking: Some("先想一轮".into()),
+            tool_invocations: vec![],
+            failure_message: None,
+        };
+
+        let text =
+            super::turn_lines(&turn, 60).iter().map(line_text).collect::<Vec<_>>().join("\n");
+
+        let thinking_index = text.find("Thinking: 先想一轮").expect("应有 thinking");
+        let tool_index = text.find(" • tool search_code ").expect("应有工具块");
+        let answer_index = text.find("再给回答").expect("应有回答块");
+        assert!(thinking_index < tool_index);
+        assert!(tool_index < answer_index);
     }
 
     #[test]
@@ -2655,6 +2847,7 @@ mod tests {
             finished_at_ms: 2,
             source_entry_ids: vec![1],
             user_message: "继续".into(),
+            blocks: vec![],
             assistant_message: None,
             thinking: None,
             tool_invocations: vec![agent_runtime::ToolInvocationLifecycle {
@@ -2684,6 +2877,7 @@ mod tests {
             finished_at_ms: 2,
             source_entry_ids: vec![1],
             user_message: "请继续".into(),
+            blocks: vec![],
             assistant_message: None,
             thinking: None,
             tool_invocations: vec![agent_runtime::ToolInvocationLifecycle {
@@ -2813,6 +3007,7 @@ mod tests {
             finished_at_ms: 2,
             source_entry_ids: vec![1],
             user_message: "问题".into(),
+            blocks: vec![],
             assistant_message: Some(
                 "这是一个非常非常非常非常非常非常长的回答，用于触发自动换行并验证滚动高度计算。"
                     .into(),
@@ -2940,6 +3135,7 @@ mod tests {
                 finished_at_ms: 2,
                 source_entry_ids: vec![1, 2],
                 user_message: "hello world".into(),
+                blocks: vec![],
                 assistant_message: Some("Hello world!".into()),
                 thinking: None,
                 tool_invocations: vec![],
@@ -2951,6 +3147,7 @@ mod tests {
                 finished_at_ms: 4,
                 source_entry_ids: vec![3, 4],
                 user_message: "你能干什么".into(),
+                blocks: vec![],
                 assistant_message: Some("我可以帮你做很多事，常见的有：\n\n1. 回答问题\n2. 写作和改写\n3. 编程相关\n4. 学习和办公\n5. 中文交流\n\n如果你愿意，我也可以直接演示一下。".into()),
                 thinking: None,
                 tool_invocations: vec![],
@@ -2962,6 +3159,7 @@ mod tests {
                 finished_at_ms: 6,
                 source_entry_ids: vec![5, 6],
                 user_message: "哦".into(),
+                blocks: vec![],
                 assistant_message: Some("嗯，我在。\n你想聊点什么，或者要我帮你做什么？".into()),
                 thinking: None,
                 tool_invocations: vec![],

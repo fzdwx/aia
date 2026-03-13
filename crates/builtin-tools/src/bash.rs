@@ -89,15 +89,10 @@ impl Tool for BashTool {
 
         let stderr_buf = stderr_thread.join().unwrap_or_default();
         if !stderr_buf.is_empty() {
-            output(ToolOutputDelta {
-                stream: ToolOutputStream::Stderr,
-                text: stderr_buf.clone(),
-            });
+            output(ToolOutputDelta { stream: ToolOutputStream::Stderr, text: stderr_buf.clone() });
         }
 
-        let status = child
-            .wait()
-            .map_err(|e| CoreError::new(format!("bash wait failed: {e}")))?;
+        let status = child.wait().map_err(|e| CoreError::new(format!("bash wait failed: {e}")))?;
         let exit_code = status.code().unwrap_or(-1);
 
         let mut result_text = stdout_buf;

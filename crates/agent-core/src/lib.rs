@@ -33,6 +33,40 @@ impl Message {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum ConversationItem {
+    Message(Message),
+    ToolCall(ToolCall),
+    ToolResult(ToolResult),
+}
+
+impl ConversationItem {
+    pub fn message(role: Role, content: impl Into<String>) -> Self {
+        Self::Message(Message::new(role, content))
+    }
+
+    pub fn as_message(&self) -> Option<&Message> {
+        match self {
+            Self::Message(message) => Some(message),
+            Self::ToolCall(_) | Self::ToolResult(_) => None,
+        }
+    }
+
+    pub fn as_tool_call(&self) -> Option<&ToolCall> {
+        match self {
+            Self::ToolCall(call) => Some(call),
+            Self::Message(_) | Self::ToolResult(_) => None,
+        }
+    }
+
+    pub fn as_tool_result(&self) -> Option<&ToolResult> {
+        match self {
+            Self::ToolResult(result) => Some(result),
+            Self::Message(_) | Self::ToolCall(_) => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ModelDisposition {
     Balanced,
     Precise,
@@ -109,6 +143,8 @@ pub struct ToolCall {
     pub invocation_id: String,
     pub tool_name: String,
     pub arguments: Value,
+    #[serde(default)]
+    pub response_id: Option<String>,
 }
 
 impl ToolCall {
@@ -117,6 +153,7 @@ impl ToolCall {
             invocation_id: next_tool_invocation_id(),
             tool_name: tool_name.into(),
             arguments: Value::Object(serde_json::Map::new()),
+            response_id: None,
         }
     }
 
@@ -136,6 +173,11 @@ impl ToolCall {
     /// Set the entire arguments value (must be a JSON object).
     pub fn with_arguments_value(mut self, arguments: Value) -> Self {
         self.arguments = arguments;
+        self
+    }
+
+    pub fn with_response_id(mut self, response_id: impl Into<String>) -> Self {
+        self.response_id = Some(response_id.into());
         self
     }
 }
@@ -166,6 +208,7 @@ impl PartialEq for ToolCall {
         self.invocation_id == other.invocation_id
             && self.tool_name == other.tool_name
             && self.arguments == other.arguments
+            && self.response_id == other.response_id
     }
 }
 
@@ -176,6 +219,8 @@ pub struct ToolResult {
     pub invocation_id: String,
     pub tool_name: String,
     pub content: String,
+    #[serde(default)]
+    pub response_id: Option<String>,
 }
 
 impl ToolResult {
@@ -184,7 +229,20 @@ impl ToolResult {
             invocation_id: call.invocation_id.clone(),
             tool_name: call.tool_name.clone(),
             content: content.into(),
+            response_id: call.response_id.clone(),
         }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ModelCheckpoint {
+    pub protocol: String,
+    pub token: String,
+}
+
+impl ModelCheckpoint {
+    pub fn new(protocol: impl Into<String>, token: impl Into<String>) -> Self {
+        Self { protocol: protocol.into(), token: token.into() }
     }
 }
 
@@ -198,11 +256,12 @@ pub enum CompletionSegment {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Completion {
     pub segments: Vec<CompletionSegment>,
+    pub checkpoint: Option<ModelCheckpoint>,
 }
 
 impl Completion {
     pub fn text(content: impl Into<String>) -> Self {
-        Self { segments: vec![CompletionSegment::Text(content.into())] }
+        Self { segments: vec![CompletionSegment::Text(content.into())], checkpoint: None }
     }
 
     pub fn plain_text(&self) -> String {
@@ -233,7 +292,8 @@ impl Completion {
 pub struct CompletionRequest {
     pub model: ModelIdentity,
     pub instructions: Option<String>,
-    pub conversation: Vec<Message>,
+    pub conversation: Vec<ConversationItem>,
+    pub resume_checkpoint: Option<ModelCheckpoint>,
     pub available_tools: Vec<ToolDefinition>,
 }
 
@@ -302,11 +362,7 @@ impl ToolExecutionContext {
 pub enum StreamEvent {
     ThinkingDelta { text: String },
     TextDelta { text: String },
-    ToolOutputDelta {
-        invocation_id: String,
-        stream: ToolOutputStream,
-        text: String,
-    },
+    ToolOutputDelta { invocation_id: String, stream: ToolOutputStream, text: String },
     Log { text: String },
     Done,
 }
@@ -462,6 +518,7 @@ mod tests {
                 CompletionSegment::ToolUse(ToolCall::new("search")),
                 CompletionSegment::Text("第二行".into()),
             ],
+            checkpoint: None,
         };
 
         assert_eq!(completion.plain_text(), "第一行\n第二行");
@@ -545,7 +602,11 @@ mod tests {
 
     #[test]
     fn resolve_path_无_workspace_root_时返回原样() {
-        let ctx = ToolExecutionContext { run_id: "r1".into(), workspace_root: None, abort: AbortSignal::new() };
+        let ctx = ToolExecutionContext {
+            run_id: "r1".into(),
+            workspace_root: None,
+            abort: AbortSignal::new(),
+        };
         assert_eq!(ctx.resolve_path("src/main.rs"), PathBuf::from("src/main.rs"));
     }
 
@@ -559,8 +620,7 @@ mod tests {
         }
 
         fn definition(&self) -> ToolDefinition {
-            ToolDefinition::new("echo", "回显输入")
-                .with_parameter("text", "要回显的文本", true)
+            ToolDefinition::new("echo", "回显输入").with_parameter("text", "要回显的文本", true)
         }
 
         fn call(
@@ -589,7 +649,11 @@ mod tests {
         registry.register(Box::new(EchoTool));
 
         let call = ToolCall::new("echo").with_argument("text", "你好");
-        let ctx = ToolExecutionContext { run_id: "r1".into(), workspace_root: None, abort: AbortSignal::new() };
+        let ctx = ToolExecutionContext {
+            run_id: "r1".into(),
+            workspace_root: None,
+            abort: AbortSignal::new(),
+        };
         let result = ToolExecutor::call(&registry, &call, &mut |_| {}, &ctx).unwrap();
         assert_eq!(result.content, "你好");
     }
@@ -598,7 +662,11 @@ mod tests {
     fn 注册表未知工具返回错误() {
         let registry = ToolRegistry::new();
         let call = ToolCall::new("nonexistent");
-        let ctx = ToolExecutionContext { run_id: "r1".into(), workspace_root: None, abort: AbortSignal::new() };
+        let ctx = ToolExecutionContext {
+            run_id: "r1".into(),
+            workspace_root: None,
+            abort: AbortSignal::new(),
+        };
         let err = ToolExecutor::call(&registry, &call, &mut |_| {}, &ctx).unwrap_err();
         assert!(err.to_string().contains("unknown tool"));
     }

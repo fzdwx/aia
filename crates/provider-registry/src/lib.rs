@@ -9,6 +9,16 @@ pub fn default_registry_path() -> std::path::PathBuf {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ProviderKind {
     OpenAiResponses,
+    OpenAiChatCompletions,
+}
+
+impl ProviderKind {
+    pub fn protocol_name(&self) -> &'static str {
+        match self {
+            Self::OpenAiResponses => "openai-responses",
+            Self::OpenAiChatCompletions => "openai-chat-completions",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -30,6 +40,21 @@ impl ProviderProfile {
         Self {
             name: name.into(),
             kind: ProviderKind::OpenAiResponses,
+            base_url: base_url.into(),
+            api_key: api_key.into(),
+            model: model.into(),
+        }
+    }
+
+    pub fn openai_chat_completions(
+        name: impl Into<String>,
+        base_url: impl Into<String>,
+        api_key: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            kind: ProviderKind::OpenAiChatCompletions,
             base_url: base_url.into(),
             api_key: api_key.into(),
             model: model.into(),
@@ -188,5 +213,20 @@ mod tests {
         let error = registry.set_active("missing").expect_err("应当失败");
 
         assert!(error.to_string().contains("不存在"));
+    }
+
+    #[test]
+    fn 可构造_openai_兼容聊天补全_provider() {
+        let provider = ProviderProfile::openai_chat_completions(
+            "compat",
+            "http://127.0.0.1:8000/v1",
+            "secret",
+            "minum-security-llm",
+        );
+
+        assert_eq!(provider.kind, super::ProviderKind::OpenAiChatCompletions);
+        assert_eq!(provider.name, "compat");
+        assert_eq!(provider.base_url, "http://127.0.0.1:8000/v1");
+        assert_eq!(provider.model, "minum-security-llm");
     }
 }

@@ -77,7 +77,7 @@ where
         return Err(error.into());
     }
     if let Some(error) = result.turn_error {
-        return Err(error.into());
+        writeln!(writer, "[状态] 当前轮失败，但会话继续：{error}")?;
     }
     Ok(())
 }
@@ -279,7 +279,7 @@ mod tests {
     }
 
     #[test]
-    fn agent_loop_失败时会输出失败事件() {
+    fn agent_loop_失败时会输出失败事件且继续交互() {
         struct FailingCliModel;
 
         impl agent_core::LanguageModel for FailingCliModel {
@@ -299,7 +299,7 @@ mod tests {
             agent_core::ModelDisposition::Balanced,
         );
         let runtime = AgentRuntime::new(FailingCliModel, BootstrapTools, identity);
-        let mut reader = Cursor::new("第一句\n".as_bytes());
+        let mut reader = Cursor::new("第一句\n退出\n".as_bytes());
         let mut writer = Vec::new();
 
         let result = run_agent_loop(
@@ -312,11 +312,13 @@ mod tests {
             "failing",
         );
 
-        assert!(result.is_err());
+        assert!(result.is_ok());
         let output = String::from_utf8(writer).expect("输出是有效 utf-8");
         assert!(output.contains("当前模型：local/failing"));
         assert!(output.contains("[轮次] turn-"));
         assert!(output.contains("[用户] 第一句"));
         assert!(output.contains("[失败] 模型执行失败：故意失败"));
+        assert!(output.contains("[状态] 当前轮失败，但会话继续：模型执行失败：故意失败"));
+        assert!(output.contains("已退出 aia agent loop"));
     }
 }

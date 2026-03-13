@@ -26,7 +26,7 @@ this repository now starts with a library-first rust workspace:
 - `crates/session-tape`: append-only tape with flat entries (`{id, kind, payload, meta, date}` aligned with republic/bub), lightweight anchors, handoff events, query slicing, fork/merge, and jsonl replay snapshots
 - `crates/agent-runtime`: minimal runtime that composes models, tools, and session state
 - `crates/provider-registry`: stores local provider profiles and active selection
-- `crates/openai-adapter`: the first real model adapter, targeting responses-style http interfaces
+- `crates/openai-adapter`: the first real model adapter set, now covering both responses-style and openai-compatible chat-completions-style http interfaces
 - `apps/agent-cli` (binary `aia`): a tiny runnable shell used to verify the core boundaries
 
 `agent-cli` is now split into startup wiring, provider setup, a shared driver layer, loop driving, rendering, and tui modules. when running in a real terminal it prefers a minimal tui; provider selection and the first question now happen inside the tui startup state machine, and the current session remembers the last provider binding unless the user actively presses `F2` during startup to replace it. in non-terminal environments it falls back to the plain text loop, but both paths now share the same driver protocol.
@@ -35,11 +35,21 @@ the shared driver boundary has also been tightened so it no longer leaks cli-spe
 
 on shutdown, the shared driver now only finalizes and persists session state; it no longer injects a hard-coded handoff summary on exit.
 
+the runtime turn semantics now run as an internal multi-step loop instead of a single model call. one user turn can proceed as model → tool execution/results → model continuation until no further tool calls remain or a small step cap is hit. tool failures are recorded as structured failed tool outcomes plus tool-result entries on tape, so the next model step can see what failed instead of aborting the whole session immediately.
+
+the plain text loop now matches the tui failure policy: a failed turn is rendered as status and lifecycle output, but the session itself stays alive so the next user input can continue.
+
 the current tui message flow now renders markdown content into terminal lines and keeps a single scrollable message list with keyboard and mouse-wheel scrolling. submitted user messages are echoed optimistically before the round completes, streaming status stays pinned to the bottom of the message pane above the input bar, and the list auto-follows to the latest content unless the user explicitly scrolls upward.
 
 the tui now also has a minimal theme system, with `aura` as the first built-in theme. aura currently drives assistant text, user message bubbles, thinking text, tool blocks, separators, and footer status animation through semantic style mappings instead of scattered hard-coded colors.
 
 on startup, `aia` now enters a terminal provider flow: create a provider, select a saved provider, or fall back to the local bootstrap model. local provider data is stored in `.aia/providers.json`, and `.aia/` is ignored to reduce accidental commits.
+
+provider profiles now persist the exact protocol kind they use, so `aia` can distinguish the same endpoint/model under different wire protocols. the startup flows can create either an OpenAI Responses provider or an OpenAI-compatible Chat Completions provider, and remembered session bindings now restore the correct protocol instead of guessing from name/model/base url alone.
+
+the model-facing continuation context is no longer rebuilt only from flattened `role/content` messages. tool calls and tool results are now preserved as structured conversation items through `agent-core` → `session-tape` → `agent-runtime` → `openai-adapter`, so follow-up tool turns can be mapped back into protocol-native request shapes instead of lossy plain text.
+
+for the OpenAI Responses path specifically, `aia` now persists a session-local continuation checkpoint from each successful response and resumes later turns with `previous_response_id` plus only the incremental local input. that means both same-turn tool outputs and later user follow-ups can continue the same remote response chain without replaying the full conversation payload each time.
 
 session replay data is stored separately in `.aia/session.jsonl` as jsonl snapshots of flat tape entries (`{id, kind, payload, meta, date}`). the tape core now uses a single flat entry model aligned with republic, bub, and tape.systems — each entry carries its kind as a string, its payload as json, and optional metadata including run_id for turn grouping. legacy session files in the old `{id, fact, date}` format are auto-converted on load. the shared tape core also exposes named-tape storage, query slicing, and append-only fork/merge semantics.
 

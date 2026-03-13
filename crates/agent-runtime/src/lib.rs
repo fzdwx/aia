@@ -6,12 +6,14 @@ use std::{
 };
 
 use agent_core::{
-    AbortSignal, Completion, CompletionRequest, CompletionSegment, LanguageModel, Message,
-    ModelIdentity, Role, StreamEvent, ToolCall, ToolDefinition, ToolExecutionContext, ToolExecutor,
-    ToolOutputDelta, ToolResult,
+    AbortSignal, Completion, CompletionRequest, CompletionSegment, ConversationItem, LanguageModel,
+    Message, ModelIdentity, Role, StreamEvent, ToolCall, ToolDefinition, ToolExecutionContext,
+    ToolExecutor, ToolOutputDelta, ToolResult,
 };
 use serde_json::json;
 use session_tape::{Anchor, Handoff, SessionTape, TapeEntry};
+
+const MAX_TURN_STEPS: usize = 8;
 
 pub struct AgentRuntime<M, T> {
     model: M,
@@ -41,6 +43,7 @@ pub struct TurnLifecycle {
     pub finished_at_ms: u128,
     pub source_entry_ids: Vec<u64>,
     pub user_message: String,
+    pub blocks: Vec<TurnBlock>,
     pub assistant_message: Option<String>,
     pub thinking: Option<String>,
     pub tool_invocations: Vec<ToolInvocationLifecycle>,
@@ -51,6 +54,14 @@ pub struct TurnLifecycle {
 pub enum ToolInvocationOutcome {
     Succeeded { result: ToolResult },
     Failed { message: String },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TurnBlock {
+    Thinking { content: String },
+    Assistant { content: String },
+    ToolInvocation { invocation: ToolInvocationLifecycle },
+    Failure { message: String },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -114,258 +125,133 @@ where
         let user_entry_id =
             self.tape.append_entry(TapeEntry::message(&user_message).with_run_id(&turn_id));
         let mut source_entry_ids = vec![user_entry_id];
+        let mut aggregated_thinking = String::new();
+        let mut tool_invocations = Vec::new();
+        let mut blocks = Vec::new();
+        let mut last_assistant_text = None;
+        let mut seen_tool_calls = BTreeMap::new();
         self.publish_event(RuntimeEvent::UserMessage { content: user_message.content.clone() });
-        let view = self.tape.default_view();
-        let mut conversation = Vec::new();
-        if let Some(anchor) = view.origin_anchor.as_ref() {
-            conversation.push(anchor_state_message(anchor));
-        }
-        conversation.extend(view.messages);
+        for _ in 0..MAX_TURN_STEPS {
+            let request = self.build_completion_request();
+            let completion = match self.model.complete_streaming(request, &mut on_delta) {
+                Ok(completion) => completion,
+                Err(error) => {
+                    let runtime_error = RuntimeError::model(error);
+                    self.record_turn_failure(
+                        &turn_id,
+                        started_at_ms,
+                        &mut source_entry_ids,
+                        &user_message.content,
+                        &blocks,
+                        last_assistant_text.clone(),
+                        aggregated_thinking.as_str(),
+                        &tool_invocations,
+                        runtime_error.clone(),
+                    );
+                    return Err(runtime_error);
+                }
+            };
 
-        let request = CompletionRequest {
-            model: self.model_identity.clone(),
-            instructions: self.instructions.clone(),
-            conversation,
-            available_tools: self.visible_tools(),
-        };
+            let assistant_text = completion.plain_text();
+            let mut assistant_entry_id = None;
+            let mut last_step_entry_id = None;
+            let mut saw_tool_calls = false;
 
-        let completion = match self.model.complete_streaming(request, &mut on_delta) {
-            Ok(completion) => completion,
-            Err(error) => {
-                let runtime_error = RuntimeError::model(error);
-                let failure_event_id = self.tape.append_entry(
-                    TapeEntry::event(
-                        "turn_failed",
-                        Some(json!({"message": runtime_error.to_string()})),
-                    )
-                    .with_run_id(&turn_id)
-                    .with_meta("source_entry_ids", json!([user_entry_id])),
-                );
-                source_entry_ids.push(failure_event_id);
-                self.publish_event(RuntimeEvent::TurnFailed { message: runtime_error.to_string() });
+            for segment in &completion.segments {
+                match segment {
+                    CompletionSegment::Thinking(text) if !text.is_empty() => {
+                        let thinking_entry_id =
+                            self.tape.append_entry(TapeEntry::thinking(text).with_run_id(&turn_id));
+                        source_entry_ids.push(thinking_entry_id);
+                        aggregated_thinking.push_str(text);
+                        blocks.push(TurnBlock::Thinking { content: text.clone() });
+                        last_step_entry_id = Some(thinking_entry_id);
+                    }
+                    CompletionSegment::Text(text) if !text.is_empty() => {
+                        let assistant_message = Message::new(Role::Assistant, text.clone());
+                        let entry_id = self.tape.append_entry(
+                            TapeEntry::message(&assistant_message).with_run_id(&turn_id),
+                        );
+                        source_entry_ids.push(entry_id);
+                        self.publish_event(RuntimeEvent::AssistantMessage {
+                            content: text.clone(),
+                        });
+                        last_assistant_text = Some(text.clone());
+                        blocks.push(TurnBlock::Assistant { content: text.clone() });
+                        assistant_entry_id = Some(entry_id);
+                        last_step_entry_id = Some(entry_id);
+                    }
+                    CompletionSegment::ToolUse(call) => {
+                        saw_tool_calls = true;
+                        let tool_call_entry_id = self
+                            .tape
+                            .append_entry(TapeEntry::tool_call(call).with_run_id(&turn_id));
+                        source_entry_ids.push(tool_call_entry_id);
+                        last_step_entry_id = Some(tool_call_entry_id);
+                        let invocation = self.execute_tool_call(
+                            &turn_id,
+                            assistant_entry_id,
+                            tool_call_entry_id,
+                            call,
+                            &mut seen_tool_calls,
+                            &mut source_entry_ids,
+                            &mut on_delta,
+                        );
+                        blocks.push(TurnBlock::ToolInvocation { invocation: invocation.clone() });
+                        tool_invocations.push(invocation);
+                    }
+                    CompletionSegment::Thinking(_) | CompletionSegment::Text(_) => {}
+                }
+            }
+
+            if let Some(checkpoint) = completion.checkpoint.as_ref() {
+                let checkpoint_entry_id =
+                    last_step_entry_id.or(assistant_entry_id).unwrap_or(user_entry_id);
+                let checkpoint_event_id =
+                    self.tape.record_model_checkpoint(checkpoint, checkpoint_entry_id, &turn_id);
+                source_entry_ids.push(checkpoint_event_id);
+            }
+
+            if !saw_tool_calls {
+                let thinking = if aggregated_thinking.is_empty() {
+                    None
+                } else {
+                    Some(aggregated_thinking.clone())
+                };
                 self.publish_turn_lifecycle(TurnLifecycle {
                     turn_id,
                     started_at_ms,
                     finished_at_ms: now_timestamp_ms(),
                     source_entry_ids,
-                    user_message: user_message.content.clone(),
-                    assistant_message: None,
-                    thinking: None,
-                    tool_invocations: Vec::new(),
-                    failure_message: Some(runtime_error.to_string()),
+                    user_message: user_message.content,
+                    blocks,
+                    assistant_message: last_assistant_text.clone(),
+                    thinking,
+                    tool_invocations,
+                    failure_message: None,
                 });
-                return Err(runtime_error);
-            }
-        };
 
-        // Extract and persist thinking content
-        let thinking = completion.thinking_text();
-        if let Some(ref thinking_text) = thinking {
-            let thinking_entry_id =
-                self.tape.append_entry(TapeEntry::thinking(thinking_text).with_run_id(&turn_id));
-            source_entry_ids.push(thinking_entry_id);
-        }
-
-        let assistant_text = completion.plain_text();
-        let assistant_message = Message::new(Role::Assistant, assistant_text.clone());
-        let assistant_entry_id =
-            self.tape.append_entry(TapeEntry::message(&assistant_message).with_run_id(&turn_id));
-        source_entry_ids.push(assistant_entry_id);
-        self.publish_event(RuntimeEvent::AssistantMessage { content: assistant_text.clone() });
-        let mut tool_invocations = Vec::new();
-        let available_tool_names = self
-            .visible_tools()
-            .into_iter()
-            .map(|definition| definition.name)
-            .collect::<BTreeSet<_>>();
-        for segment in &completion.segments {
-            if let CompletionSegment::ToolUse(call) = segment {
-                let tool_call_entry_id =
-                    self.tape.append_entry(TapeEntry::tool_call(call).with_run_id(&turn_id));
-                source_entry_ids.push(tool_call_entry_id);
-                if !available_tool_names.contains(&call.tool_name) {
-                    let runtime_error = RuntimeError::tool_unavailable(call.tool_name.clone());
-                    let reject_event_id = self.tape.append_entry(
-                        TapeEntry::event(
-                            "tool_call_rejected",
-                            Some(json!({"message": runtime_error.to_string()})),
-                        )
-                        .with_run_id(&turn_id)
-                        .with_meta(
-                            "source_entry_ids",
-                            json!([assistant_entry_id, tool_call_entry_id]),
-                        ),
-                    );
-                    source_entry_ids.push(reject_event_id);
-                    self.publish_event(RuntimeEvent::ToolInvocation {
-                        call: call.clone(),
-                        outcome: ToolInvocationOutcome::Failed {
-                            message: runtime_error.to_string(),
-                        },
-                    });
-                    tool_invocations.push(ToolInvocationLifecycle {
-                        call: call.clone(),
-                        outcome: ToolInvocationOutcome::Failed {
-                            message: runtime_error.to_string(),
-                        },
-                    });
-                    self.publish_turn_lifecycle(TurnLifecycle {
-                        turn_id: turn_id.clone(),
-                        started_at_ms,
-                        finished_at_ms: now_timestamp_ms(),
-                        source_entry_ids,
-                        user_message: user_message.content.clone(),
-                        assistant_message: Some(assistant_text.clone()),
-                        thinking: thinking.clone(),
-                        tool_invocations,
-                        failure_message: Some(runtime_error.to_string()),
-                    });
-                    return Err(runtime_error);
-                }
-
-                match self.tools.call(
-                    call,
-                    &mut |delta: ToolOutputDelta| {
-                        on_delta(StreamEvent::ToolOutputDelta {
-                            invocation_id: call.invocation_id.clone(),
-                            stream: delta.stream,
-                            text: delta.text,
-                        });
-                    },
-                    &ToolExecutionContext {
-                        run_id: turn_id.clone(),
-                        workspace_root: self.workspace_root.clone(),
-                        abort: AbortSignal::new(),
-                    },
-                ) {
-                    Ok(result) => {
-                        if result.invocation_id != call.invocation_id
-                            || result.tool_name != call.tool_name
-                        {
-                            let runtime_error = RuntimeError::tool_result_mismatch(call, &result);
-                            let reject_event_id = self.tape.append_entry(
-                                TapeEntry::event(
-                                    "tool_result_rejected",
-                                    Some(json!({"message": runtime_error.to_string()})),
-                                )
-                                .with_run_id(&turn_id)
-                                .with_meta(
-                                    "source_entry_ids",
-                                    json!([assistant_entry_id, tool_call_entry_id]),
-                                ),
-                            );
-                            source_entry_ids.push(reject_event_id);
-                            self.publish_event(RuntimeEvent::ToolInvocation {
-                                call: call.clone(),
-                                outcome: ToolInvocationOutcome::Failed {
-                                    message: runtime_error.to_string(),
-                                },
-                            });
-                            tool_invocations.push(ToolInvocationLifecycle {
-                                call: call.clone(),
-                                outcome: ToolInvocationOutcome::Failed {
-                                    message: runtime_error.to_string(),
-                                },
-                            });
-                            self.publish_turn_lifecycle(TurnLifecycle {
-                                turn_id: turn_id.clone(),
-                                started_at_ms,
-                                finished_at_ms: now_timestamp_ms(),
-                                source_entry_ids,
-                                user_message: user_message.content.clone(),
-                                assistant_message: Some(assistant_text.clone()),
-                                thinking: thinking.clone(),
-                                tool_invocations,
-                                failure_message: Some(runtime_error.to_string()),
-                            });
-                            return Err(runtime_error);
-                        }
-
-                        let tool_result_entry_id = self
-                            .tape
-                            .append_entry(TapeEntry::tool_result(&result).with_run_id(&turn_id));
-                        source_entry_ids.push(tool_result_entry_id);
-                        let tool_result_event_id = self.tape.append_entry(
-                            TapeEntry::event(
-                                "tool_result_recorded",
-                                Some(json!({"tool_name": result.tool_name.clone()})),
-                            )
-                            .with_run_id(&turn_id)
-                            .with_meta(
-                                "source_entry_ids",
-                                json!([
-                                    assistant_entry_id,
-                                    tool_call_entry_id,
-                                    tool_result_entry_id
-                                ]),
-                            ),
-                        );
-                        source_entry_ids.push(tool_result_event_id);
-                        self.publish_event(RuntimeEvent::ToolInvocation {
-                            call: call.clone(),
-                            outcome: ToolInvocationOutcome::Succeeded { result: result.clone() },
-                        });
-                        tool_invocations.push(ToolInvocationLifecycle {
-                            call: call.clone(),
-                            outcome: ToolInvocationOutcome::Succeeded { result },
-                        });
-                    }
-                    Err(error) => {
-                        let runtime_error = RuntimeError::tool(error);
-                        let failure_event_id = self.tape.append_entry(
-                            TapeEntry::event(
-                                "tool_call_failed",
-                                Some(json!({"message": runtime_error.to_string()})),
-                            )
-                            .with_run_id(&turn_id)
-                            .with_meta(
-                                "source_entry_ids",
-                                json!([assistant_entry_id, tool_call_entry_id]),
-                            ),
-                        );
-                        source_entry_ids.push(failure_event_id);
-                        self.publish_event(RuntimeEvent::ToolInvocation {
-                            call: call.clone(),
-                            outcome: ToolInvocationOutcome::Failed {
-                                message: runtime_error.to_string(),
-                            },
-                        });
-                        tool_invocations.push(ToolInvocationLifecycle {
-                            call: call.clone(),
-                            outcome: ToolInvocationOutcome::Failed {
-                                message: runtime_error.to_string(),
-                            },
-                        });
-                        self.publish_turn_lifecycle(TurnLifecycle {
-                            turn_id: turn_id.clone(),
-                            started_at_ms,
-                            finished_at_ms: now_timestamp_ms(),
-                            source_entry_ids,
-                            user_message: user_message.content.clone(),
-                            assistant_message: Some(assistant_text.clone()),
-                            thinking: thinking.clone(),
-                            tool_invocations,
-                            failure_message: Some(runtime_error.to_string()),
-                        });
-                        return Err(runtime_error);
-                    }
-                }
+                return Ok(TurnOutput {
+                    assistant_text,
+                    completion,
+                    visible_tools: self.visible_tools(),
+                });
             }
         }
 
-        self.publish_turn_lifecycle(TurnLifecycle {
-            turn_id,
+        let runtime_error = RuntimeError::turn_step_limit(MAX_TURN_STEPS);
+        self.record_turn_failure(
+            &turn_id,
             started_at_ms,
-            finished_at_ms: now_timestamp_ms(),
-            source_entry_ids,
-            user_message: user_message.content,
-            assistant_message: Some(assistant_text.clone()),
-            thinking,
-            tool_invocations,
-            failure_message: None,
-        });
-
-        Ok(TurnOutput { assistant_text, completion, visible_tools: self.visible_tools() })
+            &mut source_entry_ids,
+            &user_message.content,
+            &blocks,
+            last_assistant_text,
+            aggregated_thinking.as_str(),
+            &tool_invocations,
+            runtime_error.clone(),
+        );
+        Err(runtime_error)
     }
 
     pub fn disable_tool(&mut self, tool_name: impl Into<String>) {
@@ -419,6 +305,278 @@ where
     fn publish_turn_lifecycle(&mut self, turn: TurnLifecycle) {
         self.publish_event(RuntimeEvent::TurnLifecycle { turn });
     }
+
+    fn build_completion_request(&self) -> CompletionRequest {
+        let view = self.tape.default_view();
+        let checkpoint = self.tape.latest_model_checkpoint();
+        let should_resume_from_checkpoint = self
+            .tape
+            .latest_provider_binding()
+            .and_then(|binding| match binding {
+                session_tape::SessionProviderBinding::Provider { protocol, .. } => Some(protocol),
+                session_tape::SessionProviderBinding::Bootstrap => None,
+            })
+            .is_some_and(|protocol| {
+                protocol == "openai-responses"
+                    && checkpoint.as_ref().is_some_and(|checkpoint| {
+                        checkpoint.checkpoint.protocol == "openai-responses"
+                    })
+            });
+        let conversation = if should_resume_from_checkpoint {
+            self.tape.conversation_since(
+                checkpoint.as_ref().map(|checkpoint| checkpoint.checkpoint_entry_id).unwrap_or(0),
+            )
+        } else {
+            let mut conversation = Vec::new();
+            if let Some(anchor) = view.origin_anchor.as_ref() {
+                conversation.push(ConversationItem::Message(anchor_state_message(anchor)));
+            }
+            conversation.extend(view.conversation);
+            conversation
+        };
+
+        CompletionRequest {
+            model: self.model_identity.clone(),
+            instructions: self.instructions.clone(),
+            conversation,
+            resume_checkpoint: if should_resume_from_checkpoint {
+                checkpoint.map(|value| value.checkpoint)
+            } else {
+                None
+            },
+            available_tools: self.visible_tools(),
+        }
+    }
+
+    fn execute_tool_call(
+        &mut self,
+        turn_id: &str,
+        assistant_entry_id: Option<u64>,
+        tool_call_entry_id: u64,
+        call: &ToolCall,
+        seen_tool_calls: &mut BTreeMap<String, PreviousToolCall>,
+        source_entry_ids: &mut Vec<u64>,
+        on_delta: &mut dyn FnMut(StreamEvent),
+    ) -> ToolInvocationLifecycle {
+        let available_tool_names = self
+            .visible_tools()
+            .into_iter()
+            .map(|definition| definition.name)
+            .collect::<BTreeSet<_>>();
+        let call_signature = tool_call_signature(call);
+
+        if let Some(previous) = seen_tool_calls.get(&call_signature) {
+            return self.record_failed_tool_call(
+                turn_id,
+                assistant_entry_id,
+                tool_call_entry_id,
+                call,
+                source_entry_ids,
+                "tool_call_skipped_duplicate",
+                RuntimeError::duplicate_tool_call(call, previous),
+            );
+        }
+
+        if !available_tool_names.contains(&call.tool_name) {
+            let runtime_error = RuntimeError::tool_unavailable(call.tool_name.clone());
+            let lifecycle = self.record_failed_tool_call(
+                turn_id,
+                assistant_entry_id,
+                tool_call_entry_id,
+                call,
+                source_entry_ids,
+                "tool_call_rejected",
+                runtime_error,
+            );
+            seen_tool_calls
+                .insert(call_signature, PreviousToolCall::from_outcome(&lifecycle.outcome));
+            return lifecycle;
+        }
+
+        match self.tools.call(
+            call,
+            &mut |delta: ToolOutputDelta| {
+                on_delta(StreamEvent::ToolOutputDelta {
+                    invocation_id: call.invocation_id.clone(),
+                    stream: delta.stream,
+                    text: delta.text,
+                });
+            },
+            &ToolExecutionContext {
+                run_id: turn_id.to_string(),
+                workspace_root: self.workspace_root.clone(),
+                abort: AbortSignal::new(),
+            },
+        ) {
+            Ok(result) => {
+                if result.invocation_id != call.invocation_id || result.tool_name != call.tool_name
+                {
+                    let runtime_error = RuntimeError::tool_result_mismatch(call, &result);
+                    let lifecycle = self.record_failed_tool_call(
+                        turn_id,
+                        assistant_entry_id,
+                        tool_call_entry_id,
+                        call,
+                        source_entry_ids,
+                        "tool_result_rejected",
+                        runtime_error,
+                    );
+                    seen_tool_calls
+                        .insert(call_signature, PreviousToolCall::from_outcome(&lifecycle.outcome));
+                    return lifecycle;
+                }
+
+                let tool_result_entry_id =
+                    self.tape.append_entry(TapeEntry::tool_result(&result).with_run_id(turn_id));
+                source_entry_ids.push(tool_result_entry_id);
+                let tool_result_event_id = self.tape.append_entry(
+                    TapeEntry::event(
+                        "tool_result_recorded",
+                        Some(json!({"tool_name": result.tool_name.clone(), "status": "ok"})),
+                    )
+                    .with_run_id(turn_id)
+                    .with_meta(
+                        "source_entry_ids",
+                        json!(build_tool_source_entry_ids(
+                            assistant_entry_id,
+                            tool_call_entry_id,
+                            tool_result_entry_id,
+                        )),
+                    ),
+                );
+                source_entry_ids.push(tool_result_event_id);
+
+                let outcome = ToolInvocationOutcome::Succeeded { result: result.clone() };
+                self.publish_event(RuntimeEvent::ToolInvocation {
+                    call: call.clone(),
+                    outcome: outcome.clone(),
+                });
+                let lifecycle = ToolInvocationLifecycle { call: call.clone(), outcome };
+                seen_tool_calls
+                    .insert(call_signature, PreviousToolCall::from_outcome(&lifecycle.outcome));
+                lifecycle
+            }
+            Err(error) => {
+                let lifecycle = self.record_failed_tool_call(
+                    turn_id,
+                    assistant_entry_id,
+                    tool_call_entry_id,
+                    call,
+                    source_entry_ids,
+                    "tool_call_failed",
+                    RuntimeError::tool(error),
+                );
+                seen_tool_calls
+                    .insert(call_signature, PreviousToolCall::from_outcome(&lifecycle.outcome));
+                lifecycle
+            }
+        }
+    }
+
+    fn record_failed_tool_call(
+        &mut self,
+        turn_id: &str,
+        assistant_entry_id: Option<u64>,
+        tool_call_entry_id: u64,
+        call: &ToolCall,
+        source_entry_ids: &mut Vec<u64>,
+        event_name: &str,
+        runtime_error: RuntimeError,
+    ) -> ToolInvocationLifecycle {
+        let failure_message = runtime_error.to_string();
+        let failed_result = ToolResult::from_call(call, failure_message.clone());
+        let tool_result_entry_id =
+            self.tape.append_entry(TapeEntry::tool_result(&failed_result).with_run_id(turn_id));
+        source_entry_ids.push(tool_result_entry_id);
+        let failure_event_id = self.tape.append_entry(
+            TapeEntry::event(
+                event_name,
+                Some(json!({"message": failure_message, "tool_name": call.tool_name.clone()})),
+            )
+            .with_run_id(turn_id)
+            .with_meta(
+                "source_entry_ids",
+                json!(build_tool_source_entry_ids(
+                    assistant_entry_id,
+                    tool_call_entry_id,
+                    tool_result_entry_id,
+                )),
+            ),
+        );
+        source_entry_ids.push(failure_event_id);
+
+        let outcome = ToolInvocationOutcome::Failed { message: runtime_error.to_string() };
+        self.publish_event(RuntimeEvent::ToolInvocation {
+            call: call.clone(),
+            outcome: outcome.clone(),
+        });
+        ToolInvocationLifecycle { call: call.clone(), outcome }
+    }
+
+    fn record_turn_failure(
+        &mut self,
+        turn_id: &str,
+        started_at_ms: u128,
+        source_entry_ids: &mut Vec<u64>,
+        user_message: &str,
+        blocks: &[TurnBlock],
+        assistant_message: Option<String>,
+        aggregated_thinking: &str,
+        tool_invocations: &[ToolInvocationLifecycle],
+        runtime_error: RuntimeError,
+    ) {
+        let failure_event_id = self.tape.append_entry(
+            TapeEntry::event("turn_failed", Some(json!({"message": runtime_error.to_string()})))
+                .with_run_id(turn_id)
+                .with_meta("source_entry_ids", json!(source_entry_ids.clone())),
+        );
+        source_entry_ids.push(failure_event_id);
+        self.publish_event(RuntimeEvent::TurnFailed { message: runtime_error.to_string() });
+        let mut lifecycle_blocks = blocks.to_vec();
+        lifecycle_blocks.push(TurnBlock::Failure { message: runtime_error.to_string() });
+        self.publish_turn_lifecycle(TurnLifecycle {
+            turn_id: turn_id.to_string(),
+            started_at_ms,
+            finished_at_ms: now_timestamp_ms(),
+            source_entry_ids: source_entry_ids.clone(),
+            user_message: user_message.to_string(),
+            blocks: lifecycle_blocks,
+            assistant_message,
+            thinking: if aggregated_thinking.is_empty() {
+                None
+            } else {
+                Some(aggregated_thinking.to_string())
+            },
+            tool_invocations: tool_invocations.to_vec(),
+            failure_message: Some(runtime_error.to_string()),
+        });
+    }
+}
+
+fn build_tool_source_entry_ids(
+    assistant_entry_id: Option<u64>,
+    tool_call_entry_id: u64,
+    tool_result_entry_id: u64,
+) -> Vec<u64> {
+    let mut ids = Vec::with_capacity(3);
+    if let Some(assistant_entry_id) = assistant_entry_id {
+        ids.push(assistant_entry_id);
+    }
+    ids.push(tool_call_entry_id);
+    ids.push(tool_result_entry_id);
+    ids
+}
+
+fn tool_call_signature(call: &ToolCall) -> String {
+    format!("{}:{}", call.tool_name, call.arguments)
+}
+
+fn summarize_for_duplicate_message(content: &str) -> String {
+    let mut preview = content.chars().take(160).collect::<String>();
+    if content.chars().count() > 160 {
+        preview.push('…');
+    }
+    preview.replace('\n', " ")
 }
 
 fn next_turn_id() -> String {
@@ -466,6 +624,23 @@ pub struct TurnOutput {
     pub visible_tools: Vec<ToolDefinition>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PreviousToolCall {
+    summary: String,
+}
+
+impl PreviousToolCall {
+    fn from_outcome(outcome: &ToolInvocationOutcome) -> Self {
+        let summary = match outcome {
+            ToolInvocationOutcome::Succeeded { result } => {
+                summarize_for_duplicate_message(&result.content)
+            }
+            ToolInvocationOutcome::Failed { message } => summarize_for_duplicate_message(message),
+        };
+        Self { summary }
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct RuntimeError {
     message: String,
@@ -499,6 +674,19 @@ impl RuntimeError {
             ),
         }
     }
+
+    pub fn turn_step_limit(max_steps: usize) -> Self {
+        Self { message: format!("轮次超过最大内部步骤数：{max_steps}") }
+    }
+
+    fn duplicate_tool_call(call: &agent_core::ToolCall, previous: &PreviousToolCall) -> Self {
+        Self {
+            message: format!(
+                "重复工具调用已跳过：{}#{} 在本轮内已用相同参数执行过。请直接基于已有结果继续。上次结果：{}",
+                call.tool_name, call.invocation_id, previous.summary
+            ),
+        }
+    }
 }
 
 impl fmt::Display for RuntimeError {
@@ -514,9 +702,9 @@ mod tests {
     use std::cell::RefCell;
 
     use agent_core::{
-        Completion, CompletionRequest, CompletionSegment, CoreError, LanguageModel, Message,
-        ModelDisposition, ModelIdentity, Role, ToolCall, ToolDefinition, ToolExecutionContext,
-        ToolExecutor, ToolOutputDelta, ToolResult,
+        Completion, CompletionRequest, CompletionSegment, ConversationItem, CoreError,
+        LanguageModel, Message, ModelCheckpoint, ModelDisposition, ModelIdentity, Role, ToolCall,
+        ToolDefinition, ToolExecutionContext, ToolExecutor, ToolOutputDelta, ToolResult,
     };
     use serde_json::json;
     use session_tape::SessionTape;
@@ -531,16 +719,53 @@ mod tests {
         type Error = CoreError;
 
         fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+            let last_user_index = request
+                .conversation
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(_, item)| {
+                    item.as_message().is_some_and(|message| message.role == Role::User)
+                })
+                .map(|(index, _)| index);
+            let latest_user = request
+                .conversation
+                .iter()
+                .rev()
+                .find_map(|item| {
+                    item.as_message()
+                        .filter(|message| message.role == Role::User)
+                        .map(|message| message.content.clone())
+                })
+                .unwrap_or_else(|| "空输入".into());
+            let saw_tool_result = last_user_index
+                .map(|index| {
+                    request
+                        .conversation
+                        .iter()
+                        .skip(index + 1)
+                        .any(|item| item.as_tool_result().is_some())
+                })
+                .unwrap_or(false);
+            if saw_tool_result {
+                return Ok(Completion::text(format!("已收到：{latest_user}")));
+            }
+
             let latest = request
                 .conversation
                 .last()
-                .map(|message| message.content.clone())
+                .map(|item| match item {
+                    ConversationItem::Message(message) => message.content.clone(),
+                    ConversationItem::ToolCall(call) => format!("工具调用 {}", call.tool_name),
+                    ConversationItem::ToolResult(result) => result.content.clone(),
+                })
                 .unwrap_or_else(|| "空输入".into());
             Ok(Completion {
                 segments: vec![
-                    CompletionSegment::Text(format!("已收到：{latest}")),
+                    CompletionSegment::Text(format!("准备处理：{latest}")),
                     CompletionSegment::ToolUse(ToolCall::new("search")),
                 ],
+                checkpoint: None,
             })
         }
     }
@@ -565,12 +790,139 @@ mod tests {
         }
     }
 
+    struct ContinueAfterToolModel {
+        seen_requests: RefCell<Vec<CompletionRequest>>,
+    }
+
+    impl ContinueAfterToolModel {
+        fn new() -> Self {
+            Self { seen_requests: RefCell::new(Vec::new()) }
+        }
+    }
+
+    impl LanguageModel for ContinueAfterToolModel {
+        type Error = CoreError;
+
+        fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+            let step = self.seen_requests.borrow().len();
+            self.seen_requests.borrow_mut().push(request.clone());
+            if step == 0 {
+                Ok(Completion {
+                    segments: vec![
+                        CompletionSegment::Thinking("先查一下".into()),
+                        CompletionSegment::ToolUse(ToolCall::new("search")),
+                    ],
+                    checkpoint: None,
+                })
+            } else {
+                let saw_tool = request.conversation.iter().any(|item| {
+                    item.as_tool_result().is_some_and(|result| result.content.contains("未实现"))
+                });
+                if saw_tool {
+                    Ok(Completion::text("已根据工具结果继续回答"))
+                } else {
+                    Err(CoreError::new("未看到工具结果"))
+                }
+            }
+        }
+    }
+
+    struct DuplicateToolLoopModel {
+        seen_requests: RefCell<Vec<CompletionRequest>>,
+    }
+
+    impl DuplicateToolLoopModel {
+        fn new() -> Self {
+            Self { seen_requests: RefCell::new(Vec::new()) }
+        }
+    }
+
+    impl LanguageModel for DuplicateToolLoopModel {
+        type Error = CoreError;
+
+        fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+            self.seen_requests.borrow_mut().push(request.clone());
+            let saw_duplicate_skip = request.conversation.iter().any(|item| {
+                item.as_tool_result()
+                    .is_some_and(|result| result.content.contains("重复工具调用已跳过"))
+            });
+            if saw_duplicate_skip {
+                return Ok(Completion::text("已停止重复调用并给出最终回答"));
+            }
+
+            let saw_initial_tool_result = request.conversation.iter().any(|item| {
+                item.as_tool_result().is_some_and(|result| result.content.contains("未实现"))
+            });
+
+            if saw_initial_tool_result {
+                return Ok(Completion {
+                    segments: vec![CompletionSegment::ToolUse(
+                        ToolCall::new("search").with_argument("query", "date"),
+                    )],
+                    checkpoint: None,
+                });
+            }
+
+            Ok(Completion {
+                segments: vec![CompletionSegment::ToolUse(
+                    ToolCall::new("search").with_argument("query", "date"),
+                )],
+                checkpoint: None,
+            })
+        }
+    }
+
+    struct FailingTools;
+
+    impl ToolExecutor for FailingTools {
+        type Error = CoreError;
+
+        fn definitions(&self) -> Vec<ToolDefinition> {
+            vec![ToolDefinition::new("search", "搜索代码")]
+        }
+
+        fn call(
+            &self,
+            _call: &ToolCall,
+            _output: &mut dyn FnMut(ToolOutputDelta),
+            _context: &ToolExecutionContext,
+        ) -> Result<ToolResult, Self::Error> {
+            Err(CoreError::new("工具炸了"))
+        }
+    }
+
     impl LanguageModel for RecordingModel {
         type Error = CoreError;
 
         fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
             self.seen_requests.borrow_mut().push(request);
             Ok(Completion::text("记录完成"))
+        }
+    }
+
+    struct CheckpointRecordingModel {
+        seen_requests: RefCell<Vec<CompletionRequest>>,
+    }
+
+    impl CheckpointRecordingModel {
+        fn new() -> Self {
+            Self { seen_requests: RefCell::new(Vec::new()) }
+        }
+    }
+
+    impl LanguageModel for CheckpointRecordingModel {
+        type Error = CoreError;
+
+        fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+            let index = self.seen_requests.borrow().len();
+            self.seen_requests.borrow_mut().push(request);
+            Ok(Completion {
+                segments: vec![CompletionSegment::Text(format!("第{}轮完成", index + 1))],
+                checkpoint: Some(ModelCheckpoint::new(
+                    "openai-responses",
+                    format!("resp_{}", index + 1),
+                )),
+            })
         }
     }
 
@@ -612,6 +964,7 @@ mod tests {
                 invocation_id: "wrong-id".into(),
                 tool_name: "search".into(),
                 content: "未实现".into(),
+                response_id: None,
             })
         }
     }
@@ -625,7 +978,7 @@ mod tests {
         let output = runtime.handle_turn("你好").expect("运行成功");
 
         assert_eq!(output.assistant_text, "已收到：你好");
-        assert_eq!(runtime.tape().entries().len(), 5);
+        assert_eq!(runtime.tape().entries().len(), 6);
         assert_eq!(output.visible_tools.len(), 1);
     }
 
@@ -650,15 +1003,21 @@ mod tests {
     }
 
     #[test]
-    fn 已禁用工具不会暴露给模型() {
+    fn 已禁用工具会作为失败结果写回上下文() {
         let identity = ModelIdentity::new("local", "stub", ModelDisposition::Balanced);
         let mut runtime = AgentRuntime::new(StubModel, StubTools, identity);
 
         runtime.disable_tool("search");
 
-        let error = runtime.handle_turn("你好").expect_err("应当失败");
+        let output = runtime.handle_turn("你好").expect("应写回失败结果并继续完成");
 
-        assert!(error.to_string().contains("工具不可用"));
+        assert_eq!(output.assistant_text, "已收到：你好");
+        assert!(runtime.tape().entries().iter().any(|entry| {
+            entry
+                .as_tool_result()
+                .map(|result| result.content.contains("工具不可用"))
+                .unwrap_or(false)
+        }));
     }
 
     #[test]
@@ -670,15 +1029,71 @@ mod tests {
         let output = runtime.handle_turn("第二轮").expect("第二轮成功");
 
         assert_eq!(output.assistant_text, "已收到：第二轮");
-        assert_eq!(runtime.tape().entries().len(), 10);
+        assert_eq!(runtime.tape().entries().len(), 12);
         assert_eq!(
             runtime.tape().entries()[0].as_message().map(|value| value.content.clone()),
             Some("第一轮".into())
         );
         assert_eq!(
-            runtime.tape().entries()[5].as_message().map(|value| value.content.clone()),
+            runtime.tape().entries()[6].as_message().map(|value| value.content.clone()),
             Some("第二轮".into())
         );
+    }
+
+    #[test]
+    fn 同一轮内工具完成后会继续再次调用模型() {
+        let identity = ModelIdentity::new("local", "continue", ModelDisposition::Balanced);
+        let model = ContinueAfterToolModel::new();
+        let mut runtime = AgentRuntime::new(model, StubTools, identity);
+
+        let output = runtime.handle_turn("开始").expect("应继续完成");
+
+        assert_eq!(output.assistant_text, "已根据工具结果继续回答");
+        assert_eq!(runtime.model.seen_requests.borrow().len(), 2);
+        assert!(runtime.tape().entries().iter().any(|entry| entry.as_tool_result().is_some()));
+        let second_request = &runtime.model.seen_requests.borrow()[1];
+        assert!(second_request.conversation.iter().any(
+            |item| matches!(item, ConversationItem::ToolCall(call) if call.tool_name == "search")
+        ));
+        assert!(second_request.conversation.iter().any(
+            |item| matches!(item, ConversationItem::ToolResult(result) if result.tool_name == "search")
+        ));
+    }
+
+    #[test]
+    fn 工具失败不会直接让整轮报错() {
+        let identity = ModelIdentity::new("local", "stub", ModelDisposition::Balanced);
+        let mut runtime = AgentRuntime::new(StubModel, FailingTools, identity);
+
+        let output = runtime.handle_turn("你好").expect("工具失败应写入轮次而不是直接报错");
+
+        assert_eq!(output.assistant_text, "已收到：你好");
+        assert!(runtime.tape().entries().iter().any(|entry| entry.as_tool_result().is_some()));
+        assert!(runtime.tape().entries().iter().any(|entry| {
+            entry
+                .as_tool_result()
+                .map(|result| result.content.contains("工具执行失败"))
+                .unwrap_or(false)
+        }));
+    }
+
+    #[test]
+    fn 同一轮内相同工具与参数的重复调用会被跳过() {
+        let identity = ModelIdentity::new("local", "duplicate", ModelDisposition::Balanced);
+        let model = DuplicateToolLoopModel::new();
+        let mut runtime = AgentRuntime::new(model, StubTools, identity);
+
+        let output = runtime.handle_turn("今天星期几").expect("应在跳过重复调用后完成");
+
+        assert_eq!(output.assistant_text, "已停止重复调用并给出最终回答");
+        let duplicate_results = runtime
+            .tape()
+            .entries()
+            .iter()
+            .filter_map(|entry| entry.as_tool_result())
+            .filter(|result| result.content.contains("重复工具调用已跳过"))
+            .count();
+        assert_eq!(duplicate_results, 1);
     }
 
     #[test]
@@ -711,11 +1126,12 @@ mod tests {
 
         let default_messages = runtime.tape().default_messages();
 
-        assert_eq!(default_messages.len(), 3);
+        assert_eq!(default_messages.len(), 4);
         assert_eq!(default_messages[0].content, "第二轮");
-        assert_eq!(default_messages[1].content, "已收到：第二轮");
+        assert_eq!(default_messages[1].content, "准备处理：第二轮");
         assert!(default_messages[2].content.starts_with("工具 search #tool-call-"));
         assert!(default_messages[2].content.ends_with("输出: 未实现"));
+        assert_eq!(default_messages[3].content, "已收到：第二轮");
     }
 
     #[test]
@@ -734,10 +1150,17 @@ mod tests {
         let requests = runtime.model.seen_requests.borrow();
         let last_request = requests.last().expect("应记录第二轮请求");
 
-        assert_eq!(last_request.conversation[0].role, Role::System);
-        assert!(last_request.conversation[0].content.contains("当前阶段: handoff"));
-        assert!(last_request.conversation[0].content.contains("锚点摘要: 切到实现阶段"));
-        assert_eq!(last_request.conversation[1].content, "第二轮");
+        assert!(matches!(
+            &last_request.conversation[0],
+            ConversationItem::Message(message)
+                if message.role == Role::System
+                    && message.content.contains("当前阶段: handoff")
+                    && message.content.contains("锚点摘要: 切到实现阶段")
+        ));
+        assert!(matches!(
+            &last_request.conversation[1],
+            ConversationItem::Message(message) if message.content == "第二轮"
+        ));
     }
 
     #[test]
@@ -754,9 +1177,50 @@ mod tests {
         let requests = runtime.model.seen_requests.borrow();
         let last_request = requests.last().expect("应记录新请求");
 
-        assert_eq!(last_request.conversation[0].content, "历史用户消息");
-        assert_eq!(last_request.conversation[1].content, "历史助手消息");
-        assert_eq!(last_request.conversation[2].content, "新的输入");
+        assert!(matches!(
+            &last_request.conversation[0],
+            ConversationItem::Message(message) if message.content == "历史用户消息"
+        ));
+        assert!(matches!(
+            &last_request.conversation[1],
+            ConversationItem::Message(message) if message.content == "历史助手消息"
+        ));
+        assert!(matches!(
+            &last_request.conversation[2],
+            ConversationItem::Message(message) if message.content == "新的输入"
+        ));
+    }
+
+    #[test]
+    fn responses_检查点存在时下一轮只发送增量上下文() {
+        let identity = ModelIdentity::new("openai", "responses", ModelDisposition::Balanced);
+        let model = CheckpointRecordingModel::new();
+        let mut tape = SessionTape::new();
+        tape.bind_provider(session_tape::SessionProviderBinding::Provider {
+            name: "resp".into(),
+            model: "gpt-4.1-mini".into(),
+            base_url: "https://api.openai.com/v1".into(),
+            protocol: "openai-responses".into(),
+        });
+        let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape);
+
+        runtime.handle_turn("第一轮").expect("第一轮成功");
+        runtime.handle_turn("第二轮").expect("第二轮成功");
+
+        let requests = runtime.model.seen_requests.borrow();
+        assert_eq!(requests.len(), 2);
+        assert!(
+            requests[1]
+                .resume_checkpoint
+                .as_ref()
+                .is_some_and(|checkpoint| checkpoint.protocol == "openai-responses"
+                    && checkpoint.token == "resp_1")
+        );
+        assert_eq!(requests[1].conversation.len(), 1);
+        assert!(matches!(
+            &requests[1].conversation[0],
+            ConversationItem::Message(message) if message.role == Role::User && message.content == "第二轮"
+        ));
     }
 
     #[test]
@@ -853,11 +1317,16 @@ mod tests {
         let subscriber = runtime.subscribe();
         runtime.disable_tool("search");
 
-        let error = runtime.handle_turn("你好").expect_err("应当因为工具被禁用而失败");
+        let output = runtime.handle_turn("你好").expect("应当继续完成");
         let events = runtime.collect_events(subscriber).expect("读取事件成功");
 
-        assert!(error.to_string().contains("工具不可用"));
-        assert!(!runtime.tape().entries().iter().any(|entry| entry.as_tool_result().is_some()));
+        assert_eq!(output.assistant_text, "已收到：你好");
+        assert!(runtime.tape().entries().iter().any(|entry| {
+            entry
+                .as_tool_result()
+                .map(|result| result.content.contains("工具不可用"))
+                .unwrap_or(false)
+        }));
         assert!(events.iter().any(|event| matches!(
             event,
             RuntimeEvent::ToolInvocation { call, outcome: ToolInvocationOutcome::Failed { message } }
@@ -866,16 +1335,21 @@ mod tests {
     }
 
     #[test]
-    fn 工具结果调用标识错配时会被拒绝() {
+    fn 工具结果调用标识错配时会作为失败结果保留() {
         let identity = ModelIdentity::new("local", "stub", ModelDisposition::Balanced);
         let mut runtime = AgentRuntime::new(StubModel, MismatchedTools, identity);
         let subscriber = runtime.subscribe();
 
-        let error = runtime.handle_turn("你好").expect_err("应当因结果错配失败");
+        let output = runtime.handle_turn("你好").expect("应当继续完成");
         let events = runtime.collect_events(subscriber).expect("读取事件成功");
 
-        assert!(error.to_string().contains("工具结果不匹配"));
-        assert!(!runtime.tape().entries().iter().any(|entry| entry.as_tool_result().is_some()));
+        assert_eq!(output.assistant_text, "已收到：你好");
+        assert!(runtime.tape().entries().iter().any(|entry| {
+            entry
+                .as_tool_result()
+                .map(|result| result.content.contains("工具结果不匹配"))
+                .unwrap_or(false)
+        }));
         assert!(events.iter().any(|event| matches!(
             event,
             RuntimeEvent::ToolInvocation { call, outcome: ToolInvocationOutcome::Failed { message } }
@@ -901,6 +1375,7 @@ mod tests {
                     finished_at_ms,
                     source_entry_ids,
                     user_message,
+                    blocks: _,
                     assistant_message: Some(assistant_message),
                     thinking: None,
                     tool_invocations,
@@ -924,12 +1399,12 @@ mod tests {
     }
 
     #[test]
-    fn 失败轮也会聚合成完整轮次块事件() {
+    fn 工具失败后成功收尾的轮次也会聚合完整块事件() {
         let identity = ModelIdentity::new("local", "stub", ModelDisposition::Balanced);
         let mut runtime = AgentRuntime::new(StubModel, MismatchedTools, identity);
         let subscriber = runtime.subscribe();
 
-        let _ = runtime.handle_turn("你好");
+        let _ = runtime.handle_turn("你好").expect("应继续完成");
         let events = runtime.collect_events(subscriber).expect("读取事件成功");
 
         assert!(events.iter().any(|event| matches!(
@@ -941,10 +1416,11 @@ mod tests {
                     finished_at_ms,
                     source_entry_ids,
                     user_message,
+                    blocks: _,
                     assistant_message: Some(assistant_message),
                     thinking: _,
                     tool_invocations,
-                    failure_message: Some(failure_message),
+                    failure_message: None,
                 }
             }
                 if turn_id.starts_with("turn-")
@@ -952,7 +1428,6 @@ mod tests {
                 && !source_entry_ids.is_empty()
                 && user_message == "你好"
                 && assistant_message == "已收到：你好"
-                && failure_message.contains("工具结果不匹配")
                 && tool_invocations.len() == 1
                 && matches!(
                     &tool_invocations[0],

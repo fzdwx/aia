@@ -35,7 +35,7 @@
 - Rust 工作区骨架已建立
 - 共享核心库边界已拆分为 `agent-core`、`session-tape`、`agent-runtime`
 - `provider-registry` 已承担本地 provider 管理与持久化
-- 首个真实模型适配库 `openai-adapter` 已建立
+- 首个真实模型适配库 `openai-adapter` 已建立，并已同时覆盖 Responses 与 OpenAI 兼容 Chat Completions 两条协议链路
 - 最小验证入口 `agent-cli` 已可编译、测试并运行
 - 会话磁带、结构化锚点、handoff 事件、工具启停基础能力已落地
 - 工具调用与工具结果已进入类型化会话磁带，并能投影到后续默认上下文
@@ -50,6 +50,7 @@
 - 兼容门面仍保持 `.aia/session.jsonl` 的旧格式读写，避免当前 CLI 会话文件被隐式迁移
 - `agent-cli` 已可在启动时通过终端交互创建或选择 provider
 - provider 本地资料当前落盘在 `.aia/providers.json`，并通过 `.gitignore` 避免误提交
+- provider 当前已具备协议级区分能力，可在同一地址 / 模型下区分 Responses 与 Chat Completions
 - `agent-cli` 已可进入多轮 agent loop，并支持退出指令
 - `agent-cli` 已按模块拆分，并在真实终端环境中优先进入最小 TUI
 - 真实终端下的 provider 选择与首条问题输入已并入 TUI 状态机
@@ -61,6 +62,14 @@
 - TUI 消息列表已支持键盘与鼠标滚轮滚动，且在用户未主动上翻时自动跟随到底部
 - TUI 已将流式状态固定在消息列表底部展示，并通过亮到暗的文本渐变表达运行节奏
 - TUI 已引入最小 theme 系统，并以 `aura` 作为首套终端主题，覆盖用户消息、助手消息、thinking、工具块与状态语义样式
+- 启动阶段的 provider 创建流程现已支持选择 OpenAI Responses 或 OpenAI 兼容 Chat Completions 协议
+- 会话记住的 provider 绑定现已包含协议信息，避免同地址同模型的不同协议互相串用
+- `agent-runtime` 已从单次模型调用收敛为单轮内多步执行：模型 → 工具 → 再回模型，直到没有更多工具调用或达到内部步数上限
+- 工具不可用、工具执行失败、工具结果错配已改为轮次内结构化失败结果，而不是直接终止整个会话循环
+- 文本 loop 已与 TUI 对齐：当前轮失败会显示失败信息，但不会直接结束整个交互会话
+- 模型续调上下文已不再只依赖扁平文本消息；工具调用与工具结果已作为结构化会话条目贯穿核心层到适配层
+- OpenAI Responses 与 OpenAI 兼容 Chat Completions 在工具续调时已能按各自协议原生形态重建请求，而不是把工具结果压平为普通文本
+- OpenAI Responses 现已支持基于 `previous_response_id` 的会话续调：同轮工具输出与下一轮用户输入都可沿用上一响应链，而不是重复回放全量历史
 
 ### 当前不做
 
@@ -78,3 +87,4 @@
 - 为后续终端界面准备稳定事件流，并让 provider 管理复用同一事件流
 - 在保持现有会话文件兼容的前提下，逐步把运行时接到更完整的命名磁带能力
 - 在当前 Aura 主题系统之上继续扩展主题切换与更完整的终端界面细节
+- 在运行时语义已收稳的前提下，继续推进统一工具规范向外部协议映射与 MCP 接入

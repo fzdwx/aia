@@ -3,7 +3,7 @@
 ## 当前阶段
 
 - 阶段：真实模型适配
-- 当前步骤：TUI 重构阶段 A（止血）已基本完成，消息面板已组件化为 `MessagePanel`，历史与流式渲染通过两级缓存分离，流式期间不再触发全量 Markdown 重排；主线焦点回到工具协议映射与 MCP 接入
+- 当前步骤：真实模型适配继续推进：已补齐 OpenAI 兼容 Chat Completions 协议接入与 provider 协议记忆；主线焦点回到统一工具协议映射与 MCP 接入
 
 ## 已完成
 
@@ -66,20 +66,40 @@
 - 完成两级渲染缓存：`HistoryCache`（仅在 turn 完成或 resize 时失效）+ `OverlayCache`（仅在新 delta 到达时失效），流式期间每帧成本从 O(N × markdown_parse) 降至 O(hash) + O(流式增量)
 - 完成每帧 delta 上限（`MAX_DELTAS_PER_FRAME = 64`），防止突发 delta 阻塞渲染
 - 完成流式状态标签统一为英文现在分词：Waiting / Thinking / Generating
+- 完成 `agent-runtime` 从单次模型调用收敛为单轮内多步循环，支持模型 → 工具 → 再回模型
+- 完成工具不可用、工具执行失败、工具结果错配的非终止式收敛：失败结果会写入磁带并回灌给同轮后续模型步骤
+- 完成文本 loop 与 TUI 的失败策略统一：当前轮失败会显示状态，但不会直接结束整个会话
+- 完成历史轮次重建策略修正：回放优先显示最后一条助手消息，并合并同轮 thinking 片段
+- 完成 `openai-adapter` 对 OpenAI 兼容 Chat Completions 协议的普通与流式支持
+- 完成 `provider-registry` 的 provider 协议类型区分，并支持 Responses / Chat Completions 双协议 provider
+- 完成 TUI 与文本 provider 创建流程的协议选择接入
+- 完成会话级 provider 绑定带上协议字段，避免同地址同模型的不同协议恢复错配
+- 完成本地 `Minum-Security-LLM` provider 以 Chat Completions 协议写入 `.aia/providers.json`
+- 完成 TUI 超长消息展示截断：历史与流式消息过大时仅渲染前若干字符，并明确提示已截断
+- 完成运行时同轮重复工具调用防重：相同工具与相同参数在同一轮内重复出现时会被跳过，并提示模型直接基于已有结果继续
+- 完成结构化续调上下文：工具调用与工具结果不再只压平成普通消息，而是以结构化条目贯穿 `agent-core` / `session-tape` / `agent-runtime` / `openai-adapter`
+- 完成双协议工具续调映射：Responses 走 `function_call` / `function_call_output`，Chat Completions 走 `assistant.tool_calls` / `tool.tool_call_id`
+- 完成 Responses 检查点续调：成功响应会记录模型检查点，后续 turn 通过 `previous_response_id` + 增量输入继续远端响应链
+- 完成 TUI 消息列表统一滚动：流式内容与状态行动画已并入主消息时间线，不再只有局部 overlay / footer 在动
+- 完成 turn 顺序块渲染：thinking / tool / assistant / failure 按真实发生顺序进入 `TurnLifecycle.blocks` 并驱动历史与当前消息渲染
+- 完成 TUI 内联视口模式：不再切换到 alternate screen，且通过 `Viewport::Inline` 在当前终端输出下方保留固定渲染区域，避免覆盖 shell 提示内容
 
 ## 正在进行
 
-- 统一工具规范向外部协议的映射收敛，并继续把共享 driver 往客户端无关边界推进；磁带核心已补齐，现在没有必要跳过协议层直接堆完整界面
+- 统一工具规范向外部协议的映射收敛，并继续把共享 driver 往客户端无关边界推进；运行时语义与双协议模型适配已收稳，现在没有必要跳过协议层直接堆完整界面
+- 统一工具规范向外部协议的映射收敛，并继续把共享 driver 往客户端无关边界推进；当前已补齐协议原生的工具续调主链，后续重点回到更完整的 MCP 接入与工具协议映射
+- 统一工具规范向外部协议的映射收敛，并继续把共享 driver 往客户端无关边界推进；当前已补齐协议原生的工具续调主链与 Responses 检查点续调，后续重点回到更完整的 MCP 接入与工具协议映射
 - TUI 重构阶段 A（止血）已基本完成；阶段 B（拆状态机：Action / Reducer / Effect）作为次优先穿插推进，不压过协议主线
 
 ## 下一步
 
 1. 把统一工具规范往外映射到标准协议方向
 2. 推进 MCP 风格工具协议接入
-3. 继续把运行时与客户端层接到更完整的命名磁带能力，但不破坏现有兼容门面
-4. 按 `docs/tui-plan.md` 推进阶段 B（拆状态机：Action / Reducer / Effect），穿插在协议主线之间
-5. 继续收敛共享 driver、启动编排与 TUI reducer 边界，减少 `app.rs` 与 `tui.rs` 的重复职责
-6. 在协议边界更稳之后，再把当前最小 TUI 扩展为更完整的终端界面
+3. 基于新的多步运行时语义，为后续真实工具与协议桥接补齐更细的结果分类与限制策略
+4. 继续把运行时与客户端层接到更完整的命名磁带能力，但不破坏现有兼容门面
+5. 按 `docs/tui-plan.md` 推进阶段 B（拆状态机：Action / Reducer / Effect），穿插在协议主线之间
+6. 继续收敛共享 driver、启动编排与 TUI reducer 边界，减少 `app.rs` 与 `tui.rs` 的重复职责
+7. 在协议边界更稳之后，再把当前最小 TUI 扩展为更完整的终端界面
 
 ## 为什么当前先不直接做完整界面
 

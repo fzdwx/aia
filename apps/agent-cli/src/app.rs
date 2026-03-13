@@ -68,11 +68,12 @@ fn choose_non_interactive_provider(
     if let Some(binding) = tape.latest_provider_binding() {
         match binding {
             SessionProviderBinding::Bootstrap => return ProviderLaunchChoice::Bootstrap,
-            SessionProviderBinding::Provider { name, model, base_url } => {
+            SessionProviderBinding::Provider { name, model, base_url, protocol } => {
                 if let Some(profile) = registry.providers().iter().find(|provider| {
                     provider.name == name
                         && provider.model == model
                         && provider.base_url == base_url
+                        && provider.kind.protocol_name() == protocol.as_str()
                 }) {
                     return ProviderLaunchChoice::OpenAi(profile.clone());
                 }
@@ -89,7 +90,7 @@ fn choose_non_interactive_provider(
 
 #[cfg(test)]
 mod tests {
-    use provider_registry::{ProviderProfile, ProviderRegistry};
+    use provider_registry::{ProviderKind, ProviderProfile, ProviderRegistry};
     use session_tape::{SessionProviderBinding, SessionTape};
 
     use crate::model::ProviderLaunchChoice;
@@ -140,6 +141,7 @@ mod tests {
             name: "main".into(),
             model: "gpt-4.1-mini".into(),
             base_url: "https://api.openai.com/v1".into(),
+            protocol: "openai-responses".into(),
         });
 
         let selection = choose_non_interactive_provider(&registry, &tape);
@@ -159,5 +161,38 @@ mod tests {
             choose_non_interactive_provider(&registry, &tape),
             ProviderLaunchChoice::Bootstrap
         );
+    }
+
+    #[test]
+    fn 非终端环境会区分同地址同模型的不同协议_provider() {
+        let mut registry = ProviderRegistry::default();
+        registry.upsert(ProviderProfile::openai_responses(
+            "resp",
+            "http://127.0.0.1:8000/v1",
+            "secret",
+            "minum-security-llm",
+        ));
+        registry.upsert(ProviderProfile::openai_chat_completions(
+            "compat",
+            "http://127.0.0.1:8000/v1",
+            "secret",
+            "minum-security-llm",
+        ));
+        let mut tape = SessionTape::new();
+        tape.bind_provider(SessionProviderBinding::Provider {
+            name: "compat".into(),
+            model: "minum-security-llm".into(),
+            base_url: "http://127.0.0.1:8000/v1".into(),
+            protocol: ProviderKind::OpenAiChatCompletions.protocol_name().into(),
+        });
+
+        let selection = choose_non_interactive_provider(&registry, &tape);
+
+        assert!(matches!(
+            selection,
+            ProviderLaunchChoice::OpenAi(profile)
+                if profile.name == "compat"
+                    && profile.kind == ProviderKind::OpenAiChatCompletions
+        ));
     }
 }

@@ -67,21 +67,14 @@ impl Tool for GlobTool {
             if !glob.is_match(relative) && !glob.is_match(path) {
                 continue;
             }
-            let mtime = entry
-                .metadata()
-                .ok()
-                .and_then(|m| m.modified().ok())
-                .unwrap_or(UNIX_EPOCH);
+            let mtime = entry.metadata().ok().and_then(|m| m.modified().ok()).unwrap_or(UNIX_EPOCH);
             entries.push((path.to_path_buf(), mtime));
         }
 
         entries.sort_by(|a, b| b.1.cmp(&a.1));
 
-        let result = entries
-            .iter()
-            .map(|(p, _)| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
+        let result =
+            entries.iter().map(|(p, _)| p.display().to_string()).collect::<Vec<_>>().join("\n");
 
         Ok(ToolResult::from_call(call, result))
     }
