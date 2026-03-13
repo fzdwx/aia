@@ -100,18 +100,13 @@ pub fn build_model_from_selection(
                 .map(|m| m.id.clone())
                 .or_else(|| profile.active_model.clone())
                 .unwrap_or_default();
-            let reasoning_effort =
-                model_config.and_then(|m| m.reasoning_effort.clone());
-            let identity =
-                ModelIdentity::new("openai", &model_id, ModelDisposition::Balanced)
-                    .with_reasoning_effort(reasoning_effort);
+            let reasoning_effort = model_config.and_then(|m| m.reasoning_effort.clone());
+            let identity = ModelIdentity::new("openai", &model_id, ModelDisposition::Balanced)
+                .with_reasoning_effort(reasoning_effort);
             match profile.kind {
                 ProviderKind::OpenAiResponses => {
-                    let config = OpenAiResponsesConfig::new(
-                        profile.base_url,
-                        profile.api_key,
-                        &model_id,
-                    );
+                    let config =
+                        OpenAiResponsesConfig::new(profile.base_url, profile.api_key, &model_id);
                     let model = OpenAiResponsesModel::new(config)
                         .map_err(ServerSetupError::OpenAiAdapter)?;
                     Ok((identity, ServerModel::OpenAiResponses(model)))
