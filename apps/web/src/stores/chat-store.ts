@@ -126,6 +126,15 @@ export const useChatStore = create<ChatStore>((set, get) => ({
               assistantText: prev.assistantText + data.text,
             },
           })
+        } else if (data.kind === "tool_call_started") {
+          const outputs = [...prev.toolOutputs]
+          outputs.push({
+            invocationId: data.invocation_id,
+            toolName: data.tool_name,
+            arguments: data.arguments,
+            output: "",
+          })
+          set({ streamingTurn: { ...prev, toolOutputs: outputs } })
         } else if (data.kind === "tool_output_delta") {
           const outputs = [...prev.toolOutputs]
           const idx = outputs.findIndex(
@@ -139,6 +148,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           } else {
             outputs.push({
               invocationId: data.invocation_id,
+              toolName: "",
+              arguments: {},
               output: data.text,
             })
           }

@@ -4,10 +4,15 @@ import { cn } from "@/lib/utils"
 import { Shimmer } from "@/components/ai-elements/shimmer"
 import { useChatStore } from "@/stores/chat-store"
 import type {
+  StreamingToolOutput,
   StreamingTurn,
+  ToolCall,
+  ToolInvocationLifecycle,
   TurnBlock,
   TurnLifecycle,
 } from "@/lib/types"
+
+// --- Markdown rendering ---
 
 function renderInline(text: string) {
   const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g)
@@ -73,10 +78,91 @@ function MarkdownContent({ content }: { content: string }) {
   )
 }
 
-// --- Thinking block: compact collapsible label ---
+// --- Tool categorization & labeling ---
 
-function ThinkingBlock({ content }: { content: string }) {
-  const [open, setOpen] = useState(false)
+type ToolCategory = "read" | "search" | "edit" | "other"
+
+const TOOL_CATEGORIES: Record<string, ToolCategory> = {
+  read_file: "read",
+  read: "read",
+  cat: "read",
+  head: "read",
+  tail: "read",
+  grep: "search",
+  search: "search",
+  find: "search",
+  glob: "search",
+  ripgrep: "search",
+  edit: "edit",
+  write: "edit",
+  write_file: "edit",
+  patch: "edit",
+  replace: "edit",
+  sed: "edit",
+}
+
+const CATEGORY_LABELS: Record<ToolCategory, string> = {
+  read: "read",
+  search: "search",
+  edit: "edit",
+  other: "tool use",
+}
+
+function categorize(toolName: string): ToolCategory {
+  const lower = toolName.toLowerCase()
+  for (const [key, cat] of Object.entries(TOOL_CATEGORIES)) {
+    if (lower.includes(key)) return cat
+  }
+  return "other"
+}
+
+function getToolLabel(
+  toolName: string,
+  args: Record<string, unknown>,
+): string {
+  const firstStr = Object.values(args).find(
+    (v) => typeof v === "string",
+  ) as string | undefined
+  return firstStr ? `${toolName}  ${firstStr}` : toolName
+}
+
+/** Parse +N / -N diff stats from tool result content */
+function parseDiffStats(content: string): { added: number; removed: number } | null {
+  const addMatch = content.match(/(\d+)\s+insertion/)
+  const removeMatch = content.match(/(\d+)\s+deletion/)
+  if (!addMatch && !removeMatch) return null
+  return {
+    added: addMatch ? parseInt(addMatch[1], 10) : 0,
+    removed: removeMatch ? parseInt(removeMatch[1], 10) : 0,
+  }
+}
+
+function buildCategorySummary(
+  invocations: { toolName: string }[],
+): { category: ToolCategory; label: string; count: number }[] {
+  const counts = new Map<ToolCategory, number>()
+  for (const inv of invocations) {
+    const cat = categorize(inv.toolName)
+    counts.set(cat, (counts.get(cat) ?? 0) + 1)
+  }
+  return Array.from(counts.entries()).map(([cat, count]) => ({
+    category: cat,
+    label: CATEGORY_LABELS[cat],
+    count,
+  }))
+}
+
+// --- Thinking display ---
+
+function ThinkingBlock({
+  content,
+  isStreaming = false,
+}: {
+  content: string
+  isStreaming?: boolean
+}) {
+  const [open, setOpen] = useState(isStreaming)
+  const lastLine = content.trim().split("\n").pop() ?? ""
 
   return (
     <div className="mb-2">
@@ -86,11 +172,22 @@ function ThinkingBlock({ content }: { content: string }) {
       >
         <ChevronRight
           className={cn(
-            "size-3.5 transition-transform",
+            "size-3.5 shrink-0 transition-transform",
             open && "rotate-90",
           )}
         />
-        <span className="font-medium">Thought</span>
+        {isStreaming ? (
+          <span className="font-medium">Thinking</span>
+        ) : (
+          <>
+            <span className="font-medium">Thought</span>
+            {!open && lastLine && (
+              <span className="ml-1 max-w-[400px] truncate text-muted-foreground/50">
+                {lastLine}
+              </span>
+            )}
+          </>
+        )}
       </button>
       {open && (
         <div className="mt-1.5 ml-5 border-l-2 border-border/30 pl-3 text-[13px] leading-relaxed text-muted-foreground/80">
@@ -101,34 +198,167 @@ function ThinkingBlock({ content }: { content: string }) {
   )
 }
 
-// --- Tool invocation: flat indented row ---
+// --- Completed tool group: collapsible with categorized summary ---
 
-function ToolInvocationBlock({
-  block,
+function ToolGroupView({
+  invocations,
 }: {
-  block: Extract<TurnBlock, { kind: "tool_invocation" }>
+  invocations: ToolInvocationLifecycle[]
 }) {
-  const { call, outcome } = block.invocation
-  const succeeded = outcome.status === "succeeded"
-
-  // Derive a friendly label from tool name + first arg
-  const firstArg = Object.values(call.arguments)[0]
-  const argLabel = typeof firstArg === "string" ? firstArg : null
-  const label = argLabel
-    ? `${call.tool_name} ${argLabel}`
-    : call.tool_name
+  const [open, setOpen] = useState(false)
+  const allSucceeded = invocations.every(
+    (inv) => inv.outcome.status === "succeeded",
+  )
+  const summary = buildCategorySummary(
+    invocations.map((inv) => ({ toolName: inv.call.tool_name })),
+  )
 
   return (
-    <div className="flex items-center gap-2 py-0.5 pl-5 text-[13px] text-muted-foreground">
-      <span>{label}</span>
-      {succeeded && (
-        <Check className="size-3.5 text-foreground/50" />
-      )}
-      {!succeeded && outcome.status === "failed" && (
-        <XIcon className="size-3.5 text-destructive/70" />
+    <div className="mb-3">
+      {/* Summary header */}
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <ChevronRight
+          className={cn(
+            "size-3.5 shrink-0 transition-transform",
+            open && "rotate-90",
+          )}
+        />
+        <span className="font-medium">Explored</span>
+        <span className="text-muted-foreground/70">
+          {summary
+            .map((s) => `${s.count} ${s.label}${s.count > 1 ? "s" : ""}`)
+            .join(", ")}
+        </span>
+        {allSucceeded && (
+          <Check className="size-3.5 text-emerald-500/70" />
+        )}
+      </button>
+
+      {/* Expanded tool details */}
+      {open && (
+        <div className="mt-1 ml-5">
+          {invocations.map((inv) => (
+            <ToolInvocationRow key={inv.call.invocation_id} invocation={inv} />
+          ))}
+        </div>
       )}
     </div>
   )
+}
+
+function ToolInvocationRow({
+  invocation,
+}: {
+  invocation: ToolInvocationLifecycle
+}) {
+  const { call, outcome } = invocation
+  const succeeded = outcome.status === "succeeded"
+  const label = getToolLabel(call.tool_name, call.arguments)
+  const diffStats =
+    succeeded && outcome.status === "succeeded"
+      ? parseDiffStats(outcome.result.content)
+      : null
+
+  return (
+    <div className="flex items-center gap-2 py-0.5 text-[13px] text-muted-foreground">
+      <span className="shrink-0 font-medium text-muted-foreground/70">
+        {call.tool_name}
+      </span>
+      <span className="truncate">{getToolFirstArg(call)}</span>
+      {diffStats && (
+        <>
+          <span className="text-emerald-500">+{diffStats.added}</span>
+          <span className="text-red-400">-{diffStats.removed}</span>
+        </>
+      )}
+      {succeeded ? (
+        <Check className="size-3 shrink-0 text-foreground/30" />
+      ) : (
+        <XIcon className="size-3 shrink-0 text-destructive/70" />
+      )}
+    </div>
+  )
+}
+
+function getToolFirstArg(call: ToolCall): string {
+  const firstStr = Object.values(call.arguments).find(
+    (v) => typeof v === "string",
+  ) as string | undefined
+  return firstStr ?? ""
+}
+
+// --- Streaming tool group ---
+
+function StreamingToolGroup({
+  toolOutputs,
+}: {
+  toolOutputs: StreamingToolOutput[]
+}) {
+  if (toolOutputs.length === 0) return null
+
+  const summary = buildCategorySummary(toolOutputs)
+
+  return (
+    <div className="mb-2">
+      <div className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
+        <span className="size-1.5 shrink-0 rounded-full bg-amber-500/70 animate-pulse" />
+        <Shimmer as="span" className="font-medium" duration={2}>
+          Exploring
+        </Shimmer>
+        <span className="text-muted-foreground/70">
+          {summary
+            .map((s) => `${s.count} ${s.label}${s.count > 1 ? "s" : ""}`)
+            .join(", ")}
+        </span>
+      </div>
+      {/* Show current active tool */}
+      {toolOutputs.length > 0 && (
+        <div className="mt-0.5 ml-5">
+          {toolOutputs.map((tool) => (
+            <div
+              key={tool.invocationId}
+              className="flex items-center gap-2 py-0.5 text-[13px] text-muted-foreground/60"
+            >
+              {tool.toolName && (
+                <span className="shrink-0 font-medium">{tool.toolName}</span>
+              )}
+              <span className="truncate">
+                {getToolLabel("", tool.arguments).trim() ||
+                  tool.invocationId}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// --- Block grouping ---
+
+type BlockGroup =
+  | { type: "single"; block: TurnBlock }
+  | { type: "tools"; invocations: ToolInvocationLifecycle[] }
+
+function groupBlocks(blocks: TurnBlock[]): BlockGroup[] {
+  const result: BlockGroup[] = []
+
+  for (const block of blocks) {
+    if (block.kind === "tool_invocation") {
+      const last = result[result.length - 1]
+      if (last && last.type === "tools") {
+        last.invocations.push(block.invocation)
+      } else {
+        result.push({ type: "tools", invocations: [block.invocation] })
+      }
+    } else {
+      result.push({ type: "single", block })
+    }
+  }
+  return result
 }
 
 // --- Block renderer ---
@@ -143,44 +373,36 @@ function BlockRenderer({ block }: { block: TurnBlock }) {
           <MarkdownContent content={block.content} />
         </div>
       )
-    case "tool_invocation":
-      return <ToolInvocationBlock block={block} />
     case "failure":
       return (
         <div className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-[13px] text-destructive">
           {block.message}
         </div>
       )
+    case "tool_invocation":
+      // Handled by grouping — should not reach here in normal flow
+      return null
   }
 }
 
-// --- Group consecutive tool blocks with a summary header ---
+// --- Status indicator ---
 
-function groupBlocks(blocks: TurnBlock[]) {
-  const groups: { type: "single"; block: TurnBlock }[] | { type: "tools"; blocks: TurnBlock[] }[] = []
-  type Group = { type: "single"; block: TurnBlock } | { type: "tools"; blocks: TurnBlock[] }
-  const result: Group[] = []
-
-  for (const block of blocks) {
-    if (block.kind === "tool_invocation") {
-      const last = result[result.length - 1]
-      if (last && last.type === "tools") {
-        last.blocks.push(block)
-      } else {
-        result.push({ type: "tools", blocks: [block] })
-      }
-    } else {
-      result.push({ type: "single", block })
-    }
-  }
-  void groups
-  return result
+const STATUS_LABELS: Record<StreamingTurn["status"], string> = {
+  waiting: "Waiting",
+  thinking: "Thinking",
+  working: "Working",
+  generating: "Generating",
 }
 
-function ToolGroupHeader({ count }: { count: number }) {
+function StatusIndicator({ status }: { status: StreamingTurn["status"] }) {
+  // Working status has its own UI (StreamingToolGroup)
+  if (status === "working") return null
+
   return (
-    <div className="mb-0.5 text-[13px] text-muted-foreground">
-      <span>Ran {count} tool{count > 1 ? "s" : ""}</span>
+    <div className="py-2">
+      <Shimmer as="span" className="text-[14px] font-medium" duration={2}>
+        {STATUS_LABELS[status]}
+      </Shimmer>
     </div>
   )
 }
@@ -212,58 +434,14 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
           </span>
         </div>
         {grouped.map((group, i) => {
-          if (group.type === "single") {
-            return <BlockRenderer key={i} block={group.block} />
+          if (group.type === "tools") {
+            return (
+              <ToolGroupView key={i} invocations={group.invocations} />
+            )
           }
-          return (
-            <div key={i} className="mb-3">
-              <ToolGroupHeader count={group.blocks.length} />
-              {group.blocks.map((block, j) => (
-                <BlockRenderer key={j} block={block} />
-              ))}
-            </div>
-          )
+          return <BlockRenderer key={i} block={group.block} />
         })}
       </div>
-    </div>
-  )
-}
-
-// --- Status indicator (more prominent) ---
-
-const STATUS_LABELS: Record<StreamingTurn["status"], string> = {
-  waiting: "Waiting",
-  thinking: "Thinking",
-  working: "Working",
-  generating: "Generating",
-}
-
-function StatusIndicator({ status }: { status: StreamingTurn["status"] }) {
-  return (
-    <div className="py-2">
-      <Shimmer as="span" className="text-[14px] font-medium" duration={2}>
-        {STATUS_LABELS[status]}
-      </Shimmer>
-    </div>
-  )
-}
-
-// --- Streaming tool block: flat row with pulse dot ---
-
-function StreamingToolBlock({
-  invocationId,
-  output,
-}: {
-  invocationId: string
-  output: string
-}) {
-  return (
-    <div className="flex items-center gap-2 py-0.5 pl-5 text-[13px] text-muted-foreground">
-      <span className="size-1.5 rounded-full bg-amber-500/70 animate-pulse" />
-      <span>{invocationId}</span>
-      {output && (
-        <span className="truncate text-muted-foreground/50">{output.split("\n")[0]}</span>
-      )}
     </div>
   )
 }
@@ -295,25 +473,17 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
           </span>
         </div>
         {streaming.thinkingText && (
-          <ThinkingBlock content={streaming.thinkingText} />
+          <ThinkingBlock
+            content={streaming.thinkingText}
+            isStreaming={streaming.status === "thinking"}
+          />
         )}
-        {streaming.toolOutputs.length > 0 && (
-          <div className="mb-2">
-            {streaming.toolOutputs.map((tool) => (
-              <StreamingToolBlock
-                key={tool.invocationId}
-                invocationId={tool.invocationId}
-                output={tool.output}
-              />
-            ))}
-          </div>
-        )}
+        <StreamingToolGroup toolOutputs={streaming.toolOutputs} />
         {streaming.assistantText ? (
           <div className="text-[14px] leading-[1.75] text-foreground/85">
             <MarkdownContent content={streaming.assistantText} />
           </div>
         ) : null}
-        <StatusIndicator status={streaming.status} />
       </div>
     </div>
   )
@@ -348,7 +518,7 @@ export function ChatMessages() {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto">
+    <div className="relative flex-1 overflow-y-auto">
       <div className="mx-auto max-w-[720px] px-6 py-8">
         {turns.map((turn) => (
           <TurnView key={turn.turn_id} turn={turn} />
@@ -361,6 +531,13 @@ export function ChatMessages() {
         )}
         <div ref={bottomRef} />
       </div>
+      {streamingTurn && (
+        <div className="sticky bottom-0 z-10 bg-gradient-to-t from-background via-background to-transparent pb-4 pt-6">
+          <div className="mx-auto max-w-[720px] px-6">
+            <StatusIndicator status={streamingTurn.status} />
+          </div>
+        </div>
+      )}
     </div>
   )
 }

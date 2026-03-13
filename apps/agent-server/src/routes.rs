@@ -240,10 +240,7 @@ pub async fn delete_provider(
     let mut s = state.lock().expect("lock poisoned");
 
     if let Err(e) = s.registry.remove(&name) {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        );
+        return (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": e.to_string() })));
     }
 
     if let Err(e) = s.registry.save(&s.store_path) {
@@ -380,6 +377,7 @@ pub async fn submit_turn(
                 let new_status = match &event {
                     StreamEvent::ThinkingDelta { .. } => CurrentStatus::Thinking,
                     StreamEvent::TextDelta { .. } => CurrentStatus::Generating,
+                    StreamEvent::ToolCallStarted { .. } => CurrentStatus::Working,
                     StreamEvent::ToolOutputDelta { .. } => CurrentStatus::Working,
                     _ => current_status.clone(),
                 };

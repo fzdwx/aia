@@ -3,6 +3,12 @@ export type StreamEvent =
   | { kind: "thinking_delta"; text: string }
   | { kind: "text_delta"; text: string }
   | {
+      kind: "tool_call_started"
+      invocation_id: string
+      tool_name: string
+      arguments: Record<string, unknown>
+    }
+  | {
       kind: "tool_output_delta"
       invocation_id: string
       stream: "stdout" | "stderr"
@@ -74,6 +80,8 @@ export type TurnStatus = "waiting" | "thinking" | "working" | "generating"
 // Streaming tool output accumulator
 export type StreamingToolOutput = {
   invocationId: string
+  toolName: string
+  arguments: Record<string, unknown>
   output: string
 }
 
