@@ -231,19 +231,15 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
 // --- Status indicator (more prominent) ---
 
 const STATUS_LABELS: Record<StreamingTurn["status"], string> = {
-  waiting: "Waiting...",
-  thinking: "Thinking...",
-  working: "Working...",
-  generating: "Generating...",
+  waiting: "Waiting",
+  thinking: "Thinking",
+  working: "Working",
+  generating: "Generating",
 }
 
 function StatusIndicator({ status }: { status: StreamingTurn["status"] }) {
   return (
-    <div className="flex items-center gap-2.5 py-2">
-      <span className="relative flex size-2.5">
-        <span className="absolute inline-flex size-full animate-ping rounded-full bg-foreground/30" />
-        <span className="relative inline-flex size-2.5 rounded-full bg-foreground/60" />
-      </span>
+    <div className="py-2">
       <span className="shimmer-text text-[14px] font-medium">
         {STATUS_LABELS[status]}
       </span>
