@@ -15,11 +15,17 @@ impl ProviderKind {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ModelLimit {
+    pub context: Option<u32>,
+    pub output: Option<u32>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ModelConfig {
     pub id: String,
     pub display_name: Option<String>,
-    pub context_window: Option<u32>,
+    pub limit: Option<ModelLimit>,
     pub default_temperature: Option<f32>,
     #[serde(default)]
     pub supports_reasoning: bool,
@@ -31,7 +37,7 @@ impl ModelConfig {
         Self {
             id: id.into(),
             display_name: None,
-            context_window: None,
+            limit: None,
             default_temperature: None,
             supports_reasoning: false,
             reasoning_effort: None,

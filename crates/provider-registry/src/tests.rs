@@ -4,7 +4,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::{ProviderKind, ProviderProfile, ProviderRegistry, default_registry_path};
+use crate::{
+    ModelConfig, ModelLimit, ProviderKind, ProviderProfile, ProviderRegistry, default_registry_path,
+};
 
 fn temp_file(name: &str) -> PathBuf {
     let suffix = SystemTime::now().duration_since(UNIX_EPOCH).expect("时间有效").as_nanos();
@@ -81,6 +83,37 @@ fn 可构造_openai_兼容聊天补全_provider() {
     assert_eq!(provider.name, "compat");
     assert_eq!(provider.base_url, "http://127.0.0.1:8000/v1");
     assert_eq!(provider.active_model_id(), Some("minum-security-llm"));
+}
+
+#[test]
+fn 模型_limit_可保存并重新载入() {
+    let path = temp_file("provider-registry-limit");
+    let mut registry = ProviderRegistry::default();
+    registry.upsert(ProviderProfile {
+        name: "main".into(),
+        kind: ProviderKind::OpenAiResponses,
+        base_url: "https://api.openai.com/v1".into(),
+        api_key: "secret".into(),
+        models: vec![ModelConfig {
+            id: "gpt-4.1".into(),
+            display_name: Some("GPT-4.1".into()),
+            limit: Some(ModelLimit { context: Some(200_000), output: Some(131_072) }),
+            default_temperature: Some(0.2),
+            supports_reasoning: true,
+            reasoning_effort: Some("medium".into()),
+        }],
+        active_model: Some("gpt-4.1".into()),
+    });
+
+    registry.save(&path).expect("保存成功");
+    let restored = ProviderRegistry::load_or_default(&path).expect("加载成功");
+
+    assert_eq!(
+        restored.providers()[0].models[0].limit,
+        Some(ModelLimit { context: Some(200_000), output: Some(131_072) })
+    );
+
+    let _ = fs::remove_file(path);
 }
 
 #[test]
