@@ -7,16 +7,13 @@ check:
 test:
 	cargo test --workspace
 
-run *ARGS:
-	cargo run -p agent-cli -- {{ARGS}}
-
 # 同时启动后端和前端
 dev:
 	#!/usr/bin/env bash
 	set -e
 	cargo run -p agent-server &
 	SERVER_PID=$!
-	cd apps/web && bun dev &
+	cd apps/web && bun i && bun dev &
 	WEB_PID=$!
 	trap "kill $SERVER_PID $WEB_PID 2>/dev/null" EXIT
 	wait
