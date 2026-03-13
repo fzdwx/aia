@@ -301,7 +301,8 @@ pub struct CompletionRequest {
 // Streaming
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ToolOutputStream {
     Stdout,
     Stderr,
@@ -358,7 +359,8 @@ impl ToolExecutionContext {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StreamEvent {
     ThinkingDelta { text: String },
     TextDelta { text: String },

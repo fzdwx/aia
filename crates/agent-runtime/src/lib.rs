@@ -10,10 +10,12 @@ use agent_core::{
     Message, ModelIdentity, Role, StreamEvent, ToolCall, ToolDefinition, ToolExecutionContext,
     ToolExecutor, ToolOutputDelta, ToolResult,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use session_tape::{Anchor, Handoff, SessionTape, TapeEntry};
 
-const MAX_TURN_STEPS: usize = 8;
+const DEFAULT_MAX_TURN_STEPS: usize = 8;
+const DEFAULT_MAX_TOOL_CALLS_PER_TURN: usize = 50;
 
 pub struct AgentRuntime<M, T> {
     model: M,
@@ -23,6 +25,8 @@ pub struct AgentRuntime<M, T> {
     instructions: Option<String>,
     disabled_tools: BTreeSet<String>,
     workspace_root: Option<std::path::PathBuf>,
+    max_turn_steps: usize,
+    max_tool_calls_per_turn: usize,
     events: Vec<RuntimeEvent>,
     subscribers: BTreeMap<RuntimeSubscriberId, usize>,
     next_subscriber_id: RuntimeSubscriberId,
@@ -30,17 +34,17 @@ pub struct AgentRuntime<M, T> {
 
 pub type RuntimeSubscriberId = u64;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ToolInvocationLifecycle {
     pub call: ToolCall,
     pub outcome: ToolInvocationOutcome,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TurnLifecycle {
     pub turn_id: String,
-    pub started_at_ms: u128,
-    pub finished_at_ms: u128,
+    pub started_at_ms: u64,
+    pub finished_at_ms: u64,
     pub source_entry_ids: Vec<u64>,
     pub user_message: String,
     pub blocks: Vec<TurnBlock>,
@@ -50,13 +54,15 @@ pub struct TurnLifecycle {
     pub failure_message: Option<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
 pub enum ToolInvocationOutcome {
     Succeeded { result: ToolResult },
     Failed { message: String },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TurnBlock {
     Thinking { content: String },
     Assistant { content: String },
@@ -64,7 +70,8 @@ pub enum TurnBlock {
     Failure { message: String },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RuntimeEvent {
     UserMessage { content: String },
     AssistantMessage { content: String },
@@ -78,6 +85,9 @@ where
     M: LanguageModel,
     T: ToolExecutor,
 {
+    const FINAL_TEXT_ONLY_INSTRUCTION: &'static str = "你已经到达本轮内部步骤预算的最后一步。不要再调用任何工具，直接基于当前上下文给出最好的最终回答。";
+    const STEP_BUDGET_INSTRUCTION_PREFIX: &'static str = "当前是本轮内部循环的预算提示：";
+
     pub fn new(model: M, tools: T, model_identity: ModelIdentity) -> Self {
         Self::with_tape(model, tools, model_identity, SessionTape::new())
     }
@@ -91,6 +101,8 @@ where
             instructions: None,
             disabled_tools: BTreeSet::new(),
             workspace_root: None,
+            max_turn_steps: DEFAULT_MAX_TURN_STEPS,
+            max_tool_calls_per_turn: DEFAULT_MAX_TOOL_CALLS_PER_TURN,
             events: Vec::new(),
             subscribers: BTreeMap::new(),
             next_subscriber_id: 1,
@@ -104,6 +116,16 @@ where
 
     pub fn with_workspace_root(mut self, workspace_root: impl Into<std::path::PathBuf>) -> Self {
         self.workspace_root = Some(workspace_root.into());
+        self
+    }
+
+    pub fn with_max_turn_steps(mut self, max_turn_steps: usize) -> Self {
+        self.max_turn_steps = max_turn_steps.max(1);
+        self
+    }
+
+    pub fn with_max_tool_calls_per_turn(mut self, max_tool_calls_per_turn: usize) -> Self {
+        self.max_tool_calls_per_turn = max_tool_calls_per_turn.max(1);
         self
     }
 
@@ -131,8 +153,9 @@ where
         let mut last_assistant_text = None;
         let mut seen_tool_calls = BTreeMap::new();
         self.publish_event(RuntimeEvent::UserMessage { content: user_message.content.clone() });
-        for _ in 0..MAX_TURN_STEPS {
-            let request = self.build_completion_request();
+        for step_index in 0..self.max_turn_steps {
+            let request = self
+                .build_completion_request(step_index + 1, step_index + 1 == self.max_turn_steps);
             let completion = match self.model.complete_streaming(request, &mut on_delta) {
                 Ok(completion) => completion,
                 Err(error) => {
@@ -182,6 +205,22 @@ where
                         last_step_entry_id = Some(entry_id);
                     }
                     CompletionSegment::ToolUse(call) => {
+                        if tool_invocations.len() >= self.max_tool_calls_per_turn {
+                            let runtime_error =
+                                RuntimeError::tool_call_limit(self.max_tool_calls_per_turn);
+                            self.record_turn_failure(
+                                &turn_id,
+                                started_at_ms,
+                                &mut source_entry_ids,
+                                &user_message.content,
+                                &blocks,
+                                last_assistant_text.clone(),
+                                aggregated_thinking.as_str(),
+                                &tool_invocations,
+                                runtime_error.clone(),
+                            );
+                            return Err(runtime_error);
+                        }
                         saw_tool_calls = true;
                         let tool_call_entry_id = self
                             .tape
@@ -239,7 +278,7 @@ where
             }
         }
 
-        let runtime_error = RuntimeError::turn_step_limit(MAX_TURN_STEPS);
+        let runtime_error = RuntimeError::turn_step_limit(self.max_turn_steps);
         self.record_turn_failure(
             &turn_id,
             started_at_ms,
@@ -306,7 +345,11 @@ where
         self.publish_event(RuntimeEvent::TurnLifecycle { turn });
     }
 
-    fn build_completion_request(&self) -> CompletionRequest {
+    fn build_completion_request(
+        &self,
+        current_step: usize,
+        force_text_only: bool,
+    ) -> CompletionRequest {
         let view = self.tape.default_view();
         let checkpoint = self.tape.latest_model_checkpoint();
         let should_resume_from_checkpoint = self
@@ -335,16 +378,38 @@ where
             conversation
         };
 
+        let remaining_steps = self.max_turn_steps.saturating_sub(current_step);
+        let budget_hint = if force_text_only {
+            format!(
+                "{} 当前为第 {current_step}/{max} 步，剩余可调用工具步数为 0。{}",
+                Self::STEP_BUDGET_INSTRUCTION_PREFIX,
+                Self::FINAL_TEXT_ONLY_INSTRUCTION,
+                max = self.max_turn_steps,
+            )
+        } else {
+            format!(
+                "{} 当前为第 {current_step}/{max} 步，剩余可继续调用工具的步数为 {remaining_steps}。如果信息已经足够，请尽早直接给出最终回答。",
+                Self::STEP_BUDGET_INSTRUCTION_PREFIX,
+                max = self.max_turn_steps,
+            )
+        };
+        let instructions = match self.instructions.as_ref() {
+            Some(instructions) if !instructions.is_empty() => {
+                Some(format!("{instructions}\n\n{budget_hint}"))
+            }
+            _ => Some(budget_hint),
+        };
+
         CompletionRequest {
             model: self.model_identity.clone(),
-            instructions: self.instructions.clone(),
+            instructions,
             conversation,
             resume_checkpoint: if should_resume_from_checkpoint {
                 checkpoint.map(|value| value.checkpoint)
             } else {
                 None
             },
-            available_tools: self.visible_tools(),
+            available_tools: if force_text_only { vec![] } else { self.visible_tools() },
         }
     }
 
@@ -516,7 +581,7 @@ where
     fn record_turn_failure(
         &mut self,
         turn_id: &str,
-        started_at_ms: u128,
+        started_at_ms: u64,
         source_entry_ids: &mut Vec<u64>,
         user_message: &str,
         blocks: &[TurnBlock],
@@ -589,8 +654,9 @@ fn next_turn_id() -> String {
     format!("turn-{now_ms}-{id}")
 }
 
-fn now_timestamp_ms() -> u128 {
+fn now_timestamp_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).expect("系统时间应晚于 UNIX_EPOCH").as_millis()
+        as u64
 }
 
 fn anchor_state_message(anchor: &Anchor) -> Message {
@@ -677,6 +743,10 @@ impl RuntimeError {
 
     pub fn turn_step_limit(max_steps: usize) -> Self {
         Self { message: format!("轮次超过最大内部步骤数：{max_steps}") }
+    }
+
+    pub fn tool_call_limit(max_tool_calls: usize) -> Self {
+        Self { message: format!("轮次超过最大工具调用次数：{max_tool_calls}") }
     }
 
     fn duplicate_tool_call(call: &agent_core::ToolCall, previous: &PreviousToolCall) -> Self {
@@ -1094,6 +1164,68 @@ mod tests {
             .filter(|result| result.content.contains("重复工具调用已跳过"))
             .count();
         assert_eq!(duplicate_results, 1);
+    }
+
+    #[test]
+    fn 可通过_builder_覆盖默认步数上限() {
+        let identity = ModelIdentity::new("local", "duplicate", ModelDisposition::Balanced);
+        let model = DuplicateToolLoopModel::new();
+        let mut runtime = AgentRuntime::new(model, StubTools, identity).with_max_turn_steps(2);
+
+        let error = runtime.handle_turn("今天星期几").expect_err("两步上限应触发失败");
+
+        assert!(error.to_string().contains("轮次超过最大内部步骤数：2"));
+    }
+
+    #[test]
+    fn 最后一步会切换为文本收尾模式() {
+        let identity = ModelIdentity::new("local", "continue", ModelDisposition::Balanced);
+        let model = ContinueAfterToolModel::new();
+        let mut runtime = AgentRuntime::new(model, StubTools, identity).with_max_turn_steps(2);
+
+        let output = runtime.handle_turn("开始").expect("最后一步应收尾成功");
+
+        assert_eq!(output.assistant_text, "已根据工具结果继续回答");
+        let requests = runtime.model.seen_requests.borrow();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1].available_tools.is_empty());
+        assert!(
+            requests[1]
+                .instructions
+                .as_deref()
+                .is_some_and(|text| text.contains("不要再调用任何工具"))
+        );
+    }
+
+    #[test]
+    fn 非最后一步会向模型注入剩余预算提示() {
+        let identity = ModelIdentity::new("local", "continue", ModelDisposition::Balanced);
+        let model = ContinueAfterToolModel::new();
+        let mut runtime = AgentRuntime::new(model, StubTools, identity).with_max_turn_steps(3);
+
+        let _ = runtime.handle_turn("开始").expect("应成功完成");
+
+        let requests = runtime.model.seen_requests.borrow();
+        assert!(
+            requests[0]
+                .instructions
+                .as_deref()
+                .is_some_and(|text| text.contains("当前为第 1/3 步")
+                    && text.contains("剩余可继续调用工具的步数为 2"))
+        );
+    }
+
+    #[test]
+    fn 可通过_builder_限制单轮最大工具调用次数() {
+        let identity = ModelIdentity::new("local", "duplicate", ModelDisposition::Balanced);
+        let model = DuplicateToolLoopModel::new();
+        let mut runtime = AgentRuntime::new(model, StubTools, identity)
+            .with_max_turn_steps(10)
+            .with_max_tool_calls_per_turn(1);
+
+        let error = runtime.handle_turn("今天星期几").expect_err("超过工具调用上限应失败");
+
+        assert!(error.to_string().contains("轮次超过最大工具调用次数：1"));
     }
 
     #[test]

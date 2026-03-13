@@ -1,7 +1,7 @@
 # aia agent
 i just wanted an aia agent.
 
-- a nice tui
+- a good web interface
 - gui support as a desktop app
 - support for windows, linux, and macos
 - tape.system https://tape.systems/#, from bub,https://github.com/bubbuild/bub
@@ -28,8 +28,9 @@ this repository now starts with a library-first rust workspace:
 - `crates/provider-registry`: stores local provider profiles and active selection
 - `crates/openai-adapter`: the first real model adapter set, now covering both responses-style and openai-compatible chat-completions-style http interfaces
 - `apps/agent-cli` (binary `aia`): a tiny runnable shell used to verify the core boundaries
+- `apps/web`: the primary web interface shell built with React + Vite
 
-`agent-cli` is now split into startup wiring, provider setup, a shared driver layer, loop driving, rendering, and tui modules. when running in a real terminal it prefers a minimal tui; provider selection and the first question now happen inside the tui startup state machine, and the current session remembers the last provider binding unless the user actively presses `F2` during startup to replace it. in non-terminal environments it falls back to the plain text loop, but both paths now share the same driver protocol.
+`agent-cli` now stays as a verification shell around startup wiring, provider setup, the shared driver layer, and the plain text loop. all terminal TUI code has been removed from the repository; `apps/web` is now the primary client direction for provider management, session timeline, and streaming interaction.
 
 the shared driver boundary has also been tightened so it no longer leaks cli-specific error types or pre-stringified errors into the reusable turn-driving path.
 
@@ -37,11 +38,11 @@ on shutdown, the shared driver now only finalizes and persists session state; it
 
 the runtime turn semantics now run as an internal multi-step loop instead of a single model call. one user turn can proceed as model → tool execution/results → model continuation until no further tool calls remain or a small step cap is hit. tool failures are recorded as structured failed tool outcomes plus tool-result entries on tape, so the next model step can see what failed instead of aborting the whole session immediately.
 
-the plain text loop now matches the tui failure policy: a failed turn is rendered as status and lifecycle output, but the session itself stays alive so the next user input can continue.
+that step cap is now runtime-configurable instead of being a single fixed constant everywhere. the generic runtime keeps a conservative default safety rail, while the current interactive verification shell uses a higher default budget suited to longer tool chains.
 
-the current tui message flow now renders markdown content into terminal lines and keeps a single scrollable message list with keyboard and mouse-wheel scrolling. submitted user messages are echoed optimistically before the round completes, streaming status stays pinned to the bottom of the message pane above the input bar, and the list auto-follows to the latest content unless the user explicitly scrolls upward.
+the stop strategy is also closer to opencode now: when a turn reaches its last allowed internal step, the runtime switches to a text-only finishing step instead of immediately failing. this preserves a hard safety rail while still giving the model one final chance to conclude cleanly without more tools.
 
-the tui now also has a minimal theme system, with `aura` as the first built-in theme. aura currently drives assistant text, user message bubbles, thinking text, tool blocks, separators, and footer status animation through semantic style mappings instead of scattered hard-coded colors.
+the plain text loop keeps the same non-fatal turn failure policy: a failed turn is rendered as status and lifecycle output, but the session itself stays alive so the next user input can continue.
 
 on startup, `aia` now enters a terminal provider flow: create a provider, select a saved provider, or fall back to the local bootstrap model. local provider data is stored in `.aia/providers.json`, and `.aia/` is ignored to reduce accidental commits.
 
@@ -53,7 +54,9 @@ for the OpenAI Responses path specifically, `aia` now persists a session-local c
 
 session replay data is stored separately in `.aia/session.jsonl` as jsonl snapshots of flat tape entries (`{id, kind, payload, meta, date}`). the tape core now uses a single flat entry model aligned with republic, bub, and tape.systems — each entry carries its kind as a string, its payload as json, and optional metadata including run_id for turn grouping. legacy session files in the old `{id, fact, date}` format are auto-converted on load. the shared tape core also exposes named-tape storage, query slicing, and append-only fork/merge semantics.
 
-see `docs/architecture.md` for the first-phase architecture and why the project starts from reusable libraries instead of a premature ui shell.
+`apps/web` is no longer a template placeholder. it now contains the primary web-shell scaffold that will host provider selection, session timeline, streaming output, and runtime status once the web/runtime bridge is connected.
+
+see `docs/architecture.md` for the first-phase architecture and why the project starts from reusable libraries instead of pushing agent logic into a client shell.
 
 project coordination lives in:
 

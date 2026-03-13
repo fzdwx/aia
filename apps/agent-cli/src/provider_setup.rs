@@ -6,7 +6,7 @@ use provider_registry::{ProviderKind, ProviderProfile, ProviderRegistry};
 
 use crate::{errors::CliSetupError, model::ProviderLaunchChoice};
 
-pub fn choose_provider_via_tui<R: BufRead, W: Write>(
+pub fn choose_provider_interactively<R: BufRead, W: Write>(
     reader: &mut R,
     writer: &mut W,
     registry: &mut ProviderRegistry,
@@ -176,7 +176,7 @@ mod tests {
 
     use crate::model::ProviderLaunchChoice;
 
-    use super::choose_provider_via_tui;
+    use super::choose_provider_interactively;
 
     fn temp_file(name: &str) -> std::path::PathBuf {
         let suffix = SystemTime::now().duration_since(UNIX_EPOCH).expect("时间有效").as_nanos();
@@ -201,8 +201,9 @@ mod tests {
         let mut reader = Cursor::new(input.as_slice());
         let mut output = Vec::new();
 
-        let selection = choose_provider_via_tui(&mut reader, &mut output, &mut registry, &path)
-            .expect("创建成功");
+        let selection =
+            choose_provider_interactively(&mut reader, &mut output, &mut registry, &path)
+                .expect("创建成功");
 
         assert_eq!(
             selection,
@@ -229,8 +230,9 @@ mod tests {
         let mut reader = Cursor::new(input.as_slice());
         let mut output = Vec::new();
 
-        let selection = choose_provider_via_tui(&mut reader, &mut output, &mut registry, &path)
-            .expect("创建成功");
+        let selection =
+            choose_provider_interactively(&mut reader, &mut output, &mut registry, &path)
+                .expect("创建成功");
 
         assert_eq!(
             selection,
@@ -262,8 +264,9 @@ mod tests {
         let mut reader = Cursor::new(input.as_slice());
         let mut output = Vec::new();
 
-        let selection = choose_provider_via_tui(&mut reader, &mut output, &mut registry, &path)
-            .expect("选择成功");
+        let selection =
+            choose_provider_interactively(&mut reader, &mut output, &mut registry, &path)
+                .expect("选择成功");
 
         assert_eq!(
             selection,
@@ -294,8 +297,9 @@ mod tests {
         let mut reader = Cursor::new(input.as_slice());
         let mut output = Vec::new();
 
-        let selection = choose_provider_via_tui(&mut reader, &mut output, &mut registry, &path)
-            .expect("选择成功");
+        let selection =
+            choose_provider_interactively(&mut reader, &mut output, &mut registry, &path)
+                .expect("选择成功");
 
         assert_eq!(
             selection,

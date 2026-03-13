@@ -1,4 +1,4 @@
-use std::{env, error::Error, io, io::IsTerminal};
+use std::{env, error::Error, io};
 
 use agent_runtime::AgentRuntime;
 use builtin_tools::build_tool_registry;
@@ -9,8 +9,10 @@ use crate::{
     errors::CliLoopError,
     loop_driver::run_agent_loop,
     model::{ProviderLaunchChoice, build_model_from_selection},
-    tui::run_tui_loop,
 };
+
+const CLI_DEFAULT_MAX_TURN_STEPS: usize = 50;
+const CLI_DEFAULT_MAX_TOOL_CALLS_PER_TURN: usize = 50;
 
 pub fn run() -> Result<(), Box<dyn Error>> {
     let prompt_seed = {
@@ -22,21 +24,15 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     let session_path = default_session_path();
     let registry = ProviderRegistry::load_or_default(&store_path)?;
     let tape = SessionTape::load_jsonl_or_default(&session_path)?;
-    let interactive_terminal = io::stdin().is_terminal() && io::stdout().is_terminal();
-
-    if interactive_terminal {
-        run_tui_loop(registry, &store_path, tape, &session_path, prompt_seed)
-            .map_err(boxed_loop_error)?;
-        return Ok(());
-    }
-
     let selection = choose_non_interactive_provider(&registry, &tape);
     let (identity, model) = build_model_from_selection(selection)?;
     let tools = build_tool_registry();
     let current_model_provider = identity.provider.clone();
     let current_model_name = identity.name.clone();
     let mut runtime = AgentRuntime::with_tape(model, tools, identity, tape)
-        .with_instructions("你是 aia 的起步代理。优先给出结构化、可继续落地的答案。");
+        .with_instructions("你是 aia 的起步代理。优先给出结构化、可继续落地的答案。")
+        .with_max_turn_steps(CLI_DEFAULT_MAX_TURN_STEPS)
+        .with_max_tool_calls_per_turn(CLI_DEFAULT_MAX_TOOL_CALLS_PER_TURN);
     runtime.disable_tool("handoff_session");
 
     let stdin = io::stdin();
