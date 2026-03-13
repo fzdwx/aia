@@ -265,9 +265,7 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
             <MarkdownContent content={streaming.assistantText} />
           </div>
         ) : null}
-        {streaming.status !== "generating" || !streaming.assistantText ? (
-          <StatusIndicator status={streaming.status} />
-        ) : null}
+        <StatusIndicator status={streaming.status} />
       </div>
     </div>
   )
