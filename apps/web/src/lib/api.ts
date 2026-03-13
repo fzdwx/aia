@@ -1,4 +1,10 @@
-import type { ModelConfig, ProviderInfo, ProviderListItem, SseEvent, TurnLifecycle } from "./types"
+import type {
+  ModelConfig,
+  ProviderInfo,
+  ProviderListItem,
+  SseEvent,
+  TurnLifecycle,
+} from "./types"
 
 export async function fetchProviders(): Promise<ProviderInfo> {
   const res = await fetch("/api/providers")
@@ -8,8 +14,7 @@ export async function fetchProviders(): Promise<ProviderInfo> {
 
 export async function fetchHistory(): Promise<TurnLifecycle[]> {
   const res = await fetch("/api/session/history")
-  if (!res.ok)
-    throw new Error(`GET /api/session/history failed: ${res.status}`)
+  if (!res.ok) throw new Error(`GET /api/session/history failed: ${res.status}`)
   return res.json() as Promise<TurnLifecycle[]>
 }
 
@@ -52,24 +57,29 @@ export async function updateProvider(
     active_model?: string
     api_key?: string
     base_url?: string
-  },
+  }
 ): Promise<void> {
   const res = await fetch(`/api/providers/${encodeURIComponent(name)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   })
-  if (!res.ok) throw new Error(`PUT /api/providers/${name} failed: ${res.status}`)
+  if (!res.ok)
+    throw new Error(`PUT /api/providers/${name} failed: ${res.status}`)
 }
 
 export async function deleteProvider(name: string): Promise<void> {
   const res = await fetch(`/api/providers/${encodeURIComponent(name)}`, {
     method: "DELETE",
   })
-  if (!res.ok) throw new Error(`DELETE /api/providers/${name} failed: ${res.status}`)
+  if (!res.ok)
+    throw new Error(`DELETE /api/providers/${name} failed: ${res.status}`)
 }
 
-export async function switchProvider(name: string, modelId?: string): Promise<ProviderInfo> {
+export async function switchProvider(
+  name: string,
+  modelId?: string
+): Promise<ProviderInfo> {
   const res = await fetch("/api/providers/switch", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

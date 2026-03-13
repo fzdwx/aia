@@ -57,7 +57,7 @@ type ChatStore = {
       active_model?: string
       api_key?: string
       base_url?: string
-    },
+    }
   ) => Promise<void>
   deleteProvider: (name: string) => Promise<void>
 }
@@ -138,7 +138,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         } else if (data.kind === "tool_output_delta") {
           const outputs = [...prev.toolOutputs]
           const idx = outputs.findIndex(
-            (t) => t.invocationId === data.invocation_id,
+            (t) => t.invocationId === data.invocation_id
           )
           if (idx >= 0) {
             outputs[idx] = {

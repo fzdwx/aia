@@ -1,12 +1,10 @@
 import { Fragment, useEffect, useRef, useState } from "react"
-import { Check, ChevronRight, X as XIcon } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { Check, X as XIcon } from "lucide-react"
 import { Shimmer } from "@/components/ai-elements/shimmer"
 import { useChatStore } from "@/stores/chat-store"
 import type {
   StreamingToolOutput,
   StreamingTurn,
-  ToolCall,
   ToolInvocationLifecycle,
   TurnBlock,
   TurnLifecycle,
@@ -83,7 +81,6 @@ function MarkdownContent({ content }: { content: string }) {
 type ToolCategory = "read" | "search" | "edit" | "other"
 
 const TOOL_CATEGORIES: Record<string, ToolCategory> = {
-  read_file: "read",
   read: "read",
   cat: "read",
   head: "read",
@@ -93,9 +90,9 @@ const TOOL_CATEGORIES: Record<string, ToolCategory> = {
   find: "search",
   glob: "search",
   ripgrep: "search",
+  shell: "other",
   edit: "edit",
   write: "edit",
-  write_file: "edit",
   patch: "edit",
   replace: "edit",
   sed: "edit",
@@ -109,36 +106,53 @@ const CATEGORY_LABELS: Record<ToolCategory, string> = {
 }
 
 function categorize(toolName: string): ToolCategory {
-  const lower = toolName.toLowerCase()
-  for (const [key, cat] of Object.entries(TOOL_CATEGORIES)) {
-    if (lower.includes(key)) return cat
-  }
-  return "other"
+  return TOOL_CATEGORIES[toolName.toLowerCase()] ?? "other"
 }
 
-function getToolLabel(
-  toolName: string,
-  args: Record<string, unknown>,
+/** Extract display label from tool details (backend-provided) or fallback to first arg */
+function getToolDisplayPath(
+  details: Record<string, unknown> | undefined,
+  args: Record<string, unknown>
 ): string {
-  const firstStr = Object.values(args).find(
-    (v) => typeof v === "string",
-  ) as string | undefined
-  return firstStr ? `${toolName}  ${firstStr}` : toolName
+  if (details) {
+    if (typeof details.file_path === "string") return details.file_path
+    if (typeof details.pattern === "string") return details.pattern
+    if (typeof details.command === "string") return details.command
+  }
+  // fallback: first string arg
+  const firstStr = Object.values(args).find((v) => typeof v === "string") as
+    | string
+    | undefined
+  return firstStr ?? ""
 }
 
-/** Parse +N / -N diff stats from tool result content */
-function parseDiffStats(content: string): { added: number; removed: number } | null {
-  const addMatch = content.match(/(\d+)\s+insertion/)
-  const removeMatch = content.match(/(\d+)\s+deletion/)
-  if (!addMatch && !removeMatch) return null
+/** Extract diff/line stats from backend details */
+function getToolStats(details: Record<string, unknown> | undefined): {
+  added?: number
+  removed?: number
+  lines?: number
+  matches?: number
+  linesRead?: number
+  totalLines?: number
+  exitCode?: number
+} {
+  if (!details) return {}
   return {
-    added: addMatch ? parseInt(addMatch[1], 10) : 0,
-    removed: removeMatch ? parseInt(removeMatch[1], 10) : 0,
+    added: typeof details.added === "number" ? details.added : undefined,
+    removed: typeof details.removed === "number" ? details.removed : undefined,
+    lines: typeof details.lines === "number" ? details.lines : undefined,
+    matches: typeof details.matches === "number" ? details.matches : undefined,
+    linesRead:
+      typeof details.lines_read === "number" ? details.lines_read : undefined,
+    totalLines:
+      typeof details.total_lines === "number" ? details.total_lines : undefined,
+    exitCode:
+      typeof details.exit_code === "number" ? details.exit_code : undefined,
   }
 }
 
 function buildCategorySummary(
-  invocations: { toolName: string }[],
+  invocations: { toolName: string }[]
 ): { category: ToolCategory; label: string; count: number }[] {
   const counts = new Map<ToolCategory, number>()
   for (const inv of invocations) {
@@ -170,12 +184,6 @@ function ThinkingBlock({
         onClick={() => setOpen(!open)}
         className="flex items-center gap-1.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
       >
-        <ChevronRight
-          className={cn(
-            "size-3.5 shrink-0 transition-transform",
-            open && "rotate-90",
-          )}
-        />
         {isStreaming ? (
           <span className="font-medium">Thinking</span>
         ) : (
@@ -190,7 +198,7 @@ function ThinkingBlock({
         )}
       </button>
       {open && (
-        <div className="mt-1.5 ml-5 border-l-2 border-border/30 pl-3 text-[13px] leading-relaxed text-muted-foreground/80">
+        <div className="mt-1.5 border-l-2 border-border/30 pl-3 text-[13px] leading-relaxed text-muted-foreground/80">
           <MarkdownContent content={content} />
         </div>
       )}
@@ -207,10 +215,10 @@ function ToolGroupView({
 }) {
   const [open, setOpen] = useState(false)
   const allSucceeded = invocations.every(
-    (inv) => inv.outcome.status === "succeeded",
+    (inv) => inv.outcome.status === "succeeded"
   )
   const summary = buildCategorySummary(
-    invocations.map((inv) => ({ toolName: inv.call.tool_name })),
+    invocations.map((inv) => ({ toolName: inv.call.tool_name }))
   )
 
   return (
@@ -220,21 +228,13 @@ function ToolGroupView({
         onClick={() => setOpen(!open)}
         className="flex items-center gap-1.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
       >
-        <ChevronRight
-          className={cn(
-            "size-3.5 shrink-0 transition-transform",
-            open && "rotate-90",
-          )}
-        />
         <span className="font-medium">Explored</span>
         <span className="text-muted-foreground/70">
           {summary
             .map((s) => `${s.count} ${s.label}${s.count > 1 ? "s" : ""}`)
             .join(", ")}
         </span>
-        {allSucceeded && (
-          <Check className="size-3.5 text-emerald-500/70" />
-        )}
+        {allSucceeded && <Check className="size-3.5 text-emerald-500/70" />}
       </button>
 
       {/* Expanded tool details */}
@@ -254,40 +254,61 @@ function ToolInvocationRow({
 }: {
   invocation: ToolInvocationLifecycle
 }) {
+  const [showOutput, setShowOutput] = useState(false)
   const { call, outcome } = invocation
   const succeeded = outcome.status === "succeeded"
-  const label = getToolLabel(call.tool_name, call.arguments)
-  const diffStats =
-    succeeded && outcome.status === "succeeded"
-      ? parseDiffStats(outcome.result.content)
-      : null
+  const outputContent = succeeded
+    ? outcome.result.content
+    : outcome.status === "failed"
+      ? outcome.message
+      : ""
+
+  const details = succeeded ? outcome.result.details : undefined
+  const stats = getToolStats(details)
+  const displayPath = getToolDisplayPath(details, call.arguments)
 
   return (
-    <div className="flex items-center gap-2 py-0.5 text-[13px] text-muted-foreground">
-      <span className="shrink-0 font-medium text-muted-foreground/70">
-        {call.tool_name}
-      </span>
-      <span className="truncate">{getToolFirstArg(call)}</span>
-      {diffStats && (
-        <>
-          <span className="text-emerald-500">+{diffStats.added}</span>
-          <span className="text-red-400">-{diffStats.removed}</span>
-        </>
-      )}
-      {succeeded ? (
-        <Check className="size-3 shrink-0 text-foreground/30" />
-      ) : (
-        <XIcon className="size-3 shrink-0 text-destructive/70" />
+    <div>
+      <button
+        onClick={() => setShowOutput(!showOutput)}
+        className="flex w-full items-center gap-2 py-0.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <span className="shrink-0 font-medium text-muted-foreground/70">
+          {call.tool_name}
+        </span>
+        <span className="truncate">{displayPath}</span>
+        {stats.added != null && (
+          <span className="shrink-0 text-emerald-500">+{stats.added}</span>
+        )}
+        {stats.removed != null && (
+          <span className="shrink-0 text-red-400">-{stats.removed}</span>
+        )}
+        {stats.lines != null && (
+          <span className="shrink-0 text-emerald-500">+{stats.lines}</span>
+        )}
+        {stats.matches != null && (
+          <span className="shrink-0 text-muted-foreground/50">
+            {stats.matches} matches
+          </span>
+        )}
+        {stats.linesRead != null && stats.totalLines != null && (
+          <span className="shrink-0 text-muted-foreground/50">
+            {stats.linesRead}/{stats.totalLines}
+          </span>
+        )}
+        {succeeded ? (
+          <Check className="size-3 shrink-0 text-foreground/30" />
+        ) : (
+          <XIcon className="size-3 shrink-0 text-destructive/70" />
+        )}
+      </button>
+      {showOutput && outputContent && (
+        <pre className="mt-0.5 mb-1 ml-5 max-h-[300px] overflow-auto rounded border border-border/40 bg-muted/40 p-2 font-mono text-[12px] leading-relaxed text-muted-foreground/80">
+          {outputContent}
+        </pre>
       )}
     </div>
   )
-}
-
-function getToolFirstArg(call: ToolCall): string {
-  const firstStr = Object.values(call.arguments).find(
-    (v) => typeof v === "string",
-  ) as string | undefined
-  return firstStr ?? ""
 }
 
 // --- Streaming tool group ---
@@ -304,7 +325,7 @@ function StreamingToolGroup({
   return (
     <div className="mb-2">
       <div className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
-        <span className="size-1.5 shrink-0 rounded-full bg-amber-500/70 animate-pulse" />
+        <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-amber-500/70" />
         <Shimmer as="span" className="font-medium" duration={2}>
           Exploring
         </Shimmer>
@@ -326,7 +347,7 @@ function StreamingToolGroup({
                 <span className="shrink-0 font-medium">{tool.toolName}</span>
               )}
               <span className="truncate">
-                {getToolLabel("", tool.arguments).trim() ||
+                {getToolDisplayPath(undefined, tool.arguments) ||
                   tool.invocationId}
               </span>
             </div>
@@ -342,6 +363,7 @@ function StreamingToolGroup({
 type BlockGroup =
   | { type: "single"; block: TurnBlock }
   | { type: "tools"; invocations: ToolInvocationLifecycle[] }
+  | { type: "thinking"; content: string }
 
 function groupBlocks(blocks: TurnBlock[]): BlockGroup[] {
   const result: BlockGroup[] = []
@@ -353,6 +375,13 @@ function groupBlocks(blocks: TurnBlock[]): BlockGroup[] {
         last.invocations.push(block.invocation)
       } else {
         result.push({ type: "tools", invocations: [block.invocation] })
+      }
+    } else if (block.kind === "thinking") {
+      const last = result[result.length - 1]
+      if (last && last.type === "thinking") {
+        last.content += "\n" + block.content
+      } else {
+        result.push({ type: "thinking", content: block.content })
       }
     } else {
       result.push({ type: "single", block })
@@ -413,11 +442,11 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
   const grouped = groupBlocks(turn.blocks)
 
   return (
-    <div className="mb-8 last:mb-0 animate-[message-in_250ms_ease-out_both]">
+    <div className="mb-8 animate-[message-in_250ms_ease-out_both] last:mb-0">
       {/* User message */}
       <div className="mb-6">
         <div className="mb-2 flex items-baseline gap-2.5">
-          <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-foreground/70">
+          <span className="text-[11px] font-semibold tracking-[0.1em] text-foreground/70 uppercase">
             You
           </span>
         </div>
@@ -429,15 +458,13 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
       {/* Assistant response blocks */}
       <div>
         <div className="mb-2 flex items-baseline gap-2.5">
-          <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+          <span className="text-[11px] font-semibold tracking-[0.1em] text-muted-foreground uppercase">
             aia
           </span>
         </div>
         {grouped.map((group, i) => {
           if (group.type === "tools") {
-            return (
-              <ToolGroupView key={i} invocations={group.invocations} />
-            )
+            return <ToolGroupView key={i} invocations={group.invocations} />
           }
           return <BlockRenderer key={i} block={group.block} />
         })}
@@ -455,7 +482,7 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
       {streaming.userMessage && (
         <div className="mb-6">
           <div className="mb-2 flex items-baseline gap-2.5">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-foreground/70">
+            <span className="text-[11px] font-semibold tracking-[0.1em] text-foreground/70 uppercase">
               You
             </span>
           </div>
@@ -468,7 +495,7 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
       {/* Assistant response */}
       <div>
         <div className="mb-2 flex items-baseline gap-2.5">
-          <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+          <span className="text-[11px] font-semibold tracking-[0.1em] text-muted-foreground uppercase">
             aia
           </span>
         </div>
@@ -497,7 +524,11 @@ export function ChatMessages() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [turns.length, streamingTurn?.assistantText, streamingTurn?.toolOutputs.length])
+  }, [
+    turns.length,
+    streamingTurn?.assistantText,
+    streamingTurn?.toolOutputs.length,
+  ])
 
   if (turns.length === 0 && !streamingTurn) {
     return (
@@ -532,7 +563,7 @@ export function ChatMessages() {
         <div ref={bottomRef} />
       </div>
       {streamingTurn && (
-        <div className="sticky bottom-0 z-10 bg-gradient-to-t from-background via-background to-transparent pb-4 pt-6">
+        <div className="sticky bottom-0 z-10 bg-gradient-to-t from-background via-background to-transparent pt-6 pb-4">
           <div className="mx-auto max-w-[720px] px-6">
             <StatusIndicator status={streamingTurn.status} />
           </div>

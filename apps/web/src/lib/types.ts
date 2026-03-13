@@ -27,6 +27,7 @@ export type ToolResult = {
   tool_name: string
   content: string
   response_id?: string
+  details?: Record<string, unknown>
 }
 
 export type ToolCall = {
