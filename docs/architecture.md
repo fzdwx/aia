@@ -24,7 +24,8 @@ README 里真正难的是这些能力：
 - `agent-runtime`：运行时编排与最小 turn 执行
 - `provider-registry`：provider 资料、活动项与本地持久化
 - `openai-adapter`：首个真实模型适配层，负责把统一请求映射到 Responses 风格接口
-- `agent-cli`：最小可运行入口，用来验证核心设计；输出二进制名为 `aia`
+- `apps/agent-server`：最小应用壳，负责把共享运行时桥接到 HTTP + SSE
+- `apps/web`：主界面承接层，消费服务端事件流并负责交互展示
 
 ## 模块边界
 
@@ -88,7 +89,7 @@ README 里真正难的是这些能力：
 - 每个轮次块带稳定轮次标识与时间戳，便于时间线跳转与回放定位
 - 轮次块只作为运行时事件发出，不再写入磁带（"derivatives never replace original facts"）
 - 历史轮次可从磁带 entries 按 `meta.run_id` 分组重建，不依赖磁带内的 TurnRecord
-- CLI 每轮会把原始 entries 同步落盘到 `.aia/session.jsonl`
+- `apps/agent-server` 会在每轮完成后把原始 entries 同步落盘到 `.aia/session.jsonl`
 
 第一阶段只实现最小 turn 执行，故意不把并发子代理一次做满，避免空壳化。
 
@@ -100,7 +101,7 @@ README 里真正难的是这些能力：
 - 保存 provider 所属协议类型（Responses / OpenAI 兼容 Chat Completions）
 - 记录当前活动 provider
 - 从磁盘载入与写回 `.aia/providers.json`
-- 保持 provider 持久化逻辑不泄漏进 `agent-cli`
+- 保持 provider 持久化逻辑不泄漏进应用壳层
 
 ### `openai-adapter`
 
@@ -112,23 +113,6 @@ README 里真正难的是这些能力：
 - 在续调阶段按协议原生形态编码工具链路：Responses 使用 `function_call` / `function_call_output`，Chat Completions 使用 `assistant.tool_calls` / `tool.tool_call_id`
 - Responses 还会持久化并回传 `previous_response_id`，避免后续 turn 重放整段历史
 - 保持提供商细节停留在边缘层，不把外部协议泄漏进 `agent-core`
-
-### `agent-cli`
-
-这是一个**验证壳**，不是最终界面：
-
-- 用最小入口证明核心库边界是可运行的
-- 启动时提供最小交互式 provider 创建与选择流程，并允许显式选择协议类型
-- 启动后提供最小可运行的 agent loop
-- 入口已按 startup / provider / driver / loop / model / error 拆分，避免验证壳继续膨胀
-- 当前会话会记住上次使用的 provider 绑定（名称 / 模型 / 基地址，或 bootstrap）；用户在启动阶段通过 `F2` 才会替换
-- 当前会话会记住上次使用的 provider 绑定（名称 / 模型 / 基地址 / 协议，或 bootstrap）；用户在启动阶段通过 `F2` 才会替换
-- 文本 loop 作为最小验证路径继续存在，为后续 web / 其他客户端接入预留边界
-- 共享驱动层已收敛为驱动本地错误与事件结果，不再直接泄漏命令行错误类型，也不再把错误提前压成字符串
-- 共享驱动层在退出时只负责收尾与最终落盘，不再自动写入硬编码 handoff；handoff 保持为会话层显式能力
-- 文本 loop 与共享运行时现在共享一致的失败策略：轮次失败会渲染状态与生命周期块，但不会直接打断整个交互会话
-- Web 端将成为主界面：负责 provider 管理、会话时间线、输入发送、流式输出与运行状态展示
-- 桌面应用后续将共享同一运行时与 Web 界面壳，而不是重写代理逻辑
 
 ### `apps/web`
 
@@ -148,14 +132,16 @@ README 里真正难的是这些能力：
 负责 Web ↔ 运行时桥接：
 
 - 基于 axum 构建 HTTP + SSE 服务器，监听端口 3434
+- 启动时从 `.aia/providers.json` 与 `.aia/session.jsonl` 恢复 provider 绑定，无匹配时回退 bootstrap
 - 通过 `tokio::task::spawn_blocking` 桥接同步 `AgentRuntime` 到异步 axum
 - 全局 `broadcast::channel` 向所有 SSE 客户端推送事件
 - HTTP API：
   - `GET /api/providers`：返回当前 provider 信息
   - `GET /api/session/history`：返回已完成的 `TurnLifecycle[]`
   - `GET /api/events`：全局 SSE 事件流（stream / status / turn_completed / error）
-  - `POST /api/turn`：发送用户消息（202 fire-and-forget）
+- `POST /api/turn`：发送用户消息（202 fire-and-forget）
 - 从 `StreamEvent` 变体自动派生轮次状态（ThinkingDelta → Thinking，TextDelta → Generating，ToolOutputDelta → Working）
+- turn 完成后把会话磁带落盘回 `.aia/session.jsonl`
 - 不含 agent loop 逻辑，纯粹作为运行时的 HTTP 外壳
 
 ## 对 README 的映射
@@ -171,7 +157,7 @@ README 里真正难的是这些能力：
 - 首个真实模型适配器基线
 - 最小可运行的多轮 agent loop
 - 可被多个订阅者消费的统一事件流基线
-- 最小可运行的 CLI 验证壳与模块化结构
+- 最小可运行的 HTTP + SSE 应用壳与 Web 主界面骨架
 
 ### 下一阶段直接承接的能力
 

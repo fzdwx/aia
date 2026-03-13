@@ -27,27 +27,26 @@ this repository now starts with a library-first rust workspace:
 - `crates/agent-runtime`: minimal runtime that composes models, tools, and session state
 - `crates/provider-registry`: stores local provider profiles and active selection
 - `crates/openai-adapter`: the first real model adapter set, now covering both responses-style and openai-compatible chat-completions-style http interfaces
-- `apps/agent-cli` (binary `aia`): a tiny runnable shell used to verify the core boundaries
 - `apps/agent-server`: axum HTTP+SSE server bridging web frontend to shared runtime
 - `apps/web`: the primary web interface shell built with React + Vite
 
-`agent-cli` now stays as a verification shell around startup wiring, provider setup, the shared driver layer, and the plain text loop. all terminal TUI code has been removed from the repository; `apps/web` is now the primary client direction for provider management, session timeline, and streaming interaction.
+`apps/web` is now the primary client direction for provider management, session timeline, and streaming interaction. `apps/agent-server` is the only application shell in the Rust workspace and stays focused on bridging HTTP + SSE into the shared runtime instead of re-owning agent logic.
 
-the shared driver boundary has also been tightened so it no longer leaks cli-specific error types or pre-stringified errors into the reusable turn-driving path.
+the shared turn-driving boundary has also been tightened so it no longer leaks shell-specific error types or pre-stringified errors into the reusable runtime path.
 
 on shutdown, the shared driver now only finalizes and persists session state; it no longer injects a hard-coded handoff summary on exit.
 
 the runtime turn semantics now run as an internal multi-step loop instead of a single model call. one user turn can proceed as model → tool execution/results → model continuation until no further tool calls remain or a small step cap is hit. tool failures are recorded as structured failed tool outcomes plus tool-result entries on tape, so the next model step can see what failed instead of aborting the whole session immediately.
 
-that step cap is now runtime-configurable instead of being a single fixed constant everywhere. the generic runtime keeps a conservative default safety rail, while the current interactive verification shell uses a higher default budget suited to longer tool chains.
+that step cap is now runtime-configurable instead of being a single fixed constant everywhere. the generic runtime keeps a conservative default safety rail, while the current web bridge uses a higher default budget suited to longer tool chains.
 
 the stop strategy is also closer to opencode now: when a turn reaches its last allowed internal step, the runtime switches to a text-only finishing step instead of immediately failing. this preserves a hard safety rail while still giving the model one final chance to conclude cleanly without more tools.
 
-the plain text loop keeps the same non-fatal turn failure policy: a failed turn is rendered as status and lifecycle output, but the session itself stays alive so the next user input can continue.
+the web turn flow keeps the same non-fatal failure policy: a failed turn is emitted through structured SSE error/status events, but the session itself stays alive so the next user input can continue.
 
-on startup, `aia` now enters a terminal provider flow: create a provider, select a saved provider, or fall back to the local bootstrap model. local provider data is stored in `.aia/providers.json`, and `.aia/` is ignored to reduce accidental commits.
+on startup, `apps/agent-server` restores provider state from `.aia/providers.json` and `.aia/session.jsonl`, preferring the latest remembered binding and falling back to the local bootstrap model when no matching provider exists. `.aia/` is ignored to reduce accidental commits.
 
-provider profiles now persist the exact protocol kind they use, so `aia` can distinguish the same endpoint/model under different wire protocols. the startup flows can create either an OpenAI Responses provider or an OpenAI-compatible Chat Completions provider, and remembered session bindings now restore the correct protocol instead of guessing from name/model/base url alone.
+provider profiles now persist the exact protocol kind they use, so the server can distinguish the same endpoint/model under different wire protocols. remembered session bindings restore the correct protocol instead of guessing from name/model/base url alone.
 
 the model-facing continuation context is no longer rebuilt only from flattened `role/content` messages. tool calls and tool results are now preserved as structured conversation items through `agent-core` → `session-tape` → `agent-runtime` → `openai-adapter`, so follow-up tool turns can be mapped back into protocol-native request shapes instead of lossy plain text.
 
