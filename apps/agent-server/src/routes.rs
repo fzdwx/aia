@@ -12,7 +12,9 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
-use agent_core::StreamEvent;
+use std::collections::BTreeMap;
+
+use agent_core::{Role, StreamEvent};
 use agent_runtime::{RuntimeEvent, TurnLifecycle};
 use provider_registry::{ModelConfig, ProviderKind};
 use session_tape::SessionProviderBinding;
@@ -90,6 +92,177 @@ fn sync_runtime_to_registry(
     state.runtime.replace_model(model, identity);
     *state.runtime.tape_mut() = candidate_tape;
     Ok(info)
+}
+
+#[derive(Default)]
+struct TurnHistoryBuilder {
+    turn_id: String,
+    started_at_ms: Option<u64>,
+    finished_at_ms: Option<u64>,
+    source_entry_ids: Vec<u64>,
+    user_message: Option<String>,
+    blocks: Vec<agent_runtime::TurnBlock>,
+    assistant_message: Option<String>,
+    thinking: Option<String>,
+    tool_invocations: Vec<agent_runtime::ToolInvocationLifecycle>,
+    failure_message: Option<String>,
+    pending_tool_calls: BTreeMap<String, agent_core::ToolCall>,
+}
+
+impl TurnHistoryBuilder {
+    fn new(turn_id: String) -> Self {
+        Self { turn_id, ..Self::default() }
+    }
+
+    fn push_entry(&mut self, entry: &session_tape::TapeEntry) {
+        self.source_entry_ids.push(entry.id);
+        let timestamp_ms = parse_iso8601_utc_seconds(&entry.date).unwrap_or(0);
+        self.started_at_ms = Some(self.started_at_ms.unwrap_or(timestamp_ms));
+        self.finished_at_ms = Some(timestamp_ms);
+
+        if let Some(message) = entry.as_message() {
+            match message.role {
+                Role::User => {
+                    if self.user_message.is_none() {
+                        self.user_message = Some(message.content);
+                    }
+                }
+                Role::Assistant => {
+                    self.assistant_message = Some(message.content.clone());
+                    self.blocks
+                        .push(agent_runtime::TurnBlock::Assistant { content: message.content });
+                }
+                Role::System | Role::Tool => {}
+            }
+            return;
+        }
+
+        if let Some(content) = entry.as_thinking() {
+            match &mut self.thinking {
+                Some(existing) => existing.push_str(content),
+                None => self.thinking = Some(content.to_string()),
+            }
+            self.blocks.push(agent_runtime::TurnBlock::Thinking { content: content.to_string() });
+            return;
+        }
+
+        if let Some(call) = entry.as_tool_call() {
+            self.pending_tool_calls.insert(call.invocation_id.clone(), call);
+            return;
+        }
+
+        if let Some(result) = entry.as_tool_result() {
+            let call = self.pending_tool_calls.remove(&result.invocation_id).unwrap_or_else(|| {
+                agent_core::ToolCall::new(result.tool_name.clone())
+                    .with_invocation_id(result.invocation_id.clone())
+            });
+            let invocation = agent_runtime::ToolInvocationLifecycle {
+                call,
+                outcome: agent_runtime::ToolInvocationOutcome::Succeeded { result },
+            };
+            self.blocks
+                .push(agent_runtime::TurnBlock::ToolInvocation { invocation: invocation.clone() });
+            self.tool_invocations.push(invocation);
+            return;
+        }
+
+        if entry.kind == "event" && entry.event_name() == Some("turn_failed") {
+            let message = entry
+                .event_data()
+                .and_then(|value| value.get("message"))
+                .and_then(|value| value.as_str())
+                .unwrap_or("turn failed")
+                .to_string();
+            self.failure_message = Some(message.clone());
+            self.blocks.push(agent_runtime::TurnBlock::Failure { message });
+        }
+    }
+
+    fn finish(self) -> Option<TurnLifecycle> {
+        let user_message = self.user_message?;
+        Some(TurnLifecycle {
+            turn_id: self.turn_id,
+            started_at_ms: self.started_at_ms.unwrap_or(0),
+            finished_at_ms: self.finished_at_ms.unwrap_or(0),
+            source_entry_ids: self.source_entry_ids,
+            user_message,
+            blocks: self.blocks,
+            assistant_message: self.assistant_message,
+            thinking: self.thinking,
+            tool_invocations: self.tool_invocations,
+            failure_message: self.failure_message,
+        })
+    }
+}
+
+fn rebuild_turn_history_from_tape(tape: &session_tape::SessionTape) -> Vec<TurnLifecycle> {
+    let mut builders = Vec::<TurnHistoryBuilder>::new();
+    let mut by_run_id = BTreeMap::<String, usize>::new();
+    let mut legacy_turns = Vec::<TurnLifecycle>::new();
+
+    for entry in tape.entries() {
+        if entry.kind == "event" && entry.event_name() == Some("turn_record") {
+            if let Some(turn) = parse_legacy_turn_record(entry) {
+                legacy_turns.push(turn);
+            }
+            continue;
+        }
+
+        let run_id = entry
+            .meta
+            .get("run_id")
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let Some(run_id) = run_id else {
+            continue;
+        };
+
+        let index = match by_run_id.get(&run_id) {
+            Some(index) => *index,
+            None => {
+                let index = builders.len();
+                builders.push(TurnHistoryBuilder::new(run_id.clone()));
+                by_run_id.insert(run_id, index);
+                index
+            }
+        };
+        builders[index].push_entry(entry);
+    }
+
+    legacy_turns.extend(builders.into_iter().filter_map(TurnHistoryBuilder::finish));
+    legacy_turns
+        .sort_by_key(|turn| (turn.started_at_ms, turn.finished_at_ms, turn.turn_id.clone()));
+    legacy_turns
+}
+
+fn parse_legacy_turn_record(entry: &session_tape::TapeEntry) -> Option<TurnLifecycle> {
+    let data = entry.event_data()?.clone();
+    serde_json::from_value(data).ok()
+}
+
+fn parse_iso8601_utc_seconds(input: &str) -> Option<u64> {
+    if input.len() != 20 || !input.ends_with('Z') {
+        return None;
+    }
+
+    let year: i64 = input.get(0..4)?.parse().ok()?;
+    let month: i64 = input.get(5..7)?.parse().ok()?;
+    let day: i64 = input.get(8..10)?.parse().ok()?;
+    let hour: i64 = input.get(11..13)?.parse().ok()?;
+    let minute: i64 = input.get(14..16)?.parse().ok()?;
+    let second: i64 = input.get(17..19)?.parse().ok()?;
+
+    let adjusted_year = year - if month <= 2 { 1 } else { 0 };
+    let era = if adjusted_year >= 0 { adjusted_year } else { adjusted_year - 399 } / 400;
+    let year_of_era = adjusted_year - era * 400;
+    let adjusted_month = month + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * adjusted_month + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days_since_epoch = era * 146097 + day_of_era - 719468;
+    let total_seconds = days_since_epoch * 86_400 + hour * 3_600 + minute * 60 + second;
+
+    (total_seconds >= 0).then_some((total_seconds as u64) * 1000)
 }
 
 #[derive(Serialize)]
@@ -351,16 +524,16 @@ pub async fn switch_provider(
 mod tests {
     use std::path::PathBuf;
 
-    use agent_core::{ModelDisposition, ModelIdentity};
-    use agent_runtime::AgentRuntime;
+    use agent_core::{Message, ModelDisposition, ModelIdentity, Role, ToolCall, ToolResult};
+    use agent_runtime::{AgentRuntime, TurnLifecycle};
     use builtin_tools::build_tool_registry;
     use provider_registry::{ModelConfig, ProviderKind, ProviderProfile, ProviderRegistry};
-    use session_tape::SessionProviderBinding;
+    use session_tape::{SessionProviderBinding, SessionTape, TapeEntry};
     use tokio::sync::broadcast;
 
     use crate::{model::BootstrapModel, state::AppState};
 
-    use super::{prepare_runtime_sync, sync_runtime_to_registry};
+    use super::{prepare_runtime_sync, rebuild_turn_history_from_tape, sync_runtime_to_registry};
 
     fn provider(name: &str, model: &str) -> ProviderProfile {
         ProviderProfile {
@@ -566,19 +739,64 @@ mod tests {
         assert_eq!(state.runtime.tape().latest_provider_binding(), before_binding);
         assert!(state.registry.providers().is_empty());
     }
+
+    #[test]
+    fn rebuild_turn_history_from_tape_restores_completed_turns() {
+        let mut tape = SessionTape::new();
+        let turn_id = "turn-1";
+        let user = Message::new(Role::User, "你好");
+        let assistant = Message::new(Role::Assistant, "已完成");
+        let call = ToolCall::new("read").with_invocation_id("call-1");
+        let result = ToolResult::from_call(&call, "内容");
+
+        tape.append_entry(TapeEntry::message(&user).with_run_id(turn_id));
+        tape.append_entry(TapeEntry::thinking("思考中").with_run_id(turn_id));
+        tape.append_entry(TapeEntry::tool_call(&call).with_run_id(turn_id));
+        tape.append_entry(TapeEntry::tool_result(&result).with_run_id(turn_id));
+        tape.append_entry(TapeEntry::message(&assistant).with_run_id(turn_id));
+
+        let turns = rebuild_turn_history_from_tape(&tape);
+
+        assert_eq!(turns.len(), 1);
+        let turn = &turns[0];
+        assert_eq!(turn.turn_id, turn_id);
+        assert_eq!(turn.user_message, "你好");
+        assert_eq!(turn.assistant_message.as_deref(), Some("已完成"));
+        assert_eq!(turn.thinking.as_deref(), Some("思考中"));
+        assert_eq!(turn.tool_invocations.len(), 1);
+        assert_eq!(turn.blocks.len(), 3);
+    }
+
+    #[test]
+    fn rebuild_turn_history_from_tape_restores_legacy_turn_record() {
+        let mut tape = SessionTape::new();
+        let legacy_turn = TurnLifecycle {
+            turn_id: "legacy-turn-1".to_string(),
+            started_at_ms: 1000,
+            finished_at_ms: 2000,
+            source_entry_ids: vec![1, 2],
+            user_message: "旧问题".to_string(),
+            blocks: vec![agent_runtime::TurnBlock::Assistant { content: "旧回答".to_string() }],
+            assistant_message: Some("旧回答".to_string()),
+            thinking: None,
+            tool_invocations: vec![],
+            failure_message: None,
+        };
+        tape.append_entry(TapeEntry::event(
+            "turn_record",
+            Some(serde_json::to_value(&legacy_turn).expect("legacy turn should serialize")),
+        ));
+
+        let turns = rebuild_turn_history_from_tape(&tape);
+
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0], legacy_turn);
+    }
 }
 
 pub async fn get_history(State(state): State<SharedState>) -> impl IntoResponse {
-    let mut s = state.lock().expect("lock poisoned");
-    let sub = s.subscriber;
-    let events = s.runtime.collect_events(sub).unwrap_or_default();
-    let turns: Vec<TurnLifecycle> = events
-        .into_iter()
-        .filter_map(|event| match event {
-            RuntimeEvent::TurnLifecycle { turn } => Some(turn),
-            _ => None,
-        })
-        .collect();
+    let s = state.lock().expect("lock poisoned");
+    let turns = rebuild_turn_history_from_tape(s.runtime.tape());
     Json(turns)
 }
 
