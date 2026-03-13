@@ -33,6 +33,8 @@ type ChatStore = {
   // Internal ref for pending prompt
   _pendingPrompt: string | null
 
+  _refreshProviderInfo: () => Promise<void>
+
   // Actions
   initialize: () => void
   handleSseEvent: (event: SseEvent) => void
@@ -71,9 +73,14 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   view: "chat",
   _pendingPrompt: null,
 
+  _refreshProviderInfo: async () => {
+    const provider = await fetchProviders()
+    set({ provider })
+  },
+
   initialize: () => {
-    fetchProviders()
-      .then((provider) => set({ provider }))
+    get()
+      ._refreshProviderInfo()
       .catch(() => {})
     fetchHistory()
       .then((turns) => set({ turns }))
@@ -92,10 +99,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             chatState: "active",
             streamingTurn: {
               userMessage: prompt,
-              thinkingText: "",
-              assistantText: "",
               status: "waiting",
-              toolOutputs: [],
+              blocks: [],
             },
           })
         } else {
@@ -111,48 +116,74 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         const prev = get().streamingTurn
         if (!prev) break
 
+        const blocks = [...prev.blocks]
+
         if (data.kind === "thinking_delta") {
-          set({
-            streamingTurn: {
-              ...prev,
-              thinkingText: prev.thinkingText + data.text,
-            },
-          })
-        } else if (data.kind === "text_delta") {
-          set({
-            streamingTurn: {
-              ...prev,
-              assistantText: prev.assistantText + data.text,
-            },
-          })
-        } else if (data.kind === "tool_call_started") {
-          const outputs = [...prev.toolOutputs]
-          outputs.push({
-            invocationId: data.invocation_id,
-            toolName: data.tool_name,
-            arguments: data.arguments,
-            output: "",
-          })
-          set({ streamingTurn: { ...prev, toolOutputs: outputs } })
-        } else if (data.kind === "tool_output_delta") {
-          const outputs = [...prev.toolOutputs]
-          const idx = outputs.findIndex(
-            (t) => t.invocationId === data.invocation_id
-          )
-          if (idx >= 0) {
-            outputs[idx] = {
-              ...outputs[idx],
-              output: outputs[idx].output + data.text,
+          const last = blocks[blocks.length - 1]
+          if (last && last.type === "thinking") {
+            blocks[blocks.length - 1] = {
+              ...last,
+              content: last.content + data.text,
             }
           } else {
-            outputs.push({
+            blocks.push({ type: "thinking", content: data.text })
+          }
+          set({ streamingTurn: { ...prev, blocks } })
+        } else if (data.kind === "text_delta") {
+          const last = blocks[blocks.length - 1]
+          if (last && last.type === "text") {
+            blocks[blocks.length - 1] = {
+              ...last,
+              content: last.content + data.text,
+            }
+          } else {
+            blocks.push({ type: "text", content: data.text })
+          }
+          set({ streamingTurn: { ...prev, blocks } })
+        } else if (data.kind === "tool_call_started") {
+          blocks.push({
+            type: "tool",
+            tool: {
               invocationId: data.invocation_id,
-              toolName: "",
-              arguments: {},
-              output: data.text,
+              toolName: data.tool_name,
+              arguments: data.arguments,
+              output: "",
+            },
+          })
+          set({ streamingTurn: { ...prev, blocks } })
+        } else if (data.kind === "tool_output_delta") {
+          let idx = -1
+          for (let i = blocks.length - 1; i >= 0; i -= 1) {
+            const block = blocks[i]
+            if (
+              block?.type === "tool" &&
+              block.tool.invocationId === data.invocation_id
+            ) {
+              idx = i
+              break
+            }
+          }
+          if (idx >= 0) {
+            const b = blocks[idx] as Extract<
+              (typeof blocks)[number],
+              { type: "tool" }
+            >
+            blocks[idx] = {
+              ...b,
+              tool: { ...b.tool, output: b.tool.output + data.text },
+            }
+          } else {
+            blocks.push({
+              type: "tool",
+              tool: {
+                invocationId: data.invocation_id,
+                toolName: "",
+                arguments: {},
+                output: data.text,
+              },
             })
           }
-          set({ streamingTurn: { ...prev, toolOutputs: outputs } })
+          set({ streamingTurn: { ...prev, blocks } })
         }
         break
       }
@@ -201,8 +232,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   },
 
   refreshProviders: () => {
-    apiListProviders()
-      .then((providerList) => set({ providerList }))
+    Promise.all([apiListProviders(), fetchProviders()])
+      .then(([providerList, provider]) => set({ providerList, provider }))
       .catch(() => {})
   },
 

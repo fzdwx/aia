@@ -458,9 +458,6 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
           if (group.type === "tools") {
             return <ToolGroupView key={i} invocations={group.invocations} />
           }
-          if (group.type === "thinking") {
-            return <ThinkingBlock key={i} content={group.content} />
-          }
           return <BlockRenderer key={i} block={group.block} />
         })}
       </div>
@@ -470,7 +467,33 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
 
 // --- Streaming view ---
 
+type StreamingGroup =
+  | { type: "thinking"; content: string }
+  | { type: "text"; content: string }
+  | { type: "tools"; tools: StreamingToolOutput[] }
+
+function groupStreamingBlocks(
+  blocks: StreamingTurn["blocks"]
+): StreamingGroup[] {
+  const groups: StreamingGroup[] = []
+  for (const block of blocks) {
+    if (block.type === "tool") {
+      const last = groups[groups.length - 1]
+      if (last && last.type === "tools") {
+        last.tools.push(block.tool)
+      } else {
+        groups.push({ type: "tools", tools: [block.tool] })
+      }
+    } else {
+      groups.push(block)
+    }
+  }
+  return groups
+}
+
 function StreamingView({ streaming }: { streaming: StreamingTurn }) {
+  const groups = groupStreamingBlocks(streaming.blocks)
+
   return (
     <div className="mb-8 animate-[message-in_250ms_ease-out_both]">
       {/* User message */}
@@ -487,25 +510,37 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
         </div>
       )}
 
-      {/* Assistant response */}
+      {/* Assistant response — blocks in real interleaved order */}
       <div>
         <div className="mb-2 flex items-baseline gap-2.5">
           <span className="text-[11px] font-semibold tracking-[0.1em] text-muted-foreground uppercase">
             aia
           </span>
         </div>
-        {streaming.thinkingText && (
-          <ThinkingBlock
-            content={streaming.thinkingText}
-            isStreaming={streaming.status === "thinking"}
-          />
-        )}
-        <StreamingToolGroup toolOutputs={streaming.toolOutputs} />
-        {streaming.assistantText ? (
-          <div className="text-[14px] leading-[1.75] text-foreground/85">
-            <MarkdownContent content={streaming.assistantText} />
-          </div>
-        ) : null}
+        {groups.map((group, i) => {
+          if (group.type === "thinking") {
+            const isLast =
+              i === groups.length - 1 && streaming.status === "thinking"
+            return (
+              <ThinkingBlock
+                key={i}
+                content={group.content}
+                isStreaming={isLast}
+              />
+            )
+          }
+          if (group.type === "tools") {
+            return <StreamingToolGroup key={i} toolOutputs={group.tools} />
+          }
+          return (
+            <div
+              key={i}
+              className="text-[14px] leading-[1.75] text-foreground/85"
+            >
+              <MarkdownContent content={group.content} />
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -519,11 +554,7 @@ export function ChatMessages() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [
-    turns.length,
-    streamingTurn?.assistantText,
-    streamingTurn?.toolOutputs.length,
-  ])
+  }, [turns.length, streamingTurn?.blocks.length, streamingTurn?.blocks])
 
   if (turns.length === 0 && !streamingTurn) {
     return (

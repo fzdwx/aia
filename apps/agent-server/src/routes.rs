@@ -18,9 +18,9 @@ use provider_registry::{ModelConfig, ProviderKind};
 use session_tape::SessionProviderBinding;
 
 use crate::{
-    model::{ProviderLaunchChoice, build_model_from_selection},
+    model::{ProviderLaunchChoice, ServerModel, build_model_from_selection},
     sse::{SsePayload, TurnStatus},
-    state::SharedState,
+    state::{AppState, SharedState},
 };
 
 #[derive(Deserialize)]
@@ -28,11 +28,68 @@ pub struct TurnRequest {
     pub prompt: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct ProviderInfo {
     pub name: String,
     pub model: String,
     pub connected: bool,
+}
+
+fn provider_info_from_runtime(state: &AppState) -> ProviderInfo {
+    let identity = state.runtime.model_identity();
+    ProviderInfo { name: identity.provider.clone(), model: identity.name.clone(), connected: true }
+}
+
+fn prepare_runtime_sync(
+    registry: &provider_registry::ProviderRegistry,
+) -> Result<(ProviderInfo, agent_core::ModelIdentity, ServerModel, SessionProviderBinding), String>
+{
+    let selection = registry
+        .active_provider()
+        .cloned()
+        .map(ProviderLaunchChoice::OpenAi)
+        .unwrap_or(ProviderLaunchChoice::Bootstrap);
+
+    let (identity, model) = build_model_from_selection(selection).map_err(|e| e.to_string())?;
+
+    let binding = match registry.active_provider() {
+        Some(profile) => SessionProviderBinding::Provider {
+            name: profile.name.clone(),
+            model: profile.active_model_id().unwrap_or("").to_string(),
+            base_url: profile.base_url.clone(),
+            protocol: profile.kind.protocol_name().to_string(),
+        },
+        None => SessionProviderBinding::Bootstrap,
+    };
+
+    let info = ProviderInfo {
+        name: identity.provider.clone(),
+        model: identity.name.clone(),
+        connected: true,
+    };
+
+    Ok((info, identity, model, binding))
+}
+
+fn sync_runtime_to_registry(
+    state: &mut AppState,
+    candidate_registry: provider_registry::ProviderRegistry,
+) -> Result<ProviderInfo, String> {
+    let (info, identity, model, binding) = prepare_runtime_sync(&candidate_registry)?;
+    let mut candidate_tape = state.runtime.tape().clone();
+    candidate_tape.bind_provider(binding.clone());
+
+    candidate_registry
+        .save(&state.store_path)
+        .map_err(|e| format!("provider registry save failed: {e}"))?;
+    candidate_tape
+        .save_jsonl(&state.session_path)
+        .map_err(|e| format!("session save failed: {e}"))?;
+
+    state.registry = candidate_registry;
+    state.runtime.replace_model(model, identity);
+    *state.runtime.tape_mut() = candidate_tape;
+    Ok(info)
 }
 
 #[derive(Serialize)]
@@ -114,12 +171,7 @@ struct TurnAccepted {
 
 pub async fn get_providers(State(state): State<SharedState>) -> Json<ProviderInfo> {
     let s = state.lock().expect("lock poisoned");
-    let identity = s.runtime.model_identity();
-    Json(ProviderInfo {
-        name: identity.provider.clone(),
-        model: identity.name.clone(),
-        connected: true,
-    })
+    Json(provider_info_from_runtime(&s))
 }
 
 pub async fn list_providers(State(state): State<SharedState>) -> Json<Vec<ProviderListItem>> {
@@ -169,9 +221,10 @@ pub async fn create_provider(
         active_model,
     };
 
-    s.registry.upsert(profile);
-    if let Err(e) = s.registry.save(&s.store_path) {
-        eprintln!("provider registry save failed: {e}");
+    let mut candidate_registry = s.registry.clone();
+    candidate_registry.upsert(profile);
+    if let Err(e) = sync_runtime_to_registry(&mut s, candidate_registry) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e })));
     }
 
     (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
@@ -225,9 +278,10 @@ pub async fn update_provider(
         active_model,
     };
 
-    s.registry.upsert(updated);
-    if let Err(e) = s.registry.save(&s.store_path) {
-        eprintln!("provider registry save failed: {e}");
+    let mut candidate_registry = s.registry.clone();
+    candidate_registry.upsert(updated);
+    if let Err(e) = sync_runtime_to_registry(&mut s, candidate_registry) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e })));
     }
 
     (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
@@ -239,12 +293,13 @@ pub async fn delete_provider(
 ) -> impl IntoResponse {
     let mut s = state.lock().expect("lock poisoned");
 
-    if let Err(e) = s.registry.remove(&name) {
+    let mut candidate_registry = s.registry.clone();
+    if let Err(e) = candidate_registry.remove(&name) {
         return (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": e.to_string() })));
     }
 
-    if let Err(e) = s.registry.save(&s.store_path) {
-        eprintln!("provider registry save failed: {e}");
+    if let Err(e) = sync_runtime_to_registry(&mut s, candidate_registry) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e })));
     }
 
     (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
@@ -275,51 +330,242 @@ pub async fn switch_provider(
             );
         }
         profile.active_model = Some(model_id.clone());
-        // Persist the active_model change
-        s.registry.upsert(profile.clone());
     }
 
-    let selection = ProviderLaunchChoice::OpenAi(profile.clone());
-    let (identity, model) = match build_model_from_selection(selection) {
-        Ok(pair) => pair,
+    let mut candidate_registry = s.registry.clone();
+    candidate_registry.upsert(profile);
+    if let Err(e) = candidate_registry.set_active(&body.name) {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": e.to_string() })));
+    }
+    let info = match sync_runtime_to_registry(&mut s, candidate_registry) {
+        Ok(info) => info,
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": e.to_string() })),
-            );
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e })));
         }
     };
 
-    s.runtime.replace_model(model, identity.clone());
+    (StatusCode::OK, Json(serde_json::json!(info)))
+}
 
-    if let Err(e) = s.registry.set_active(&body.name) {
-        eprintln!("set active failed: {e}");
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use agent_core::{ModelDisposition, ModelIdentity};
+    use agent_runtime::AgentRuntime;
+    use builtin_tools::build_tool_registry;
+    use provider_registry::{ModelConfig, ProviderKind, ProviderProfile, ProviderRegistry};
+    use session_tape::SessionProviderBinding;
+    use tokio::sync::broadcast;
+
+    use crate::{model::BootstrapModel, state::AppState};
+
+    use super::{prepare_runtime_sync, sync_runtime_to_registry};
+
+    fn provider(name: &str, model: &str) -> ProviderProfile {
+        ProviderProfile {
+            name: name.to_string(),
+            kind: ProviderKind::OpenAiResponses,
+            base_url: "https://api.openai.com/v1".to_string(),
+            api_key: "test-key".to_string(),
+            models: vec![ModelConfig {
+                id: model.to_string(),
+                display_name: None,
+                context_window: None,
+                default_temperature: None,
+                supports_reasoning: false,
+                reasoning_effort: None,
+            }],
+            active_model: Some(model.to_string()),
+        }
     }
-    if let Err(e) = s.registry.save(&s.store_path) {
-        eprintln!("provider registry save failed: {e}");
+
+    #[test]
+    fn sync_runtime_to_active_provider_tracks_registry_after_active_delete() {
+        let mut registry = ProviderRegistry::default();
+        registry.upsert(provider("first", "gpt-4.1-mini"));
+        registry.upsert(provider("second", "gpt-4.1"));
+        registry.set_active("first").expect("first provider should exist");
+
+        let runtime = AgentRuntime::new(
+            crate::model::ServerModel::Bootstrap(BootstrapModel),
+            build_tool_registry(),
+            ModelIdentity::new("local", "bootstrap", ModelDisposition::Balanced),
+        );
+        let (broadcast_tx, _) = broadcast::channel(16);
+        let mut state = AppState {
+            runtime,
+            subscriber: 1,
+            session_path: PathBuf::from("/tmp/session.jsonl"),
+            registry,
+            store_path: PathBuf::from("/tmp/providers.json"),
+            broadcast_tx,
+        };
+
+        state.registry.remove("first").expect("active provider should be removable");
+        let candidate_registry = state.registry.clone();
+
+        let info = sync_runtime_to_registry(&mut state, candidate_registry)
+            .expect("runtime sync should follow the new active provider");
+
+        assert_eq!(info.name, "openai");
+        assert_eq!(info.model, "gpt-4.1");
+        let binding = state.runtime.tape().latest_provider_binding();
+        assert_eq!(
+            binding,
+            Some(SessionProviderBinding::Provider {
+                name: "second".to_string(),
+                model: "gpt-4.1".to_string(),
+                base_url: "https://api.openai.com/v1".to_string(),
+                protocol: "openai-responses".to_string(),
+            })
+        );
     }
 
-    let model_id = profile.active_model_id().unwrap_or("").to_string();
+    #[test]
+    fn sync_runtime_to_active_provider_falls_back_to_bootstrap_when_empty() {
+        let runtime = AgentRuntime::new(
+            crate::model::ServerModel::Bootstrap(BootstrapModel),
+            build_tool_registry(),
+            ModelIdentity::new("local", "bootstrap", ModelDisposition::Balanced),
+        );
+        let (broadcast_tx, _) = broadcast::channel(16);
+        let mut state = AppState {
+            runtime,
+            subscriber: 1,
+            session_path: PathBuf::from("/tmp/session.jsonl"),
+            registry: ProviderRegistry::default(),
+            store_path: PathBuf::from("/tmp/providers.json"),
+            broadcast_tx,
+        };
+        let candidate_registry = state.registry.clone();
 
-    s.runtime.tape_mut().bind_provider(SessionProviderBinding::Provider {
-        name: profile.name,
-        model: model_id.clone(),
-        base_url: profile.base_url,
-        protocol: profile.kind.protocol_name().to_string(),
-    });
+        let info = sync_runtime_to_registry(&mut state, candidate_registry)
+            .expect("runtime sync should support bootstrap fallback");
 
-    if let Err(e) = s.runtime.tape().save_jsonl(&s.session_path) {
-        eprintln!("session save failed: {e}");
+        assert_eq!(info.name, "local");
+        assert_eq!(info.model, "bootstrap");
+        assert_eq!(
+            state.runtime.tape().latest_provider_binding(),
+            Some(SessionProviderBinding::Bootstrap)
+        );
     }
 
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({
-            "name": identity.provider,
-            "model": identity.name,
-            "connected": true,
-        })),
-    )
+    #[test]
+    fn prepare_runtime_sync_failure_does_not_mutate_existing_state() {
+        let mut registry = ProviderRegistry::default();
+        registry.upsert(provider("stable", "gpt-4.1-mini"));
+
+        let runtime = AgentRuntime::new(
+            crate::model::ServerModel::Bootstrap(BootstrapModel),
+            build_tool_registry(),
+            ModelIdentity::new("local", "bootstrap", ModelDisposition::Balanced),
+        );
+        let (broadcast_tx, _) = broadcast::channel(16);
+        let mut state = AppState {
+            runtime,
+            subscriber: 1,
+            session_path: PathBuf::from("/tmp/session.jsonl"),
+            registry: registry.clone(),
+            store_path: PathBuf::from("/tmp/providers.json"),
+            broadcast_tx,
+        };
+
+        sync_runtime_to_registry(&mut state, registry).expect("initial sync should succeed");
+
+        let mut invalid_registry = state.registry.clone();
+        invalid_registry.upsert(ProviderProfile {
+            name: "stable".to_string(),
+            kind: ProviderKind::OpenAiResponses,
+            base_url: "".to_string(),
+            api_key: "test-key".to_string(),
+            models: vec![ModelConfig {
+                id: "gpt-4.1-mini".to_string(),
+                display_name: None,
+                context_window: None,
+                default_temperature: None,
+                supports_reasoning: false,
+                reasoning_effort: None,
+            }],
+            active_model: Some("gpt-4.1-mini".to_string()),
+        });
+
+        let before_identity = state.runtime.model_identity().clone();
+        let before_binding = state.runtime.tape().latest_provider_binding();
+        assert!(prepare_runtime_sync(&invalid_registry).is_err());
+
+        assert_eq!(state.runtime.model_identity(), &before_identity);
+        assert_eq!(state.runtime.tape().latest_provider_binding(), before_binding);
+        assert_eq!(state.registry.active_provider().map(|p| p.name.as_str()), Some("stable"));
+        assert_eq!(
+            state.registry.active_provider().map(|p| p.base_url.as_str()),
+            Some("https://api.openai.com/v1")
+        );
+    }
+
+    #[test]
+    fn sync_runtime_to_registry_failure_does_not_mutate_when_registry_save_fails() {
+        let mut registry = ProviderRegistry::default();
+        registry.upsert(provider("stable", "gpt-4.1-mini"));
+
+        let runtime = AgentRuntime::new(
+            crate::model::ServerModel::Bootstrap(BootstrapModel),
+            build_tool_registry(),
+            ModelIdentity::new("local", "bootstrap", ModelDisposition::Balanced),
+        );
+        let (broadcast_tx, _) = broadcast::channel(16);
+        let mut state = AppState {
+            runtime,
+            subscriber: 1,
+            session_path: PathBuf::from("/tmp/session.jsonl"),
+            registry: ProviderRegistry::default(),
+            store_path: PathBuf::from("/proc/aia/providers.json"),
+            broadcast_tx,
+        };
+
+        let before_identity = state.runtime.model_identity().clone();
+        let before_binding = state.runtime.tape().latest_provider_binding();
+
+        let error =
+            sync_runtime_to_registry(&mut state, registry).expect_err("registry save should fail");
+
+        assert!(error.contains("provider registry save failed"));
+        assert_eq!(state.runtime.model_identity(), &before_identity);
+        assert_eq!(state.runtime.tape().latest_provider_binding(), before_binding);
+        assert!(state.registry.providers().is_empty());
+    }
+
+    #[test]
+    fn sync_runtime_to_registry_failure_does_not_mutate_when_session_save_fails() {
+        let mut registry = ProviderRegistry::default();
+        registry.upsert(provider("stable", "gpt-4.1-mini"));
+
+        let runtime = AgentRuntime::new(
+            crate::model::ServerModel::Bootstrap(BootstrapModel),
+            build_tool_registry(),
+            ModelIdentity::new("local", "bootstrap", ModelDisposition::Balanced),
+        );
+        let (broadcast_tx, _) = broadcast::channel(16);
+        let mut state = AppState {
+            runtime,
+            subscriber: 1,
+            session_path: PathBuf::from("/proc/aia/session.jsonl"),
+            registry: ProviderRegistry::default(),
+            store_path: PathBuf::from("/tmp/providers.json"),
+            broadcast_tx,
+        };
+
+        let before_identity = state.runtime.model_identity().clone();
+        let before_binding = state.runtime.tape().latest_provider_binding();
+
+        let error =
+            sync_runtime_to_registry(&mut state, registry).expect_err("session save should fail");
+
+        assert!(error.contains("session save failed"));
+        assert_eq!(state.runtime.model_identity(), &before_identity);
+        assert_eq!(state.runtime.tape().latest_provider_binding(), before_binding);
+        assert!(state.registry.providers().is_empty());
+    }
 }
 
 pub async fn get_history(State(state): State<SharedState>) -> impl IntoResponse {

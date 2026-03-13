@@ -86,13 +86,20 @@ export type StreamingToolOutput = {
   output: string
 }
 
+// Ordered streaming block — mirrors the real event sequence
+export type StreamingBlock =
+  | { type: "thinking"; content: string }
+  | { type: "tool"; tool: StreamingToolOutput }
+  | { type: "text"; content: string }
+
 // Streaming turn accumulator state
 export type StreamingTurn = {
   userMessage: string
-  thinkingText: string
-  assistantText: string
   status: TurnStatus
-  toolOutputs: StreamingToolOutput[]
+  thinkingText?: string
+  assistantText?: string
+  toolOutputs?: StreamingToolOutput[]
+  blocks: StreamingBlock[]
 }
 
 export type ChatState = "idle" | "active"
