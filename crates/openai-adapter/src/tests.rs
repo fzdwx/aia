@@ -25,6 +25,7 @@ fn sample_request() -> CompletionRequest {
             ConversationItem::Message(Message::new(Role::User, "帮我总结当前工作区")),
         ],
         resume_checkpoint: None,
+        max_output_tokens: None,
         available_tools: vec![ToolDefinition::new("search_code", "搜索代码").with_parameter(
             "query",
             "关键字",
@@ -68,6 +69,22 @@ fn 请求体带_reasoning_effort_时发送_reasoning_块() {
 
     assert_eq!(body["reasoning"]["effort"], json!("high"));
     assert_eq!(body["reasoning"]["summary"], json!("auto"));
+}
+
+#[test]
+fn responses_请求体会映射_output_limit() {
+    let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
+        "http://127.0.0.1:1",
+        "test-key",
+        "gpt-4.1-mini",
+    ))
+    .expect("模型创建成功");
+
+    let mut request = sample_request();
+    request.max_output_tokens = Some(131_072);
+    let body = model.build_request_body(&request);
+
+    assert_eq!(body["max_output_tokens"], json!(131_072));
 }
 
 #[test]
@@ -590,6 +607,23 @@ fn 聊天补全请求体会保留结构化工具链路() {
     assert_eq!(body["messages"][4]["role"], json!("tool"));
     assert_eq!(body["messages"][4]["tool_call_id"], json!("call_1"));
     assert_eq!(body["messages"][4]["content"], json!("found"));
+}
+
+#[test]
+fn 聊天补全请求体会映射_output_limit() {
+    let model = OpenAiChatCompletionsModel::new(OpenAiChatCompletionsConfig::new(
+        "http://127.0.0.1:1",
+        "test-key",
+        "minum-security-llm",
+    ))
+    .expect("模型创建成功");
+
+    let mut request = sample_request();
+    request.model.name = "minum-security-llm".into();
+    request.max_output_tokens = Some(131_072);
+    let body = model.build_request_body(&request);
+
+    assert_eq!(body["max_completion_tokens"], json!(131_072));
 }
 
 #[test]

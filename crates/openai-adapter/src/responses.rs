@@ -67,6 +67,9 @@ impl OpenAiResponsesModel {
             "input": input,
             "tools": tools,
         });
+        if let Some(output_limit) = request.max_output_tokens {
+            body["max_output_tokens"] = json!(output_limit);
+        }
         if let Some(effort) = &request.model.reasoning_effort {
             body["reasoning"] = json!({"effort": effort, "summary": "auto"});
         }

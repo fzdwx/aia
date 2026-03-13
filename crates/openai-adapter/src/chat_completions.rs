@@ -75,11 +75,15 @@ impl OpenAiChatCompletionsModel {
             })
             .collect::<Vec<_>>();
 
-        json!({
+        let mut body = json!({
             "model": self.config.model,
             "messages": messages,
             "tools": tools,
-        })
+        });
+        if let Some(output_limit) = request.max_output_tokens {
+            body["max_completion_tokens"] = json!(output_limit);
+        }
+        body
     }
 
     pub(crate) fn build_streaming_request_body(&self, request: &CompletionRequest) -> Value {
