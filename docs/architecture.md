@@ -95,7 +95,10 @@ README 里真正难的是这些能力：
 - 每个轮次块带稳定轮次标识与时间戳，便于时间线跳转与回放定位
 - 轮次块只作为运行时事件发出，不再写入磁带（"derivatives never replace original facts"）
 - 历史轮次可从磁带 entries 按 `meta.run_id` 分组重建，不依赖磁带内的 TurnRecord
+- crate 内部已继续拆分为运行时主循环、请求构造、工具执行、事件缓冲、错误与测试子模块，避免继续把所有逻辑堆在单个实现文件中
 - `apps/agent-server` 会在每轮完成后把原始 entries 同步落盘到 `.aia/session.jsonl`
+
+当前内建编码工具契约维持短名集合：`shell`、`read`、`write`、`edit`、`glob`、`grep`。其中 `shell` 是模型可见的稳定工具名，底层执行器可在边缘实现中替换；当前实现使用 `brush` 作为 shell 运行时，而不是把具体 shell 名称泄漏进统一工具协议。
 
 第一阶段只实现最小 turn 执行，故意不把并发子代理一次做满，避免空壳化。
 

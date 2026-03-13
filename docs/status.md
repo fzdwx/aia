@@ -3,7 +3,7 @@
 ## 当前阶段
 
 - 阶段：Web 界面 ↔ 运行时桥接
-- 当前步骤：`apps/web` 已通过 `apps/agent-server`（axum HTTP+SSE）桥接到共享运行时，实现流式消息、状态指示与工具调用实时展示；工作区已移除 `agent-cli`，收口为 Web + server 主路径
+- 当前步骤：在 Web + server 主路径稳定的基础上，继续收口统一工具契约；内建编码工具现已改为短名 `shell/read/write/edit/glob/grep`，并将 shell 执行器切到 `brush`
 
 ## 已完成
 
@@ -40,11 +40,15 @@
 - 完成移除 `apps/agent-cli` 包，并同步清理工作区与文档中的 CLI 主入口叙事
 - 完成核心 Rust crates 的内部模块化收口：`provider-registry`、`agent-core`、`session-tape`、`openai-adapter`、`agent-runtime` 已从单文件主入口拆为薄 `lib.rs` + 职责模块
 - 完成 `provider-registry` 与 `apps/agent-server` 之间的 provider 多模型配置接口对齐，并兼容旧单模型本地落盘格式
+- 完成 `agent-runtime` 深一层内部拆分：主循环、请求构造、工具执行、事件缓冲、错误与测试已进一步解耦
+- 完成内建编码工具命名收口为 `shell`、`read`、`write`、`edit`、`glob`、`grep`
+- 完成 shell 内建工具底层执行器切换到 `brush`，避免把具体 shell 名称泄漏进统一工具协议
 
 ## 正在进行
 
 - 继续推进统一工具规范向外部协议映射与 MCP 接入
 - 收口 `apps/agent-server` 与 `apps/web` 双壳结构后的文档与边界一致性
+- 观察 `brush` 作为 shell 运行时的实际稳定性与命令兼容性
 
 ## 下一步
 
