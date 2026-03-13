@@ -183,27 +183,60 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
   )
 }
 
+const STATUS_LABELS: Record<StreamingTurn["status"], string> = {
+  waiting: "Waiting",
+  thinking: "Thinking",
+  working: "Working",
+  generating: "Generating",
+}
+
+function StatusIndicator({ status }: { status: StreamingTurn["status"] }) {
+  return (
+    <div className="flex items-center gap-2.5 py-1">
+      <span className="shimmer-bar" />
+      <span className="text-[12px] font-medium tracking-wide text-muted-foreground/70">
+        {STATUS_LABELS[status]}
+      </span>
+    </div>
+  )
+}
+
 function StreamingView({ streaming }: { streaming: StreamingTurn }) {
   return (
     <div className="mb-8 animate-[message-in_250ms_ease-out_both]">
-      <div className="mb-2 flex items-baseline gap-2.5">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
-          aia
-        </span>
+      {/* User message */}
+      {streaming.userMessage && (
+        <div className="mb-6">
+          <div className="mb-2 flex items-baseline gap-2.5">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-foreground/70">
+              You
+            </span>
+          </div>
+          <div className="text-[14px] leading-[1.75] text-foreground/85">
+            <MarkdownContent content={streaming.userMessage} />
+          </div>
+        </div>
+      )}
+
+      {/* Assistant response */}
+      <div>
+        <div className="mb-2 flex items-baseline gap-2.5">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+            aia
+          </span>
+        </div>
+        {streaming.thinkingText && (
+          <ThinkingBlock content={streaming.thinkingText} />
+        )}
+        {streaming.assistantText ? (
+          <div className="text-[14px] leading-[1.75] text-foreground/85">
+            <MarkdownContent content={streaming.assistantText} />
+          </div>
+        ) : null}
+        {streaming.status !== "generating" || !streaming.assistantText ? (
+          <StatusIndicator status={streaming.status} />
+        ) : null}
       </div>
-      {streaming.thinkingText && (
-        <ThinkingBlock content={streaming.thinkingText} />
-      )}
-      {streaming.assistantText ? (
-        <div className="text-[14px] leading-[1.75] text-foreground/85">
-          <MarkdownContent content={streaming.assistantText} />
-        </div>
-      ) : (
-        <div className="flex items-center gap-2 text-[13px] text-muted-foreground/50">
-          <span className="inline-block size-1.5 animate-pulse rounded-full bg-muted-foreground/40" />
-          Generating...
-        </div>
-      )}
     </div>
   )
 }

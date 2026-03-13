@@ -61,16 +61,22 @@ export type ProviderInfo = {
   connected: boolean
 }
 
-// SSE event types from the server
+// SSE event types from the global /api/events stream
 export type SseEvent =
   | { type: "stream"; data: StreamEvent }
+  | { type: "status"; data: { status: TurnStatus } }
   | { type: "turn_completed"; data: TurnLifecycle }
   | { type: "error"; data: { message: string } }
 
+// Mirrors Rust TurnStatus
+export type TurnStatus = "waiting" | "thinking" | "working" | "generating"
+
 // Streaming turn accumulator state
 export type StreamingTurn = {
+  userMessage: string
   thinkingText: string
   assistantText: string
+  status: TurnStatus
 }
 
-export type ChatState = "idle" | "streaming"
+export type ChatState = "idle" | "active"

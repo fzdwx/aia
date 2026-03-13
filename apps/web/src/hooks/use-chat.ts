@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { fetchHistory, fetchProviders, submitTurn } from "@/lib/api"
+import {
+  connectEvents,
+  fetchHistory,
+  fetchProviders,
+  submitTurn as apiSubmitTurn,
+} from "@/lib/api"
 import type {
   ChatState,
   ProviderInfo,
   SseEvent,
   StreamingTurn,
   TurnLifecycle,
+  TurnStatus,
 } from "@/lib/types"
 
 export function useChat() {
@@ -14,70 +20,85 @@ export function useChat() {
   const [chatState, setChatState] = useState<ChatState>("idle")
   const [provider, setProvider] = useState<ProviderInfo | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const controllerRef = useRef<AbortController | null>(null)
+  const pendingPromptRef = useRef<string | null>(null)
 
-  // Load provider info and history on mount
+  // Connect to global SSE on mount
   useEffect(() => {
     fetchProviders()
       .then(setProvider)
-      .catch(() => {
-        /* server not running yet */
-      })
+      .catch(() => {})
 
     fetchHistory()
       .then(setTurns)
-      .catch(() => {
-        /* server not running yet */
-      })
+      .catch(() => {})
+
+    const cleanup = connectEvents((event: SseEvent) => {
+      switch (event.type) {
+        case "status": {
+          const status = event.data.status as TurnStatus
+          if (status === "waiting") {
+            // Start of a new turn — grab the pending prompt
+            const prompt = pendingPromptRef.current ?? ""
+            pendingPromptRef.current = null
+            setChatState("active")
+            setStreamingTurn({
+              userMessage: prompt,
+              thinkingText: "",
+              assistantText: "",
+              status: "waiting",
+            })
+          } else {
+            setStreamingTurn((prev) =>
+              prev ? { ...prev, status } : null,
+            )
+          }
+          break
+        }
+        case "stream": {
+          const data = event.data
+          if (data.kind === "thinking_delta") {
+            setStreamingTurn((prev) =>
+              prev
+                ? { ...prev, thinkingText: prev.thinkingText + data.text }
+                : null,
+            )
+          } else if (data.kind === "text_delta") {
+            setStreamingTurn((prev) =>
+              prev
+                ? { ...prev, assistantText: prev.assistantText + data.text }
+                : null,
+            )
+          }
+          break
+        }
+        case "turn_completed": {
+          setTurns((prev) => [...prev, event.data])
+          setStreamingTurn(null)
+          setChatState("idle")
+          setError(null)
+          break
+        }
+        case "error": {
+          setError(event.data.message)
+          setStreamingTurn(null)
+          setChatState("idle")
+          break
+        }
+      }
+    })
+
+    return cleanup
   }, [])
 
   const handleSubmitTurn = useCallback(
     (prompt: string) => {
-      if (chatState === "streaming") return
-
+      if (chatState === "active") return
       setError(null)
-      setChatState("streaming")
-      setStreamingTurn({ thinkingText: "", assistantText: "" })
-
-      const controller = submitTurn(prompt, (event: SseEvent) => {
-        switch (event.type) {
-          case "stream": {
-            const data = event.data
-            if (data.kind === "thinking_delta") {
-              setStreamingTurn((prev) =>
-                prev
-                  ? { ...prev, thinkingText: prev.thinkingText + data.text }
-                  : null,
-              )
-            } else if (data.kind === "text_delta") {
-              setStreamingTurn((prev) =>
-                prev
-                  ? {
-                      ...prev,
-                      assistantText: prev.assistantText + data.text,
-                    }
-                  : null,
-              )
-            }
-            // done, log, tool_output_delta — no UI action needed
-            break
-          }
-          case "turn_completed": {
-            setTurns((prev) => [...prev, event.data])
-            setStreamingTurn(null)
-            setChatState("idle")
-            break
-          }
-          case "error": {
-            setError(event.data.message)
-            setStreamingTurn(null)
-            setChatState("idle")
-            break
-          }
-        }
+      pendingPromptRef.current = prompt
+      apiSubmitTurn(prompt).catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : "Network error")
+        pendingPromptRef.current = null
       })
-
-      controllerRef.current = controller
     },
     [chatState],
   )

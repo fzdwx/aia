@@ -16,7 +16,7 @@ function App() {
           streamingTurn={streamingTurn}
           error={error}
         />
-        <ChatInput onSend={submitTurn} disabled={chatState === "streaming"} />
+        <ChatInput onSend={submitTurn} disabled={chatState === "active"} />
       </main>
     </div>
   )

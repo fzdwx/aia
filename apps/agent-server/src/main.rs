@@ -67,6 +67,7 @@ async fn main() {
         .with_max_tool_calls_per_turn(SERVER_DEFAULT_MAX_TOOL_CALLS_PER_TURN);
 
     let subscriber = runtime.subscribe();
+    let (broadcast_tx, _) = tokio::sync::broadcast::channel(512);
 
     let state = Arc::new(Mutex::new(AppState {
         runtime,
@@ -74,11 +75,13 @@ async fn main() {
         session_path,
         provider_name,
         model_name,
+        broadcast_tx,
     }));
 
     let app = Router::new()
         .route("/api/providers", get(routes::get_providers))
         .route("/api/session/history", get(routes::get_history))
+        .route("/api/events", get(routes::events))
         .route("/api/turn", post(routes::submit_turn))
         .layer(CorsLayer::permissive())
         .with_state(state);

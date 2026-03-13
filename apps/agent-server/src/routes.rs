@@ -3,17 +3,22 @@ use std::convert::Infallible;
 use axum::{
     Json,
     extract::State,
+    http::StatusCode,
     response::{
         IntoResponse,
-        sse::{Event, Sse},
+        sse::{Event, KeepAlive, Sse},
     },
 };
 use serde::{Deserialize, Serialize};
-use tokio_stream::{StreamExt, wrappers::ReceiverStream};
+use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
+use agent_core::StreamEvent;
 use agent_runtime::{RuntimeEvent, TurnLifecycle};
 
-use crate::{sse::SsePayload, state::SharedState};
+use crate::{
+    sse::{SsePayload, TurnStatus},
+    state::SharedState,
+};
 
 #[derive(Deserialize)]
 pub struct TurnRequest {
@@ -25,6 +30,11 @@ pub struct ProviderInfo {
     pub name: String,
     pub model: String,
     pub connected: bool,
+}
+
+#[derive(Serialize)]
+struct TurnAccepted {
+    ok: bool,
 }
 
 pub async fn get_providers(State(state): State<SharedState>) -> Json<ProviderInfo> {
@@ -50,22 +60,60 @@ pub async fn get_history(State(state): State<SharedState>) -> impl IntoResponse 
     Json(turns)
 }
 
+/// Global SSE endpoint — client connects once, receives all events.
+pub async fn events(
+    State(state): State<SharedState>,
+) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
+    let rx = {
+        let s = state.lock().expect("lock poisoned");
+        s.broadcast_tx.subscribe()
+    };
+
+    let stream = BroadcastStream::new(rx).filter_map(|result| match result {
+        Ok(payload) => Some(payload.into_axum_event()),
+        Err(_) => None, // lagged — skip missed events
+    });
+
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+/// Fire-and-forget turn submission. Events arrive via the global SSE stream.
 pub async fn submit_turn(
     State(state): State<SharedState>,
     Json(body): Json<TurnRequest>,
-) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
-    let (tx, rx) = tokio::sync::mpsc::channel::<SsePayload>(256);
+) -> impl IntoResponse {
+    let broadcast_tx = {
+        let s = state.lock().expect("lock poisoned");
+        s.broadcast_tx.clone()
+    };
+
+    // Immediately signal "waiting"
+    let _ = broadcast_tx.send(SsePayload::Status(TurnStatus::Waiting));
 
     tokio::task::spawn_blocking(move || {
-        let stream_tx = tx.clone();
+        let mut current_status = CurrentStatus::Waiting;
+        let btx = broadcast_tx.clone();
+
         let result = {
             let mut s = state.lock().expect("lock poisoned");
             s.runtime.handle_turn_streaming(&body.prompt, |event| {
-                let _ = stream_tx.blocking_send(SsePayload::Stream(event));
+                // Derive status from event kind
+                let new_status = match &event {
+                    StreamEvent::ThinkingDelta { .. } => CurrentStatus::Thinking,
+                    StreamEvent::TextDelta { .. } => CurrentStatus::Generating,
+                    StreamEvent::ToolOutputDelta { .. } => CurrentStatus::Working,
+                    _ => current_status.clone(),
+                };
+
+                if new_status != current_status {
+                    current_status = new_status.clone();
+                    let _ = btx.send(SsePayload::Status(new_status.to_turn_status()));
+                }
+
+                let _ = btx.send(SsePayload::Stream(event));
             })
         };
 
-        // After handle_turn_streaming completes (lock released), collect events
         match result {
             Ok(_) => {
                 let mut s = state.lock().expect("lock poisoned");
@@ -76,19 +124,36 @@ pub async fn submit_turn(
                     _ => None,
                 });
                 if let Some(turn) = turn {
-                    let _ = tx.blocking_send(SsePayload::TurnCompleted(turn));
+                    let _ = broadcast_tx.send(SsePayload::TurnCompleted(turn));
                 }
-                // Save session
                 if let Err(e) = s.runtime.tape().save_jsonl(&s.session_path) {
                     eprintln!("session save failed: {e}");
                 }
             }
             Err(error) => {
-                let _ = tx.blocking_send(SsePayload::Error(error.to_string()));
+                let _ = broadcast_tx.send(SsePayload::Error(error.to_string()));
             }
         }
     });
 
-    let stream = ReceiverStream::new(rx).map(|payload| payload.into_axum_event());
-    Sse::new(stream)
+    (StatusCode::ACCEPTED, Json(TurnAccepted { ok: true }))
+}
+
+#[derive(Clone, PartialEq)]
+enum CurrentStatus {
+    Waiting,
+    Thinking,
+    Working,
+    Generating,
+}
+
+impl CurrentStatus {
+    fn to_turn_status(&self) -> TurnStatus {
+        match self {
+            Self::Waiting => TurnStatus::Waiting,
+            Self::Thinking => TurnStatus::Thinking,
+            Self::Working => TurnStatus::Working,
+            Self::Generating => TurnStatus::Generating,
+        }
+    }
 }
