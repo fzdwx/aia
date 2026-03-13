@@ -26,7 +26,12 @@ type ModelFormRow = {
 }
 
 function emptyModelRow(): ModelFormRow {
-  return { id: "", display_name: "", supports_reasoning: false, reasoning_effort: "medium" }
+  return {
+    id: "",
+    display_name: "",
+    supports_reasoning: false,
+    reasoning_effort: "medium",
+  }
 }
 
 export function SettingsPanel() {
@@ -67,7 +72,7 @@ export function SettingsPanel() {
         display_name: m.display_name ?? "",
         supports_reasoning: m.supports_reasoning,
         reasoning_effort: m.reasoning_effort ?? "medium",
-      })),
+      }))
     )
     setEditing(providerName)
     setFormOpen(true)
@@ -75,7 +80,7 @@ export function SettingsPanel() {
 
   function updateModelRow(index: number, patch: Partial<ModelFormRow>) {
     setModels((prev) =>
-      prev.map((row, i) => (i === index ? { ...row, ...patch } : row)),
+      prev.map((row, i) => (i === index ? { ...row, ...patch } : row))
     )
   }
 
@@ -111,7 +116,10 @@ export function SettingsPanel() {
           base_url: baseUrl.trim(),
         }
         if (apiKey.trim()) body.api_key = apiKey.trim()
-        await storeUpdateProvider(editing, body as Parameters<typeof storeUpdateProvider>[1])
+        await storeUpdateProvider(
+          editing,
+          body as Parameters<typeof storeUpdateProvider>[1]
+        )
       } else {
         await storeCreateProvider({
           name: name.trim(),
@@ -166,7 +174,7 @@ export function SettingsPanel() {
                   key={p.name}
                   className={cn(
                     "flex items-center justify-between px-4 py-3",
-                    p.active && "border-foreground/20",
+                    p.active && "border-foreground/20"
                   )}
                 >
                   <div className="min-w-0 flex-1">
@@ -294,7 +302,7 @@ export function SettingsPanel() {
                     API Key{editing && " (leave blank to keep existing)"}
                   </label>
                   <Input
-                    type="password"
+                    type="text"
                     value={apiKey}
                     onChange={(e) => setApiKey(e.target.value)}
                     placeholder="sk-..."
@@ -378,7 +386,10 @@ export function SettingsPanel() {
                                 updateModelRow(i, { reasoning_effort: v })
                               }
                             >
-                              <SelectTrigger className="h-6 w-[100px] text-[11px]" size="sm">
+                              <SelectTrigger
+                                className="h-6 w-[100px] text-[11px]"
+                                size="sm"
+                              >
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
@@ -396,7 +407,9 @@ export function SettingsPanel() {
                     type="button"
                     variant="ghost"
                     size="sm"
-                    onClick={() => setModels((prev) => [...prev, emptyModelRow()])}
+                    onClick={() =>
+                      setModels((prev) => [...prev, emptyModelRow()])
+                    }
                     className="mt-2"
                   >
                     <Plus className="mr-1.5 size-3" />

@@ -13,9 +13,7 @@ export function ModelSelector() {
   const activeModelId = activeProvider?.active_model
 
   // Display label: model display_name or model id
-  const activeModel = activeProvider?.models.find(
-    (m) => m.id === activeModelId,
-  )
+  const activeModel = activeProvider?.models.find((m) => m.id === activeModelId)
   const displayLabel = activeModel?.display_name ?? activeModelId ?? "no model"
 
   useEffect(() => {
@@ -41,10 +39,7 @@ export function ModelSelector() {
       >
         <span>{displayLabel}</span>
         <ChevronDown
-          className={cn(
-            "size-3 transition-transform",
-            open && "rotate-180",
-          )}
+          className={cn("size-3 transition-transform", open && "rotate-180")}
         />
       </button>
 
@@ -53,7 +48,7 @@ export function ModelSelector() {
           {providerList.map((p) => (
             <div key={p.name}>
               {/* Provider group header */}
-              <div className="px-2.5 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+              <div className="px-2.5 pt-2 pb-1 text-[10px] font-semibold tracking-wider text-muted-foreground/50 uppercase">
                 {p.name}
               </div>
               {/* Models under this provider */}
@@ -70,7 +65,7 @@ export function ModelSelector() {
                     className={cn(
                       "flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-[12px] transition-colors hover:bg-accent/50",
                       isActive && "text-foreground",
-                      !isActive && "text-muted-foreground",
+                      !isActive && "text-muted-foreground"
                     )}
                   >
                     <span className="font-medium">
