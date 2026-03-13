@@ -2,8 +2,8 @@
 
 ## 当前阶段
 
-- 阶段：Web 界面实现
-- 当前步骤：移除 TUI 路线，切换到 `apps/web` 作为主界面承接点；共享运行时、会话磁带、provider 管理与双协议模型适配继续保留
+- 阶段：Web 界面 ↔ 运行时桥接
+- 当前步骤：`apps/web` 已通过 `apps/agent-server`（axum HTTP+SSE）桥接到共享运行时，实现流式消息、状态指示与工具调用实时展示
 
 ## 已完成
 
@@ -29,19 +29,29 @@
 - 完成 Web 主界面信息结构收敛：左侧边栏、中央消息列表、底部输入框，去掉发散型展示布局
 - 完成 `docs/frontend-web-guidelines.md`，明确 Web 前端开发规范与运行时边界
 - 完成删除 `agent-cli` 中所有 TUI 代码、模块声明与终端 UI 依赖
+- 完成 `apps/agent-server` axum HTTP+SSE 服务器，桥接 Web 前端到共享运行时
+- 完成全局 SSE 事件流架构（`GET /api/events`），基于 `broadcast::channel` 向所有客户端推送事件
+- 完成 `POST /api/turn` fire-and-forget 消息提交，响应通过全局 SSE 返回
+- 完成 `GET /api/providers` 与 `GET /api/session/history` 数据接口
+- 完成 Rust 侧核心类型（StreamEvent、TurnLifecycle、TurnBlock 等）的 Serialize/Deserialize 支持
+- 完成前端 TypeScript 类型定义镜像 Rust 侧类型（discriminated union 对齐 serde tag）
+- 完成前端 `useChat` hook：全局 EventSource 连接、流式状态累积、turn 完成回收
+- 完成流式轮次状态指示：waiting → thinking → working → generating，shimmer 文字动画
+- 完成流式 tool_output_delta 实时渲染，按 invocation_id 分组展示，不等 turn_completed
+- 完成 Vite 开发代理配置（`/api` → `http://localhost:3434`）
+- 完成 justfile 开发命令（`just dev` 同时启动前后端）
 
 ## 正在进行
 
-- 让 `apps/web` 真正接入共享 driver / runtime，承接 provider 管理、会话时间线、输入发送与流式输出
 - 继续推进统一工具规范向外部协议映射与 MCP 接入
+- Web 界面细节打磨与交互优化
 
 ## 下一步
 
-1. 为 `apps/web` 增加与共享运行时的桥接层
-2. 在 Web 界面里接入 provider 创建 / 选择与会话恢复
-3. 在 Web 界面里接入流式时间线、工具块、思考块与输入发送
-4. 推进 MCP 风格工具协议接入
-5. 继续把共享 driver 往客户端无关边界推进
+1. 在 Web 界面中接入 provider 创建 / 选择与会话恢复
+2. 推进 MCP 风格工具协议接入
+3. 继续把共享 driver 往客户端无关边界推进
+4. 桌面壳接入
 
 ## 为什么当前先做 Web，而不是继续堆终端界面
 

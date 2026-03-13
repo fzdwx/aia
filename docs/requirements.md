@@ -69,10 +69,17 @@
 - OpenAI Responses 现已支持基于 `previous_response_id` 的会话续调：同轮工具输出与下一轮用户输入都可沿用上一响应链，而不是重复回放全量历史
 - 运行时步数与工具调用预算已配置化：默认安全护栏保留在核心层，CLI 验证壳使用更高预算，模型同时收到剩余预算提示以便更早收尾
 - 已建立 `docs/frontend-web-guidelines.md` 作为 Web 前端开发规范
+- 已建立 `apps/agent-server` axum HTTP+SSE 服务器，作为 Web 前端与 Rust 运行时的桥接层
+- 已完成全局 SSE 事件流架构：`GET /api/events` 基于 `broadcast::channel`，`POST /api/turn` fire-and-forget（202）
+- 已完成 Rust 侧核心类型的 Serialize/Deserialize 支持，u128 时间戳已改为 u64
+- 已完成前端 `useChat` hook 与全局 EventSource 连接，支持流式状态累积与 turn 完成回收
+- 已完成流式轮次状态指示（waiting / thinking / working / generating）与 shimmer 文字动画
+- 已完成流式 tool_output_delta 实时渲染，工具调用不再等 turn_completed 才显示
+- 已完成 Vite 开发代理（`/api` → `:3434`）与 justfile 开发命令
 
 ### 当前不做
 
-- 完整 Web / 运行时桥接
+- Web 界面 provider 创建 / 选择
 - 桌面壳实现
 - 完整 MCP 接入
 - 多提供商真实适配
@@ -83,7 +90,6 @@
 
 - 明确内部统一工具规范与外部协议映射
 - 推进 MCP 方向的工具协议接入
-- 为 Web 界面准备稳定事件流与运行时桥接，并让 provider 管理复用同一事件流
+- 在 Web 界面中接入 provider 创建 / 选择与会话恢复
 - 在保持现有会话文件兼容的前提下，逐步把运行时接到更完整的命名磁带能力
-- 在 `apps/web` 中承接 provider 管理、会话时间线、输入发送与流式展示
 - 在运行时语义已收稳的前提下，继续推进统一工具规范向外部协议映射与 MCP 接入

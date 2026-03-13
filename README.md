@@ -28,6 +28,7 @@ this repository now starts with a library-first rust workspace:
 - `crates/provider-registry`: stores local provider profiles and active selection
 - `crates/openai-adapter`: the first real model adapter set, now covering both responses-style and openai-compatible chat-completions-style http interfaces
 - `apps/agent-cli` (binary `aia`): a tiny runnable shell used to verify the core boundaries
+- `apps/agent-server`: axum HTTP+SSE server bridging web frontend to shared runtime
 - `apps/web`: the primary web interface shell built with React + Vite
 
 `agent-cli` now stays as a verification shell around startup wiring, provider setup, the shared driver layer, and the plain text loop. all terminal TUI code has been removed from the repository; `apps/web` is now the primary client direction for provider management, session timeline, and streaming interaction.
@@ -54,7 +55,7 @@ for the OpenAI Responses path specifically, `aia` now persists a session-local c
 
 session replay data is stored separately in `.aia/session.jsonl` as jsonl snapshots of flat tape entries (`{id, kind, payload, meta, date}`). the tape core now uses a single flat entry model aligned with republic, bub, and tape.systems — each entry carries its kind as a string, its payload as json, and optional metadata including run_id for turn grouping. legacy session files in the old `{id, fact, date}` format are auto-converted on load. the shared tape core also exposes named-tape storage, query slicing, and append-only fork/merge semantics.
 
-`apps/web` is no longer a template placeholder. it now contains the primary web-shell scaffold that will host provider selection, session timeline, streaming output, and runtime status once the web/runtime bridge is connected.
+`apps/web` is no longer a template placeholder. it now contains the primary web interface connected to the shared runtime via `apps/agent-server` (axum HTTP+SSE on port 3434). the web frontend consumes a global SSE event stream (`GET /api/events`) for real-time streaming of thinking, tool output, and assistant text, with fire-and-forget message submission (`POST /api/turn`). turn status phases (waiting/thinking/working/generating) are derived from stream events and displayed with shimmer text animation.
 
 see `docs/architecture.md` for the first-phase architecture and why the project starts from reusable libraries instead of pushing agent logic into a client shell.
 

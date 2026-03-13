@@ -137,8 +137,26 @@ README 里真正难的是这些能力：
 - 基于 React + Vite 构建 Web 工作台
 - 优先使用 `shadcn` 基础组件承接卡片、输入、滚动容器与状态徽标
 - 只负责界面布局、交互与状态展示，不重写 agent loop 或工具编排
-- 后续通过共享 driver / runtime 桥接消费结构化事件流
+- 通过全局 SSE（`EventSource` → `GET /api/events`）消费结构化事件流
+- 消息提交通过 `POST /api/turn` fire-and-forget，响应通过 SSE 返回
+- `useChat` hook 管理全局 SSE 连接与流式状态累积
+- 流式 turn 实时渲染 thinking / tool output / assistant text，并显示状态阶段指示器
 - 具体开发规范由 `docs/frontend-web-guidelines.md` 约束
+
+### `apps/agent-server`
+
+负责 Web ↔ 运行时桥接：
+
+- 基于 axum 构建 HTTP + SSE 服务器，监听端口 3434
+- 通过 `tokio::task::spawn_blocking` 桥接同步 `AgentRuntime` 到异步 axum
+- 全局 `broadcast::channel` 向所有 SSE 客户端推送事件
+- HTTP API：
+  - `GET /api/providers`：返回当前 provider 信息
+  - `GET /api/session/history`：返回已完成的 `TurnLifecycle[]`
+  - `GET /api/events`：全局 SSE 事件流（stream / status / turn_completed / error）
+  - `POST /api/turn`：发送用户消息（202 fire-and-forget）
+- 从 `StreamEvent` 变体自动派生轮次状态（ThinkingDelta → Thinking，TextDelta → Generating，ToolOutputDelta → Working）
+- 不含 agent loop 逻辑，纯粹作为运行时的 HTTP 外壳
 
 ## 对 README 的映射
 
@@ -159,7 +177,7 @@ README 里真正难的是这些能力：
 
 - MCP 客户端 / 服务端桥接
 - 统一工具规范向 Claude / Codex / MCP 的外部映射
-- Web / 运行时桥接与浏览器端事件消费
+- Web 界面 provider 创建 / 选择与会话恢复
 - 子代理调度
 - 桌面壳
 - 压缩策略与 fork
