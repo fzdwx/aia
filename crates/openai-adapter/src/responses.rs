@@ -235,7 +235,12 @@ impl LanguageModel for OpenAiResponsesModel {
                         }
                     }
                 }
-                Some(kind) if kind.contains("reasoning") || kind.contains("thinking") => {
+                Some(
+                    kind @ ("response.reasoning_summary.delta"
+                    | "response.reasoning_summary.done"
+                    | "response.reasoning_summary_text.delta"
+                    | "response.reasoning_summary_text.done"),
+                ) => {
                     if let Some(delta) = extract_reasoning_stream_text(&event) {
                         let is_done_event = kind.ends_with(".done");
                         if !is_done_event || !saw_reasoning_delta {

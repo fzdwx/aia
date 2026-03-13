@@ -177,7 +177,30 @@ pub(crate) fn extract_stream_text(value: &Value) -> Option<String> {
 }
 
 pub(crate) fn extract_reasoning_stream_text(event: &Value) -> Option<String> {
-    extract_stream_text(&event["delta"])
-        .or_else(|| extract_stream_text(&event["text"]))
-        .or_else(|| extract_stream_text(&event["part"]["text"]))
+    extract_reasoning_summary_text(&event["delta"])
+        .or_else(|| extract_reasoning_summary_text(&event["text"]))
+        .or_else(|| extract_reasoning_summary_text(&event["part"]["text"]))
+}
+
+fn extract_reasoning_summary_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) if !text.is_empty() => Some(text.clone()),
+        Value::Array(values) => {
+            let text = values
+                .iter()
+                .filter_map(extract_reasoning_summary_text)
+                .collect::<Vec<_>>()
+                .join("");
+            if text.is_empty() { None } else { Some(text) }
+        }
+        Value::Object(map) => {
+            for key in ["text", "summary_text"] {
+                if let Some(text) = map.get(key).and_then(extract_reasoning_summary_text) {
+                    return Some(text);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
 }

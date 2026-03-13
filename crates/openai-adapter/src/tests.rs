@@ -498,6 +498,54 @@ fn responses_流式工具调用会继承_response_id() {
 }
 
 #[test]
+fn 未知_reasoning_事件不会被当成思考内容() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("监听成功");
+    let address = listener.local_addr().expect("读取地址成功");
+
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("接受连接成功");
+        let mut buffer = [0_u8; 4096];
+        let _ = stream.read(&mut buffer).expect("读取请求成功");
+
+        let sse_body = [
+            r#"data: {"type":"response.reasoning_text.delta","delta":{"content":"这段文本不应进入 Thought"}}"#,
+            r#"data: {"type":"response.output_text.done","text":"真正的最终回答"}"#,
+            r#"data: [DONE]"#,
+        ]
+        .join("\n\n");
+
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n{sse_body}\n\n"
+        );
+        stream.write_all(response.as_bytes()).expect("写回响应成功");
+    });
+
+    let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
+        format!("http://{address}"),
+        "test-key",
+        "gpt-4.1-mini",
+    ))
+    .expect("模型创建成功");
+
+    let mut deltas = Vec::new();
+    let completion = model
+        .complete_streaming(sample_request(), &mut |event| deltas.push(event))
+        .expect("流式调用成功");
+
+    handle.join().expect("服务线程退出");
+    assert_eq!(completion.thinking_text(), None);
+    assert_eq!(completion.plain_text(), "真正的最终回答");
+    assert_eq!(
+        deltas,
+        vec![
+            StreamEvent::Log { text: "[sse] response.reasoning_text.delta".into() },
+            StreamEvent::TextDelta { text: "真正的最终回答".into() },
+            StreamEvent::Done,
+        ]
+    );
+}
+
+#[test]
 fn 聊天补全请求体会映射_messages_与工具() {
     let model = OpenAiChatCompletionsModel::new(OpenAiChatCompletionsConfig::new(
         "http://127.0.0.1:1",
