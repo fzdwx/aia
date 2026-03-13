@@ -65,8 +65,10 @@ impl OpenAiResponsesModel {
             "instructions": request.instructions,
             "input": input,
             "tools": tools,
-            "reasoning": {"effort": "medium", "summary": "auto"},
         });
+        if let Some(effort) = &request.reasoning_effort {
+            body["reasoning"] = json!({"effort": effort, "summary": "auto"});
+        }
         if let Some((previous_response_id, _)) = continuation {
             body["previous_response_id"] = json!(previous_response_id);
         }
@@ -864,6 +866,7 @@ mod tests {
                 "关键字",
                 true,
             )],
+            reasoning_effort: None,
         }
     }
 
@@ -884,7 +887,24 @@ mod tests {
         assert_eq!(body["input"][1]["content"], json!("帮我总结当前工作区"));
         assert_eq!(body["tools"][0]["name"], json!("search_code"));
         assert_eq!(body["tools"][0]["parameters"]["required"], json!(["query"]));
-        assert_eq!(body["reasoning"]["effort"], json!("medium"));
+        // reasoning block not sent when reasoning_effort is None
+        assert!(body.get("reasoning").is_none() || body["reasoning"].is_null());
+    }
+
+    #[test]
+    fn 请求体带_reasoning_effort_时发送_reasoning_块() {
+        let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
+            "http://127.0.0.1:1",
+            "test-key",
+            "gpt-4.1-mini",
+        ))
+        .expect("模型创建成功");
+
+        let mut request = sample_request();
+        request.reasoning_effort = Some("high".into());
+        let body = model.build_request_body(&request);
+
+        assert_eq!(body["reasoning"]["effort"], json!("high"));
         assert_eq!(body["reasoning"]["summary"], json!("auto"));
     }
 

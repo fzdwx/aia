@@ -317,6 +317,19 @@ where
         &self.tape
     }
 
+    pub fn tape_mut(&mut self) -> &mut SessionTape {
+        &mut self.tape
+    }
+
+    pub fn model_identity(&self) -> &ModelIdentity {
+        &self.model_identity
+    }
+
+    pub fn replace_model(&mut self, model: M, identity: ModelIdentity) {
+        self.model = model;
+        self.model_identity = identity;
+    }
+
     pub fn subscribe(&mut self) -> RuntimeSubscriberId {
         let subscriber_id = self.next_subscriber_id;
         self.next_subscriber_id += 1;
@@ -410,6 +423,7 @@ where
                 None
             },
             available_tools: if force_text_only { vec![] } else { self.visible_tools() },
+            reasoning_effort: self.model_identity.reasoning_effort.clone(),
         }
     }
 

@@ -1,17 +1,12 @@
 import { Fragment, useEffect, useRef, useState } from "react"
 import { ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useChatStore } from "@/stores/chat-store"
 import type {
   StreamingTurn,
   TurnBlock,
   TurnLifecycle,
 } from "@/lib/types"
-
-type ChatMessagesProps = {
-  turns: TurnLifecycle[]
-  streamingTurn: StreamingTurn | null
-  error: string | null
-}
 
 function renderInline(text: string) {
   const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g)
@@ -271,11 +266,10 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
   )
 }
 
-export function ChatMessages({
-  turns,
-  streamingTurn,
-  error,
-}: ChatMessagesProps) {
+export function ChatMessages() {
+  const turns = useChatStore((s) => s.turns)
+  const streamingTurn = useChatStore((s) => s.streamingTurn)
+  const error = useChatStore((s) => s.error)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {

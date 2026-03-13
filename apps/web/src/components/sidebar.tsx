@@ -1,13 +1,13 @@
 import { Settings } from "lucide-react"
 import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
-import type { ProviderInfo } from "@/lib/types"
+import { useChatStore } from "@/stores/chat-store"
 
-type SidebarProps = {
-  provider: ProviderInfo | null
-}
+export function Sidebar() {
+  const provider = useChatStore((s) => s.provider)
+  const view = useChatStore((s) => s.view)
+  const setView = useChatStore((s) => s.setView)
 
-export function Sidebar({ provider }: SidebarProps) {
   return (
     <aside className="flex h-full w-[280px] shrink-0 flex-col border-r border-border/50 bg-sidebar">
       {/* Header */}
@@ -45,7 +45,13 @@ export function Sidebar({ provider }: SidebarProps) {
 
       {/* Footer */}
       <div className="p-2">
-        <button className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] text-muted-foreground transition-colors duration-150 hover:bg-accent/50 hover:text-foreground/80">
+        <button
+          onClick={() => setView(view === "settings" ? "chat" : "settings")}
+          className={cn(
+            "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] text-muted-foreground transition-colors duration-150 hover:bg-accent/50 hover:text-foreground/80",
+            view === "settings" && "bg-accent/50 text-foreground/80",
+          )}
+        >
           <Settings className="size-[14px] opacity-40" />
           <span>Settings</span>
         </button>

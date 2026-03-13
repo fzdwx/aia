@@ -87,3 +87,23 @@ export type StreamingTurn = {
 }
 
 export type ChatState = "idle" | "active"
+
+export type ModelConfig = {
+  id: string
+  display_name: string | null
+  context_window: number | null
+  default_temperature: number | null
+  supports_reasoning: boolean
+  reasoning_effort: string | null
+}
+
+export type ProviderListItem = {
+  name: string
+  kind: string
+  models: ModelConfig[]
+  active_model: string | null
+  base_url: string
+  active: boolean
+}
+
+export type AppView = "chat" | "settings"

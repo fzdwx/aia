@@ -79,6 +79,8 @@ pub struct ModelIdentity {
     pub provider: String,
     pub name: String,
     pub disposition: ModelDisposition,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
 }
 
 impl ModelIdentity {
@@ -87,7 +89,12 @@ impl ModelIdentity {
         name: impl Into<String>,
         disposition: ModelDisposition,
     ) -> Self {
-        Self { provider: provider.into(), name: name.into(), disposition }
+        Self { provider: provider.into(), name: name.into(), disposition, reasoning_effort: None }
+    }
+
+    pub fn with_reasoning_effort(mut self, effort: Option<String>) -> Self {
+        self.reasoning_effort = effort;
+        self
     }
 }
 
@@ -295,6 +302,8 @@ pub struct CompletionRequest {
     pub conversation: Vec<ConversationItem>,
     pub resume_checkpoint: Option<ModelCheckpoint>,
     pub available_tools: Vec<ToolDefinition>,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

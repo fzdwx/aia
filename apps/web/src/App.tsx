@@ -1,22 +1,23 @@
+import { useEffect } from "react"
 import { Sidebar } from "@/components/sidebar"
-import { ChatMessages } from "@/components/chat-messages"
-import { ChatInput } from "@/components/chat-input"
-import { useChat } from "@/hooks/use-chat"
+import { MainContent } from "@/components/main-content"
+import { useChatStore } from "@/stores/chat-store"
+import { connectEvents } from "@/lib/api"
 
 function App() {
-  const { turns, streamingTurn, chatState, provider, error, submitTurn } =
-    useChat()
+  const initialize = useChatStore((s) => s.initialize)
+  const handleSseEvent = useChatStore((s) => s.handleSseEvent)
+
+  useEffect(() => {
+    initialize()
+    return connectEvents(handleSseEvent)
+  }, [initialize, handleSseEvent])
 
   return (
     <div className="flex h-screen bg-background text-foreground antialiased">
-      <Sidebar provider={provider} />
+      <Sidebar />
       <main className="flex min-w-0 flex-1 flex-col">
-        <ChatMessages
-          turns={turns}
-          streamingTurn={streamingTurn}
-          error={error}
-        />
-        <ChatInput onSend={submitTurn} disabled={chatState === "active"} />
+        <MainContent />
       </main>
     </div>
   )

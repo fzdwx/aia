@@ -1,13 +1,14 @@
 import { useRef, useState } from "react"
 import { ArrowUp } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { ModelSelector } from "@/components/model-selector"
+import { useChatStore } from "@/stores/chat-store"
 
-type ChatInputProps = {
-  onSend: (text: string) => void
-  disabled?: boolean
-}
+export function ChatInput() {
+  const submitTurn = useChatStore((s) => s.submitTurn)
+  const chatState = useChatStore((s) => s.chatState)
+  const disabled = chatState === "active"
 
-export function ChatInput({ onSend, disabled = false }: ChatInputProps) {
   const [value, setValue] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -15,7 +16,7 @@ export function ChatInput({ onSend, disabled = false }: ChatInputProps) {
 
   function handleSend() {
     if (!canSend) return
-    onSend(value.trim())
+    submitTurn(value.trim())
     setValue("")
     textareaRef.current?.focus()
   }
@@ -33,6 +34,7 @@ export function ChatInput({ onSend, disabled = false }: ChatInputProps) {
       <div className="pointer-events-none absolute -top-10 right-0 left-0 h-10 bg-gradient-to-t from-background to-transparent" />
 
       <div className="mx-auto max-w-[720px]">
+        <ModelSelector />
         <div className="flex items-end gap-3 rounded-xl border border-border/50 bg-card px-4 py-3">
           <textarea
             ref={textareaRef}

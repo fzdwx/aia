@@ -8,7 +8,7 @@ use openai_adapter::{
 };
 use provider_registry::{ProviderKind, ProviderProfile};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ProviderLaunchChoice {
     Bootstrap,
     OpenAi(ProviderProfile),
@@ -95,14 +95,22 @@ pub fn build_model_from_selection(
             ServerModel::Bootstrap(BootstrapModel),
         )),
         ProviderLaunchChoice::OpenAi(profile) => {
+            let model_config = profile.active_model_config();
+            let model_id = model_config
+                .map(|m| m.id.clone())
+                .or_else(|| profile.active_model.clone())
+                .unwrap_or_default();
+            let reasoning_effort =
+                model_config.and_then(|m| m.reasoning_effort.clone());
             let identity =
-                ModelIdentity::new("openai", profile.model.clone(), ModelDisposition::Balanced);
+                ModelIdentity::new("openai", &model_id, ModelDisposition::Balanced)
+                    .with_reasoning_effort(reasoning_effort);
             match profile.kind {
                 ProviderKind::OpenAiResponses => {
                     let config = OpenAiResponsesConfig::new(
                         profile.base_url,
                         profile.api_key,
-                        profile.model,
+                        &model_id,
                     );
                     let model = OpenAiResponsesModel::new(config)
                         .map_err(ServerSetupError::OpenAiAdapter)?;
@@ -112,7 +120,7 @@ pub fn build_model_from_selection(
                     let config = OpenAiChatCompletionsConfig::new(
                         profile.base_url,
                         profile.api_key,
-                        profile.model,
+                        &model_id,
                     );
                     let model = OpenAiChatCompletionsModel::new(config)
                         .map_err(ServerSetupError::OpenAiAdapter)?;

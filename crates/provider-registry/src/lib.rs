@@ -21,13 +21,38 @@ impl ProviderKind {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ModelConfig {
+    pub id: String,
+    pub display_name: Option<String>,
+    pub context_window: Option<u32>,
+    pub default_temperature: Option<f32>,
+    #[serde(default)]
+    pub supports_reasoning: bool,
+    pub reasoning_effort: Option<String>,
+}
+
+impl ModelConfig {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            display_name: None,
+            context_window: None,
+            default_temperature: None,
+            supports_reasoning: false,
+            reasoning_effort: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProviderProfile {
     pub name: String,
     pub kind: ProviderKind,
     pub base_url: String,
     pub api_key: String,
-    pub model: String,
+    pub models: Vec<ModelConfig>,
+    pub active_model: Option<String>,
 }
 
 impl ProviderProfile {
@@ -37,12 +62,14 @@ impl ProviderProfile {
         api_key: impl Into<String>,
         model: impl Into<String>,
     ) -> Self {
+        let model_id = model.into();
         Self {
             name: name.into(),
             kind: ProviderKind::OpenAiResponses,
             base_url: base_url.into(),
             api_key: api_key.into(),
-            model: model.into(),
+            models: vec![ModelConfig::new(&model_id)],
+            active_model: Some(model_id),
         }
     }
 
@@ -52,17 +79,32 @@ impl ProviderProfile {
         api_key: impl Into<String>,
         model: impl Into<String>,
     ) -> Self {
+        let model_id = model.into();
         Self {
             name: name.into(),
             kind: ProviderKind::OpenAiChatCompletions,
             base_url: base_url.into(),
             api_key: api_key.into(),
-            model: model.into(),
+            models: vec![ModelConfig::new(&model_id)],
+            active_model: Some(model_id),
         }
+    }
+
+    pub fn active_model_config(&self) -> Option<&ModelConfig> {
+        let active_id = self.active_model.as_ref()?;
+        self.models.iter().find(|m| m.id == *active_id)
+    }
+
+    pub fn active_model_id(&self) -> Option<&str> {
+        self.active_model.as_deref()
+    }
+
+    pub fn has_model(&self, model_id: &str) -> bool {
+        self.models.iter().any(|m| m.id == model_id)
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ProviderRegistry {
     providers: Vec<ProviderProfile>,
     active_provider: Option<String>,
@@ -104,6 +146,18 @@ impl ProviderRegistry {
         }
 
         self.providers.push(provider);
+    }
+
+    pub fn remove(&mut self, name: &str) -> Result<(), ProviderRegistryError> {
+        let before = self.providers.len();
+        self.providers.retain(|p| p.name != name);
+        if self.providers.len() == before {
+            return Err(ProviderRegistryError::new(format!("provider 不存在：{name}")));
+        }
+        if self.active_provider.as_deref() == Some(name) {
+            self.active_provider = self.providers.first().map(|p| p.name.clone());
+        }
+        Ok(())
     }
 
     pub fn set_active(&mut self, provider_name: &str) -> Result<(), ProviderRegistryError> {
@@ -152,7 +206,7 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use super::{ProviderProfile, ProviderRegistry};
+    use super::{ModelConfig, ProviderProfile, ProviderRegistry};
 
     fn temp_file(name: &str) -> PathBuf {
         let suffix = SystemTime::now().duration_since(UNIX_EPOCH).expect("时间有效").as_nanos();
@@ -203,7 +257,7 @@ mod tests {
 
         assert_eq!(registry.providers().len(), 1);
         assert_eq!(registry.providers()[0].base_url, "https://example.com/v1");
-        assert_eq!(registry.providers()[0].model, "gpt-4.1");
+        assert_eq!(registry.providers()[0].active_model_id(), Some("gpt-4.1"));
     }
 
     #[test]
@@ -227,6 +281,75 @@ mod tests {
         assert_eq!(provider.kind, super::ProviderKind::OpenAiChatCompletions);
         assert_eq!(provider.name, "compat");
         assert_eq!(provider.base_url, "http://127.0.0.1:8000/v1");
-        assert_eq!(provider.model, "minum-security-llm");
+        assert_eq!(provider.active_model_id(), Some("minum-security-llm"));
+    }
+
+    #[test]
+    fn 多模型_provider_可查找活动模型配置() {
+        let profile = ProviderProfile {
+            name: "test".into(),
+            kind: super::ProviderKind::OpenAiResponses,
+            base_url: "https://api.openai.com/v1".into(),
+            api_key: "secret".into(),
+            models: vec![
+                ModelConfig::new("gpt-4.1-mini"),
+                ModelConfig {
+                    id: "o3-mini".into(),
+                    display_name: Some("O3 Mini".into()),
+                    context_window: Some(200_000),
+                    default_temperature: None,
+                    supports_reasoning: true,
+                    reasoning_effort: Some("medium".into()),
+                },
+            ],
+            active_model: Some("o3-mini".into()),
+        };
+
+        let config = profile.active_model_config().expect("应有活动模型");
+        assert_eq!(config.id, "o3-mini");
+        assert!(config.supports_reasoning);
+        assert_eq!(config.reasoning_effort.as_deref(), Some("medium"));
+    }
+
+    #[test]
+    fn 删除_provider_成功() {
+        let mut registry = ProviderRegistry::default();
+        registry.upsert(ProviderProfile::openai_responses(
+            "main",
+            "https://api.openai.com/v1",
+            "secret",
+            "gpt-4.1-mini",
+        ));
+        registry.upsert(ProviderProfile::openai_responses(
+            "secondary",
+            "https://api.openai.com/v1",
+            "secret-2",
+            "gpt-4.1",
+        ));
+        registry.set_active("main").unwrap();
+
+        registry.remove("main").expect("删除成功");
+
+        assert_eq!(registry.providers().len(), 1);
+        assert_eq!(registry.active_provider().map(|p| p.name.as_str()), Some("secondary"));
+    }
+
+    #[test]
+    fn 删除不存在的_provider_报错() {
+        let mut registry = ProviderRegistry::default();
+        let err = registry.remove("nope").expect_err("应当失败");
+        assert!(err.to_string().contains("不存在"));
+    }
+
+    #[test]
+    fn has_model_检查模型是否存在() {
+        let profile = ProviderProfile::openai_responses(
+            "test",
+            "https://api.openai.com/v1",
+            "secret",
+            "gpt-4.1-mini",
+        );
+        assert!(profile.has_model("gpt-4.1-mini"));
+        assert!(!profile.has_model("gpt-4.1"));
     }
 }
