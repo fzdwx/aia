@@ -100,6 +100,8 @@ README 里真正难的是这些能力：
 
 当前内建编码工具契约维持短名集合：`shell`、`read`、`write`、`edit`、`glob`、`grep`。其中 `shell` 是模型可见的稳定工具名，底层执行器可在边缘实现中替换；当前实现使用 `brush` 作为 shell 运行时，而不是把具体 shell 名称泄漏进统一工具协议。
 
+provider 变更路径也已收口为事务式提交：候选 registry 必须先通过模型构建校验，随后 `providers.json` 与 `session.jsonl` 落盘都成功，才会更新内存中的 registry、runtime 与 tape，避免出现重启前后 provider 绑定分叉。
+
 第一阶段只实现最小 turn 执行，故意不把并发子代理一次做满，避免空壳化。
 
 ### `provider-registry`
@@ -134,7 +136,7 @@ README 里真正难的是这些能力：
 - 只负责界面布局、交互与状态展示，不重写 agent loop 或工具编排
 - 通过全局 SSE（`EventSource` → `GET /api/events`）消费结构化事件流
 - 消息提交通过 `POST /api/turn` fire-and-forget，响应通过 SSE 返回
-- `useChat` hook 管理全局 SSE 连接与流式状态累积
+- 以前端全局 store 管理 SSE 连接、流式状态累积与 provider 当前状态 / 列表刷新
 - 流式 turn 实时渲染 thinking / tool output / assistant text，并显示状态阶段指示器
 - 具体开发规范由 `docs/frontend-web-guidelines.md` 约束
 
@@ -147,12 +149,15 @@ README 里真正难的是这些能力：
 - 通过 `tokio::task::spawn_blocking` 桥接同步 `AgentRuntime` 到异步 axum
 - 全局 `broadcast::channel` 向所有 SSE 客户端推送事件
 - HTTP API：
-  - `GET /api/providers`：返回当前 provider 信息
-  - `GET /api/session/history`：返回已完成的 `TurnLifecycle[]`
-  - `GET /api/events`：全局 SSE 事件流（stream / status / turn_completed / error）
+- `GET /api/providers`：返回当前 provider 信息
+- `GET /api/providers/list`：返回 provider 列表与活动项信息
+- `GET /api/session/history`：返回已完成的 `TurnLifecycle[]`
+- `GET /api/events`：全局 SSE 事件流（stream / status / turn_completed / error）
 - `POST /api/turn`：发送用户消息（202 fire-and-forget）
+- `POST /api/providers` / `PUT /api/providers/:name` / `DELETE /api/providers/:name` / `POST /api/providers/switch`：provider 管理与切换
 - 从 `StreamEvent` 变体自动派生轮次状态（ThinkingDelta → Thinking，TextDelta → Generating，ToolOutputDelta → Working）
 - turn 完成后把会话磁带落盘回 `.aia/session.jsonl`
+- provider 变更采用事务式提交，避免 registry / runtime / tape 持久化分叉
 - 不含 agent loop 逻辑，纯粹作为运行时的 HTTP 外壳
 
 ## 对 README 的映射
@@ -174,7 +179,7 @@ README 里真正难的是这些能力：
 
 - MCP 客户端 / 服务端桥接
 - 统一工具规范向 Claude / Codex / MCP 的外部映射
-- Web 界面 provider 创建 / 选择与会话恢复
+- Web 界面会话恢复与更细粒度的 provider / session 状态管理
 - 子代理调度
 - 桌面壳
 - 压缩策略与 fork

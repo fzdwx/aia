@@ -53,7 +53,7 @@
 - provider 当前已具备协议级区分能力，可在同一地址 / 模型下区分 Responses 与 Chat Completions
 - `apps/web` 已建立 React + Vite 基础工程，并替换掉模板首页，开始承接主界面方向
 - `apps/web` 已建立 Web 工作台骨架，并接入 `shadcn` 基础组件体系，开始承接主界面方向
-- 内建基础编码工具名已收口为 `shell`、`read`、`write`、`edit`、`glob`、`grep`，其中 `shell` 底层当前由 `brush` 执行
+- 内建基础编码工具名已收口为 `shell`、`read`、`write`、`edit`、`glob`、`grep`，其中 `shell` 当前以内嵌 `brush` 库执行
 - 当前会话会记住上次使用的 provider 绑定，除非用户在启动阶段主动替换
 - Web 客户端当前通过 `apps/agent-server` 复用统一运行时接口，便于后续桌面壳继续承接同一驱动层
 - 运行时事件已统一通过单一方法取回，并支持多个订阅者独立消费
@@ -72,15 +72,16 @@
 - 已完成全局 SSE 事件流架构：`GET /api/events` 基于 `broadcast::channel`，`POST /api/turn` fire-and-forget（202）
 - `apps/agent-server` 会在 turn 完成后把会话磁带落盘回 `.aia/session.jsonl`
 - 已完成 Rust 侧核心类型的 Serialize/Deserialize 支持，u128 时间戳已改为 u64
-- 已完成前端 `useChat` hook 与全局 EventSource 连接，支持流式状态累积与 turn 完成回收
+- 已完成前端全局 store 与全局 EventSource 连接，支持流式状态累积、turn 完成回收与 provider 当前状态刷新
 - 已完成流式轮次状态指示（waiting / thinking / working / generating）与 shimmer 文字动画
 - 已完成流式 tool_output_delta 实时渲染，工具调用不再等 turn_completed 才显示
 - 已完成 Vite 开发代理（`/api` → `:3434`）与 justfile 开发命令
 - 已移除 `apps/agent-cli` 包，工作区当前以 `apps/agent-server` + `apps/web` 作为唯一应用层入口
+- Web 端已接入 provider 创建、更新、删除、切换与当前 provider / provider 列表刷新
+- provider 变更已采用事务式提交：候选 registry 校验、registry 落盘、session tape 落盘全部成功后才更新内存 runtime / tape
 
 ### 当前不做
 
-- Web 界面 provider 创建 / 选择
 - 桌面壳实现
 - 完整 MCP 接入
 - 多提供商真实适配
@@ -91,6 +92,6 @@
 
 - 明确内部统一工具规范与外部协议映射
 - 推进 MCP 方向的工具协议接入
-- 在 Web 界面中接入 provider 创建 / 选择与会话恢复
+- 在现有 Web provider 管理链路基础上补强会话恢复与更细粒度的状态管理
 - 在保持现有会话文件兼容的前提下，逐步把运行时接到更完整的命名磁带能力
 - 在运行时语义已收稳的前提下，继续推进统一工具规范向外部协议映射与 MCP 接入

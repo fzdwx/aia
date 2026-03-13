@@ -3,7 +3,7 @@
 ## 当前阶段
 
 - 阶段：Web 界面 ↔ 运行时桥接
-- 当前步骤：在 Web + server 主路径稳定的基础上，继续收口统一工具契约；内建编码工具现已改为短名 `shell/read/write/edit/glob/grep`，并将 shell 执行器切到 `brush`
+- 当前步骤：在 Web + server 主路径稳定的基础上，继续收口 provider 状态一致性与统一工具契约；内建编码工具已收口为 `shell/read/write/edit/glob/grep`，`shell` 已改为内嵌 `brush`，provider create / update / delete / switch 已通过事务式提交与持久化校验保证 registry / runtime / tape 一致
 
 ## 已完成
 
@@ -32,7 +32,7 @@
 - 完成 `GET /api/providers` 与 `GET /api/session/history` 数据接口
 - 完成 Rust 侧核心类型（StreamEvent、TurnLifecycle、TurnBlock 等）的 Serialize/Deserialize 支持
 - 完成前端 TypeScript 类型定义镜像 Rust 侧类型（discriminated union 对齐 serde tag）
-- 完成前端 `useChat` hook：全局 EventSource 连接、流式状态累积、turn 完成回收
+- 完成前端全局 store：统一管理 EventSource 连接、流式状态累积、turn 完成回收与 provider 当前状态刷新
 - 完成流式轮次状态指示：waiting → thinking → working → generating，shimmer 文字动画
 - 完成流式 tool_output_delta 实时渲染，按 invocation_id 分组展示，不等 turn_completed
 - 完成 Vite 开发代理配置（`/api` → `http://localhost:3434`）
@@ -42,19 +42,23 @@
 - 完成 `provider-registry` 与 `apps/agent-server` 之间的 provider 多模型配置接口对齐，并兼容旧单模型本地落盘格式
 - 完成 `agent-runtime` 深一层内部拆分：主循环、请求构造、工具执行、事件缓冲、错误与测试已进一步解耦
 - 完成内建编码工具命名收口为 `shell`、`read`、`write`、`edit`、`glob`、`grep`
-- 完成 shell 内建工具底层执行器切换到 `brush`，避免把具体 shell 名称泄漏进统一工具协议
+- 完成 `shell` 内建工具改为内嵌 `brush` 库执行，并补齐 stdout / stderr / exit_code 结构化回传与基础测试
+- 完成 `apps/agent-server` 向 runtime 显式传入 `workspace_root`，保证相对路径工具调用语义稳定
+- 完成 Web 端 provider 创建、更新、删除、切换与当前 provider / provider 列表刷新链路
+- 完成 provider 变更的事务式提交：候选 registry 校验、registry 落盘、session tape 落盘全部成功后才提交到内存 runtime / tape
+- 完成 provider 持久化失败路径回归测试，保证落盘失败不会留下 registry / runtime / tape 分叉状态
 
 ## 正在进行
 
 - 继续推进统一工具规范向外部协议映射与 MCP 接入
 - 收口 `apps/agent-server` 与 `apps/web` 双壳结构后的文档与边界一致性
-- 观察 `brush` 作为 shell 运行时的实际稳定性与命令兼容性
+- 观察内嵌 `brush` 作为 shell 运行时的实际稳定性、命令兼容性与中断语义
 
 ## 下一步
 
 1. 推进 MCP 风格工具协议接入
 2. 继续把共享 driver 往客户端无关边界推进
-3. 在工具协议边界进一步收稳后，再接入 Web 端 provider 创建 / 选择与会话恢复
+3. 在工具协议边界进一步收稳后，继续补强 shell 中断 / 长任务处理与更细粒度的工具运行时能力
 4. 桌面壳接入
 
 ## 为什么当前先做 Web，而不是继续堆终端界面
@@ -63,4 +67,4 @@
 
 ## 阻塞
 
-- 当前无硬阻塞
+- 当前无硬阻塞；已知非阻断事项主要是前端生产包体积提示偏大，以及 `shell` 的中断能力仍可继续增强
