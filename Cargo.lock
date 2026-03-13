@@ -3,19 +3,6 @@
 version = 4
 
 [[package]]
-name = "agent-cli"
-version = "0.1.0"
-dependencies = [
- "agent-core",
- "agent-runtime",
- "builtin-tools",
- "openai-adapter",
- "provider-registry",
- "serde_json",
- "session-tape",
-]
-
-[[package]]
 name = "agent-core"
 version = "0.1.0"
 dependencies = [
