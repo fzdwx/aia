@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from "react"
 import { Check, ChevronRight, X as XIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Shimmer } from "@/components/ai-elements/shimmer"
 import { useChatStore } from "@/stores/chat-store"
 import type {
   StreamingTurn,
@@ -240,9 +241,9 @@ const STATUS_LABELS: Record<StreamingTurn["status"], string> = {
 function StatusIndicator({ status }: { status: StreamingTurn["status"] }) {
   return (
     <div className="py-2">
-      <span className="shimmer-text text-[14px] font-medium">
+      <Shimmer as="span" className="text-[14px] font-medium" duration={2}>
         {STATUS_LABELS[status]}
-      </span>
+      </Shimmer>
     </div>
   )
 }
