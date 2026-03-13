@@ -141,16 +141,23 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           }
           set({ streamingTurn: { ...prev, blocks } })
         } else if (data.kind === "tool_call_started") {
-          blocks.push({
-            type: "tool",
-            tool: {
-              invocationId: data.invocation_id,
-              toolName: data.tool_name,
-              arguments: data.arguments,
-              output: "",
-            },
-          })
-          set({ streamingTurn: { ...prev, blocks } })
+          const exists = blocks.some(
+            (b) =>
+              b.type === "tool" &&
+              b.tool.invocationId === data.invocation_id,
+          )
+          if (!exists) {
+            blocks.push({
+              type: "tool",
+              tool: {
+                invocationId: data.invocation_id,
+                toolName: data.tool_name,
+                arguments: data.arguments,
+                output: "",
+              },
+            })
+            set({ streamingTurn: { ...prev, blocks } })
+          }
         } else if (data.kind === "tool_output_delta") {
           let idx = -1
           for (let i = blocks.length - 1; i >= 0; i -= 1) {

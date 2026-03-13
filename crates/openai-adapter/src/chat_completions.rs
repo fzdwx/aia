@@ -225,6 +225,18 @@ impl LanguageModel for OpenAiChatCompletionsModel {
                         .and_then(|value| value.get("name"))
                         .and_then(|value| value.as_str())
                     {
+                        if state.name.is_none() {
+                            let invocation_id = state.id.clone().unwrap_or_else(|| {
+                                format!("openai-chat-stream-call-{}", index + 1)
+                            });
+                            let arguments =
+                                parse_tool_arguments(&state.arguments).unwrap_or_default();
+                            sink(StreamEvent::ToolCallStarted {
+                                invocation_id,
+                                tool_name: name.to_string(),
+                                arguments,
+                            });
+                        }
                         state.name = Some(name.to_string());
                     }
                     if let Some(arguments_delta) = tool_delta

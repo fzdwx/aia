@@ -273,6 +273,13 @@ impl LanguageModel for OpenAiResponsesModel {
                         } else {
                             current_tool_id.clone()
                         };
+                        let arguments =
+                            parse_tool_arguments(&current_tool_args).unwrap_or_default();
+                        sink(StreamEvent::ToolCallStarted {
+                            invocation_id: id.clone(),
+                            tool_name: current_tool_name.clone(),
+                            arguments,
+                        });
                         tool_calls.push((id, current_tool_name.clone(), current_tool_args.clone()));
                     }
                     current_tool_id.clear();
