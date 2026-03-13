@@ -32,6 +32,8 @@ this repository now starts with a library-first rust workspace:
 
 `apps/web` is now the primary client direction for provider management, session timeline, and streaming interaction. `apps/agent-server` is the only application shell in the Rust workspace and stays focused on bridging HTTP + SSE into the shared runtime instead of re-owning agent logic.
 
+the builtin coding tool contract is now intentionally short and explicit: `shell`, `read`, `write`, `edit`, `glob`, and `grep`. the shell tool keeps a stable generic name while embedding `brush` as its execution runtime.
+
 the shared turn-driving boundary has also been tightened so it no longer leaks shell-specific error types or pre-stringified errors into the reusable runtime path.
 
 on shutdown, the shared driver now only finalizes and persists session state; it no longer injects a hard-coded handoff summary on exit.
