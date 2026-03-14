@@ -1,5 +1,6 @@
 import { create } from "zustand"
 import {
+  fetchCurrentTurn,
   fetchHistory,
   fetchProviders,
   fetchSessionInfo,
@@ -14,6 +15,7 @@ import { normalizeToolArguments } from "@/lib/tool-display"
 import type {
   AppView,
   ChatState,
+  CurrentTurnSnapshot,
   ModelConfig,
   ProviderInfo,
   ProviderListItem,
@@ -22,6 +24,37 @@ import type {
   TurnLifecycle,
   TurnStatus,
 } from "@/lib/types"
+
+function currentTurnToStreamingTurn(
+  current: CurrentTurnSnapshot
+): StreamingTurn {
+  return {
+    userMessage: current.user_message,
+    status: current.status,
+    blocks: current.blocks.map((block) => {
+      switch (block.kind) {
+        case "thinking":
+          return { type: "thinking", content: block.content } as const
+        case "text":
+          return { type: "text", content: block.content } as const
+        case "tool":
+          return {
+            type: "tool",
+            tool: {
+              invocationId: block.tool.invocation_id,
+              toolName: block.tool.tool_name,
+              arguments: normalizeToolArguments(block.tool.arguments),
+              output: block.tool.output,
+              completed: block.tool.completed,
+              resultContent: block.tool.result_content ?? undefined,
+              resultDetails: block.tool.result_details ?? undefined,
+              failed: block.tool.failed ?? undefined,
+            },
+          } as const
+      }
+    }),
+  }
+}
 
 type ChatStore = {
   turns: TurnLifecycle[]
@@ -86,8 +119,16 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     get()
       ._refreshProviderInfo()
       .catch(() => {})
-    fetchHistory()
-      .then((turns) => set({ turns }))
+    Promise.all([fetchHistory(), fetchCurrentTurn()])
+      .then(([turns, currentTurn]) =>
+        set({
+          turns,
+          streamingTurn: currentTurn
+            ? currentTurnToStreamingTurn(currentTurn)
+            : null,
+          chatState: currentTurn ? "active" : "idle",
+        })
+      )
       .catch(() => {})
     fetchSessionInfo()
       .then((info) => set({ contextPressure: info.pressure_ratio }))

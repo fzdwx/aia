@@ -28,7 +28,7 @@ where
         seen_tool_calls: &mut BTreeMap<String, PreviousToolCall>,
         source_entry_ids: &mut Vec<u64>,
         on_delta: &mut dyn FnMut(StreamEvent),
-    ) -> ToolInvocationLifecycle {
+    ) -> Result<ToolInvocationLifecycle, RuntimeError> {
         let available_tool_names = self
             .visible_tools()
             .into_iter()
@@ -47,10 +47,10 @@ where
                 "tool_call_rejected",
                 runtime_error,
                 on_delta,
-            );
+            )?;
             seen_tool_calls
                 .insert(call_signature, PreviousToolCall::from_outcome(&lifecycle.outcome));
-            return lifecycle;
+            return Ok(lifecycle);
         }
 
         on_delta(StreamEvent::ToolCallStarted {
@@ -87,16 +87,16 @@ where
                         "tool_result_rejected",
                         runtime_error,
                         on_delta,
-                    );
+                    )?;
                     seen_tool_calls
                         .insert(call_signature, PreviousToolCall::from_outcome(&lifecycle.outcome));
-                    return lifecycle;
+                    return Ok(lifecycle);
                 }
 
                 let tool_result_entry_id =
-                    self.tape.append_entry(TapeEntry::tool_result(&result).with_run_id(turn_id));
+                    self.append_tape_entry(TapeEntry::tool_result(&result).with_run_id(turn_id))?;
                 source_entry_ids.push(tool_result_entry_id);
-                let tool_result_event_id = self.tape.append_entry(
+                let tool_result_event_id = self.append_tape_entry(
                     TapeEntry::event(
                         "tool_result_recorded",
                         Some(json!({"tool_name": result.tool_name.clone(), "status": "ok"})),
@@ -110,7 +110,7 @@ where
                             tool_result_entry_id,
                         )),
                     ),
-                );
+                )?;
                 source_entry_ids.push(tool_result_event_id);
 
                 on_delta(StreamEvent::ToolCallCompleted {
@@ -129,7 +129,7 @@ where
                 let lifecycle = ToolInvocationLifecycle { call: call.clone(), outcome };
                 seen_tool_calls
                     .insert(call_signature, PreviousToolCall::from_outcome(&lifecycle.outcome));
-                lifecycle
+                Ok(lifecycle)
             }
             Err(error) => {
                 let lifecycle = self.record_failed_tool_call(
@@ -141,10 +141,10 @@ where
                     "tool_call_failed",
                     RuntimeError::tool(error),
                     on_delta,
-                );
+                )?;
                 seen_tool_calls
                     .insert(call_signature, PreviousToolCall::from_outcome(&lifecycle.outcome));
-                lifecycle
+                Ok(lifecycle)
             }
         }
     }
@@ -159,13 +159,13 @@ where
         event_name: &str,
         runtime_error: RuntimeError,
         on_delta: &mut dyn FnMut(StreamEvent),
-    ) -> ToolInvocationLifecycle {
+    ) -> Result<ToolInvocationLifecycle, RuntimeError> {
         let failure_message = runtime_error.to_string();
         let failed_result = ToolResult::from_call(call, failure_message.clone());
         let tool_result_entry_id =
-            self.tape.append_entry(TapeEntry::tool_result(&failed_result).with_run_id(turn_id));
+            self.append_tape_entry(TapeEntry::tool_result(&failed_result).with_run_id(turn_id))?;
         source_entry_ids.push(tool_result_entry_id);
-        let failure_event_id = self.tape.append_entry(
+        let failure_event_id = self.append_tape_entry(
             TapeEntry::event(
                 event_name,
                 Some(json!({"message": failure_message, "tool_name": call.tool_name.clone()})),
@@ -179,7 +179,7 @@ where
                     tool_result_entry_id,
                 )),
             ),
-        );
+        )?;
         source_entry_ids.push(failure_event_id);
 
         let outcome = ToolInvocationOutcome::Failed { message: runtime_error.to_string() };
@@ -194,6 +194,6 @@ where
             details: None,
             failed: true,
         });
-        ToolInvocationLifecycle { call: call.clone(), outcome }
+        Ok(ToolInvocationLifecycle { call: call.clone(), outcome })
     }
 }

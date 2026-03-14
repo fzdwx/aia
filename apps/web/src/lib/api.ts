@@ -1,4 +1,5 @@
 import type {
+  CurrentTurnSnapshot,
   ModelConfig,
   ProviderInfo,
   ProviderListItem,
@@ -35,6 +36,13 @@ export async function fetchHistory(): Promise<TurnLifecycle[]> {
   const res = await fetch("/api/session/history")
   if (!res.ok) throw new Error(`GET /api/session/history failed: ${res.status}`)
   return res.json() as Promise<TurnLifecycle[]>
+}
+
+export async function fetchCurrentTurn(): Promise<CurrentTurnSnapshot | null> {
+  const res = await fetch("/api/session/current-turn")
+  if (!res.ok)
+    throw new Error(`GET /api/session/current-turn failed: ${res.status}`)
+  return res.json() as Promise<CurrentTurnSnapshot | null>
 }
 
 export async function submitTurn(prompt: string): Promise<void> {

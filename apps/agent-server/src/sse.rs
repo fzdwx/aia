@@ -1,9 +1,9 @@
 use agent_core::StreamEvent;
 use agent_runtime::TurnLifecycle;
 use axum::response::sse::Event;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnStatus {
     Waiting,

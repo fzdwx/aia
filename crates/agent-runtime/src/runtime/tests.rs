@@ -382,7 +382,8 @@ fn 运行时会记录用户与助手消息() {
     let output = runtime.handle_turn("你好").expect("运行成功");
 
     assert_eq!(output.assistant_text, "已收到：你好");
-    assert_eq!(runtime.tape().entries().len(), 6);
+    assert_eq!(runtime.tape().entries().len(), 7);
+    assert_eq!(runtime.tape().entries()[6].event_name(), Some("turn_completed"));
     assert_eq!(output.visible_tools.len(), 1);
 }
 
@@ -427,13 +428,13 @@ fn 多轮调用会保留上下文() {
     let output = runtime.handle_turn("第二轮").expect("第二轮成功");
 
     assert_eq!(output.assistant_text, "已收到：第二轮");
-    assert_eq!(runtime.tape().entries().len(), 12);
+    assert_eq!(runtime.tape().entries().len(), 14);
     assert_eq!(
         runtime.tape().entries()[0].as_message().map(|value| value.content.clone()),
         Some("第一轮".into())
     );
     assert_eq!(
-        runtime.tape().entries()[6].as_message().map(|value| value.content.clone()),
+        runtime.tape().entries()[7].as_message().map(|value| value.content.clone()),
         Some("第二轮".into())
     );
 }

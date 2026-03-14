@@ -28,6 +28,7 @@ React (Vite :5173)  ──proxy──>  axum server (:3434)
 |------|------|------|
 | GET | `/api/providers` | 返回当前 provider 信息 |
 | GET | `/api/session/history` | 返回已完成的 `TurnLifecycle[]` |
+| GET | `/api/session/current-turn` | 返回当前运行中的 turn 快照（如果存在） |
 | GET | `/api/events` | 全局 SSE 事件流（stream / status / turn_completed / error） |
 | POST | `/api/turn` | 发送用户消息，202 fire-and-forget，事件通过 SSE 返回 |
 
@@ -102,7 +103,7 @@ Web 主界面按以下信息层次组织：
 2. Web 端通过全局 SSE（`EventSource`）消费 `/api/events` 的结构化事件流。
 3. 消息提交通过 `POST /api/turn` fire-and-forget，响应通过 SSE 返回。
 4. `useChat` hook 是唯一的事件消费入口，管理 turns / streamingTurn / chatState / error。
-5. 会话恢复通过 `GET /api/session/history` 加载，provider 信息通过 `GET /api/providers` 加载。
+5. 会话恢复通过 `GET /api/session/history` + `GET /api/session/current-turn` 加载，provider 信息通过 `GET /api/providers` 加载。
 6. 流式 tool 输出（`tool_output_delta`）按 `invocation_id` 分组实时渲染，不等 turn_completed。
 
 ## 9. 开发工作流

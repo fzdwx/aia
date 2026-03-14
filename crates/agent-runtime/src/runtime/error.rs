@@ -16,6 +16,10 @@ impl RuntimeError {
         Self { message: message.into() }
     }
 
+    pub fn session(error: impl fmt::Display) -> Self {
+        Self { message: format!("会话持久化失败：{error}") }
+    }
+
     pub fn tool(error: impl fmt::Display) -> Self {
         Self { message: format!("工具执行失败：{error}") }
     }

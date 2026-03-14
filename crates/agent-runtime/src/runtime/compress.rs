@@ -47,7 +47,7 @@ where
         let completion = self.model.complete(request).map_err(RuntimeError::model)?;
         let summary = completion.plain_text();
 
-        self.tape.handoff(
+        self.record_handoff(
             "context_compression",
             json!({
                 "phase": "context_compression",
@@ -56,7 +56,7 @@ where
                 "source_entry_ids": source_entry_ids,
                 "owner": "runtime"
             }),
-        );
+        )?;
 
         self.publish_event(RuntimeEvent::ContextCompressed { summary });
         Ok(())

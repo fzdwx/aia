@@ -65,7 +65,7 @@ where
         let started_at_ms = now_timestamp_ms();
         let user_message = Message::new(Role::User, user_input.into());
         let user_entry_id =
-            self.tape.append_entry(TapeEntry::message(&user_message).with_run_id(&turn_id));
+            self.append_tape_entry(TapeEntry::message(&user_message).with_run_id(&turn_id))?;
         let mut buffers = TurnBuffers::new(user_entry_id);
         self.publish_event(RuntimeEvent::UserMessage { content: user_message.content.clone() });
 
@@ -105,7 +105,7 @@ where
                         buffers.aggregated_thinking.as_str(),
                         &buffers.tool_invocations,
                         runtime_error.clone(),
-                    );
+                    )?;
                     return Err(runtime_error);
                 }
             };
@@ -121,7 +121,7 @@ where
                     buffers.aggregated_thinking.as_str(),
                     &buffers.tool_invocations,
                     runtime_error.clone(),
-                );
+                )?;
                 return Err(runtime_error);
             }
 
@@ -144,7 +144,7 @@ where
                         buffers.aggregated_thinking.as_str(),
                         &buffers.tool_invocations,
                         runtime_error.clone(),
-                    );
+                    )?;
                     return Err(runtime_error);
                 }
             };
@@ -164,7 +164,7 @@ where
                             buffers.aggregated_thinking.as_str(),
                             &buffers.tool_invocations,
                             runtime_error.clone(),
-                        );
+                        )?;
                         return Err(runtime_error);
                     }
                 }
@@ -182,7 +182,7 @@ where
                             buffers.aggregated_thinking.as_str(),
                             &buffers.tool_invocations,
                             runtime_error.clone(),
-                        );
+                        )?;
                         return Err(runtime_error);
                     }
 
@@ -196,7 +196,7 @@ where
                         buffers.last_assistant_text.clone(),
                         thinking,
                         buffers.tool_invocations,
-                    );
+                    )?;
 
                     return Ok(TurnOutput {
                         assistant_text,
@@ -240,7 +240,7 @@ where
             match segment {
                 CompletionSegment::Thinking(text) if !text.is_empty() => {
                     let thinking_entry_id =
-                        self.tape.append_entry(TapeEntry::thinking(text).with_run_id(turn_id));
+                        self.append_tape_entry(TapeEntry::thinking(text).with_run_id(turn_id))?;
                     buffers.source_entry_ids.push(thinking_entry_id);
                     buffers.aggregated_thinking.push_str(text);
                     buffers.blocks.push(TurnBlock::Thinking { content: text.clone() });
@@ -248,8 +248,7 @@ where
                 CompletionSegment::Text(text) if !text.is_empty() => {
                     let assistant_message = Message::new(Role::Assistant, text.clone());
                     let entry_id = self
-                        .tape
-                        .append_entry(TapeEntry::message(&assistant_message).with_run_id(turn_id));
+                        .append_tape_entry(TapeEntry::message(&assistant_message).with_run_id(turn_id))?;
                     buffers.source_entry_ids.push(entry_id);
                     self.publish_event(RuntimeEvent::AssistantMessage { content: text.clone() });
                     buffers.last_assistant_text = Some(text.clone());
@@ -262,7 +261,7 @@ where
                     }
                     saw_tool_calls = true;
                     let tool_call_entry_id =
-                        self.tape.append_entry(TapeEntry::tool_call(call).with_run_id(turn_id));
+                        self.append_tape_entry(TapeEntry::tool_call(call).with_run_id(turn_id))?;
                     buffers.source_entry_ids.push(tool_call_entry_id);
                     let invocation = self.execute_tool_call(
                         turn_id,
@@ -272,7 +271,7 @@ where
                         &mut buffers.seen_tool_calls,
                         &mut buffers.source_entry_ids,
                         on_delta,
-                    );
+                    )?;
                     buffers
                         .blocks
                         .push(TurnBlock::ToolInvocation { invocation: invocation.clone() });

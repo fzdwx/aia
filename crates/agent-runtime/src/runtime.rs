@@ -10,9 +10,10 @@ mod tool_calls;
 mod turn;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use agent_core::{LanguageModel, ModelIdentity, ToolDefinition, ToolExecutor};
-use session_tape::{Handoff, SessionTape};
+use session_tape::{Handoff, SessionTape, SessionTapeError, TapeEntry};
 
 use crate::{RuntimeEvent, RuntimeSubscriberId};
 
@@ -20,6 +21,8 @@ pub use self::error::RuntimeError;
 
 const DEFAULT_MAX_TOOL_CALLS_PER_TURN: usize = 1000;
 const DEFAULT_CONTEXT_PRESSURE_THRESHOLD: f64 = 0.80;
+type TapeEntryListener =
+    Arc<dyn Fn(&TapeEntry) -> Result<(), SessionTapeError> + Send + Sync + 'static>;
 
 pub struct AgentRuntime<M, T> {
     model: M,
@@ -31,6 +34,7 @@ pub struct AgentRuntime<M, T> {
     workspace_root: Option<std::path::PathBuf>,
     max_tool_calls_per_turn: usize,
     context_pressure_threshold: f64,
+    tape_entry_listener: Option<TapeEntryListener>,
     events: Vec<RuntimeEvent>,
     subscribers: BTreeMap<RuntimeSubscriberId, usize>,
     next_subscriber_id: RuntimeSubscriberId,
@@ -56,6 +60,7 @@ where
             workspace_root: None,
             max_tool_calls_per_turn: DEFAULT_MAX_TOOL_CALLS_PER_TURN,
             context_pressure_threshold: DEFAULT_CONTEXT_PRESSURE_THRESHOLD,
+            tape_entry_listener: None,
             events: Vec::new(),
             subscribers: BTreeMap::new(),
             next_subscriber_id: 1,
@@ -79,6 +84,14 @@ where
 
     pub fn with_context_pressure_threshold(mut self, threshold: f64) -> Self {
         self.context_pressure_threshold = threshold.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn with_tape_entry_listener(
+        mut self,
+        listener: impl Fn(&TapeEntry) -> Result<(), SessionTapeError> + Send + Sync + 'static,
+    ) -> Self {
+        self.tape_entry_listener = Some(Arc::new(listener));
         self
     }
 
@@ -117,5 +130,42 @@ where
     pub fn replace_model(&mut self, model: M, identity: ModelIdentity) {
         self.model = model;
         self.model_identity = identity;
+    }
+
+    pub(super) fn append_tape_entry(&mut self, entry: TapeEntry) -> Result<u64, RuntimeError> {
+        let entry_id = self.tape.append_entry(entry);
+        self.persist_last_tape_entry()?;
+        Ok(entry_id)
+    }
+
+    pub(super) fn record_handoff(
+        &mut self,
+        name: impl Into<String>,
+        state: serde_json::Value,
+    ) -> Result<Handoff, RuntimeError> {
+        let previous_len = self.tape.entries().len();
+        let handoff = self.tape.handoff(name, state);
+        self.persist_tape_entries_from(previous_len)?;
+        Ok(handoff)
+    }
+
+    fn persist_last_tape_entry(&self) -> Result<(), RuntimeError> {
+        let Some(listener) = self.tape_entry_listener.as_ref() else {
+            return Ok(());
+        };
+        let Some(entry) = self.tape.entries().last() else {
+            return Err(RuntimeError::session("会话条目追加后未找到最后一条记录"));
+        };
+        listener(entry).map_err(RuntimeError::session)
+    }
+
+    fn persist_tape_entries_from(&self, start_index: usize) -> Result<(), RuntimeError> {
+        let Some(listener) = self.tape_entry_listener.as_ref() else {
+            return Ok(());
+        };
+        for entry in &self.tape.entries()[start_index..] {
+            listener(entry).map_err(RuntimeError::session)?;
+        }
+        Ok(())
     }
 }

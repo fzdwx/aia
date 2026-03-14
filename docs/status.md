@@ -3,7 +3,7 @@
 ## 当前阶段
 
 - 阶段：Web 界面 ↔ 运行时桥接
-- 当前步骤：在 Web + server 主路径稳定的基础上，继续收口“可作为其他客户端驱动接口”的 server 形态；`apps/agent-server` 已把 `AgentRuntime` 从全局锁中拆出，改为后台 runtime worker + provider 快照读模型，Web 端用户消息也已改为发送即显示
+- 当前步骤：在 Web + server 主路径稳定的基础上，继续收口“可作为其他客户端驱动接口”的 server 形态；`apps/agent-server` 已把 `AgentRuntime` 从全局锁中拆出，改为后台 runtime worker，读路径也逐步改成 provider / history / current-turn 快照，Web 端用户消息已改为发送即显示
 
 ## 已完成
 
@@ -29,7 +29,7 @@
 - 完成 `apps/agent-server` axum HTTP+SSE 服务器，桥接 Web 前端到共享运行时
 - 完成全局 SSE 事件流架构（`GET /api/events`），基于 `broadcast::channel` 向所有客户端推送事件
 - 完成 `POST /api/turn` fire-and-forget 消息提交，响应通过全局 SSE 返回
-- 完成 `GET /api/providers` 与 `GET /api/session/history` 数据接口
+- 完成 `GET /api/providers`、`GET /api/session/history` 与 `GET /api/session/current-turn` 数据接口
 - 完成 Rust 侧核心类型（StreamEvent、TurnLifecycle、TurnBlock 等）的 Serialize/Deserialize 支持
 - 完成前端 TypeScript 类型定义镜像 Rust 侧类型（discriminated union 对齐 serde tag）
 - 完成前端全局 store：统一管理 EventSource 连接、流式状态累积、turn 完成回收与 provider 当前状态刷新
@@ -50,6 +50,8 @@
 - 完成 Web 端 Markdown 渲染入口收敛为共享前端组件，并参考 opencode 的消息排版规则统一标题、列表、引用、表格与代码块样式
 - 完成 `apps/agent-server` 运行时拥有关系重构：当前由后台 runtime worker 独占 `AgentRuntime`、provider registry 与 session 持久化，HTTP 路由通过消息传递访问运行时，不再用全局 Mutex 包住整个 turn
 - 完成 provider 当前信息 / provider 列表快照化读取，长时间 shell / model turn 不再阻塞轻量查询接口
+- 完成 session history / current-turn 快照化读取：运行中的 agent loop 不再把 `/api/session/history` 挂起，页面刷新时也能直接恢复当前进行中的 turn
+- 完成 session jsonl 实时 append 落盘：agent loop 过程中新增的用户消息、thinking、tool 调用结果与完成/失败事件都会立即写入 `.aia/session.jsonl`
 - 完成 Web 端用户消息的乐观渲染，提交后立即显示到消息列表，而不是等流式完成再落入 completed turn
 - 完成 Web 端 trace 详情模态框的诊断视图重构：第一行先展示 trace overview，下方分离执行结果与请求上下文，右侧集中放消息时间线与 tool schema，原始 payload 退为补充折叠区
 - 完成 trace 记录对真实 HTTP 状态码的保留：不再在成功路径硬编码 `200`，OpenAI 适配器错误也会把上游状态码与响应体带回 trace

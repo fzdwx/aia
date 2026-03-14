@@ -48,7 +48,7 @@
 - 锚点已简化为 `{entry_id, name, state: Value}`，不再硬编码固定字段
 - 运行时不再将 TurnRecord 写入磁带，遵循 "derivatives never replace original facts" 原则
 - 旧格式 JSONL 可兼容载入并自动转换为新扁平格式
-- `.aia/session.jsonl` 当前统一以扁平 `TapeEntry` JSONL 形式落盘；旧格式仅在载入时兼容转换，不再继续按旧格式写回
+- `.aia/session.jsonl` 当前统一以扁平 `TapeEntry` JSONL 形式 append-only 落盘；旧格式仅在载入时兼容转换，不再继续按旧格式写回
 - provider 本地资料当前落盘在 `.aia/providers.json`，并通过 `.gitignore` 避免误提交
 - provider 当前已具备协议级区分能力，可在同一地址 / 模型下区分 Responses 与 Chat Completions
 - `apps/web` 已建立 React + Vite 基础工程，并替换掉模板首页，开始承接主界面方向
@@ -70,9 +70,9 @@
 - 已建立 `apps/agent-server` axum HTTP+SSE 服务器，作为 Web 前端与 Rust 运行时的桥接层
 - `apps/agent-server` 启动时会从 `.aia/providers.json` 与 `.aia/session.jsonl` 恢复 provider 绑定，无匹配时回退 bootstrap
 - 已完成全局 SSE 事件流架构：`GET /api/events` 基于 `broadcast::channel`，`POST /api/turn` fire-and-forget（202）
-- `apps/agent-server` 当前已把 `AgentRuntime` 从全局 Mutex 中拆出，由后台 runtime worker 串行驱动 turn / history / info / handoff / provider 变更，避免大工具调用拖住整个 server
-- `apps/agent-server` 当前通过 provider 快照对外暴露 `/api/providers` 与 `/api/providers/list`，长时间 turn 不再阻塞这类轻量读取接口
-- `apps/agent-server` 会在 turn 完成后把会话磁带落盘回 `.aia/session.jsonl`
+- `apps/agent-server` 当前已把 `AgentRuntime` 从全局 Mutex 中拆出，由后台 runtime worker 串行驱动 turn / info / handoff / provider 变更，避免大工具调用拖住整个 server
+- `apps/agent-server` 当前通过 provider / history / current-turn 共享快照对外暴露轻量读取接口，长时间 turn 不再阻塞这类查询
+- `apps/agent-server` 当前会把会话磁带新增条目实时 append 到 `.aia/session.jsonl`，而不是等整轮结束后再整体写回
 - 已完成 Rust 侧核心类型的 Serialize/Deserialize 支持，u128 时间戳已改为 u64
 - 已完成前端全局 store 与全局 EventSource 连接，支持流式状态累积、turn 完成回收与 provider 当前状态刷新
 - 已完成流式轮次状态指示（waiting / thinking / working / generating）与 shimmer 文字动画

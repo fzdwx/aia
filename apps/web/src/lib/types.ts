@@ -87,6 +87,29 @@ export type SseEvent =
 // Mirrors Rust TurnStatus
 export type TurnStatus = "waiting" | "thinking" | "working" | "generating"
 
+export type CurrentToolOutput = {
+  invocation_id: string
+  tool_name: string
+  arguments: Record<string, unknown>
+  output: string
+  completed: boolean
+  result_content: string | null
+  result_details: Record<string, unknown> | null
+  failed: boolean | null
+}
+
+export type CurrentTurnBlock =
+  | { kind: "thinking"; content: string }
+  | { kind: "tool"; tool: CurrentToolOutput }
+  | { kind: "text"; content: string }
+
+export type CurrentTurnSnapshot = {
+  started_at_ms: number
+  user_message: string
+  status: TurnStatus
+  blocks: CurrentTurnBlock[]
+}
+
 // Streaming tool output accumulator
 export type StreamingToolOutput = {
   invocationId: string

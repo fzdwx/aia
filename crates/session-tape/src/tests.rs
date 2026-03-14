@@ -217,6 +217,24 @@ fn 保存并载入新格式_jsonl() {
 }
 
 #[test]
+fn 可向_jsonl_追加单条记录() {
+    let path = temp_file("append-entry");
+    let mut tape = SessionTape::new();
+    tape.append_entry(TapeEntry::message(&Message::new(Role::User, "第一条")));
+    tape.append_entry(TapeEntry::event("turn_completed", Some(json!({"status": "ok"}))));
+
+    SessionTape::append_jsonl_entry(&path, &tape.entries()[0]).expect("应可追加第一条");
+    SessionTape::append_jsonl_entry(&path, &tape.entries()[1]).expect("应可追加第二条");
+
+    let restored = SessionTape::load_jsonl_or_default(&path).expect("应可载入追加后的文件");
+    assert_eq!(restored.entries().len(), 2);
+    assert_eq!(restored.entries()[0].kind, "message");
+    assert_eq!(restored.entries()[1].event_name(), Some("turn_completed"));
+
+    let _ = fs::remove_file(path);
+}
+
+#[test]
 fn 兼容载入旧格式_jsonl() {
     let path = temp_file("legacy-compat");
     let old_line = r#"{"id":1,"fact":{"Message":{"role":"User","content":"旧文件兼容"}},"date":"2026-03-12T10:00:00Z"}"#;

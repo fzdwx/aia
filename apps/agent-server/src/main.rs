@@ -22,8 +22,6 @@ use model::{ProviderLaunchChoice, build_model_from_selection};
 use runtime_worker::{ProviderInfoSnapshot, RuntimeOwnerState, spawn_runtime_worker};
 use state::AppState;
 
-const SERVER_DEFAULT_MAX_TOOL_CALLS_PER_TURN: usize = 50;
-
 fn default_trace_store_path() -> std::path::PathBuf {
     provider_registry::default_registry_path()
         .parent()
@@ -80,17 +78,23 @@ async fn main() {
         build_model_from_selection(selection, Some(trace_store.clone())).expect("模型构建失败");
 
     let tools = build_tool_registry();
+    let session_append_path = session_path.clone();
 
     let mut runtime = AgentRuntime::with_tape(model, tools, identity, tape)
         .with_instructions("你是 aia 的助手。给出清晰、结构化的答案。")
         .with_workspace_root(workspace_root)
-        .with_max_tool_calls_per_turn(SERVER_DEFAULT_MAX_TOOL_CALLS_PER_TURN);
+        .with_tape_entry_listener(move |entry| {
+            SessionTape::append_jsonl_entry(&session_append_path, entry)
+        })
+        .with_max_tool_calls_per_turn(100000);
 
     let subscriber = runtime.subscribe();
     let (broadcast_tx, _) = tokio::sync::broadcast::channel(512);
     let provider_registry_snapshot = Arc::new(RwLock::new(registry.clone()));
     let provider_info_snapshot =
         Arc::new(RwLock::new(ProviderInfoSnapshot::from_identity(runtime.model_identity())));
+    let history_snapshot = Arc::new(RwLock::new(Vec::new()));
+    let current_turn_snapshot = Arc::new(RwLock::new(None));
     let worker = spawn_runtime_worker(RuntimeOwnerState {
         runtime,
         subscriber,
@@ -101,6 +105,8 @@ async fn main() {
         broadcast_tx: broadcast_tx.clone(),
         provider_registry_snapshot: provider_registry_snapshot.clone(),
         provider_info_snapshot: provider_info_snapshot.clone(),
+        history_snapshot: history_snapshot.clone(),
+        current_turn_snapshot: current_turn_snapshot.clone(),
     });
 
     let state = Arc::new(AppState {
@@ -108,6 +114,8 @@ async fn main() {
         broadcast_tx,
         provider_registry_snapshot,
         provider_info_snapshot,
+        history_snapshot,
+        current_turn_snapshot,
         trace_store,
     });
 
@@ -122,6 +130,7 @@ async fn main() {
         .route("/api/providers/{name}", delete(routes::delete_provider))
         .route("/api/providers/switch", post(routes::switch_provider))
         .route("/api/session/history", get(routes::get_history))
+        .route("/api/session/current-turn", get(routes::get_current_turn))
         .route("/api/session/info", get(routes::get_session_info))
         .route("/api/session/handoff", post(routes::create_handoff))
         .route("/api/events", get(routes::events))

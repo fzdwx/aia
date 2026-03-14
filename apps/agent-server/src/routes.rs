@@ -15,8 +15,8 @@ use provider_registry::{ModelConfig, ModelLimit, ProviderKind};
 
 use crate::{
     runtime_worker::{
-        CreateProviderInput, ProviderInfoSnapshot, RuntimeWorkerError, SwitchProviderInput,
-        UpdateProviderInput,
+        CreateProviderInput, CurrentTurnSnapshot, ProviderInfoSnapshot, RuntimeWorkerError,
+        SwitchProviderInput, UpdateProviderInput,
     },
     sse::{SsePayload, TurnStatus},
     state::SharedState,
@@ -362,14 +362,16 @@ mod tests {
     use tokio::sync::broadcast;
 
     use crate::{
-        runtime_worker::{self, ProviderInfoSnapshot, RuntimeOwnerState, spawn_runtime_worker},
-        sse::SsePayload,
+        runtime_worker::{
+            self, ProviderInfoSnapshot, RuntimeOwnerState, spawn_runtime_worker,
+        },
+        sse::{SsePayload, TurnStatus},
         state::AppState,
     };
 
     use super::{
-        ModelConfigDto, ModelLimitDto, get_providers, get_trace, get_trace_summary, list_providers,
-        list_traces,
+        ModelConfigDto, ModelLimitDto, get_current_turn, get_history, get_providers, get_trace,
+        get_trace_summary, list_providers, list_traces,
     };
 
     fn provider(name: &str, model: &str) -> ProviderProfile {
@@ -409,6 +411,8 @@ mod tests {
             Arc::new(SqliteLlmTraceStore::in_memory().expect("trace store should init"));
         let provider_registry_snapshot = Arc::new(RwLock::new(registry.clone()));
         let provider_info_snapshot = Arc::new(RwLock::new(provider_info.clone()));
+        let history_snapshot = Arc::new(RwLock::new(Vec::new()));
+        let current_turn_snapshot = Arc::new(RwLock::new(None));
         let worker = spawn_runtime_worker(RuntimeOwnerState {
             runtime,
             subscriber,
@@ -419,6 +423,8 @@ mod tests {
             broadcast_tx: broadcast_tx.clone(),
             provider_registry_snapshot: provider_registry_snapshot.clone(),
             provider_info_snapshot: provider_info_snapshot.clone(),
+            history_snapshot: history_snapshot.clone(),
+            current_turn_snapshot: current_turn_snapshot.clone(),
         });
 
         let state = Arc::new(AppState {
@@ -426,6 +432,8 @@ mod tests {
             broadcast_tx,
             provider_registry_snapshot,
             provider_info_snapshot,
+            history_snapshot,
+            current_turn_snapshot,
             trace_store,
         });
         *state.provider_info_snapshot.write().expect("lock poisoned") = provider_info;
@@ -447,6 +455,7 @@ mod tests {
         tape.append_entry(TapeEntry::tool_call(&call).with_run_id(turn_id));
         tape.append_entry(TapeEntry::tool_result(&result).with_run_id(turn_id));
         tape.append_entry(TapeEntry::message(&assistant).with_run_id(turn_id));
+        tape.append_entry(TapeEntry::event("turn_completed", None).with_run_id(turn_id));
 
         let turns = runtime_worker::rebuild_turn_history_from_tape(&tape);
 
@@ -458,6 +467,28 @@ mod tests {
         assert_eq!(turn.thinking.as_deref(), Some("思考中"));
         assert_eq!(turn.tool_invocations.len(), 1);
         assert_eq!(turn.blocks.len(), 3);
+    }
+
+    #[test]
+    fn rebuild_session_snapshots_from_tape_keeps_incomplete_turn_out_of_history() {
+        let mut tape = SessionTape::new();
+        let turn_id = "turn-1";
+        tape.append_entry(TapeEntry::message(&Message::new(Role::User, "处理中")).with_run_id(turn_id));
+        tape.append_entry(TapeEntry::thinking("先分析").with_run_id(turn_id));
+
+        let snapshots = runtime_worker::rebuild_session_snapshots_from_tape(&tape);
+
+        assert!(snapshots.history.is_empty());
+        let current = snapshots.current_turn.expect("应保留当前未完成轮次");
+        assert_eq!(current.user_message, "处理中");
+        assert_eq!(current.status, crate::sse::TurnStatus::Thinking);
+        assert!(current.started_at_ms > 0);
+        assert_eq!(
+            current.blocks,
+            vec![runtime_worker::CurrentTurnBlock::Thinking {
+                content: "先分析".to_string(),
+            }]
+        );
     }
 
     #[test]
@@ -575,6 +606,65 @@ mod tests {
         assert_eq!(items.len(), 2);
         assert!(items.iter().any(|item| item.name == "beta" && item.active));
         assert!(items.iter().any(|item| item.name == "alpha" && !item.active));
+    }
+
+    #[tokio::test]
+    async fn get_history_reads_history_snapshot_directly() {
+        let state = shared_state_with_snapshots(
+            ProviderInfoSnapshot {
+                name: "openai".to_string(),
+                model: "gpt-4.1".to_string(),
+                connected: true,
+            },
+            ProviderRegistry::default(),
+        );
+        *state.history_snapshot.write().expect("lock poisoned") = vec![TurnLifecycle {
+            turn_id: "turn-1".to_string(),
+            started_at_ms: 1,
+            finished_at_ms: 2,
+            source_entry_ids: vec![1],
+            user_message: "你好".to_string(),
+            blocks: vec![agent_runtime::TurnBlock::Assistant { content: "已完成".to_string() }],
+            assistant_message: Some("已完成".to_string()),
+            thinking: None,
+            tool_invocations: vec![],
+            failure_message: None,
+        }];
+
+        let (status, Json(value)) = get_history(axum::extract::State(state)).await;
+        let turns: Vec<TurnLifecycle> = serde_json::from_value(value).expect("decode history");
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].turn_id, "turn-1");
+    }
+
+    #[tokio::test]
+    async fn get_current_turn_reads_current_turn_snapshot_directly() {
+        let state = shared_state_with_snapshots(
+            ProviderInfoSnapshot {
+                name: "openai".to_string(),
+                model: "gpt-4.1".to_string(),
+                connected: true,
+            },
+            ProviderRegistry::default(),
+        );
+        *state.current_turn_snapshot.write().expect("lock poisoned") =
+            Some(runtime_worker::CurrentTurnSnapshot {
+                started_at_ms: 1,
+                user_message: "处理中".to_string(),
+                status: TurnStatus::Working,
+                blocks: vec![runtime_worker::CurrentTurnBlock::Thinking {
+                    content: "先分析".to_string(),
+                }],
+            });
+
+        let (status, Json(value)) = get_current_turn(axum::extract::State(state)).await;
+        let current: Option<runtime_worker::CurrentTurnSnapshot> =
+            serde_json::from_value(value).expect("decode current turn");
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(current.expect("应返回当前轮次").user_message, "处理中");
     }
 
     #[tokio::test]
@@ -705,13 +795,17 @@ pub async fn create_handoff(
     }
 }
 
-pub async fn get_history(State(state): State<SharedState>) -> impl IntoResponse {
-    match state.worker.get_history().await {
-        Ok(turns) => {
-            (StatusCode::OK, Json(serde_json::to_value(turns).expect("serialize history")))
-        }
-        Err(error) => runtime_worker_error_response(error),
-    }
+pub async fn get_history(State(state): State<SharedState>) -> (StatusCode, Json<serde_json::Value>) {
+    let turns = state.history_snapshot.read().expect("lock poisoned").clone();
+    (StatusCode::OK, Json(serde_json::to_value(turns).expect("serialize history")))
+}
+
+pub async fn get_current_turn(
+    State(state): State<SharedState>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let current: Option<CurrentTurnSnapshot> =
+        state.current_turn_snapshot.read().expect("lock poisoned").clone();
+    (StatusCode::OK, Json(serde_json::to_value(current).expect("serialize current turn")))
 }
 
 /// Global SSE endpoint — client connects once, receives all events.

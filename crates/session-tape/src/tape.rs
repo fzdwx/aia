@@ -1,4 +1,9 @@
-use std::{fs, path::Path};
+use std::{
+    fs,
+    fs::OpenOptions,
+    io::Write,
+    path::Path,
+};
 
 use agent_core::{ConversationItem, Message};
 use serde_json::Value;
@@ -213,6 +218,20 @@ impl SessionTape {
             .join("\n");
         let contents = if contents.is_empty() { contents } else { format!("{contents}\n") };
         fs::write(path, contents).map_err(SessionTapeError::from_io)
+    }
+
+    pub fn append_jsonl_entry(path: &Path, entry: &TapeEntry) -> Result<(), SessionTapeError> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(SessionTapeError::from_io)?;
+        }
+
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .map_err(SessionTapeError::from_io)?;
+        let line = serde_json::to_string(entry).map_err(SessionTapeError::from_serde)?;
+        writeln!(file, "{line}").map_err(SessionTapeError::from_io)
     }
 
     fn query_lower_bound(&self, query: &TapeQuery) -> Result<u64, SessionTapeError> {

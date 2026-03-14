@@ -22,7 +22,14 @@ where
         assistant_message: Option<String>,
         thinking: Option<String>,
         tool_invocations: Vec<ToolInvocationLifecycle>,
-    ) {
+    ) -> Result<(), RuntimeError> {
+        let completion_event_id = self.append_tape_entry(
+            TapeEntry::event("turn_completed", Some(json!({"status": "ok"})))
+                .with_run_id(&turn_id)
+                .with_meta("source_entry_ids", json!(source_entry_ids.clone())),
+        )?;
+        let mut source_entry_ids = source_entry_ids;
+        source_entry_ids.push(completion_event_id);
         self.publish_turn_lifecycle(TurnLifecycle {
             turn_id,
             started_at_ms,
@@ -35,6 +42,7 @@ where
             tool_invocations,
             failure_message: None,
         });
+        Ok(())
     }
 
     pub(super) fn record_turn_failure(
@@ -48,12 +56,12 @@ where
         aggregated_thinking: &str,
         tool_invocations: &[ToolInvocationLifecycle],
         runtime_error: RuntimeError,
-    ) {
-        let failure_event_id = self.tape.append_entry(
+    ) -> Result<(), RuntimeError> {
+        let failure_event_id = self.append_tape_entry(
             TapeEntry::event("turn_failed", Some(json!({"message": runtime_error.to_string()})))
                 .with_run_id(turn_id)
                 .with_meta("source_entry_ids", json!(source_entry_ids.clone())),
-        );
+        )?;
         source_entry_ids.push(failure_event_id);
         self.publish_event(crate::RuntimeEvent::TurnFailed { message: runtime_error.to_string() });
         let mut lifecycle_blocks = blocks.to_vec();
@@ -74,5 +82,6 @@ where
             tool_invocations: tool_invocations.to_vec(),
             failure_message: Some(runtime_error.to_string()),
         });
+        Ok(())
     }
 }

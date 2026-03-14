@@ -8,6 +8,7 @@ use agent_runtime::{AgentRuntime, ContextStats, RuntimeEvent, RuntimeSubscriberI
 use axum::http::StatusCode;
 use llm_trace::LlmTraceStore;
 use provider_registry::{ModelConfig, ProviderKind, ProviderProfile, ProviderRegistry};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use session_tape::{SessionProviderBinding, SessionTape};
 use tokio::sync::{broadcast, oneshot};
@@ -16,6 +17,40 @@ use crate::{
     model::{ProviderLaunchChoice, ServerModel, build_model_from_selection},
     sse::{SsePayload, TurnStatus},
 };
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CurrentToolOutput {
+    pub invocation_id: String,
+    pub tool_name: String,
+    pub arguments: serde_json::Value,
+    pub output: String,
+    pub completed: bool,
+    pub result_content: Option<String>,
+    pub result_details: Option<serde_json::Value>,
+    pub failed: Option<bool>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CurrentTurnBlock {
+    Thinking { content: String },
+    Tool { tool: CurrentToolOutput },
+    Text { content: String },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CurrentTurnSnapshot {
+    pub started_at_ms: u64,
+    pub user_message: String,
+    pub status: TurnStatus,
+    pub blocks: Vec<CurrentTurnBlock>,
+}
+
+#[derive(Default)]
+pub struct SessionSnapshots {
+    pub history: Vec<TurnLifecycle>,
+    pub current_turn: Option<CurrentTurnSnapshot>,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProviderInfoSnapshot {
@@ -68,14 +103,6 @@ impl RuntimeWorkerHandle {
         self.tx
             .send(RuntimeCommand::SubmitTurn { prompt })
             .map_err(|_| RuntimeWorkerError::unavailable())
-    }
-
-    pub async fn get_history(&self) -> Result<Vec<TurnLifecycle>, RuntimeWorkerError> {
-        let (reply_tx, reply_rx) = oneshot::channel();
-        self.tx
-            .send(RuntimeCommand::GetHistory { reply: reply_tx })
-            .map_err(|_| RuntimeWorkerError::unavailable())?;
-        reply_rx.await.map_err(|_| RuntimeWorkerError::unavailable())
     }
 
     pub async fn get_session_info(&self) -> Result<ContextStats, RuntimeWorkerError> {
@@ -151,6 +178,8 @@ pub struct RuntimeOwnerState {
     pub broadcast_tx: broadcast::Sender<SsePayload>,
     pub provider_registry_snapshot: Arc<RwLock<ProviderRegistry>>,
     pub provider_info_snapshot: Arc<RwLock<ProviderInfoSnapshot>>,
+    pub history_snapshot: Arc<RwLock<Vec<TurnLifecycle>>>,
+    pub current_turn_snapshot: Arc<RwLock<Option<CurrentTurnSnapshot>>>,
 }
 
 #[derive(Clone)]
@@ -182,9 +211,6 @@ enum RuntimeCommand {
     SubmitTurn {
         prompt: String,
     },
-    GetHistory {
-        reply: oneshot::Sender<Vec<TurnLifecycle>>,
-    },
     GetSessionInfo {
         reply: oneshot::Sender<ContextStats>,
     },
@@ -214,6 +240,7 @@ enum RuntimeCommand {
 
 pub fn spawn_runtime_worker(mut owner: RuntimeOwnerState) -> RuntimeWorkerHandle {
     refresh_provider_snapshots(&owner.registry, owner.runtime.model_identity(), &owner);
+    refresh_session_snapshots(owner.runtime.tape(), &owner);
 
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
@@ -221,9 +248,6 @@ pub fn spawn_runtime_worker(mut owner: RuntimeOwnerState) -> RuntimeWorkerHandle
             match command {
                 RuntimeCommand::SubmitTurn { prompt } => {
                     run_turn(&mut owner, prompt);
-                }
-                RuntimeCommand::GetHistory { reply } => {
-                    let _ = reply.send(rebuild_turn_history_from_tape(owner.runtime.tape()));
                 }
                 RuntimeCommand::GetSessionInfo { reply } => {
                     let _ = reply.send(owner.runtime.context_stats());
@@ -353,6 +377,14 @@ fn switch_provider(
 
 fn run_turn(owner: &mut RuntimeOwnerState, prompt: String) {
     let broadcast_tx = owner.broadcast_tx.clone();
+    let current_turn_snapshot = owner.current_turn_snapshot.clone();
+    let history_snapshot = owner.history_snapshot.clone();
+    *current_turn_snapshot.write().expect("lock poisoned") = Some(CurrentTurnSnapshot {
+        started_at_ms: now_timestamp_ms(),
+        user_message: prompt.clone(),
+        status: TurnStatus::Waiting,
+        blocks: Vec::new(),
+    });
     let _ = broadcast_tx.send(SsePayload::Status(TurnStatus::Waiting));
 
     let mut current_status = CurrentStatus::Waiting;
@@ -368,9 +400,11 @@ fn run_turn(owner: &mut RuntimeOwnerState, prompt: String) {
 
         if new_status != current_status {
             current_status = new_status.clone();
+            update_current_turn_status(&current_turn_snapshot, new_status.to_turn_status());
             let _ = btx.send(SsePayload::Status(new_status.to_turn_status()));
         }
 
+        update_current_turn_from_stream(&current_turn_snapshot, &event);
         let _ = btx.send(SsePayload::Stream(event));
     });
 
@@ -379,21 +413,19 @@ fn run_turn(owner: &mut RuntimeOwnerState, prompt: String) {
             let events = owner.runtime.collect_events(owner.subscriber).unwrap_or_default();
             let turn = broadcast_runtime_events(events, &broadcast_tx);
             if let Some(turn) = turn {
+                history_snapshot.write().expect("lock poisoned").push(turn.clone());
                 let _ = broadcast_tx.send(SsePayload::TurnCompleted(turn));
             }
-            if let Err(e) = owner.runtime.tape().save_jsonl(&owner.session_path) {
-                eprintln!("session save failed: {e}");
-            }
+            *current_turn_snapshot.write().expect("lock poisoned") = None;
         }
         Err(error) => {
             let events = owner.runtime.collect_events(owner.subscriber).unwrap_or_default();
             let turn = broadcast_runtime_events(events, &broadcast_tx);
             if let Some(turn) = turn {
+                history_snapshot.write().expect("lock poisoned").push(turn.clone());
                 let _ = broadcast_tx.send(SsePayload::TurnCompleted(turn));
             }
-            if let Err(e) = owner.runtime.tape().save_jsonl(&owner.session_path) {
-                eprintln!("session save failed: {e}");
-            }
+            *current_turn_snapshot.write().expect("lock poisoned") = None;
             let _ = broadcast_tx.send(SsePayload::Error(error.to_string()));
         }
     }
@@ -407,6 +439,136 @@ fn refresh_provider_snapshots(
     *owner.provider_registry_snapshot.write().expect("lock poisoned") = registry.clone();
     *owner.provider_info_snapshot.write().expect("lock poisoned") =
         ProviderInfoSnapshot::from_identity(identity);
+}
+
+fn refresh_session_snapshots(tape: &SessionTape, owner: &RuntimeOwnerState) {
+    let snapshots = rebuild_session_snapshots_from_tape(tape);
+    *owner.history_snapshot.write().expect("lock poisoned") = snapshots.history;
+    *owner.current_turn_snapshot.write().expect("lock poisoned") = snapshots.current_turn;
+}
+
+fn now_timestamp_ms() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_millis().min(u64::MAX as u128) as u64,
+        Err(_) => 0,
+    }
+}
+
+fn object_value(value: &serde_json::Value) -> serde_json::Value {
+    if value.is_object() { value.clone() } else { json!({}) }
+}
+
+fn update_current_turn_status(
+    snapshot: &Arc<RwLock<Option<CurrentTurnSnapshot>>>,
+    status: TurnStatus,
+) {
+    if let Some(current) = snapshot.write().expect("lock poisoned").as_mut() {
+        current.status = status;
+    }
+}
+
+fn update_current_turn_from_stream(
+    snapshot: &Arc<RwLock<Option<CurrentTurnSnapshot>>>,
+    event: &StreamEvent,
+) {
+    let mut current = snapshot.write().expect("lock poisoned");
+    let Some(snapshot) = current.as_mut() else {
+        return;
+    };
+
+    match event {
+        StreamEvent::ThinkingDelta { text } => {
+            match snapshot.blocks.last_mut() {
+                Some(CurrentTurnBlock::Thinking { content }) => content.push_str(text),
+                _ => snapshot.blocks.push(CurrentTurnBlock::Thinking { content: text.clone() }),
+            }
+        }
+        StreamEvent::TextDelta { text } => {
+            match snapshot.blocks.last_mut() {
+                Some(CurrentTurnBlock::Text { content }) => content.push_str(text),
+                _ => snapshot.blocks.push(CurrentTurnBlock::Text { content: text.clone() }),
+            }
+        }
+        StreamEvent::ToolCallStarted { invocation_id, tool_name, arguments } => {
+            if let Some(CurrentTurnBlock::Tool { tool }) = snapshot.blocks.iter_mut().rev().find(
+                |block| {
+                    matches!(
+                        block,
+                        CurrentTurnBlock::Tool { tool }
+                            if tool.invocation_id == *invocation_id
+                    )
+                },
+            ) {
+                tool.tool_name = tool_name.clone();
+                tool.arguments = object_value(arguments);
+            } else {
+                snapshot.blocks.push(CurrentTurnBlock::Tool {
+                    tool: CurrentToolOutput {
+                        invocation_id: invocation_id.clone(),
+                        tool_name: tool_name.clone(),
+                        arguments: object_value(arguments),
+                        output: String::new(),
+                        completed: false,
+                        result_content: None,
+                        result_details: None,
+                        failed: None,
+                    },
+                });
+            }
+        }
+        StreamEvent::ToolOutputDelta { invocation_id, text, .. } => {
+            if let Some(CurrentTurnBlock::Tool { tool }) = snapshot.blocks.iter_mut().rev().find(
+                |block| {
+                    matches!(
+                        block,
+                        CurrentTurnBlock::Tool { tool }
+                            if tool.invocation_id == *invocation_id
+                    )
+                },
+            ) {
+                tool.output.push_str(text);
+            } else {
+                snapshot.blocks.push(CurrentTurnBlock::Tool {
+                    tool: CurrentToolOutput {
+                        invocation_id: invocation_id.clone(),
+                        tool_name: String::new(),
+                        arguments: json!({}),
+                        output: text.clone(),
+                        completed: false,
+                        result_content: None,
+                        result_details: None,
+                        failed: None,
+                    },
+                });
+            }
+        }
+        StreamEvent::ToolCallCompleted {
+            invocation_id,
+            tool_name,
+            content,
+            details,
+            failed,
+        } => {
+            if let Some(CurrentTurnBlock::Tool { tool }) = snapshot.blocks.iter_mut().rev().find(
+                |block| {
+                    matches!(
+                        block,
+                        CurrentTurnBlock::Tool { tool }
+                            if tool.invocation_id == *invocation_id
+                    )
+                },
+            ) {
+                tool.tool_name = tool_name.clone();
+                tool.completed = true;
+                tool.result_content = Some(content.clone());
+                tool.result_details = details.clone();
+                tool.failed = Some(*failed);
+            }
+        }
+        StreamEvent::Log { .. } | StreamEvent::Done => {}
+    }
 }
 
 fn prepare_runtime_sync(
@@ -476,6 +638,7 @@ struct TurnHistoryBuilder {
     tool_invocations: Vec<agent_runtime::ToolInvocationLifecycle>,
     failure_message: Option<String>,
     pending_tool_calls: BTreeMap<String, agent_core::ToolCall>,
+    completed: bool,
 }
 
 impl TurnHistoryBuilder {
@@ -544,10 +707,16 @@ impl TurnHistoryBuilder {
                 .to_string();
             self.failure_message = Some(message.clone());
             self.blocks.push(agent_runtime::TurnBlock::Failure { message });
+            self.completed = true;
+            return;
+        }
+
+        if entry.kind == "event" && entry.event_name() == Some("turn_completed") {
+            self.completed = true;
         }
     }
 
-    fn finish(self) -> Option<TurnLifecycle> {
+    fn into_turn_lifecycle(self) -> Option<TurnLifecycle> {
         let user_message = self.user_message?;
         Some(TurnLifecycle {
             turn_id: self.turn_id,
@@ -562,17 +731,90 @@ impl TurnHistoryBuilder {
             failure_message: self.failure_message,
         })
     }
+
+    fn is_completed(&self) -> bool {
+        self.completed
+    }
+
+    fn into_current_turn(self) -> Option<CurrentTurnSnapshot> {
+        let lifecycle = self.into_turn_lifecycle()?;
+        let status = if lifecycle
+            .blocks
+            .iter()
+            .any(|block| matches!(block, agent_runtime::TurnBlock::ToolInvocation { .. }))
+        {
+            TurnStatus::Working
+        } else if lifecycle
+            .blocks
+            .iter()
+            .any(|block| matches!(block, agent_runtime::TurnBlock::Assistant { .. }))
+        {
+            TurnStatus::Generating
+        } else if lifecycle
+            .blocks
+            .iter()
+            .any(|block| matches!(block, agent_runtime::TurnBlock::Thinking { .. }))
+        {
+            TurnStatus::Thinking
+        } else {
+            TurnStatus::Waiting
+        };
+
+        Some(CurrentTurnSnapshot {
+            started_at_ms: lifecycle.started_at_ms,
+            user_message: lifecycle.user_message,
+            status,
+            blocks: lifecycle
+                .blocks
+                .into_iter()
+                .filter_map(|block| match block {
+                    agent_runtime::TurnBlock::Thinking { content } => {
+                        Some(CurrentTurnBlock::Thinking { content })
+                    }
+                    agent_runtime::TurnBlock::Assistant { content } => {
+                        Some(CurrentTurnBlock::Text { content })
+                    }
+                    agent_runtime::TurnBlock::ToolInvocation { invocation } => {
+                        let (result_content, result_details, failed) = match invocation.outcome {
+                            agent_runtime::ToolInvocationOutcome::Succeeded { result } => (
+                                Some(result.content),
+                                result.details,
+                                Some(false),
+                            ),
+                            agent_runtime::ToolInvocationOutcome::Failed { message } => {
+                                (Some(message), None, Some(true))
+                            }
+                        };
+
+                        Some(CurrentTurnBlock::Tool {
+                            tool: CurrentToolOutput {
+                                invocation_id: invocation.call.invocation_id,
+                                tool_name: invocation.call.tool_name,
+                                arguments: object_value(&invocation.call.arguments),
+                                output: String::new(),
+                                completed: true,
+                                result_content,
+                                result_details,
+                                failed,
+                            },
+                        })
+                    }
+                    agent_runtime::TurnBlock::Failure { .. } => None,
+                })
+                .collect(),
+        })
+    }
 }
 
-pub(crate) fn rebuild_turn_history_from_tape(tape: &SessionTape) -> Vec<TurnLifecycle> {
+pub(crate) fn rebuild_session_snapshots_from_tape(tape: &SessionTape) -> SessionSnapshots {
     let mut builders = Vec::<TurnHistoryBuilder>::new();
     let mut by_run_id = BTreeMap::<String, usize>::new();
-    let mut legacy_turns = Vec::<TurnLifecycle>::new();
+    let mut history = Vec::<TurnLifecycle>::new();
 
     for entry in tape.entries() {
         if entry.kind == "event" && entry.event_name() == Some("turn_record") {
             if let Some(turn) = parse_legacy_turn_record(entry) {
-                legacy_turns.push(turn);
+                history.push(turn);
             }
             continue;
         }
@@ -599,10 +841,24 @@ pub(crate) fn rebuild_turn_history_from_tape(tape: &SessionTape) -> Vec<TurnLife
         builders[index].push_entry(entry);
     }
 
-    legacy_turns.extend(builders.into_iter().filter_map(TurnHistoryBuilder::finish));
-    legacy_turns
-        .sort_by_key(|turn| (turn.started_at_ms, turn.finished_at_ms, turn.turn_id.clone()));
-    legacy_turns
+    let mut current_candidates = Vec::<CurrentTurnSnapshot>::new();
+    for builder in builders {
+        if builder.is_completed() {
+            if let Some(turn) = builder.into_turn_lifecycle() {
+                history.push(turn);
+            }
+        } else if let Some(current) = builder.into_current_turn() {
+            current_candidates.push(current);
+        }
+    }
+
+    history.sort_by_key(|turn| (turn.started_at_ms, turn.finished_at_ms, turn.turn_id.clone()));
+    let current_turn = current_candidates.into_iter().max_by_key(|turn| turn.started_at_ms);
+    SessionSnapshots { history, current_turn }
+}
+
+pub(crate) fn rebuild_turn_history_from_tape(tape: &SessionTape) -> Vec<TurnLifecycle> {
+    rebuild_session_snapshots_from_tape(tape).history
 }
 
 fn parse_legacy_turn_record(entry: &session_tape::TapeEntry) -> Option<TurnLifecycle> {
@@ -731,6 +987,8 @@ mod tests {
                 model: "bootstrap".to_string(),
                 connected: true,
             })),
+            history_snapshot: Arc::new(RwLock::new(Vec::new())),
+            current_turn_snapshot: Arc::new(RwLock::new(None)),
         }
     }
 
