@@ -67,9 +67,8 @@ where
         let mut buffers = TurnBuffers::new(user_entry_id);
         self.publish_event(RuntimeEvent::UserMessage { content: user_message.content.clone() });
 
-        for step_index in 0..self.max_turn_steps {
-            let request = self
-                .build_completion_request(step_index + 1, step_index + 1 == self.max_turn_steps);
+        loop {
+            let request = self.build_completion_request();
             let completion = match self.model.complete_streaming(request, &mut on_delta) {
                 Ok(completion) => completion,
                 Err(error) => {
@@ -133,20 +132,6 @@ where
                 });
             }
         }
-
-        let runtime_error = RuntimeError::turn_step_limit(self.max_turn_steps);
-        self.record_turn_failure(
-            &turn_id,
-            started_at_ms,
-            &mut buffers.source_entry_ids,
-            &user_message.content,
-            &buffers.blocks,
-            buffers.last_assistant_text,
-            buffers.aggregated_thinking.as_str(),
-            &buffers.tool_invocations,
-            runtime_error.clone(),
-        );
-        Err(runtime_error)
     }
 
     fn process_completion_segments(

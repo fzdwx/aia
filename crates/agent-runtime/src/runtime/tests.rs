@@ -133,6 +133,42 @@ impl DuplicateToolLoopModel {
     }
 }
 
+struct ManyToolRoundsModel {
+    seen_requests: RefCell<Vec<CompletionRequest>>,
+}
+
+impl ManyToolRoundsModel {
+    fn new() -> Self {
+        Self { seen_requests: RefCell::new(Vec::new()) }
+    }
+}
+
+impl LanguageModel for ManyToolRoundsModel {
+    type Error = CoreError;
+
+    fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+        let step = self.seen_requests.borrow().len();
+        self.seen_requests.borrow_mut().push(request.clone());
+
+        let saw_latest_tool_result = request
+            .conversation
+            .iter()
+            .rev()
+            .find_map(|item| item.as_tool_result().map(|result| result.content.clone()));
+
+        if step >= 9 && saw_latest_tool_result.is_some() {
+            return Ok(Completion::text("超过旧默认步数后仍成功收尾"));
+        }
+
+        Ok(Completion {
+            segments: vec![CompletionSegment::ToolUse(
+                ToolCall::new("search").with_argument("query", format!("step-{step}")),
+            )],
+            checkpoint: None,
+        })
+    }
+}
+
 impl LanguageModel for DuplicateToolLoopModel {
     type Error = CoreError;
 
@@ -193,6 +229,25 @@ impl LanguageModel for RecordingModel {
     fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
         self.seen_requests.borrow_mut().push(request);
         Ok(Completion::text("记录完成"))
+    }
+}
+
+struct BudgetRecordingModel {
+    seen_requests: RefCell<Vec<CompletionRequest>>,
+}
+
+impl BudgetRecordingModel {
+    fn new() -> Self {
+        Self { seen_requests: RefCell::new(Vec::new()) }
+    }
+}
+
+impl LanguageModel for BudgetRecordingModel {
+    type Error = CoreError;
+
+    fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+        self.seen_requests.borrow_mut().push(request);
+        Ok(Completion::text("预算检查完成"))
     }
 }
 
@@ -388,55 +443,87 @@ fn 同一轮内相同工具与参数的重复调用会被跳过() {
 }
 
 #[test]
-fn 可通过_builder_覆盖默认步数上限() {
-    let identity = ModelIdentity::new("local", "duplicate", ModelDisposition::Balanced);
-    let model = DuplicateToolLoopModel::new();
-    let mut runtime = AgentRuntime::new(model, StubTools, identity).with_max_turn_steps(2);
+fn 运行时不会在旧默认步数后强行中断整轮() {
+    let identity = ModelIdentity::new("local", "many-steps", ModelDisposition::Balanced);
+    let model = ManyToolRoundsModel::new();
+    let mut runtime =
+        AgentRuntime::new(model, StubTools, identity).with_max_tool_calls_per_turn(16);
 
-    let error = runtime.handle_turn("今天星期几").expect_err("两步上限应触发失败");
+    let output = runtime.handle_turn("继续执行").expect("不应被旧默认步数上限打断");
 
-    assert!(error.to_string().contains("轮次超过最大内部步骤数：2"));
+    assert_eq!(output.assistant_text, "超过旧默认步数后仍成功收尾");
+    let requests = runtime.model.seen_requests.borrow();
+    assert!(requests.len() >= 10);
 }
 
 #[test]
-fn 最后一步会切换为文本收尾模式() {
+fn 运行时不会自动追加最大步数收尾消息() {
     let identity = ModelIdentity::new("local", "continue", ModelDisposition::Balanced);
     let model = ContinueAfterToolModel::new();
-    let mut runtime = AgentRuntime::new(model, StubTools, identity).with_max_turn_steps(2);
+    let mut runtime = AgentRuntime::new(model, StubTools, identity);
 
-    let output = runtime.handle_turn("开始").expect("最后一步应收尾成功");
+    let output = runtime.handle_turn("开始").expect("应收尾成功");
 
     assert_eq!(output.assistant_text, "已根据工具结果继续回答");
     let requests = runtime.model.seen_requests.borrow();
     assert_eq!(requests.len(), 2);
-    assert!(requests[1].available_tools.is_empty());
-    assert!(
-        requests[1].instructions.as_deref().is_some_and(|text| text.contains("不要再调用任何工具"))
-    );
+    assert!(requests.iter().all(|request| request.conversation.iter().all(|item| {
+        item.as_message().is_none_or(|message| !message.content.contains("最大步骤数"))
+    })));
 }
 
 #[test]
-fn 非最后一步会向模型注入剩余预算提示() {
+fn 未设置自定义指令时不会自动注入预算提示词() {
     let identity = ModelIdentity::new("local", "continue", ModelDisposition::Balanced);
     let model = ContinueAfterToolModel::new();
-    let mut runtime = AgentRuntime::new(model, StubTools, identity).with_max_turn_steps(3);
+    let mut runtime = AgentRuntime::new(model, StubTools, identity);
 
     let _ = runtime.handle_turn("开始").expect("应成功完成");
 
     let requests = runtime.model.seen_requests.borrow();
-    assert!(
-        requests[0].instructions.as_deref().is_some_and(|text| text.contains("当前为第 1/3 步")
-            && text.contains("剩余可继续调用工具的步数为 2"))
-    );
+    assert_eq!(requests[0].instructions, None);
+}
+
+#[test]
+fn 运行时会把模型输出上限映射为本次请求预算() {
+    let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced)
+        .with_limit(Some(agent_core::ModelLimit { context: Some(200_000), output: Some(131_072) }));
+    let model = BudgetRecordingModel::new();
+    let mut runtime = AgentRuntime::new(model, StubTools, identity);
+
+    let _ = runtime.handle_turn("开始").expect("应成功完成");
+
+    let requests = runtime.model.seen_requests.borrow();
+    assert_eq!(requests[0].max_output_tokens, Some(131_072));
+}
+
+#[test]
+fn 上下文接近窗口上限时会自动收紧输出预算() {
+    let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced)
+        .with_limit(Some(agent_core::ModelLimit { context: Some(128), output: Some(64) }));
+    let model = BudgetRecordingModel::new();
+    let mut tape = SessionTape::new();
+    tape.append(Message::new(
+        Role::User,
+        "这是一段故意很长的历史消息，用来触发运行时的上下文余量预检提示。",
+    ));
+    tape.append(Message::new(
+        Role::Assistant,
+        "这是一段同样很长的历史回答，用来让近似上下文估算明显超过窗口预算。",
+    ));
+    let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape);
+
+    let _ = runtime.handle_turn("继续").expect("应成功完成");
+
+    let requests = runtime.model.seen_requests.borrow();
+    assert_eq!(requests[0].max_output_tokens, Some(1));
 }
 
 #[test]
 fn 可通过_builder_限制单轮最大工具调用次数() {
     let identity = ModelIdentity::new("local", "duplicate", ModelDisposition::Balanced);
     let model = DuplicateToolLoopModel::new();
-    let mut runtime = AgentRuntime::new(model, StubTools, identity)
-        .with_max_turn_steps(10)
-        .with_max_tool_calls_per_turn(1);
+    let mut runtime = AgentRuntime::new(model, StubTools, identity).with_max_tool_calls_per_turn(1);
 
     let error = runtime.handle_turn("今天星期几").expect_err("超过工具调用上限应失败");
 

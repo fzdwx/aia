@@ -35,10 +35,6 @@ impl RuntimeError {
         }
     }
 
-    pub fn turn_step_limit(max_steps: usize) -> Self {
-        Self { message: format!("轮次超过最大内部步骤数：{max_steps}") }
-    }
-
     pub fn tool_call_limit(max_tool_calls: usize) -> Self {
         Self { message: format!("轮次超过最大工具调用次数：{max_tool_calls}") }
     }

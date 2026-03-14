@@ -17,7 +17,6 @@ use crate::{RuntimeEvent, RuntimeSubscriberId};
 
 pub use self::error::RuntimeError;
 
-const DEFAULT_MAX_TURN_STEPS: usize = 8;
 const DEFAULT_MAX_TOOL_CALLS_PER_TURN: usize = 50;
 
 pub struct AgentRuntime<M, T> {
@@ -28,7 +27,6 @@ pub struct AgentRuntime<M, T> {
     instructions: Option<String>,
     disabled_tools: BTreeSet<String>,
     workspace_root: Option<std::path::PathBuf>,
-    max_turn_steps: usize,
     max_tool_calls_per_turn: usize,
     events: Vec<RuntimeEvent>,
     subscribers: BTreeMap<RuntimeSubscriberId, usize>,
@@ -40,9 +38,6 @@ where
     M: LanguageModel,
     T: ToolExecutor,
 {
-    const FINAL_TEXT_ONLY_INSTRUCTION: &'static str = "你已经到达本轮内部步骤预算的最后一步。不要再调用任何工具，直接基于当前上下文给出最好的最终回答。";
-    const STEP_BUDGET_INSTRUCTION_PREFIX: &'static str = "当前是本轮内部循环的预算提示：";
-
     pub fn new(model: M, tools: T, model_identity: ModelIdentity) -> Self {
         Self::with_tape(model, tools, model_identity, SessionTape::new())
     }
@@ -56,7 +51,6 @@ where
             instructions: None,
             disabled_tools: BTreeSet::new(),
             workspace_root: None,
-            max_turn_steps: DEFAULT_MAX_TURN_STEPS,
             max_tool_calls_per_turn: DEFAULT_MAX_TOOL_CALLS_PER_TURN,
             events: Vec::new(),
             subscribers: BTreeMap::new(),
@@ -71,11 +65,6 @@ where
 
     pub fn with_workspace_root(mut self, workspace_root: impl Into<std::path::PathBuf>) -> Self {
         self.workspace_root = Some(workspace_root.into());
-        self
-    }
-
-    pub fn with_max_turn_steps(mut self, max_turn_steps: usize) -> Self {
-        self.max_turn_steps = max_turn_steps.max(1);
         self
     }
 

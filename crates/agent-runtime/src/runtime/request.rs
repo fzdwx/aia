@@ -1,17 +1,16 @@
-use agent_core::{CompletionRequest, ConversationItem, LanguageModel, ToolExecutor};
+use agent_core::{
+    CompletionRequest, ConversationItem, LanguageModel, ToolDefinition, ToolExecutor,
+};
 
 use super::{AgentRuntime, helpers::anchor_state_message};
 
+const CONTEXT_HEADROOM_SAFETY_TOKENS: u32 = 32;
 impl<M, T> AgentRuntime<M, T>
 where
     M: LanguageModel,
     T: ToolExecutor,
 {
-    pub(super) fn build_completion_request(
-        &self,
-        current_step: usize,
-        force_text_only: bool,
-    ) -> CompletionRequest {
+    pub(super) fn build_completion_request(&self) -> CompletionRequest {
         let view = self.tape.default_view();
         let checkpoint = self.tape.latest_model_checkpoint();
         let should_resume_from_checkpoint = self
@@ -40,27 +39,13 @@ where
             conversation
         };
 
-        let remaining_steps = self.max_turn_steps.saturating_sub(current_step);
-        let budget_hint = if force_text_only {
-            format!(
-                "{} 当前为第 {current_step}/{max} 步，剩余可调用工具步数为 0。{}",
-                Self::STEP_BUDGET_INSTRUCTION_PREFIX,
-                Self::FINAL_TEXT_ONLY_INSTRUCTION,
-                max = self.max_turn_steps,
-            )
-        } else {
-            format!(
-                "{} 当前为第 {current_step}/{max} 步，剩余可继续调用工具的步数为 {remaining_steps}。如果信息已经足够，请尽早直接给出最终回答。",
-                Self::STEP_BUDGET_INSTRUCTION_PREFIX,
-                max = self.max_turn_steps,
-            )
-        };
-        let instructions = match self.instructions.as_ref() {
-            Some(instructions) if !instructions.is_empty() => {
-                Some(format!("{instructions}\n\n{budget_hint}"))
-            }
-            _ => Some(budget_hint),
-        };
+        let available_tools = self.visible_tools();
+        let instructions = self.instructions.as_ref().filter(|text| !text.is_empty()).cloned();
+        let max_output_tokens = self.effective_max_output_tokens(
+            instructions.as_deref(),
+            &conversation,
+            &available_tools,
+        );
 
         CompletionRequest {
             model: self.model_identity.clone(),
@@ -71,7 +56,67 @@ where
             } else {
                 None
             },
-            available_tools: if force_text_only { vec![] } else { self.visible_tools() },
+            max_output_tokens,
+            available_tools,
         }
+    }
+
+    fn effective_max_output_tokens(
+        &self,
+        instructions: Option<&str>,
+        conversation: &[ConversationItem],
+        available_tools: &[ToolDefinition],
+    ) -> Option<u32> {
+        let configured_output = self.model_identity.limit.as_ref().and_then(|limit| limit.output);
+        let context_limit = self.model_identity.limit.as_ref().and_then(|limit| limit.context);
+
+        let Some(context_limit) = context_limit else {
+            return configured_output;
+        };
+
+        let estimated_usage =
+            Self::approximate_request_units(instructions, conversation, available_tools);
+        let usable_headroom = context_limit
+            .saturating_sub(estimated_usage.saturating_add(CONTEXT_HEADROOM_SAFETY_TOKENS));
+        let effective =
+            configured_output.map_or(usable_headroom, |output| output.min(usable_headroom));
+
+        Some(effective.max(1))
+    }
+
+    fn approximate_request_units(
+        instructions: Option<&str>,
+        conversation: &[ConversationItem],
+        available_tools: &[ToolDefinition],
+    ) -> u32 {
+        let instruction_units = instructions.map_or(0, Self::approximate_text_units);
+        let conversation_units = conversation
+            .iter()
+            .map(|item| match item {
+                ConversationItem::Message(message) => {
+                    Self::approximate_text_units(&message.content)
+                }
+                ConversationItem::ToolCall(call) => Self::approximate_text_units(&call.tool_name)
+                    .saturating_add(Self::approximate_text_units(&call.arguments.to_string())),
+                ConversationItem::ToolResult(result) => {
+                    Self::approximate_text_units(&result.tool_name)
+                        .saturating_add(Self::approximate_text_units(&result.content))
+                }
+            })
+            .sum::<u32>();
+        let tool_units = available_tools
+            .iter()
+            .map(|tool| {
+                Self::approximate_text_units(&tool.name)
+                    .saturating_add(Self::approximate_text_units(&tool.description))
+                    .saturating_add(Self::approximate_text_units(&tool.parameters.to_string()))
+            })
+            .sum::<u32>();
+
+        instruction_units.saturating_add(conversation_units).saturating_add(tool_units)
+    }
+
+    fn approximate_text_units(text: &str) -> u32 {
+        text.chars().count().min(u32::MAX as usize) as u32
     }
 }
