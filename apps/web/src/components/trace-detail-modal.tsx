@@ -177,20 +177,8 @@ function roleBadgeVariant(role: string) {
 }
 
 function messageToneClasses(kind: string) {
-  switch (kind) {
-    case "system":
-      return "border-sky-500/30 bg-sky-500/5"
-    case "user":
-      return "border-amber-500/30 bg-amber-500/5"
-    case "assistant":
-      return "border-emerald-500/25 bg-emerald-500/5"
-    case "tool":
-    case "function_call":
-    case "function_call_output":
-      return "border-violet-500/25 bg-violet-500/5"
-    default:
-      return "border-border/50 bg-muted/15"
-  }
+  void kind
+  return "border-border/45 bg-background/80"
 }
 
 function extractContent(item: JsonRecord): string {
@@ -239,16 +227,16 @@ function DetailList({
   items: Array<{ label: string; value: ReactNode }>
 }) {
   return (
-    <dl className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
+    <dl className="divide-y divide-border/30 rounded-lg border border-border/40 bg-background/70">
       {items.map((item) => (
         <div
           key={item.label}
-          className="space-y-1 rounded-lg bg-muted/25 px-3 py-2"
+          className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 px-3 py-2"
         >
-          <dt className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+          <dt className="shrink-0 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
             {item.label}
           </dt>
-          <dd className="text-[13px] break-all text-foreground">
+          <dd className="min-w-0 text-[13px] text-foreground sm:text-right [&>div]:justify-end">
             {item.value}
           </dd>
         </div>
@@ -263,13 +251,16 @@ function CompactDetailList({
   items: Array<{ label: string; value: ReactNode }>
 }) {
   return (
-    <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+    <dl className="space-y-1.5">
       {items.map((item) => (
-        <div key={item.label} className="flex items-baseline gap-2">
+        <div
+          key={item.label}
+          className="flex flex-wrap items-baseline gap-x-2 gap-y-1"
+        >
           <dt className="shrink-0 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
             {item.label}
           </dt>
-          <dd className="min-w-0 text-[13px] break-all text-foreground">
+          <dd className="min-w-0 text-[12px] break-all text-foreground/90">
             {item.value}
           </dd>
         </div>
@@ -430,16 +421,14 @@ function SystemPromptSection({ prompts }: { prompts: PromptEntry[] }) {
   return (
     <SectionPanel
       title="System prompts"
-      description="Instruction text and system-role messages that shape the request before user content and tool activity."
+      description="Instruction text and system-role messages"
       className="border-sky-500/20 bg-sky-500/[0.04]"
       meta={
         <>
           <Badge variant="outline" className="text-[11px]">
-            {prompts.length} prompt{prompts.length === 1 ? "" : "s"}
+            {prompts.length}
           </Badge>
-          <Badge variant="secondary" className="text-[11px]">
-            {totalCharacters} chars
-          </Badge>
+          <span className="text-[11px] text-muted-foreground">{totalCharacters} chars</span>
         </>
       }
     >
@@ -561,16 +550,19 @@ function MessageListSection({
   description: string
 }) {
   const counts = summarizeMessageKinds(items)
+  const countSummary = counts
+    .map(([kind, count]) => `${kind} ${count}`)
+    .join(" · ")
 
   return (
     <SectionPanel
       title={title}
       description={description}
-      meta={counts.map(([kind, count]) => (
-        <Badge key={kind} variant="outline" className="text-[11px]">
-          {kind}: {count}
-        </Badge>
-      ))}
+      meta={
+        <span className="text-[11px] text-muted-foreground">
+          {countSummary || "No items"}
+        </span>
+      }
     >
       {items.length === 0 ? (
         <p className="text-[13px] text-muted-foreground">No items.</p>
@@ -598,6 +590,15 @@ function MessageListSection({
             const toolCalls = asArray(record.tool_calls)
             const callId =
               asString(record.call_id) ?? asString(record.tool_call_id)
+            const detailText = [
+              toolName ? `tool ${toolName}` : null,
+              callId ? `call ${callId}` : null,
+              toolCalls.length > 0
+                ? `${toolCalls.length} tool call${toolCalls.length === 1 ? "" : "s"}`
+                : null,
+            ]
+              .filter((part): part is string => Boolean(part))
+              .join(" · ")
 
             return (
               <Collapsible
@@ -608,46 +609,32 @@ function MessageListSection({
                   messageToneClasses(kind)
                 )}
               >
-                <CollapsibleTrigger className="flex w-full flex-wrap items-start justify-between gap-3 px-4 py-3 text-left">
-                  <div className="min-w-0 space-y-2">
+                <CollapsibleTrigger className="flex w-full flex-wrap items-start justify-between gap-3 px-3 py-2.5 text-left">
+                  <div className="min-w-0 space-y-1.5">
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline" className="text-[10px]">
+                      <span className="text-[10px] text-muted-foreground">
                         #{index + 1}
-                      </Badge>
+                      </span>
                       <Badge
                         variant={roleBadgeVariant(kind)}
-                        className="text-[11px]"
+                        className="h-4 px-1.5 text-[10px]"
                       >
                         {kind}
                       </Badge>
-                      {toolName ? (
-                        <Badge variant="secondary" className="text-[11px]">
-                          {toolName}
-                        </Badge>
-                      ) : null}
-                      {callId ? (
-                        <Badge variant="outline" className="text-[10px]">
-                          call {callId}
-                        </Badge>
-                      ) : null}
-                      {toolCalls.length > 0 ? (
-                        <Badge variant="outline" className="text-[10px]">
-                          {toolCalls.length} tool call
-                          {toolCalls.length === 1 ? "" : "s"}
-                        </Badge>
-                      ) : null}
                     </div>
                     <p className="text-[12px] leading-5 text-foreground/85">
                       {preview
                         ? truncate(preview, 220)
                         : "No preview available."}
                     </p>
+                    {detailText ? (
+                      <p className="text-[11px] text-muted-foreground/80">
+                        {detailText}
+                      </p>
+                    ) : null}
                   </div>
-                  <span className="text-[11px] text-muted-foreground">
-                    expand
-                  </span>
                 </CollapsibleTrigger>
-                <CollapsibleContent className="border-t border-border/30 px-4 py-3">
+                <CollapsibleContent className="border-t border-border/30 px-3 py-3">
                   <pre className="max-h-[360px] overflow-auto rounded-lg bg-muted/35 p-3 text-[12px] leading-6 whitespace-pre-wrap text-foreground">
                     {formatJson(record)}
                   </pre>
@@ -659,26 +646,6 @@ function MessageListSection({
       )}
     </SectionPanel>
   )
-}
-
-function summarizeResponsesInput(input: unknown[]) {
-  let messages = 0
-  let functionCalls = 0
-  let functionOutputs = 0
-
-  for (const item of input) {
-    const record = asRecord(item)
-    const kind = asString(record?.type)
-    if (kind === "function_call") {
-      functionCalls += 1
-    } else if (kind === "function_call_output") {
-      functionOutputs += 1
-    } else {
-      messages += 1
-    }
-  }
-
-  return { messages, functionCalls, functionOutputs }
 }
 
 function summarizeChatMessages(messages: unknown[]) {
@@ -711,9 +678,6 @@ function ResponsesRequestContextCard({
   summary: JsonRecord | null
 }) {
   const input = asArray(request?.input)
-  const tools = asArray(request?.tools)
-  const reasoning = asRecord(request?.reasoning)
-  const inputSummary = summarizeResponsesInput(input)
   const toolNames = asArray(summary?.tool_names).filter(
     (value): value is string => typeof value === "string"
   )
@@ -743,63 +707,44 @@ function ResponsesRequestContextCard({
   })
 
   return (
-    <Card size="sm">
-      <CardHeader>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="space-y-1">
-            <CardTitle className="text-sm">Provider request</CardTitle>
-            <CardDescription>
-              OpenAI Responses payload reorganized around instructions, input
-              items, and tool schemas.
-            </CardDescription>
+    <Collapsible defaultOpen={false} className="rounded-xl border border-border/50 bg-muted/[0.04]">
+      <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left">
+        <div className="space-y-0.5">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-foreground">Provider request</h3>
+            <Badge variant="outline" className="text-[10px]">responses</Badge>
           </div>
-          <Badge variant="outline" className="text-[11px]">
-            responses
-          </Badge>
+          <p className="text-[12px] text-muted-foreground">
+            {input.length} items · {prompts.length} system
+          </p>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <DetailList
-          items={[
-            {
-              label: "Model",
-              value: formatPrimitive(asString(request?.model)),
-            },
-            {
-              label: "Output limit",
-              value: formatPrimitive(asNumber(request?.max_output_tokens)),
-            },
-            { label: "Input items", value: formatPrimitive(input.length) },
-            {
-              label: "Message items",
-              value: formatPrimitive(inputSummary.messages),
-            },
-            {
-              label: "Function calls",
-              value: formatPrimitive(inputSummary.functionCalls),
-            },
-            {
-              label: "Function outputs",
-              value: formatPrimitive(inputSummary.functionOutputs),
-            },
-            { label: "Tool schemas", value: formatPrimitive(tools.length) },
-            {
-              label: "Reasoning effort",
-              value: formatPrimitive(asString(reasoning?.effort)),
-            },
-            {
-              label: "Streaming",
-              value: formatPrimitive(asBoolean(request?.stream)),
-            },
-            ...(toolNames.length > 0
-              ? [{ label: "Enabled tools", value: renderToolBadges(toolNames) }]
-              : []),
-          ].slice(0, 6)}
-        />
+      </CollapsibleTrigger>
+      <CollapsibleContent className="border-t border-border/40 px-4 py-4">
+        <div className="space-y-4">
+          <DetailList
+            items={[
+              {
+                label: "Model",
+                value: formatPrimitive(asString(request?.model)),
+              },
+              {
+                label: "Streaming",
+                value: formatPrimitive(asBoolean(request?.stream)),
+              },
+              {
+                label: "Output limit",
+                value: formatPrimitive(asNumber(request?.max_output_tokens)),
+              },
+              ...(toolNames.length > 0
+                ? [{ label: "Enabled tools", value: renderToolBadges(toolNames) }]
+                : []),
+            ]}
+          />
 
-        <SystemPromptSection prompts={prompts} />
-      </CardContent>
-    </Card>
+          <SystemPromptSection prompts={prompts} />
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 
@@ -875,15 +820,19 @@ function ChatCompletionsRequestContextCard({
               label: "Output limit",
               value: formatPrimitive(asNumber(request?.max_completion_tokens)),
             },
-            {
-              label: "Streaming",
-              value: formatPrimitive(asBoolean(request?.stream)),
-            },
             { label: "Messages", value: formatPrimitive(messages.length) },
+            { label: "System", value: formatPrimitive(messageSummary.system) },
+            { label: "User", value: formatPrimitive(messageSummary.user) },
+            {
+              label: "Assistant",
+              value: formatPrimitive(messageSummary.assistant),
+            },
+            { label: "Tool", value: formatPrimitive(messageSummary.tool) },
             {
               label: "Assistant tool call blocks",
               value: formatPrimitive(messageSummary.assistantToolCalls),
             },
+            { label: "Tool schemas", value: formatPrimitive(toolNames.length) },
             ...(toolNames.length > 0
               ? [{ label: "Enabled tools", value: renderToolBadges(toolNames) }]
               : []),
@@ -995,41 +944,27 @@ function ProviderRequestToolsPanel({
   return null
 }
 
-function SummaryBadge({
-  label,
-  value,
-  variant = "outline",
-}: {
-  label: string
-  value: string
-  variant?:
-    | "default"
-    | "secondary"
-    | "destructive"
-    | "outline"
-    | "ghost"
-    | "link"
-}) {
+function SummaryBadge({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-full border border-border/50 bg-background/80 px-3 py-1.5 text-[11px]">
-      <span className="mr-1 text-muted-foreground">{label}</span>
-      <Badge variant={variant} className="h-auto px-1.5 py-0 text-[10px]">
-        {value}
-      </Badge>
+    <div className="inline-flex items-center gap-1.5 rounded-md bg-muted/30 px-2.5 py-1 text-[11px]">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-medium text-foreground">{value}</span>
     </div>
   )
 }
 
 function TraceSummaryBar({ trace }: { trace: TraceRecord }) {
   const failed = trace.status === "failed"
+  const status = failed ? "failed" : "succeeded"
+  const time = formatDateTime(trace.started_at_ms)
 
   return (
     <Card
       size="sm"
       className={cn(
         failed
-          ? "border-destructive/30 bg-destructive/[0.03]"
-          : "border-emerald-500/20 bg-emerald-500/[0.04]"
+          ? "border-destructive/25 bg-background/80"
+          : "border-border/40 bg-background/80"
       )}
     >
       <CardHeader className="gap-3">
@@ -1037,52 +972,60 @@ function TraceSummaryBar({ trace }: { trace: TraceRecord }) {
           <CardTitle className="text-sm">Trace overview</CardTitle>
         </div>
         <CardDescription>
-          One-line summary of transport state, execution result, and stable
-          request identifiers.
+          Key execution metrics first. Technical identifiers are moved under
+          Details.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex flex-wrap gap-2">
-          <SummaryBadge
-            label="HTTP"
-            value={trace.status_code != null ? String(trace.status_code) : "—"}
-            variant={
-              trace.status_code != null && trace.status_code >= 400
-                ? "destructive"
-                : "outline"
-            }
-          />
+      <CardContent className="space-y-3">
+        <div className="flex flex-wrap gap-1.5">
           <SummaryBadge label="Model" value={trace.model} />
-          <SummaryBadge label="Step" value={String(trace.step_index)} />
+          <SummaryBadge label="Status" value={status} />
           <SummaryBadge
             label="Duration"
             value={trace.duration_ms != null ? `${trace.duration_ms} ms` : "—"}
           />
-          <SummaryBadge label="Stop" value={trace.stop_reason ?? "—"} />
           <SummaryBadge
             label="Tokens"
             value={String(trace.total_tokens ?? 0)}
           />
-          <SummaryBadge label="Stream" value={trace.streaming ? "yes" : "no"} />
+          <SummaryBadge label="Time" value={time} />
         </div>
-        <CompactDetailList
-          items={[
-            { label: "Trace ID", value: trace.id },
-            { label: "Turn ID", value: trace.turn_id },
-            { label: "Run ID", value: trace.run_id },
-            { label: "Provider", value: trace.provider },
-            { label: "Protocol", value: trace.protocol },
-            {
-              label: "Endpoint",
-              value: `${trace.base_url}${trace.endpoint_path}`,
-            },
-            {
-              label: "Request",
-              value: `${trace.request_kind} · step ${trace.step_index}`,
-            },
-            { label: "Started", value: formatDateTime(trace.started_at_ms) },
-          ]}
-        />
+
+        <div className="text-[11px] text-muted-foreground">
+          {trace.provider} · {trace.protocol} · {trace.request_kind} · step{" "}
+          {trace.step_index}
+        </div>
+
+        <Collapsible className="rounded-lg border border-border/35 bg-muted/10 px-3 py-2">
+          <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 text-left">
+            <span className="text-[12px] font-medium text-foreground">
+              Details
+            </span>
+            <span className="text-[11px] text-muted-foreground">
+              IDs & transport
+            </span>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="pt-2">
+            <CompactDetailList
+              items={[
+                { label: "Trace ID", value: trace.id },
+                { label: "Turn ID", value: trace.turn_id },
+                { label: "Run ID", value: trace.run_id },
+              ]}
+            />
+            <div className="mt-2 space-y-1 text-[11px] text-muted-foreground">
+              <p>
+                HTTP{" "}
+                {trace.status_code != null ? String(trace.status_code) : "—"}
+                {" · "}
+                stop {trace.stop_reason ?? "—"}
+                {" · "}
+                stream {trace.streaming ? "yes" : "no"}
+              </p>
+              <p className="break-all">{`${trace.base_url}${trace.endpoint_path}`}</p>
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
       </CardContent>
     </Card>
   )
