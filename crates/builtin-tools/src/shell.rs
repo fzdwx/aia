@@ -260,6 +260,19 @@ mod tests {
         assert_eq!(details["stdout"], "out");
         assert_eq!(details["stderr"], "err");
         assert_eq!(details["exit_code"], 7);
-        assert_eq!(deltas.len(), 2);
+
+        let stdout = deltas
+            .iter()
+            .filter(|delta| matches!(delta.stream, ToolOutputStream::Stdout))
+            .map(|delta| delta.text.as_str())
+            .collect::<String>();
+        let stderr = deltas
+            .iter()
+            .filter(|delta| matches!(delta.stream, ToolOutputStream::Stderr))
+            .map(|delta| delta.text.as_str())
+            .collect::<String>();
+
+        assert_eq!(stdout, "out");
+        assert_eq!(stderr, "err");
     }
 }
