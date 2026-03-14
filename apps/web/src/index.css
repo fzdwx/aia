@@ -197,3 +197,85 @@ pre {
   background-clip: text;
   animation: shimmer 1.8s ease-in-out infinite;
 }
+
+/* --- Streamdown overrides --- */
+
+/* Table wrapper — strip heavy bg/border */
+[data-streamdown="table-wrapper"] {
+  position: relative;
+  background: transparent;
+  border: none;
+  padding: 0;
+  gap: 0;
+}
+
+/* Toolbar — hide download & fullscreen, keep only copy; overlay top-right on hover */
+[data-streamdown="table-wrapper"] > div:first-child {
+  position: absolute;
+  top: 0.375rem;
+  right: 0.375rem;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+[data-streamdown="table-wrapper"]:hover > div:first-child {
+  opacity: 1;
+}
+
+[data-streamdown="table-wrapper"] > div:first-child > :not(:first-child) {
+  display: none;
+}
+
+/* Scroll container inside wrapper (no data-streamdown attr) */
+[data-streamdown="table-wrapper"] > div:last-child {
+  border: 0.5px solid oklch(from var(--border) l c h / 50%);
+  border-radius: 6px;
+  background: transparent;
+}
+
+/* Table element — remove divide-y */
+[data-streamdown="table"] {
+  border-style: none;
+}
+
+[data-streamdown="table"] > * + * {
+  border-top-width: 0;
+}
+
+[data-streamdown="table-header"] {
+  background: transparent;
+}
+
+[data-streamdown="table-body"] {
+  border-style: none;
+}
+
+[data-streamdown="table-body"] > * + * {
+  border-top-width: 0;
+}
+
+[data-streamdown="table-row"] {
+  border-color: transparent;
+}
+
+[data-streamdown="table-header-cell"] {
+  white-space: normal;
+  padding: 0.75rem 0.5rem;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--foreground);
+  border-bottom: 1px solid oklch(from var(--border) l c h / 50%);
+}
+
+[data-streamdown="table-cell"] {
+  padding: 0.75rem 0.5rem;
+  font-size: 14px;
+  vertical-align: top;
+  border-bottom: 1px solid oklch(from var(--border) l c h / 30%);
+}
+
+[data-streamdown="code-block"] {
+  border-radius: 6px;
+  border: 0.5px solid oklch(from var(--border) l c h / 50%);
+}
