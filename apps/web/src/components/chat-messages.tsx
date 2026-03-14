@@ -85,7 +85,129 @@ function buildCategorySummary(
   }))
 }
 
-// --- Thinking display ---
+// --- Normalized tool row data ---
+
+type ToolRowItem = {
+  id: string
+  toolName: string
+  arguments: Record<string, unknown>
+  succeeded: boolean
+  outputContent: string
+  details?: Record<string, unknown>
+}
+
+function fromInvocation(inv: ToolInvocationLifecycle): ToolRowItem {
+  const { call, outcome } = inv
+  if (outcome.status === "succeeded") {
+    return {
+      id: call.invocation_id,
+      toolName: call.tool_name,
+      arguments: call.arguments,
+      succeeded: true,
+      outputContent: outcome.result.content,
+      details: outcome.result.details,
+    }
+  }
+  return {
+    id: call.invocation_id,
+    toolName: call.tool_name,
+    arguments: call.arguments,
+    succeeded: false,
+    outputContent: outcome.status === "failed" ? outcome.message : "",
+  }
+}
+
+function fromStreamingTool(tool: StreamingToolOutput): ToolRowItem {
+  return {
+    id: tool.invocationId,
+    toolName: tool.toolName,
+    arguments: tool.arguments,
+    succeeded: !tool.failed,
+    outputContent: tool.resultContent ?? tool.output,
+    details: tool.resultDetails,
+  }
+}
+
+// --- Shared tool group + row ---
+
+function ToolGroup({ items }: { items: ToolRowItem[] }) {
+  const [open, setOpen] = useState(false)
+  const allSucceeded = items.every((item) => item.succeeded)
+  const summary = buildCategorySummary(items)
+
+  return (
+    <div className="mb-3">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <span className="font-medium">Explored</span>
+        <span className="text-muted-foreground/70">
+          {summary
+            .map((s) => `${s.count} ${s.label}${s.count > 1 ? "s" : ""}`)
+            .join(", ")}
+        </span>
+        {allSucceeded && <Check className="size-3.5 text-emerald-500/70" />}
+      </button>
+      {open && (
+        <div className="mt-1 ml-5">
+          {items.map((item) => (
+            <ToolRow key={item.id} item={item} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ToolRow({ item }: { item: ToolRowItem }) {
+  const [showOutput, setShowOutput] = useState(false)
+  const stats = getToolStats(item.details)
+  const displayPath = getToolDisplayPath(item.details, item.arguments)
+
+  return (
+    <div>
+      <button
+        onClick={() => setShowOutput(!showOutput)}
+        className="flex w-full items-center gap-2 py-0.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <span className="shrink-0 font-medium text-muted-foreground/70">
+          {item.toolName}
+        </span>
+        <span className="truncate">{displayPath}</span>
+        {stats.added != null && (
+          <span className="shrink-0 text-emerald-500">+{stats.added}</span>
+        )}
+        {stats.removed != null && (
+          <span className="shrink-0 text-red-400">-{stats.removed}</span>
+        )}
+        {stats.lines != null && (
+          <span className="shrink-0 text-emerald-500">+{stats.lines}</span>
+        )}
+        {stats.matches != null && (
+          <span className="shrink-0 text-muted-foreground/50">
+            {stats.matches} matches
+          </span>
+        )}
+        {stats.linesRead != null && stats.totalLines != null && (
+          <span className="shrink-0 text-muted-foreground/50">
+            {stats.linesRead}/{stats.totalLines}
+          </span>
+        )}
+        {item.succeeded ? (
+          <Check className="size-3 shrink-0 text-foreground/30" />
+        ) : (
+          <XIcon className="size-3 shrink-0 text-destructive/70" />
+        )}
+      </button>
+      {showOutput && item.outputContent && (
+        <pre className="mt-0.5 mb-1 ml-5 max-h-[300px] overflow-auto rounded border border-border/40 bg-muted/40 p-2 font-mono text-[12px] leading-relaxed text-muted-foreground/80">
+          {item.outputContent}
+        </pre>
+      )}
+    </div>
+  )
+}
 
 function ThinkingBlock({
   content,
@@ -127,109 +249,6 @@ function ThinkingBlock({
 
 // --- Completed tool group: collapsible with categorized summary ---
 
-function ToolGroupView({
-  invocations,
-}: {
-  invocations: ToolInvocationLifecycle[]
-}) {
-  const [open, setOpen] = useState(false)
-  const allSucceeded = invocations.every(
-    (inv) => inv.outcome.status === "succeeded"
-  )
-  const summary = buildCategorySummary(
-    invocations.map((inv) => ({ toolName: inv.call.tool_name }))
-  )
-
-  return (
-    <div className="mb-3">
-      {/* Summary header */}
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <span className="font-medium">Explored</span>
-        <span className="text-muted-foreground/70">
-          {summary
-            .map((s) => `${s.count} ${s.label}${s.count > 1 ? "s" : ""}`)
-            .join(", ")}
-        </span>
-        {allSucceeded && <Check className="size-3.5 text-emerald-500/70" />}
-      </button>
-
-      {/* Expanded tool details */}
-      {open && (
-        <div className="mt-1 ml-5">
-          {invocations.map((inv) => (
-            <ToolInvocationRow key={inv.call.invocation_id} invocation={inv} />
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function ToolInvocationRow({
-  invocation,
-}: {
-  invocation: ToolInvocationLifecycle
-}) {
-  const [showOutput, setShowOutput] = useState(false)
-  const { call, outcome } = invocation
-  const succeeded = outcome.status === "succeeded"
-  const outputContent = succeeded
-    ? outcome.result.content
-    : outcome.status === "failed"
-      ? outcome.message
-      : ""
-
-  const details = succeeded ? outcome.result.details : undefined
-  const stats = getToolStats(details)
-  const displayPath = getToolDisplayPath(details, call.arguments)
-
-  return (
-    <div>
-      <button
-        onClick={() => setShowOutput(!showOutput)}
-        className="flex w-full items-center gap-2 py-0.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <span className="shrink-0 font-medium text-muted-foreground/70">
-          {call.tool_name}
-        </span>
-        <span className="truncate">{displayPath}</span>
-        {stats.added != null && (
-          <span className="shrink-0 text-emerald-500">+{stats.added}</span>
-        )}
-        {stats.removed != null && (
-          <span className="shrink-0 text-red-400">-{stats.removed}</span>
-        )}
-        {stats.lines != null && (
-          <span className="shrink-0 text-emerald-500">+{stats.lines}</span>
-        )}
-        {stats.matches != null && (
-          <span className="shrink-0 text-muted-foreground/50">
-            {stats.matches} matches
-          </span>
-        )}
-        {stats.linesRead != null && stats.totalLines != null && (
-          <span className="shrink-0 text-muted-foreground/50">
-            {stats.linesRead}/{stats.totalLines}
-          </span>
-        )}
-        {succeeded ? (
-          <Check className="size-3 shrink-0 text-foreground/30" />
-        ) : (
-          <XIcon className="size-3 shrink-0 text-destructive/70" />
-        )}
-      </button>
-      {showOutput && outputContent && (
-        <pre className="mt-0.5 mb-1 ml-5 max-h-[300px] overflow-auto rounded border border-border/40 bg-muted/40 p-2 font-mono text-[12px] leading-relaxed text-muted-foreground/80">
-          {outputContent}
-        </pre>
-      )}
-    </div>
-  )
-}
-
 // --- Streaming tool group ---
 
 function StreamingToolGroup({
@@ -239,39 +258,46 @@ function StreamingToolGroup({
 }) {
   if (toolOutputs.length === 0) return null
 
-  const summary = buildCategorySummary(toolOutputs)
+  const completed = toolOutputs.filter((t) => t.completed)
+  const active = toolOutputs.filter((t) => !t.completed)
+  const activeSummary = buildCategorySummary(active)
 
   return (
     <div className="mb-2">
-      <div className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
-        <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-amber-500/70" />
-        <Shimmer as="span" className="font-medium" duration={2}>
-          Exploring
-        </Shimmer>
-        <span className="text-muted-foreground/70">
-          {summary
-            .map((s) => `${s.count} ${s.label}${s.count > 1 ? "s" : ""}`)
-            .join(", ")}
-        </span>
-      </div>
-      {/* Show current active tool */}
-      {toolOutputs.length > 0 && (
-        <div className="mt-0.5 ml-5">
-          {toolOutputs.map((tool) => (
-            <div
-              key={tool.invocationId}
-              className="flex items-center gap-2 py-0.5 text-[13px] text-muted-foreground/60"
-            >
-              {tool.toolName && (
-                <span className="shrink-0 font-medium">{tool.toolName}</span>
-              )}
-              <span className="truncate">
-                {getToolDisplayPath(undefined, tool.arguments) ||
-                  tool.invocationId}
-              </span>
-            </div>
-          ))}
-        </div>
+      {completed.length > 0 && (
+        <ToolGroup items={completed.map(fromStreamingTool)} />
+      )}
+
+      {active.length > 0 && (
+        <>
+          <div className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
+            <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-amber-500/70" />
+            <Shimmer as="span" className="font-medium" duration={2}>
+              Exploring
+            </Shimmer>
+            <span className="text-muted-foreground/70">
+              {activeSummary
+                .map((s) => `${s.count} ${s.label}${s.count > 1 ? "s" : ""}`)
+                .join(", ")}
+            </span>
+          </div>
+          <div className="mt-0.5 ml-5">
+            {active.map((tool) => (
+              <div
+                key={tool.invocationId}
+                className="flex items-center gap-2 py-0.5 text-[13px] text-muted-foreground/60"
+              >
+                {tool.toolName && (
+                  <span className="shrink-0 font-medium">{tool.toolName}</span>
+                )}
+                <span className="truncate">
+                  {getToolDisplayPath(undefined, tool.arguments) ||
+                    tool.invocationId}
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   )
@@ -308,7 +334,12 @@ function BlockRenderer({ block }: { block: TurnBlock }) {
     case "thinking":
       return <ThinkingBlock content={block.content} />
     case "assistant":
-      return <MarkdownContent content={block.content} />
+      return (
+        <MarkdownContent
+          content={block.content}
+          className="text-sm leading-[1.75] text-pretty"
+        />
+      )
     case "failure":
       return (
         <div className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-[13px] text-destructive">
@@ -371,7 +402,12 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
         </div>
         {grouped.map((group, i) => {
           if (group.type === "tools") {
-            return <ToolGroupView key={i} invocations={group.invocations} />
+            return (
+              <ToolGroup
+                key={i}
+                items={group.invocations.map(fromInvocation)}
+              />
+            )
           }
           return <BlockRenderer key={i} block={group.block} />
         })}
@@ -447,7 +483,14 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
           if (group.type === "tools") {
             return <StreamingToolGroup key={i} toolOutputs={group.tools} />
           }
-          return <MarkdownContent key={i} content={group.content} streaming />
+          return (
+            <MarkdownContent
+              key={i}
+              content={group.content}
+              streaming
+              className="text-sm leading-[1.75] text-pretty"
+            />
+          )
         })}
       </div>
     </div>

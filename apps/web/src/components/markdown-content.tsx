@@ -1,36 +1,70 @@
-import { memo } from "react"
+import { createElement, memo, type ComponentPropsWithoutRef } from "react"
+import { Check, Copy } from "lucide-react"
 import { Streamdown } from "streamdown"
+import type { IconMap } from "streamdown"
 import { cjk } from "@streamdown/cjk"
+import { createCodePlugin } from "@streamdown/code"
 
 import { cn } from "@/lib/utils"
 
-const markdownClassName = cn(
-  "text-[14px] leading-[1.75] text-foreground/85",
-  "[&>*:last-child]:mb-0",
-  "[&_blockquote]:mb-3 [&_dl]:mb-3 [&_ol]:mb-2 [&_p]:mb-2.5 [&_pre]:mb-3 [&_table]:mb-3 [&_ul]:mb-2",
-  "[&_strong]:font-semibold",
-  "[&_em]:italic",
-  "[&_a]:underline [&_a]:underline-offset-4",
-  "[&_ol]:list-outside [&_ol]:list-decimal [&_ol]:pl-6",
-  "[&_ul]:list-outside [&_ul]:list-disc [&_ul]:pl-6",
-  "[&_li_ol]:mt-1 [&_li_ol]:mb-0 [&_li_ul]:mt-1 [&_li_ul]:mb-0 [&_ol>li]:mb-1.5 [&_ul>li]:mb-1",
-  "[&_h1]:mb-2 [&_h1]:text-[1em] [&_h1]:font-semibold",
-  "[&_h2]:mb-2 [&_h2]:text-[1em] [&_h2]:font-semibold",
-  "[&_h3]:mb-2 [&_h3]:text-[1em] [&_h3]:font-semibold",
-  "[&_h4]:mb-2 [&_h4]:text-[1em] [&_h4]:font-semibold",
-  "[&_h5]:mb-2 [&_h5]:text-[1em] [&_h5]:font-semibold",
-  "[&_h6]:mb-2 [&_h6]:text-[1em] [&_h6]:font-semibold",
-  "[&_blockquote]:border-l-2 [&_blockquote]:border-border/40 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground",
-  "[&_hr]:my-4 [&_hr]:border-border/40",
-  // Table — layout basics (Streamdown overrides handled via data-streamdown selectors in index.css)
-  "[&_table]:w-full [&_table]:border-collapse",
-  // Code block — typography & overflow (border/radius handled via data-streamdown selector in index.css)
-  "[&_pre]:overflow-x-auto [&_pre]:px-3 [&_pre]:py-2",
-  "[&_pre]:font-mono [&_pre]:text-[13px] [&_pre]:leading-[1.6] [&_pre]:break-words [&_pre]:whitespace-pre-wrap",
-  "[&_pre_span]:whitespace-break-spaces",
-  // Inline code
-  "[&_:not(pre)>code]:rounded-[4px] [&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:px-1.5 [&_:not(pre)>code]:py-0.5 [&_:not(pre)>code]:font-mono [&_:not(pre)>code]:text-[0.85em]"
-)
+const code = createCodePlugin({
+  themes: ["github-light", "github-dark"],
+})
+
+const markdownIcons = {
+  CheckIcon: Check,
+  CopyIcon: Copy,
+} satisfies Partial<IconMap>
+
+type MarkdownTag =
+  | "a"
+  | "blockquote"
+  | "code"
+  | "em"
+  | "h1"
+  | "h2"
+  | "h3"
+  | "h4"
+  | "h5"
+  | "h6"
+  | "hr"
+  | "p"
+  | "strong"
+
+type MarkdownComponentProps<T extends MarkdownTag> =
+  ComponentPropsWithoutRef<T> & {
+    node?: unknown
+  }
+
+function withClasses<T extends MarkdownTag>(tag: T, classes: string) {
+  return ({ className, ...props }: MarkdownComponentProps<T>) =>
+    createElement(tag, {
+      ...props,
+      className: cn(classes, className),
+    })
+}
+
+const markdownComponents = {
+  p: withClasses("p", "mb-2.5"),
+  strong: withClasses("strong", "font-semibold"),
+  em: withClasses("em", "italic"),
+  a: withClasses("a", "underline underline-offset-4"),
+  h1: withClasses("h1", "mb-2 text-[1em] font-semibold"),
+  h2: withClasses("h2", "mb-2 text-[1em] font-semibold"),
+  h3: withClasses("h3", "mb-2 text-[1em] font-semibold"),
+  h4: withClasses("h4", "mb-2 text-[1em] font-semibold"),
+  h5: withClasses("h5", "mb-2 text-[1em] font-semibold"),
+  h6: withClasses("h6", "mb-2 text-[1em] font-semibold"),
+  blockquote: withClasses(
+    "blockquote",
+    "mb-3 border-l-2 border-border/40 pl-4 text-muted-foreground"
+  ),
+  hr: withClasses("hr", "my-4 border-border/40"),
+  inlineCode: withClasses(
+    "code",
+    "rounded-[4px] border border-border/40 bg-muted/70 px-1.5 py-0.5 font-mono text-[0.85em] text-foreground"
+  ),
+} as const
 
 export const MarkdownContent = memo(
   ({
@@ -42,9 +76,11 @@ export const MarkdownContent = memo(
     className?: string
     streaming?: boolean
   }) => (
-    <div className={cn(markdownClassName, className)}>
+    <div className={cn("markdown-content", className)}>
       <Streamdown
-        plugins={{ cjk }}
+        components={markdownComponents}
+        icons={markdownIcons}
+        plugins={{ cjk, code }}
         remend={streaming ? undefined : { bold: false, boldItalic: false }}
       >
         {content}
