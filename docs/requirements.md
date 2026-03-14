@@ -42,13 +42,13 @@
 - 工具调用与工具结果已进入类型化会话磁带，并能投影到后续默认上下文
 - 工具调用与工具结果现已通过稳定调用标识关联，便于后续 replay 与压缩
 - 默认上下文里的工具结果投影也保留调用标识，避免同名工具结果混淆
-- 轮次块已落盘到 `.aia/session.jsonl`，可用于后续 resume / replay
+- 历史轮次当前由磁带 entries 按 `meta.run_id` 重建，不再把轮次块直接落盘到 `.aia/session.jsonl`
 - `session-tape` 已补齐命名锚点、查询切片、命名磁带存储抽象与 fork / merge 语义
 - `session-tape` TapeEntry 已改为扁平 `{id, kind, payload, meta, date}` 模型，对齐 republic 数据模型
 - 锚点已简化为 `{entry_id, name, state: Value}`，不再硬编码固定字段
 - 运行时不再将 TurnRecord 写入磁带，遵循 "derivatives never replace original facts" 原则
 - 旧格式 JSONL 可兼容载入并自动转换为新扁平格式
-- 兼容门面仍保持 `.aia/session.jsonl` 的旧格式读写，避免现有本地会话文件被隐式迁移
+- `.aia/session.jsonl` 当前统一以扁平 `TapeEntry` JSONL 形式落盘；旧格式仅在载入时兼容转换，不再继续按旧格式写回
 - provider 本地资料当前落盘在 `.aia/providers.json`，并通过 `.gitignore` 避免误提交
 - provider 当前已具备协议级区分能力，可在同一地址 / 模型下区分 Responses 与 Chat Completions
 - `apps/web` 已建立 React + Vite 基础工程，并替换掉模板首页，开始承接主界面方向
@@ -70,11 +70,14 @@
 - 已建立 `apps/agent-server` axum HTTP+SSE 服务器，作为 Web 前端与 Rust 运行时的桥接层
 - `apps/agent-server` 启动时会从 `.aia/providers.json` 与 `.aia/session.jsonl` 恢复 provider 绑定，无匹配时回退 bootstrap
 - 已完成全局 SSE 事件流架构：`GET /api/events` 基于 `broadcast::channel`，`POST /api/turn` fire-and-forget（202）
+- `apps/agent-server` 当前已把 `AgentRuntime` 从全局 Mutex 中拆出，由后台 runtime worker 串行驱动 turn / history / info / handoff / provider 变更，避免大工具调用拖住整个 server
+- `apps/agent-server` 当前通过 provider 快照对外暴露 `/api/providers` 与 `/api/providers/list`，长时间 turn 不再阻塞这类轻量读取接口
 - `apps/agent-server` 会在 turn 完成后把会话磁带落盘回 `.aia/session.jsonl`
 - 已完成 Rust 侧核心类型的 Serialize/Deserialize 支持，u128 时间戳已改为 u64
 - 已完成前端全局 store 与全局 EventSource 连接，支持流式状态累积、turn 完成回收与 provider 当前状态刷新
 - 已完成流式轮次状态指示（waiting / thinking / working / generating）与 shimmer 文字动画
 - 已完成流式 tool_output_delta 实时渲染，工具调用不再等 turn_completed 才显示
+- 已完成 Web 端用户消息提交时的乐观显示，不再依赖 `waiting` SSE 或 `turn_completed` 才进入消息列表
 - 已完成 Vite 开发代理（`/api` → `:3434`）与 justfile 开发命令
 - 已移除 `apps/agent-cli` 包，工作区当前以 `apps/agent-server` + `apps/web` 作为唯一应用层入口
 - Web 端已接入 provider 创建、更新、删除、切换与当前 provider / provider 列表刷新

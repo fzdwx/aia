@@ -3,7 +3,7 @@
 ## 当前阶段
 
 - 阶段：Web 界面 ↔ 运行时桥接
-- 当前步骤：在 Web + server 主路径稳定的基础上，继续收口 provider 状态一致性与统一工具契约；内建编码工具已收口为 `shell/read/write/edit/glob/grep`，`shell` 已改为内嵌 `brush`，provider create / update / delete / switch 已通过事务式提交与持久化校验保证 registry / runtime / tape 一致
+- 当前步骤：在 Web + server 主路径稳定的基础上，继续收口“可作为其他客户端驱动接口”的 server 形态；`apps/agent-server` 已把 `AgentRuntime` 从全局锁中拆出，改为后台 runtime worker + provider 快照读模型，Web 端用户消息也已改为发送即显示
 
 ## 已完成
 
@@ -48,17 +48,20 @@
 - 完成 provider 变更的事务式提交：候选 registry 校验、registry 落盘、session tape 落盘全部成功后才提交到内存 runtime / tape
 - 完成 provider 持久化失败路径回归测试，保证落盘失败不会留下 registry / runtime / tape 分叉状态
 - 完成 Web 端 Markdown 渲染入口收敛为共享前端组件，并参考 opencode 的消息排版规则统一标题、列表、引用、表格与代码块样式
+- 完成 `apps/agent-server` 运行时拥有关系重构：当前由后台 runtime worker 独占 `AgentRuntime`、provider registry 与 session 持久化，HTTP 路由通过消息传递访问运行时，不再用全局 Mutex 包住整个 turn
+- 完成 provider 当前信息 / provider 列表快照化读取，长时间 shell / model turn 不再阻塞轻量查询接口
+- 完成 Web 端用户消息的乐观渲染，提交后立即显示到消息列表，而不是等流式完成再落入 completed turn
 
 ## 正在进行
 
 - 继续推进统一工具规范向外部协议映射与 MCP 接入
-- 收口 `apps/agent-server` 与 `apps/web` 双壳结构后的文档与边界一致性
+- 收口 runtime worker 留在 `apps/agent-server`、哪些能力适合上移到 `agent-runtime` 的边界
 - 观察内嵌 `brush` 作为 shell 运行时的实际稳定性、命令兼容性与中断语义
 
 ## 下一步
 
 1. 推进 MCP 风格工具协议接入
-2. 继续把共享 driver 往客户端无关边界推进
+2. 把真正传输无关的 runtime 驱动辅助从 `apps/agent-server` 继续抽到共享层
 3. 在工具协议边界进一步收稳后，继续补强 shell 中断 / 长任务处理与更细粒度的工具运行时能力
 4. 桌面壳接入
 
@@ -68,4 +71,4 @@
 
 ## 阻塞
 
-- 当前无硬阻塞；已知非阻断事项主要是前端生产包体积提示偏大，以及 `shell` 的中断能力仍可继续增强
+- 当前无硬阻塞；已知非阻断事项主要是前端生产包体积提示偏大，以及 `shell` 的中断能力与长任务取消语义仍可继续增强
