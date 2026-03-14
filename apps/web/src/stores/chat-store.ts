@@ -100,16 +100,25 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       case "status": {
         const status = event.data.status as TurnStatus
         if (status === "waiting") {
-          const prompt = get()._pendingPrompt ?? ""
-          set({
-            _pendingPrompt: null,
-            chatState: "active",
-            streamingTurn: {
-              userMessage: prompt,
-              status: "waiting",
-              blocks: [],
-            },
-          })
+          const prev = get().streamingTurn
+          if (prev) {
+            set({
+              _pendingPrompt: null,
+              chatState: "active",
+              streamingTurn: { ...prev, status: "waiting" },
+            })
+          } else {
+            const prompt = get()._pendingPrompt ?? ""
+            set({
+              _pendingPrompt: null,
+              chatState: "active",
+              streamingTurn: {
+                userMessage: prompt,
+                status: "waiting",
+                blocks: [],
+              },
+            })
+          }
         } else {
           const prev = get().streamingTurn
           if (prev) {
@@ -287,11 +296,22 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
   submitTurn: (prompt: string) => {
     if (get().chatState === "active") return
-    set({ error: null, _pendingPrompt: prompt })
+    set({
+      error: null,
+      _pendingPrompt: prompt,
+      chatState: "active",
+      streamingTurn: {
+        userMessage: prompt,
+        status: "waiting",
+        blocks: [],
+      },
+    })
     apiSubmitTurn(prompt).catch((err: unknown) => {
       set({
         error: err instanceof Error ? err.message : "Network error",
         _pendingPrompt: null,
+        streamingTurn: null,
+        chatState: "idle",
       })
     })
   },
