@@ -1,18 +1,18 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 
-use agent_runtime::{AgentRuntime, RuntimeSubscriberId};
 use provider_registry::ProviderRegistry;
 use tokio::sync::broadcast;
 
-use crate::{model::ServerModel, sse::SsePayload};
+use crate::{
+    runtime_worker::{ProviderInfoSnapshot, RuntimeWorkerHandle},
+    sse::SsePayload,
+};
 
-pub type SharedState = Arc<Mutex<AppState>>;
+pub type SharedState = Arc<AppState>;
 
 pub struct AppState {
-    pub runtime: AgentRuntime<ServerModel, agent_core::ToolRegistry>,
-    pub subscriber: RuntimeSubscriberId,
-    pub session_path: std::path::PathBuf,
-    pub registry: ProviderRegistry,
-    pub store_path: std::path::PathBuf,
+    pub worker: RuntimeWorkerHandle,
     pub broadcast_tx: broadcast::Sender<SsePayload>,
+    pub provider_registry_snapshot: Arc<RwLock<ProviderRegistry>>,
+    pub provider_info_snapshot: Arc<RwLock<ProviderInfoSnapshot>>,
 }

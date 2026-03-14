@@ -1,9 +1,10 @@
 mod model;
 mod routes;
+mod runtime_worker;
 mod sse;
 mod state;
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 
 use axum::{
     Router,
@@ -17,6 +18,7 @@ use provider_registry::ProviderRegistry;
 use session_tape::{SessionTape, default_session_path};
 
 use model::{ProviderLaunchChoice, build_model_from_selection};
+use runtime_worker::{ProviderInfoSnapshot, RuntimeOwnerState, spawn_runtime_worker};
 use state::AppState;
 
 const SERVER_DEFAULT_MAX_TOOL_CALLS_PER_TURN: usize = 50;
@@ -74,15 +76,26 @@ async fn main() {
 
     let subscriber = runtime.subscribe();
     let (broadcast_tx, _) = tokio::sync::broadcast::channel(512);
-
-    let state = Arc::new(Mutex::new(AppState {
+    let provider_registry_snapshot = Arc::new(RwLock::new(registry.clone()));
+    let provider_info_snapshot =
+        Arc::new(RwLock::new(ProviderInfoSnapshot::from_identity(runtime.model_identity())));
+    let worker = spawn_runtime_worker(RuntimeOwnerState {
         runtime,
         subscriber,
         session_path,
         registry,
         store_path,
+        broadcast_tx: broadcast_tx.clone(),
+        provider_registry_snapshot: provider_registry_snapshot.clone(),
+        provider_info_snapshot: provider_info_snapshot.clone(),
+    });
+
+    let state = Arc::new(AppState {
+        worker,
         broadcast_tx,
-    }));
+        provider_registry_snapshot,
+        provider_info_snapshot,
+    });
 
     let app = Router::new()
         .route("/api/providers", get(routes::get_providers))
