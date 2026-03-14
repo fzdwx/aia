@@ -288,8 +288,8 @@ export function TracePanel() {
                   >
                     <CollapsibleTrigger className="w-full text-left">
                       <div className="rounded-xl px-4 py-4 transition-colors hover:bg-accent/30">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0 space-y-1.5">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="min-w-0 space-y-1.5 flex-1">
                             <div className="flex flex-wrap items-center gap-2">
                               <ChevronRight
                                 className={cn(
@@ -329,19 +329,24 @@ export function TracePanel() {
                               </p>
                             )}
                           </div>
-                          <div className="text-right text-[11px] text-muted-foreground">
-                            {formatDateTime(group.latestStartedAtMs)}
+                          <div className="shrink-0 text-right text-[11px] text-muted-foreground">
+                            <div className="font-medium text-foreground/90">{formatDateTime(group.latestStartedAtMs)}</div>
+                            <div className="mt-1 space-x-2">
+                              <span>{group.stepCount} calls</span>
+                              <span>·</span>
+                              <span>{group.totalDurationMs}ms</span>
+                            </div>
+                            <div className="mt-0.5">{group.totalTokens} tokens</div>
                           </div>
                         </div>
 
-                        <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                          <span>{group.stepCount} LLM calls</span>
-                          <span>{group.totalDurationMs} ms</span>
-                          <span>{group.totalTokens} tokens</span>
-                          <span className="truncate rounded-full bg-muted px-2 py-1 text-foreground/80">
-                            {group.pathSummary}
-                          </span>
-                        </div>
+                        {group.pathSummary ? (
+                          <div className="mt-2 text-[11px] text-muted-foreground/80">
+                            <span className="truncate rounded-full bg-muted/50 px-2 py-0.5">
+                              {group.pathSummary}
+                            </span>
+                          </div>
+                        ) : null}
 
                         {group.latestError ? (
                           <p className="mt-2 line-clamp-2 text-[11px] text-destructive">
