@@ -10,6 +10,7 @@ use axum::{
     Router,
     routing::{delete, get, post, put},
 };
+use llm_trace::{LlmTraceStore, SqliteLlmTraceStore};
 use tower_http::cors::CorsLayer;
 
 use agent_runtime::AgentRuntime;
@@ -22,6 +23,13 @@ use runtime_worker::{ProviderInfoSnapshot, RuntimeOwnerState, spawn_runtime_work
 use state::AppState;
 
 const SERVER_DEFAULT_MAX_TOOL_CALLS_PER_TURN: usize = 50;
+
+fn default_trace_store_path() -> std::path::PathBuf {
+    provider_registry::default_registry_path()
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join("llm-traces.sqlite3")
+}
 
 fn choose_provider(registry: &ProviderRegistry, tape: &SessionTape) -> ProviderLaunchChoice {
     use session_tape::SessionProviderBinding;
@@ -53,6 +61,7 @@ fn choose_provider(registry: &ProviderRegistry, tape: &SessionTape) -> ProviderL
 async fn main() {
     let store_path = provider_registry::default_registry_path();
     let session_path = default_session_path();
+    let trace_store_path = default_trace_store_path();
     let workspace_root = match std::env::current_dir() {
         Ok(path) => path,
         Err(error) => {
@@ -63,9 +72,12 @@ async fn main() {
 
     let registry = ProviderRegistry::load_or_default(&store_path).expect("provider 注册表加载失败");
     let tape = SessionTape::load_jsonl_or_default(&session_path).expect("session 磁带加载失败");
+    let trace_store: Arc<dyn LlmTraceStore> =
+        Arc::new(SqliteLlmTraceStore::new(&trace_store_path).expect("trace 数据库初始化失败"));
 
     let selection = choose_provider(&registry, &tape);
-    let (identity, model) = build_model_from_selection(selection).expect("模型构建失败");
+    let (identity, model) =
+        build_model_from_selection(selection, Some(trace_store.clone())).expect("模型构建失败");
 
     let tools = build_tool_registry();
 
@@ -85,6 +97,7 @@ async fn main() {
         session_path,
         registry,
         store_path,
+        trace_store: trace_store.clone(),
         broadcast_tx: broadcast_tx.clone(),
         provider_registry_snapshot: provider_registry_snapshot.clone(),
         provider_info_snapshot: provider_info_snapshot.clone(),
@@ -95,11 +108,15 @@ async fn main() {
         broadcast_tx,
         provider_registry_snapshot,
         provider_info_snapshot,
+        trace_store,
     });
 
     let app = Router::new()
         .route("/api/providers", get(routes::get_providers))
         .route("/api/providers/list", get(routes::list_providers))
+        .route("/api/traces", get(routes::list_traces))
+        .route("/api/traces/summary", get(routes::get_trace_summary))
+        .route("/api/traces/{id}", get(routes::get_trace))
         .route("/api/providers", post(routes::create_provider))
         .route("/api/providers/{name}", put(routes::update_provider))
         .route("/api/providers/{name}", delete(routes::delete_provider))

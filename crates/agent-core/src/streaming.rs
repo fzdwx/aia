@@ -67,10 +67,22 @@ impl ToolExecutionContext {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StreamEvent {
-    ThinkingDelta { text: String },
-    TextDelta { text: String },
-    ToolCallStarted { invocation_id: String, tool_name: String, arguments: serde_json::Value },
-    ToolOutputDelta { invocation_id: String, stream: ToolOutputStream, text: String },
+    ThinkingDelta {
+        text: String,
+    },
+    TextDelta {
+        text: String,
+    },
+    ToolCallStarted {
+        invocation_id: String,
+        tool_name: String,
+        arguments: serde_json::Value,
+    },
+    ToolOutputDelta {
+        invocation_id: String,
+        stream: ToolOutputStream,
+        text: String,
+    },
     ToolCallCompleted {
         invocation_id: String,
         tool_name: String,
@@ -78,6 +90,8 @@ pub enum StreamEvent {
         details: Option<serde_json::Value>,
         failed: bool,
     },
-    Log { text: String },
+    Log {
+        text: String,
+    },
     Done,
 }

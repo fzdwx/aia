@@ -3,6 +3,9 @@ import type {
   ProviderInfo,
   ProviderListItem,
   SseEvent,
+  TraceListItem,
+  TraceRecord,
+  TraceSummary,
   TurnLifecycle,
 } from "./types"
 
@@ -47,6 +50,24 @@ export async function listProviders(): Promise<ProviderListItem[]> {
   const res = await fetch("/api/providers/list")
   if (!res.ok) throw new Error(`GET /api/providers/list failed: ${res.status}`)
   return res.json() as Promise<ProviderListItem[]>
+}
+
+export async function fetchTraces(): Promise<TraceListItem[]> {
+  const res = await fetch("/api/traces")
+  if (!res.ok) throw new Error(`GET /api/traces failed: ${res.status}`)
+  return res.json() as Promise<TraceListItem[]>
+}
+
+export async function fetchTrace(id: string): Promise<TraceRecord> {
+  const res = await fetch(`/api/traces/${encodeURIComponent(id)}`)
+  if (!res.ok) throw new Error(`GET /api/traces/${id} failed: ${res.status}`)
+  return res.json() as Promise<TraceRecord>
+}
+
+export async function fetchTraceSummary(): Promise<TraceSummary> {
+  const res = await fetch("/api/traces/summary")
+  if (!res.ok) throw new Error(`GET /api/traces/summary failed: ${res.status}`)
+  return res.json() as Promise<TraceSummary>
 }
 
 export async function createProvider(body: {

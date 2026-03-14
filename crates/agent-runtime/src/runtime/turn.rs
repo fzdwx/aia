@@ -69,23 +69,28 @@ where
         let mut buffers = TurnBuffers::new(user_entry_id);
         self.publish_event(RuntimeEvent::UserMessage { content: user_message.content.clone() });
 
+        let mut llm_step_index = 0_u32;
+
         // Pre-turn context pressure check
         if let Some(ratio) = self.context_pressure_ratio() {
             if ratio >= self.context_pressure_threshold {
-                let _ = self.compress_context();
+                let _ = self.compress_context(Some(&turn_id), llm_step_index);
+                llm_step_index = llm_step_index.saturating_add(1);
             }
         }
 
         let mut already_compressed = false;
 
         loop {
-            let request = self.build_completion_request();
+            let request = self.build_completion_request(&turn_id, "completion", llm_step_index);
+            llm_step_index = llm_step_index.saturating_add(1);
             let completion = match self.model.complete_streaming(request, &mut on_delta) {
                 Ok(completion) => completion,
                 Err(error) => {
                     if !already_compressed && is_context_length_error(&error.to_string()) {
                         already_compressed = true;
-                        if self.compress_context().is_ok() {
+                        if self.compress_context(Some(&turn_id), llm_step_index).is_ok() {
+                            llm_step_index = llm_step_index.saturating_add(1);
                             continue;
                         }
                     }

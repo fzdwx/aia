@@ -284,6 +284,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         break
       }
       case "error": {
+        const latestTurn = get().turns[get().turns.length - 1]
+        if (
+          !get().streamingTurn &&
+          latestTurn?.failure_message === event.data.message
+        ) {
+          break
+        }
         set({
           error: event.data.message,
           streamingTurn: null,

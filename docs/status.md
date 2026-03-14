@@ -51,6 +51,10 @@
 - 完成 `apps/agent-server` 运行时拥有关系重构：当前由后台 runtime worker 独占 `AgentRuntime`、provider registry 与 session 持久化，HTTP 路由通过消息传递访问运行时，不再用全局 Mutex 包住整个 turn
 - 完成 provider 当前信息 / provider 列表快照化读取，长时间 shell / model turn 不再阻塞轻量查询接口
 - 完成 Web 端用户消息的乐观渲染，提交后立即显示到消息列表，而不是等流式完成再落入 completed turn
+- 完成 Web 端 trace 详情模态框的诊断视图重构：第一行先展示 trace overview，下方分离执行结果与请求上下文，右侧集中放消息时间线与 tool schema，原始 payload 退为补充折叠区
+- 完成 trace 记录对真实 HTTP 状态码的保留：不再在成功路径硬编码 `200`，OpenAI 适配器错误也会把上游状态码与响应体带回 trace
+- 完成 trace 列表按 agent loop 聚合展示：列表先显示同一轮的 LLM 调用次数、总耗时、总 token 与 stop reason 路径，展开后再查看每个 step
+- 完成 trace loop 列表项直接基于 trace payload 提炼并展示本轮用户消息预览，不再依赖 chat store 关联，进入 trace 页面即可先判断这一轮在处理什么，再决定是否展开 step 明细
 
 ## 正在进行
 

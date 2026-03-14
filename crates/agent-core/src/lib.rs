@@ -10,8 +10,8 @@ mod traits;
 mod tests;
 
 pub use completion::{
-    Completion, CompletionRequest, CompletionSegment, CompletionStopReason, ModelCheckpoint,
-    ModelDisposition, ModelIdentity, ModelLimit,
+    Completion, CompletionRequest, CompletionSegment, CompletionStopReason, CompletionUsage,
+    LlmTraceRequestContext, ModelCheckpoint, ModelDisposition, ModelIdentity, ModelLimit,
 };
 pub use conversation::{ConversationItem, Message, Role};
 pub use error::CoreError;

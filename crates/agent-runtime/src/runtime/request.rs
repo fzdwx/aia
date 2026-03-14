@@ -1,5 +1,6 @@
 use agent_core::{
-    CompletionRequest, ConversationItem, LanguageModel, ToolDefinition, ToolExecutor,
+    CompletionRequest, ConversationItem, LanguageModel, LlmTraceRequestContext, ToolDefinition,
+    ToolExecutor,
 };
 
 use crate::ContextStats;
@@ -12,7 +13,12 @@ where
     M: LanguageModel,
     T: ToolExecutor,
 {
-    pub(super) fn build_completion_request(&self) -> CompletionRequest {
+    pub(super) fn build_completion_request(
+        &self,
+        turn_id: &str,
+        request_kind: &str,
+        step_index: u32,
+    ) -> CompletionRequest {
         let view = self.tape.default_view();
         let checkpoint = self.tape.latest_model_checkpoint();
         let should_resume_from_checkpoint = self
@@ -60,6 +66,13 @@ where
             },
             max_output_tokens,
             available_tools,
+            trace_context: Some(LlmTraceRequestContext {
+                trace_id: format!("{turn_id}-{request_kind}-{step_index}"),
+                turn_id: turn_id.to_string(),
+                run_id: turn_id.to_string(),
+                request_kind: request_kind.to_string(),
+                step_index,
+            }),
         }
     }
 

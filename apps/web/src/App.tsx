@@ -14,9 +14,9 @@ function App() {
   }, [initialize, handleSseEvent])
 
   return (
-    <div className="flex h-screen bg-background text-foreground antialiased">
+    <div className="flex h-screen overflow-hidden bg-background text-foreground antialiased">
       <Sidebar />
-      <main className="flex min-w-0 flex-1 flex-col">
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <MainContent />
       </main>
     </div>

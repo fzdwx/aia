@@ -138,4 +138,66 @@ export type ProviderListItem = {
   active: boolean
 }
 
-export type AppView = "chat" | "settings"
+export type TraceStatus = "succeeded" | "failed"
+
+export type TraceListItem = {
+  id: string
+  turn_id: string
+  run_id: string
+  request_kind: string
+  step_index: number
+  provider: string
+  protocol: string
+  model: string
+  endpoint_path: string
+  status: TraceStatus
+  stop_reason: string | null
+  status_code: number | null
+  started_at_ms: number
+  duration_ms: number | null
+  total_tokens: number | null
+  user_message: string | null
+  error: string | null
+}
+
+export type TraceRecord = {
+  id: string
+  turn_id: string
+  run_id: string
+  request_kind: string
+  step_index: number
+  provider: string
+  protocol: string
+  model: string
+  base_url: string
+  endpoint_path: string
+  streaming: boolean
+  started_at_ms: number
+  finished_at_ms: number | null
+  duration_ms: number | null
+  status_code: number | null
+  status: TraceStatus
+  stop_reason: string | null
+  error: string | null
+  checkpoint_in: string | null
+  checkpoint_out: string | null
+  request_summary: Record<string, unknown> | null
+  provider_request: Record<string, unknown> | null
+  response_summary: Record<string, unknown> | null
+  response_body: string | null
+  input_tokens: number | null
+  output_tokens: number | null
+  total_tokens: number | null
+}
+
+export type TraceSummary = {
+  total_requests: number
+  failed_requests: number
+  avg_duration_ms: number | null
+  p95_duration_ms: number | null
+  total_input_tokens: number
+  total_output_tokens: number
+  total_tokens: number
+}
+
+export type AppView = "chat" | "settings" | "trace"

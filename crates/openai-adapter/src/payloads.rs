@@ -7,8 +7,20 @@ pub(crate) struct ResponsesResponse {
     #[serde(default)]
     pub status: Option<String>,
     #[serde(default)]
+    pub usage: Option<ResponsesUsage>,
+    #[serde(default)]
     pub incomplete_details: Option<ResponsesIncompleteDetails>,
     pub output: Vec<ResponsesOutput>,
+}
+
+#[derive(Clone, Deserialize)]
+pub(crate) struct ResponsesUsage {
+    #[serde(default)]
+    pub input_tokens: Option<u64>,
+    #[serde(default)]
+    pub output_tokens: Option<u64>,
+    #[serde(default)]
+    pub total_tokens: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -53,7 +65,19 @@ pub(crate) enum ReasoningSummaryPart {
 
 #[derive(Deserialize)]
 pub(crate) struct ChatCompletionsResponse {
+    #[serde(default)]
+    pub usage: Option<ChatCompletionsUsage>,
     pub choices: Vec<ChatCompletionChoice>,
+}
+
+#[derive(Clone, Deserialize)]
+pub(crate) struct ChatCompletionsUsage {
+    #[serde(default)]
+    pub prompt_tokens: Option<u64>,
+    #[serde(default)]
+    pub completion_tokens: Option<u64>,
+    #[serde(default)]
+    pub total_tokens: Option<u64>,
 }
 
 #[derive(Deserialize)]

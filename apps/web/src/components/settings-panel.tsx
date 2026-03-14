@@ -171,7 +171,7 @@ export function SettingsPanel() {
   }
 
   return (
-    <ScrollArea className="flex-1">
+    <ScrollArea className="min-h-0 flex-1">
       <div className="mx-auto max-w-[800px] px-6 py-8">
         {/* Header */}
         <div className="mb-8 flex items-center gap-3">

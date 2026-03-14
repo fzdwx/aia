@@ -70,4 +70,40 @@ describe("chat store submitTurn", () => {
       blocks: [{ type: "text", content: "partial answer" }],
     })
   })
+
+  test("ignores duplicate global error after failed turn is already appended", () => {
+    useChatStore.setState({
+      turns: [
+        {
+          turn_id: "turn-1",
+          started_at_ms: 1,
+          finished_at_ms: 2,
+          source_entry_ids: [1, 2],
+          user_message: "what time is it",
+          blocks: [
+            {
+              kind: "failure",
+              message: "模型执行失败：请求失败：502 Bad Gateway",
+            },
+          ],
+          assistant_message: null,
+          thinking: null,
+          tool_invocations: [],
+          failure_message: "模型执行失败：请求失败：502 Bad Gateway",
+        },
+      ],
+      streamingTurn: null,
+      chatState: "idle",
+      error: null,
+    })
+
+    const errorEvent: SseEvent = {
+      type: "error",
+      data: { message: "模型执行失败：请求失败：502 Bad Gateway" },
+    }
+
+    useChatStore.getState().handleSseEvent(errorEvent)
+
+    assert.equal(useChatStore.getState().error, null)
+  })
 })

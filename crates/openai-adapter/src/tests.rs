@@ -31,6 +31,7 @@ fn sample_request() -> CompletionRequest {
             "关键字",
             true,
         )],
+        trace_context: None,
     }
 }
 
@@ -167,6 +168,11 @@ fn 响应体可解析文本与工具调用() {
     let completion = model
         .parse_response_body(
             r#"{
+                    "usage": {
+                        "input_tokens": 21,
+                        "output_tokens": 9,
+                        "total_tokens": 30
+                    },
                     "id": "resp_123",
                     "output": [
                         {
@@ -189,6 +195,37 @@ fn 响应体可解析文本与工具调用() {
 
     assert_eq!(completion.plain_text(), "第一段\n第二段");
     assert_eq!(completion.stop_reason, CompletionStopReason::ToolUse);
+    assert_eq!(
+        completion.response_body.as_deref(),
+        Some(
+            r#"{
+                    "usage": {
+                        "input_tokens": 21,
+                        "output_tokens": 9,
+                        "total_tokens": 30
+                    },
+                    "id": "resp_123",
+                    "output": [
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [
+                                {"type": "output_text", "text": "第一段"},
+                                {"type": "output_text", "text": "第二段"}
+                            ]
+                        },
+                        {
+                            "type": "function_call",
+                            "name": "search_code",
+                            "arguments": "{\"query\":\"agent-runtime\"}"
+                        }
+                    ]
+                }"#
+        )
+    );
+    assert_eq!(completion.usage.as_ref().map(|usage| usage.input_tokens), Some(21));
+    assert_eq!(completion.usage.as_ref().map(|usage| usage.output_tokens), Some(9));
+    assert_eq!(completion.usage.as_ref().map(|usage| usage.total_tokens), Some(30));
     assert!(completion.segments.iter().any(|segment| matches!(
         segment,
         agent_core::CompletionSegment::ToolUse(ToolCall { tool_name, response_id, .. })
@@ -371,6 +408,40 @@ fn 流式调用可逐段收到文本与思考() {
             StreamEvent::Done,
         ]
     );
+}
+
+#[test]
+fn responses_流式失败消息包含请求路径() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("监听成功");
+    let address = listener.local_addr().expect("读取地址成功");
+
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("接受连接成功");
+        let mut buffer = [0_u8; 4096];
+        let _ = stream.read(&mut buffer).expect("读取请求成功");
+
+        let body = r#"{"error":"upstream failed"}"#;
+        let response = format!(
+            "HTTP/1.1 502 Bad Gateway\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+
+        stream.write_all(response.as_bytes()).expect("写回响应成功");
+    });
+
+    let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
+        format!("http://{address}"),
+        "test-key",
+        "gpt-4.1-mini",
+    ))
+    .expect("模型创建成功");
+
+    let error =
+        model.complete_streaming(sample_request(), &mut |_| {}).expect_err("流式调用应失败");
+
+    handle.join().expect("服务线程退出");
+    assert!(error.to_string().contains("/responses"));
 }
 
 #[test]
@@ -641,6 +712,11 @@ fn 聊天补全响应体可解析文本与工具调用() {
     let completion = model
         .parse_response_body(
             r#"{
+                    "usage": {
+                        "prompt_tokens": 18,
+                        "completion_tokens": 7,
+                        "total_tokens": 25
+                    },
                     "choices": [
                         {
                             "message": {
@@ -665,6 +741,39 @@ fn 聊天补全响应体可解析文本与工具调用() {
 
     assert_eq!(completion.plain_text(), "第一段\n第二段");
     assert_eq!(completion.stop_reason, CompletionStopReason::ToolUse);
+    assert_eq!(
+        completion.response_body.as_deref(),
+        Some(
+            r#"{
+                    "usage": {
+                        "prompt_tokens": 18,
+                        "completion_tokens": 7,
+                        "total_tokens": 25
+                    },
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "第一段\n第二段",
+                                "tool_calls": [
+                                    {
+                                        "id": "call_1",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "search_code",
+                                            "arguments": "{\"query\":\"agent-runtime\"}"
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }"#
+        )
+    );
+    assert_eq!(completion.usage.as_ref().map(|usage| usage.input_tokens), Some(18));
+    assert_eq!(completion.usage.as_ref().map(|usage| usage.output_tokens), Some(7));
+    assert_eq!(completion.usage.as_ref().map(|usage| usage.total_tokens), Some(25));
     assert!(completion.segments.iter().any(|segment| matches!(
         segment,
         agent_core::CompletionSegment::ToolUse(ToolCall { tool_name, invocation_id, .. })

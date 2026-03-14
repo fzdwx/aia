@@ -1,4 +1,4 @@
-use agent_core::{CompletionRequest, LanguageModel, ToolExecutor};
+use agent_core::{CompletionRequest, LanguageModel, LlmTraceRequestContext, ToolExecutor};
 use serde_json::json;
 
 use crate::RuntimeEvent;
@@ -18,7 +18,11 @@ where
     M: LanguageModel,
     T: ToolExecutor,
 {
-    pub(super) fn compress_context(&mut self) -> Result<(), RuntimeError> {
+    pub(super) fn compress_context(
+        &mut self,
+        turn_id: Option<&str>,
+        step_index: u32,
+    ) -> Result<(), RuntimeError> {
         let view = self.tape.default_view();
         if view.conversation.len() < MIN_ENTRIES_FOR_COMPRESSION {
             return Ok(());
@@ -32,6 +36,13 @@ where
             resume_checkpoint: None,
             max_output_tokens: Some(SUMMARY_MAX_OUTPUT_TOKENS),
             available_tools: Vec::new(),
+            trace_context: turn_id.map(|turn_id| LlmTraceRequestContext {
+                trace_id: format!("{turn_id}-compression-{step_index}"),
+                turn_id: turn_id.to_string(),
+                run_id: turn_id.to_string(),
+                request_kind: "compression".to_string(),
+                step_index,
+            }),
         };
 
         let completion = self.model.complete(request).map_err(RuntimeError::model)?;

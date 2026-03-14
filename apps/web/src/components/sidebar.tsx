@@ -1,4 +1,4 @@
-import { Settings } from "lucide-react"
+import { PanelRightDashed, Settings } from "lucide-react"
 import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat-store"
@@ -45,6 +45,16 @@ export function Sidebar() {
 
       {/* Footer */}
       <div className="p-2">
+        <button
+          onClick={() => setView(view === "trace" ? "chat" : "trace")}
+          className={cn(
+            "mb-1 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] text-muted-foreground transition-colors duration-150 hover:bg-accent/50 hover:text-foreground/80",
+            view === "trace" && "bg-accent/50 text-foreground/80"
+          )}
+        >
+          <PanelRightDashed className="size-[14px] opacity-40" />
+          <span>Trace</span>
+        </button>
         <button
           onClick={() => setView(view === "settings" ? "chat" : "settings")}
           className={cn(

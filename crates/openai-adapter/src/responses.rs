@@ -1,15 +1,15 @@
 use std::io::{self, BufRead};
 
 use agent_core::{
-    Completion, CompletionRequest, CompletionSegment, CompletionStopReason, LanguageModel,
-    ModelCheckpoint, StreamEvent, ToolCall,
+    Completion, CompletionRequest, CompletionSegment, CompletionStopReason, CompletionUsage,
+    LanguageModel, ModelCheckpoint, StreamEvent, ToolCall,
 };
 use reqwest::blocking::Client;
 use serde_json::{Value, json};
 
 use crate::{
     OpenAiAdapterError, ReasoningSummaryPart, ResponsesContent, ResponsesOutput, ResponsesResponse,
-    extract_reasoning_stream_text, extract_stream_text, parse_tool_arguments,
+    ResponsesUsage, extract_reasoning_stream_text, extract_stream_text, parse_tool_arguments,
     responses_continuation, responses_input_item,
 };
 
@@ -35,6 +35,29 @@ pub struct OpenAiResponsesModel {
 }
 
 impl OpenAiResponsesModel {
+    fn map_usage(usage: Option<ResponsesUsage>) -> Option<CompletionUsage> {
+        usage.map(|usage| CompletionUsage {
+            input_tokens: usage.input_tokens.unwrap_or(0),
+            output_tokens: usage.output_tokens.unwrap_or(0),
+            total_tokens: usage.total_tokens.unwrap_or(0),
+        })
+    }
+
+    fn endpoint_url(&self) -> String {
+        format!("{}/responses", self.config.base_url.trim_end_matches('/'))
+    }
+
+    fn request_failure(&self, status: reqwest::StatusCode, body: &str) -> OpenAiAdapterError {
+        OpenAiAdapterError::new(format!(
+            "请求失败：POST {} -> {} {}",
+            self.endpoint_url(),
+            status,
+            body
+        ))
+        .with_status_code(Some(status.as_u16()))
+        .with_response_body(Some(body.to_string()))
+    }
+
     fn map_stop_reason(
         status: Option<&str>,
         incomplete_reason: Option<&str>,
@@ -59,7 +82,7 @@ impl OpenAiResponsesModel {
         Ok(Self { config })
     }
 
-    pub(crate) fn build_request_body(&self, request: &CompletionRequest) -> Value {
+    pub fn build_request_body(&self, request: &CompletionRequest) -> Value {
         let continuation = responses_continuation(request);
         let input = continuation.as_ref().map(|(_, items)| items.clone()).unwrap_or_else(|| {
             request.conversation.iter().map(responses_input_item).collect::<Vec<_>>()
@@ -96,7 +119,7 @@ impl OpenAiResponsesModel {
         body
     }
 
-    pub(crate) fn build_streaming_request_body(&self, request: &CompletionRequest) -> Value {
+    pub fn build_streaming_request_body(&self, request: &CompletionRequest) -> Value {
         let mut body = self.build_request_body(request);
         body["stream"] = json!(true);
         body
@@ -105,6 +128,7 @@ impl OpenAiResponsesModel {
     pub(crate) fn parse_response_body(&self, body: &str) -> Result<Completion, OpenAiAdapterError> {
         let payload: ResponsesResponse = serde_json::from_str(body)
             .map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
+        let usage = Self::map_usage(payload.usage.clone());
         let response_id = payload.id.clone();
         let status = payload.status.clone();
         let incomplete_reason =
@@ -161,6 +185,9 @@ impl OpenAiResponsesModel {
                 has_tool_calls,
             ),
             checkpoint: payload.id.clone().map(|id| ModelCheckpoint::new("openai-responses", id)),
+            usage,
+            response_body: Some(body.to_string()),
+            http_status_code: None,
         })
     }
 
@@ -181,7 +208,7 @@ impl LanguageModel for OpenAiResponsesModel {
         }
 
         let response = Client::new()
-            .post(format!("{}/responses", self.config.base_url.trim_end_matches('/')))
+            .post(self.endpoint_url())
             .bearer_auth(&self.config.api_key)
             .json(&self.build_request_body(&request))
             .send()
@@ -191,10 +218,12 @@ impl LanguageModel for OpenAiResponsesModel {
         let body = response.text().map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
 
         if !status.is_success() {
-            return Err(OpenAiAdapterError::new(format!("请求失败：{status} {body}")));
+            return Err(self.request_failure(status, &body));
         }
 
-        self.parse_response_body(&body)
+        let mut completion = self.parse_response_body(&body)?;
+        completion.http_status_code = Some(status.as_u16());
+        Ok(completion)
     }
 
     fn complete_streaming(
@@ -210,7 +239,7 @@ impl LanguageModel for OpenAiResponsesModel {
         }
 
         let response = Client::new()
-            .post(format!("{}/responses", self.config.base_url.trim_end_matches('/')))
+            .post(self.endpoint_url())
             .bearer_auth(&self.config.api_key)
             .json(&self.build_streaming_request_body(&request))
             .send()
@@ -220,7 +249,7 @@ impl LanguageModel for OpenAiResponsesModel {
         if !status.is_success() {
             let body =
                 response.text().map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
-            return Err(OpenAiAdapterError::new(format!("请求失败：{status} {body}")));
+            return Err(self.request_failure(status, &body));
         }
 
         let reader = io::BufReader::new(response);
@@ -235,12 +264,15 @@ impl LanguageModel for OpenAiResponsesModel {
         let mut response_id: Option<String> = None;
         let mut response_status: Option<String> = None;
         let mut incomplete_reason: Option<String> = None;
+        let mut usage: Option<CompletionUsage> = None;
+        let mut response_events = Vec::new();
 
         for line in reader.lines() {
             let line = line.map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
             let Some(data) = line.strip_prefix("data: ") else {
                 continue;
             };
+            response_events.push(line.clone());
             if data == "[DONE]" {
                 break;
             }
@@ -331,6 +363,11 @@ impl LanguageModel for OpenAiResponsesModel {
                             .as_str()
                             .map(ToString::to_string);
                     }
+                    if usage.is_none() {
+                        usage = Self::map_usage(
+                            serde_json::from_value(event["response"]["usage"].clone()).ok(),
+                        );
+                    }
                 }
                 Some(other) => {
                     sink(StreamEvent::Log { text: format!("[sse] {other}") });
@@ -368,6 +405,9 @@ impl LanguageModel for OpenAiResponsesModel {
                 has_tool_calls,
             ),
             checkpoint: response_id.map(|id| ModelCheckpoint::new("openai-responses", id)),
+            usage,
+            response_body: Some(response_events.join("\n")),
+            http_status_code: Some(status.as_u16()),
         })
     }
 }

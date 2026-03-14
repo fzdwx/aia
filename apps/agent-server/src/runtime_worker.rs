@@ -6,6 +6,7 @@ use std::thread;
 use agent_core::{ModelIdentity, Role, StreamEvent};
 use agent_runtime::{AgentRuntime, ContextStats, RuntimeEvent, RuntimeSubscriberId, TurnLifecycle};
 use axum::http::StatusCode;
+use llm_trace::LlmTraceStore;
 use provider_registry::{ModelConfig, ProviderKind, ProviderProfile, ProviderRegistry};
 use serde_json::json;
 use session_tape::{SessionProviderBinding, SessionTape};
@@ -146,6 +147,7 @@ pub struct RuntimeOwnerState {
     pub session_path: PathBuf,
     pub registry: ProviderRegistry,
     pub store_path: PathBuf,
+    pub trace_store: Arc<dyn LlmTraceStore>,
     pub broadcast_tx: broadcast::Sender<SsePayload>,
     pub provider_registry_snapshot: Arc<RwLock<ProviderRegistry>>,
     pub provider_info_snapshot: Arc<RwLock<ProviderInfoSnapshot>>,
@@ -409,6 +411,7 @@ fn refresh_provider_snapshots(
 
 fn prepare_runtime_sync(
     registry: &ProviderRegistry,
+    trace_store: Option<Arc<dyn LlmTraceStore>>,
 ) -> Result<
     (ProviderInfoSnapshot, ModelIdentity, ServerModel, SessionProviderBinding),
     RuntimeWorkerError,
@@ -419,7 +422,7 @@ fn prepare_runtime_sync(
         .map(ProviderLaunchChoice::OpenAi)
         .unwrap_or(ProviderLaunchChoice::Bootstrap);
 
-    let (identity, model) = build_model_from_selection(selection)
+    let (identity, model) = build_model_from_selection(selection, trace_store)
         .map_err(|e| RuntimeWorkerError::internal(e.to_string()))?;
 
     let binding = match registry.active_provider() {
@@ -441,7 +444,8 @@ fn sync_runtime_to_registry(
     owner: &mut RuntimeOwnerState,
     candidate_registry: ProviderRegistry,
 ) -> Result<ProviderInfoSnapshot, RuntimeWorkerError> {
-    let (info, identity, model, binding) = prepare_runtime_sync(&candidate_registry)?;
+    let (info, identity, model, binding) =
+        prepare_runtime_sync(&candidate_registry, Some(owner.trace_store.clone()))?;
     let mut candidate_tape = owner.runtime.tape().clone();
     candidate_tape.bind_provider(binding);
 
@@ -679,9 +683,8 @@ mod tests {
 
     use agent_core::{ModelDisposition, ModelIdentity};
     use builtin_tools::build_tool_registry;
+    use llm_trace::{LlmTraceStore, SqliteLlmTraceStore};
     use provider_registry::{ModelLimit, ProviderProfile};
-
-    use crate::model::BootstrapModel;
 
     fn provider(name: &str, model: &str) -> ProviderProfile {
         ProviderProfile {
@@ -707,17 +710,20 @@ mod tests {
         registry: ProviderRegistry,
     ) -> RuntimeOwnerState {
         let runtime = AgentRuntime::new(
-            crate::model::ServerModel::Bootstrap(BootstrapModel),
+            crate::model::ServerModel::bootstrap(),
             build_tool_registry(),
             ModelIdentity::new("local", "bootstrap", ModelDisposition::Balanced),
         );
         let (broadcast_tx, _) = broadcast::channel(16);
+        let trace_store: Arc<dyn LlmTraceStore> =
+            Arc::new(SqliteLlmTraceStore::in_memory().expect("trace store should init"));
         RuntimeOwnerState {
             runtime,
             subscriber: 1,
             session_path: PathBuf::from(session_path),
             registry,
             store_path: PathBuf::from(store_path),
+            trace_store,
             broadcast_tx,
             provider_registry_snapshot: Arc::new(RwLock::new(ProviderRegistry::default())),
             provider_info_snapshot: Arc::new(RwLock::new(ProviderInfoSnapshot {

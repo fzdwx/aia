@@ -4,14 +4,15 @@ use std::{
 };
 
 use agent_core::{
-    Completion, CompletionRequest, CompletionSegment, CompletionStopReason, LanguageModel,
-    StreamEvent, ToolCall,
+    Completion, CompletionRequest, CompletionSegment, CompletionStopReason, CompletionUsage,
+    LanguageModel, StreamEvent, ToolCall,
 };
 use reqwest::blocking::Client;
 use serde_json::{Value, json};
 
 use crate::{
-    ChatCompletionsResponse, OpenAiAdapterError, chat_completion_messages, parse_tool_arguments,
+    ChatCompletionsResponse, ChatCompletionsUsage, OpenAiAdapterError, chat_completion_messages,
+    parse_tool_arguments,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -43,6 +44,29 @@ struct StreamingToolCallState {
 }
 
 impl OpenAiChatCompletionsModel {
+    fn map_usage(usage: Option<ChatCompletionsUsage>) -> Option<CompletionUsage> {
+        usage.map(|usage| CompletionUsage {
+            input_tokens: usage.prompt_tokens.unwrap_or(0),
+            output_tokens: usage.completion_tokens.unwrap_or(0),
+            total_tokens: usage.total_tokens.unwrap_or(0),
+        })
+    }
+
+    fn endpoint_url(&self) -> String {
+        format!("{}/chat/completions", self.config.base_url.trim_end_matches('/'))
+    }
+
+    fn request_failure(&self, status: reqwest::StatusCode, body: &str) -> OpenAiAdapterError {
+        OpenAiAdapterError::new(format!(
+            "请求失败：POST {} -> {} {}",
+            self.endpoint_url(),
+            status,
+            body
+        ))
+        .with_status_code(Some(status.as_u16()))
+        .with_response_body(Some(body.to_string()))
+    }
+
     fn map_finish_reason(
         finish_reason: Option<&str>,
         has_tool_calls: bool,
@@ -67,7 +91,7 @@ impl OpenAiChatCompletionsModel {
         Ok(Self { config })
     }
 
-    pub(crate) fn build_request_body(&self, request: &CompletionRequest) -> Value {
+    pub fn build_request_body(&self, request: &CompletionRequest) -> Value {
         let mut messages = Vec::new();
         if let Some(instructions) = request.instructions.as_ref().filter(|value| !value.is_empty())
         {
@@ -104,15 +128,17 @@ impl OpenAiChatCompletionsModel {
         body
     }
 
-    pub(crate) fn build_streaming_request_body(&self, request: &CompletionRequest) -> Value {
+    pub fn build_streaming_request_body(&self, request: &CompletionRequest) -> Value {
         let mut body = self.build_request_body(request);
         body["stream"] = json!(true);
+        body["stream_options"] = json!({"include_usage": true});
         body
     }
 
     pub(crate) fn parse_response_body(&self, body: &str) -> Result<Completion, OpenAiAdapterError> {
         let payload: ChatCompletionsResponse = serde_json::from_str(body)
             .map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
+        let usage = Self::map_usage(payload.usage.clone());
 
         let mut segments = Vec::new();
         let mut finish_reason = None;
@@ -143,6 +169,9 @@ impl OpenAiChatCompletionsModel {
             segments,
             stop_reason: Self::map_finish_reason(finish_reason.as_deref(), has_tool_calls),
             checkpoint: None,
+            usage,
+            response_body: Some(body.to_string()),
+            http_status_code: None,
         })
     }
 
@@ -163,7 +192,7 @@ impl LanguageModel for OpenAiChatCompletionsModel {
         }
 
         let response = Client::new()
-            .post(format!("{}/chat/completions", self.config.base_url.trim_end_matches('/')))
+            .post(self.endpoint_url())
             .bearer_auth(&self.config.api_key)
             .json(&self.build_request_body(&request))
             .send()
@@ -173,10 +202,12 @@ impl LanguageModel for OpenAiChatCompletionsModel {
         let body = response.text().map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
 
         if !status.is_success() {
-            return Err(OpenAiAdapterError::new(format!("请求失败：{status} {body}")));
+            return Err(self.request_failure(status, &body));
         }
 
-        self.parse_response_body(&body)
+        let mut completion = self.parse_response_body(&body)?;
+        completion.http_status_code = Some(status.as_u16());
+        Ok(completion)
     }
 
     fn complete_streaming(
@@ -192,7 +223,7 @@ impl LanguageModel for OpenAiChatCompletionsModel {
         }
 
         let response = Client::new()
-            .post(format!("{}/chat/completions", self.config.base_url.trim_end_matches('/')))
+            .post(self.endpoint_url())
             .bearer_auth(&self.config.api_key)
             .json(&self.build_streaming_request_body(&request))
             .send()
@@ -202,7 +233,7 @@ impl LanguageModel for OpenAiChatCompletionsModel {
         if !status.is_success() {
             let body =
                 response.text().map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
-            return Err(OpenAiAdapterError::new(format!("请求失败：{status} {body}")));
+            return Err(self.request_failure(status, &body));
         }
 
         let reader = io::BufReader::new(response);
@@ -210,12 +241,15 @@ impl LanguageModel for OpenAiChatCompletionsModel {
         let mut thinking_buf = String::new();
         let mut tool_calls: BTreeMap<usize, StreamingToolCallState> = BTreeMap::new();
         let mut finish_reason = None;
+        let mut usage: Option<CompletionUsage> = None;
+        let mut response_events = Vec::new();
 
         for line in reader.lines() {
             let line = line.map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
             let Some(data) = line.strip_prefix("data: ") else {
                 continue;
             };
+            response_events.push(line.clone());
             if data == "[DONE]" {
                 break;
             }
@@ -224,6 +258,9 @@ impl LanguageModel for OpenAiChatCompletionsModel {
                 Ok(value) => value,
                 Err(_) => continue,
             };
+            if usage.is_none() {
+                usage = Self::map_usage(serde_json::from_value(event["usage"].clone()).ok());
+            }
             let Some(delta) = event["choices"].get(0).and_then(|choice| choice.get("delta")) else {
                 continue;
             };
@@ -317,6 +354,9 @@ impl LanguageModel for OpenAiChatCompletionsModel {
             segments,
             stop_reason: Self::map_finish_reason(finish_reason.as_deref(), has_tool_calls),
             checkpoint: None,
+            usage,
+            response_body: Some(response_events.join("\n")),
+            http_status_code: Some(status.as_u16()),
         })
     }
 }

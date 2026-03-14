@@ -7,6 +7,7 @@ use axum::{
         sse::{KeepAlive, Sse},
     },
 };
+use llm_trace::LlmTraceStoreError;
 use serde::{Deserialize, Serialize};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
@@ -141,6 +142,64 @@ fn runtime_worker_error_response(
     error: RuntimeWorkerError,
 ) -> (StatusCode, Json<serde_json::Value>) {
     (error.status, Json(serde_json::json!({ "error": error.message })))
+}
+
+fn trace_store_error_response(error: LlmTraceStoreError) -> (StatusCode, Json<serde_json::Value>) {
+    (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": error.to_string() })))
+}
+
+pub async fn list_traces(
+    State(state): State<SharedState>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let store = state.trace_store.clone();
+    match tokio::task::spawn_blocking(move || store.list(100)).await {
+        Ok(Ok(items)) => {
+            (StatusCode::OK, Json(serde_json::to_value(items).expect("serialize traces")))
+        }
+        Ok(Err(error)) => trace_store_error_response(error),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": error.to_string() })),
+        ),
+    }
+}
+
+pub async fn get_trace(
+    State(state): State<SharedState>,
+    Path(id): Path<String>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let store = state.trace_store.clone();
+    let missing_id = id.clone();
+    match tokio::task::spawn_blocking(move || store.get(&id)).await {
+        Ok(Ok(Some(trace))) => {
+            (StatusCode::OK, Json(serde_json::to_value(trace).expect("serialize trace")))
+        }
+        Ok(Ok(None)) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": format!("trace 不存在：{missing_id}") })),
+        ),
+        Ok(Err(error)) => trace_store_error_response(error),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": error.to_string() })),
+        ),
+    }
+}
+
+pub async fn get_trace_summary(
+    State(state): State<SharedState>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let store = state.trace_store.clone();
+    match tokio::task::spawn_blocking(move || store.summary()).await {
+        Ok(Ok(summary)) => {
+            (StatusCode::OK, Json(serde_json::to_value(summary).expect("serialize trace summary")))
+        }
+        Ok(Err(error)) => trace_store_error_response(error),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": error.to_string() })),
+        ),
+    }
 }
 
 pub async fn get_providers(State(state): State<SharedState>) -> Json<ProviderInfo> {
@@ -291,6 +350,11 @@ mod tests {
     use agent_core::{Message, Role, ToolCall, ToolResult};
     use agent_runtime::{AgentRuntime, RuntimeEvent, TurnLifecycle};
     use axum::Json;
+    use axum::http::StatusCode;
+    use llm_trace::{
+        LlmTraceListItem, LlmTraceRecord, LlmTraceStatus, LlmTraceStore, LlmTraceSummary,
+        SqliteLlmTraceStore,
+    };
     use provider_registry::{
         ModelConfig, ModelLimit, ProviderKind, ProviderProfile, ProviderRegistry,
     };
@@ -298,13 +362,15 @@ mod tests {
     use tokio::sync::broadcast;
 
     use crate::{
-        model::BootstrapModel,
         runtime_worker::{self, ProviderInfoSnapshot, RuntimeOwnerState, spawn_runtime_worker},
         sse::SsePayload,
         state::AppState,
     };
 
-    use super::{ModelConfigDto, ModelLimitDto, get_providers, list_providers};
+    use super::{
+        ModelConfigDto, ModelLimitDto, get_providers, get_trace, get_trace_summary, list_providers,
+        list_traces,
+    };
 
     fn provider(name: &str, model: &str) -> ProviderProfile {
         ProviderProfile {
@@ -329,7 +395,7 @@ mod tests {
         registry: ProviderRegistry,
     ) -> Arc<AppState> {
         let mut runtime = AgentRuntime::new(
-            crate::model::ServerModel::Bootstrap(BootstrapModel),
+            crate::model::ServerModel::bootstrap(),
             builtin_tools::build_tool_registry(),
             agent_core::ModelIdentity::new(
                 "local",
@@ -339,6 +405,8 @@ mod tests {
         );
         let subscriber = runtime.subscribe();
         let (broadcast_tx, _) = broadcast::channel(16);
+        let trace_store: Arc<dyn LlmTraceStore> =
+            Arc::new(SqliteLlmTraceStore::in_memory().expect("trace store should init"));
         let provider_registry_snapshot = Arc::new(RwLock::new(registry.clone()));
         let provider_info_snapshot = Arc::new(RwLock::new(provider_info.clone()));
         let worker = spawn_runtime_worker(RuntimeOwnerState {
@@ -347,6 +415,7 @@ mod tests {
             session_path: std::path::PathBuf::from("/tmp/session.jsonl"),
             registry: registry.clone(),
             store_path: std::path::PathBuf::from("/tmp/providers.json"),
+            trace_store: trace_store.clone(),
             broadcast_tx: broadcast_tx.clone(),
             provider_registry_snapshot: provider_registry_snapshot.clone(),
             provider_info_snapshot: provider_info_snapshot.clone(),
@@ -357,6 +426,7 @@ mod tests {
             broadcast_tx,
             provider_registry_snapshot,
             provider_info_snapshot,
+            trace_store,
         });
         *state.provider_info_snapshot.write().expect("lock poisoned") = provider_info;
         *state.provider_registry_snapshot.write().expect("lock poisoned") = registry;
@@ -505,6 +575,118 @@ mod tests {
         assert_eq!(items.len(), 2);
         assert!(items.iter().any(|item| item.name == "beta" && item.active));
         assert!(items.iter().any(|item| item.name == "alpha" && !item.active));
+    }
+
+    #[tokio::test]
+    async fn list_traces_reads_trace_store() {
+        let state = shared_state_with_snapshots(
+            ProviderInfoSnapshot {
+                name: "openai".to_string(),
+                model: "gpt-5.4".to_string(),
+                connected: true,
+            },
+            ProviderRegistry::default(),
+        );
+        state
+            .trace_store
+            .record(&LlmTraceRecord {
+                id: "trace-1".to_string(),
+                turn_id: "turn-1".to_string(),
+                run_id: "turn-1".to_string(),
+                request_kind: "completion".to_string(),
+                step_index: 0,
+                provider: "openai".to_string(),
+                protocol: "openai-responses".to_string(),
+                model: "gpt-5.4".to_string(),
+                base_url: "https://example.com".to_string(),
+                endpoint_path: "/responses".to_string(),
+                streaming: true,
+                started_at_ms: 10,
+                finished_at_ms: Some(20),
+                duration_ms: Some(10),
+                status_code: Some(200),
+                status: LlmTraceStatus::Succeeded,
+                stop_reason: Some("stop".to_string()),
+                error: None,
+                checkpoint_in: None,
+                checkpoint_out: Some("resp_1".to_string()),
+                request_summary: serde_json::json!({"conversation_items": 1}),
+                provider_request: serde_json::json!({"model": "gpt-5.4"}),
+                response_summary: serde_json::json!({"assistant_text": "ok"}),
+                response_body: Some("ok".to_string()),
+                input_tokens: Some(10),
+                output_tokens: Some(5),
+                total_tokens: Some(15),
+            })
+            .expect("trace should persist");
+
+        let (status, Json(value)) = list_traces(axum::extract::State(state)).await;
+        let items: Vec<LlmTraceListItem> = serde_json::from_value(value).expect("decode traces");
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "trace-1");
+        assert_eq!(items[0].user_message, None);
+    }
+
+    #[tokio::test]
+    async fn trace_detail_and_summary_routes_read_trace_store() {
+        let state = shared_state_with_snapshots(
+            ProviderInfoSnapshot {
+                name: "openai".to_string(),
+                model: "gpt-5.4".to_string(),
+                connected: true,
+            },
+            ProviderRegistry::default(),
+        );
+        let record = LlmTraceRecord {
+            id: "trace-2".to_string(),
+            turn_id: "turn-2".to_string(),
+            run_id: "turn-2".to_string(),
+            request_kind: "completion".to_string(),
+            step_index: 1,
+            provider: "openai".to_string(),
+            protocol: "openai-chat-completions".to_string(),
+            model: "gpt-5.4".to_string(),
+            base_url: "https://example.com".to_string(),
+            endpoint_path: "/chat/completions".to_string(),
+            streaming: true,
+            started_at_ms: 100,
+            finished_at_ms: Some(160),
+            duration_ms: Some(60),
+            status_code: Some(500),
+            status: LlmTraceStatus::Failed,
+            stop_reason: None,
+            error: Some("boom".to_string()),
+            checkpoint_in: None,
+            checkpoint_out: None,
+            request_summary: serde_json::json!({"conversation_items": 2}),
+            provider_request: serde_json::json!({"model": "gpt-5.4"}),
+            response_summary: serde_json::json!({"error": "boom"}),
+            response_body: None,
+            input_tokens: Some(10),
+            output_tokens: Some(0),
+            total_tokens: Some(10),
+        };
+        state.trace_store.record(&record).expect("trace should persist");
+
+        let (detail_status, Json(detail_value)) = get_trace(
+            axum::extract::State(state.clone()),
+            axum::extract::Path("trace-2".to_string()),
+        )
+        .await;
+        let detail: LlmTraceRecord =
+            serde_json::from_value(detail_value).expect("decode trace detail");
+        assert_eq!(detail_status, StatusCode::OK);
+        assert_eq!(detail.id, "trace-2");
+
+        let (summary_status, Json(summary_value)) =
+            get_trace_summary(axum::extract::State(state)).await;
+        let summary: LlmTraceSummary =
+            serde_json::from_value(summary_value).expect("decode trace summary");
+        assert_eq!(summary_status, StatusCode::OK);
+        assert_eq!(summary.total_requests, 1);
+        assert_eq!(summary.failed_requests, 1);
     }
 }
 

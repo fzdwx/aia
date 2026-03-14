@@ -8,6 +8,7 @@ license.workspace = true
 agent-core = { path = "../../crates/agent-core" }
 agent-runtime = { path = "../../crates/agent-runtime" }
 builtin-tools = { path = "../../crates/builtin-tools" }
+llm-trace = { path = "../../crates/llm-trace" }
 openai-adapter = { path = "../../crates/openai-adapter" }
 provider-registry = { path = "../../crates/provider-registry" }
 session-tape = { path = "../../crates/session-tape" }

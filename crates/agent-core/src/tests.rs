@@ -23,6 +23,9 @@ fn 完成结果可提取纯文本() {
         ],
         stop_reason: CompletionStopReason::Stop,
         checkpoint: None,
+        usage: None,
+        response_body: None,
+        http_status_code: None,
     };
 
     assert_eq!(completion.plain_text(), "第一行\n第二行");

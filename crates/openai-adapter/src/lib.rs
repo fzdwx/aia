@@ -14,7 +14,7 @@ pub(crate) use mapping::{
     parse_tool_arguments, responses_continuation, responses_input_item,
 };
 pub(crate) use payloads::{
-    ChatCompletionsResponse, ReasoningSummaryPart, ResponsesContent, ResponsesOutput,
-    ResponsesResponse,
+    ChatCompletionsResponse, ChatCompletionsUsage, ReasoningSummaryPart, ResponsesContent,
+    ResponsesOutput, ResponsesResponse, ResponsesUsage,
 };
 pub use responses::{OpenAiResponsesConfig, OpenAiResponsesModel};

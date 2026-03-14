@@ -88,12 +88,25 @@ impl Default for CompletionStopReason {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CompletionUsage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub total_tokens: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Completion {
     pub segments: Vec<CompletionSegment>,
     #[serde(default)]
     pub stop_reason: CompletionStopReason,
     #[serde(default)]
     pub checkpoint: Option<ModelCheckpoint>,
+    #[serde(default)]
+    pub usage: Option<CompletionUsage>,
+    #[serde(default)]
+    pub response_body: Option<String>,
+    #[serde(default)]
+    pub http_status_code: Option<u16>,
 }
 
 impl Completion {
@@ -102,6 +115,9 @@ impl Completion {
             segments: vec![CompletionSegment::Text(content.into())],
             stop_reason: CompletionStopReason::Stop,
             checkpoint: None,
+            usage: None,
+            response_body: None,
+            http_status_code: None,
         }
     }
 
@@ -130,6 +146,15 @@ impl Completion {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct LlmTraceRequestContext {
+    pub trace_id: String,
+    pub turn_id: String,
+    pub run_id: String,
+    pub request_kind: String,
+    pub step_index: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CompletionRequest {
     pub model: ModelIdentity,
     pub instructions: Option<String>,
@@ -137,4 +162,5 @@ pub struct CompletionRequest {
     pub resume_checkpoint: Option<ModelCheckpoint>,
     pub max_output_tokens: Option<u32>,
     pub available_tools: Vec<ToolDefinition>,
+    pub trace_context: Option<LlmTraceRequestContext>,
 }

@@ -63,6 +63,9 @@ impl LanguageModel for StubModel {
             ],
             stop_reason: CompletionStopReason::ToolUse,
             checkpoint: None,
+            usage: None,
+            response_body: None,
+            http_status_code: None,
         })
     }
 }
@@ -111,6 +114,9 @@ impl LanguageModel for ContinueAfterToolModel {
                 ],
                 stop_reason: CompletionStopReason::ToolUse,
                 checkpoint: None,
+                usage: None,
+                response_body: None,
+                http_status_code: None,
             })
         } else {
             let saw_tool = request.conversation.iter().any(|item| {
@@ -168,6 +174,9 @@ impl LanguageModel for ManyToolRoundsModel {
             )],
             stop_reason: CompletionStopReason::ToolUse,
             checkpoint: None,
+            usage: None,
+            response_body: None,
+            http_status_code: None,
         })
     }
 }
@@ -196,6 +205,9 @@ impl LanguageModel for DuplicateToolLoopModel {
                 )],
                 stop_reason: CompletionStopReason::ToolUse,
                 checkpoint: None,
+                usage: None,
+                response_body: None,
+                http_status_code: None,
             });
         }
 
@@ -205,6 +217,9 @@ impl LanguageModel for DuplicateToolLoopModel {
             )],
             stop_reason: CompletionStopReason::ToolUse,
             checkpoint: None,
+            usage: None,
+            response_body: None,
+            http_status_code: None,
         })
     }
 }
@@ -279,6 +294,9 @@ impl LanguageModel for CheckpointRecordingModel {
                 "openai-responses",
                 format!("resp_{}", index + 1),
             )),
+            usage: None,
+            response_body: None,
+            http_status_code: None,
         })
     }
 }
@@ -305,12 +323,18 @@ impl LanguageModel for StopReasonDrivenModel {
                 segments: vec![CompletionSegment::ToolUse(ToolCall::new("search"))],
                 stop_reason: CompletionStopReason::ToolUse,
                 checkpoint: None,
+                usage: None,
+                response_body: None,
+                http_status_code: None,
             })
         } else {
             Ok(Completion {
                 segments: vec![CompletionSegment::Text("按 stop reason 收尾".into())],
                 stop_reason: CompletionStopReason::Stop,
                 checkpoint: None,
+                usage: None,
+                response_body: None,
+                http_status_code: None,
             })
         }
     }
@@ -535,6 +559,9 @@ fn 工具片段与_stop_reason_不一致时会报错() {
                 segments: vec![CompletionSegment::ToolUse(ToolCall::new("search"))],
                 stop_reason: CompletionStopReason::Stop,
                 checkpoint: None,
+                usage: None,
+                response_body: None,
+                http_status_code: None,
             })
         }
     }
