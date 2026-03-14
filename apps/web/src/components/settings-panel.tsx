@@ -21,6 +21,8 @@ import type { ModelConfig } from "@/lib/types"
 type ModelFormRow = {
   id: string
   display_name: string
+  limit_context: string
+  limit_output: string
   supports_reasoning: boolean
   reasoning_effort: string
 }
@@ -29,6 +31,8 @@ function emptyModelRow(): ModelFormRow {
   return {
     id: "",
     display_name: "",
+    limit_context: "",
+    limit_output: "",
     supports_reasoning: false,
     reasoning_effort: "medium",
   }
@@ -70,6 +74,8 @@ export function SettingsPanel() {
       p.models.map((m) => ({
         id: m.id,
         display_name: m.display_name ?? "",
+        limit_context: m.limit?.context?.toString() ?? "",
+        limit_output: m.limit?.output?.toString() ?? "",
         supports_reasoning: m.supports_reasoning,
         reasoning_effort: m.reasoning_effort ?? "medium",
       }))
@@ -89,12 +95,22 @@ export function SettingsPanel() {
   }
 
   function buildModels(): ModelConfig[] {
+    const parseLimitValue = (value: string) => {
+      const trimmed = value.trim()
+      if (!trimmed) return null
+      const parsed = Number.parseInt(trimmed, 10)
+      return Number.isFinite(parsed) ? parsed : null
+    }
+
     return models
       .filter((m) => m.id.trim())
       .map((m) => ({
         id: m.id.trim(),
         display_name: m.display_name.trim() || null,
-        context_window: null,
+        limit: {
+          context: parseLimitValue(m.limit_context),
+          output: parseLimitValue(m.limit_output),
+        },
         default_temperature: null,
         supports_reasoning: m.supports_reasoning,
         reasoning_effort: m.supports_reasoning ? m.reasoning_effort : null,
@@ -364,6 +380,28 @@ export function SettingsPanel() {
                               }
                               placeholder="Display Name (optional)"
                               className="h-7 text-[12px]"
+                            />
+                            <Input
+                              value={row.limit_context}
+                              onChange={(e) =>
+                                updateModelRow(i, {
+                                  limit_context: e.target.value,
+                                })
+                              }
+                              placeholder="Context limit"
+                              className="h-7 text-[12px]"
+                              inputMode="numeric"
+                            />
+                            <Input
+                              value={row.limit_output}
+                              onChange={(e) =>
+                                updateModelRow(i, {
+                                  limit_output: e.target.value,
+                                })
+                              }
+                              placeholder="Output limit"
+                              className="h-7 text-[12px]"
+                              inputMode="numeric"
                             />
                           </div>
                           {models.length > 1 && (

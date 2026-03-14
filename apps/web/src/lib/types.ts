@@ -107,7 +107,10 @@ export type ChatState = "idle" | "active"
 export type ModelConfig = {
   id: string
   display_name: string | null
-  context_window: number | null
+  limit: {
+    context: number | null
+    output: number | null
+  } | null
   default_temperature: number | null
   supports_reasoning: boolean
   reasoning_effort: string | null
