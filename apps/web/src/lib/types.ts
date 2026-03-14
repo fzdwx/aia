@@ -15,6 +15,14 @@ export type StreamEvent =
       text: string
     }
   | { kind: "log"; text: string }
+  | {
+      kind: "tool_call_completed"
+      invocation_id: string
+      tool_name: string
+      content: string
+      details?: Record<string, unknown>
+      failed: boolean
+    }
   | { kind: "done" }
 
 // Mirrors Rust ToolInvocationOutcome — discriminated union on `status`
@@ -73,6 +81,7 @@ export type SseEvent =
   | { type: "stream"; data: StreamEvent }
   | { type: "status"; data: { status: TurnStatus } }
   | { type: "turn_completed"; data: TurnLifecycle }
+  | { type: "context_compressed"; data: { summary: string } }
   | { type: "error"; data: { message: string } }
 
 // Mirrors Rust TurnStatus
@@ -84,6 +93,10 @@ export type StreamingToolOutput = {
   toolName: string
   arguments: Record<string, unknown>
   output: string
+  completed: boolean
+  resultContent?: string
+  resultDetails?: Record<string, unknown>
+  failed?: boolean
 }
 
 // Ordered streaming block — mirrors the real event sequence

@@ -6,6 +6,22 @@ import type {
   TurnLifecycle,
 } from "./types"
 
+export type ContextStats = {
+  total_entries: number
+  anchor_count: number
+  entries_since_last_anchor: number
+  estimated_context_units: number
+  context_limit: number | null
+  output_limit: number | null
+  pressure_ratio: number | null
+}
+
+export async function fetchSessionInfo(): Promise<ContextStats> {
+  const res = await fetch("/api/session/info")
+  if (!res.ok) throw new Error(`GET /api/session/info failed: ${res.status}`)
+  return res.json() as Promise<ContextStats>
+}
+
 export async function fetchProviders(): Promise<ProviderInfo> {
   const res = await fetch("/api/providers")
   if (!res.ok) throw new Error(`GET /api/providers failed: ${res.status}`)
@@ -110,6 +126,7 @@ export function connectEvents(onEvent: (event: SseEvent) => void): () => void {
   es.addEventListener("stream", handle("stream"))
   es.addEventListener("status", handle("status"))
   es.addEventListener("turn_completed", handle("turn_completed"))
+  es.addEventListener("context_compressed", handle("context_compressed"))
   es.addEventListener("error", handle("error"))
 
   return () => es.close()

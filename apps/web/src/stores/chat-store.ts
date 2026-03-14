@@ -2,6 +2,7 @@ import { create } from "zustand"
 import {
   fetchHistory,
   fetchProviders,
+  fetchSessionInfo,
   listProviders as apiListProviders,
   switchProvider as apiSwitchProvider,
   submitTurn as apiSubmitTurn,
@@ -30,6 +31,7 @@ type ChatStore = {
   providerList: ProviderListItem[]
   error: string | null
   view: AppView
+  contextPressure: number | null
 
   // Internal ref for pending prompt
   _pendingPrompt: string | null
@@ -72,6 +74,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   providerList: [],
   error: null,
   view: "chat",
+  contextPressure: null,
   _pendingPrompt: null,
 
   _refreshProviderInfo: async () => {
@@ -85,6 +88,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       .catch(() => {})
     fetchHistory()
       .then((turns) => set({ turns }))
+      .catch(() => {})
+    fetchSessionInfo()
+      .then((info) => set({ contextPressure: info.pressure_ratio }))
       .catch(() => {})
     get().refreshProviders()
   },
@@ -142,11 +148,36 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           }
           set({ streamingTurn: { ...prev, blocks } })
         } else if (data.kind === "tool_call_started") {
-          const exists = blocks.some(
-            (b) =>
-              b.type === "tool" && b.tool.invocationId === data.invocation_id
-          )
-          if (!exists) {
+          let existingIdx = -1
+          for (let i = blocks.length - 1; i >= 0; i -= 1) {
+            const block = blocks[i]
+            if (
+              block?.type === "tool" &&
+              block.tool.invocationId === data.invocation_id
+            ) {
+              existingIdx = i
+              break
+            }
+          }
+          if (existingIdx >= 0) {
+            // Duplicate — merge arguments (adapter sends early with null args,
+            // execute_tool_call sends again with full args)
+            if (data.arguments != null) {
+              const b = blocks[existingIdx] as Extract<
+                (typeof blocks)[number],
+                { type: "tool" }
+              >
+              blocks[existingIdx] = {
+                ...b,
+                tool: {
+                  ...b.tool,
+                  toolName: data.tool_name || b.tool.toolName,
+                  arguments: normalizeToolArguments(data.arguments),
+                },
+              }
+              set({ streamingTurn: { ...prev, blocks } })
+            }
+          } else {
             blocks.push({
               type: "tool",
               tool: {
@@ -154,6 +185,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 toolName: data.tool_name,
                 arguments: normalizeToolArguments(data.arguments),
                 output: "",
+                completed: false,
               },
             })
             set({ streamingTurn: { ...prev, blocks } })
@@ -187,10 +219,40 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 toolName: "",
                 arguments: {},
                 output: data.text,
+                completed: false,
               },
             })
           }
           set({ streamingTurn: { ...prev, blocks } })
+        } else if (data.kind === "tool_call_completed") {
+          let idx = -1
+          for (let i = blocks.length - 1; i >= 0; i -= 1) {
+            const block = blocks[i]
+            if (
+              block?.type === "tool" &&
+              block.tool.invocationId === data.invocation_id
+            ) {
+              idx = i
+              break
+            }
+          }
+          if (idx >= 0) {
+            const b = blocks[idx] as Extract<
+              (typeof blocks)[number],
+              { type: "tool" }
+            >
+            blocks[idx] = {
+              ...b,
+              tool: {
+                ...b.tool,
+                completed: true,
+                resultContent: data.content,
+                resultDetails: data.details,
+                failed: data.failed,
+              },
+            }
+            set({ streamingTurn: { ...prev, blocks } })
+          }
         }
         break
       }
@@ -201,6 +263,15 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           chatState: "idle" as const,
           error: null,
         }))
+        fetchSessionInfo()
+          .then((info) => set({ contextPressure: info.pressure_ratio }))
+          .catch(() => {})
+        break
+      }
+      case "context_compressed": {
+        fetchSessionInfo()
+          .then((info) => set({ contextPressure: info.pressure_ratio }))
+          .catch(() => {})
         break
       }
       case "error": {

@@ -4,6 +4,21 @@ import { cn } from "@/lib/utils"
 import { ModelSelector } from "@/components/model-selector"
 import { useChatStore } from "@/stores/chat-store"
 
+function ContextPressure() {
+  const pressure = useChatStore((s) => s.contextPressure)
+  if (pressure == null || pressure <= 0.6) return <span />
+
+  const pct = Math.round(pressure * 100)
+  const color =
+    pressure > 0.95
+      ? "text-destructive/70"
+      : pressure > 0.8
+        ? "text-amber-500/70"
+        : "text-muted-foreground/50"
+
+  return <span className={cn("tabular-nums", color)}>{pct}%</span>
+}
+
 export function ChatInput() {
   const submitTurn = useChatStore((s) => s.submitTurn)
   const chatState = useChatStore((s) => s.chatState)
@@ -59,9 +74,12 @@ export function ChatInput() {
             <ArrowUp className="size-4" strokeWidth={2.5} />
           </button>
         </div>
-        <p className="mt-2 text-center text-[11px] text-muted-foreground/30">
-          aia may produce inaccurate responses.
-        </p>
+        <div className="mt-2 flex items-center justify-between text-[11px]">
+          <ContextPressure />
+          <p className="text-muted-foreground/30">
+            aia may produce inaccurate responses.
+          </p>
+        </div>
       </div>
     </div>
   )
