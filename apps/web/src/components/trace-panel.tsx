@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   ArrowLeft,
   ChevronRight,
@@ -87,9 +87,13 @@ function truncate(text: string, max: number) {
   return `${text.slice(0, max - 1)}...`
 }
 
-function summarizeStopReason(trace: TraceListItem) {
+function summarizeStopReason(trace: TraceListItem): string | null {
   if (trace.status === "failed") return "failed"
-  return trace.stop_reason ?? "completed"
+  // 只有非 completed 的状态才显示，避免重复
+  if (trace.stop_reason && trace.stop_reason !== "completed") {
+    return trace.stop_reason
+  }
+  return null
 }
 
 function summarizeLoopStatus(traces: TraceListItem[]) {
@@ -169,7 +173,9 @@ function loopStatusVariant(status: LoopGroup["finalStatus"]) {
 }
 
 function traceStatusVariant(status: TraceListItem["status"]) {
-  return status === "failed" ? ("destructive" as const) : ("secondary" as const)
+  if (status === "failed") return "destructive" as const
+  if (status === "succeeded") return "outline" as const
+  return "secondary" as const
 }
 
 export function TracePanel() {
@@ -189,17 +195,19 @@ export function TracePanel() {
     refreshTraces().catch(() => {})
   }, [refreshTraces])
 
-  const loopGroups = buildLoopGroups(traces)
+  const loopGroups = useMemo(() => buildLoopGroups(traces), [traces])
 
   useEffect(() => {
     setOpenGroups((previous) => {
       const next = { ...previous }
+      let hasChanges = false
       for (const group of loopGroups) {
         if (!(group.key in next)) {
           next[group.key] = false
+          hasChanges = true
         }
       }
-      return next
+      return hasChanges ? next : previous
     })
   }, [loopGroups])
 
@@ -314,10 +322,15 @@ export function TracePanel() {
                               >
                                 {group.finalStatus}
                               </Badge>
-                            </div>
-                            <div className="text-[12px] text-muted-foreground">
-                              {group.model} · {group.endpointPath} ·{" "}
-                              {group.protocol}
+                              <span className="rounded bg-muted/50 px-1.5 py-0.5 text-[11px] text-muted-foreground/90">
+                                {group.model}
+                              </span>
+                              <span className="text-[11px] text-muted-foreground/60">
+                                {group.endpointPath} · {group.protocol}
+                              </span>
+                              <span className="text-[11px] tabular-nums text-muted-foreground/80">
+                                {group.stepCount} calls · {group.totalDurationMs}ms · {group.totalTokens} tokens
+                              </span>
                             </div>
                             {group.userMessage ? (
                               <p className="max-w-[780px] text-[13px] leading-5 text-foreground/85">
@@ -329,14 +342,8 @@ export function TracePanel() {
                               </p>
                             )}
                           </div>
-                          <div className="shrink-0 text-right text-[11px] text-muted-foreground">
-                            <div className="font-medium text-foreground/90">{formatDateTime(group.latestStartedAtMs)}</div>
-                            <div className="mt-1 space-x-2">
-                              <span>{group.stepCount} calls</span>
-                              <span>·</span>
-                              <span>{group.totalDurationMs}ms</span>
-                            </div>
-                            <div className="mt-0.5">{group.totalTokens} tokens</div>
+                          <div className="shrink-0 text-[11px] text-muted-foreground/70">
+                            {formatDateTime(group.latestStartedAtMs)}
                           </div>
                         </div>
 
@@ -367,43 +374,32 @@ export function TracePanel() {
                               selectedTraceId === trace.id && "bg-accent/40"
                             )}
                           >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0 space-y-1">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span className="text-[12px] font-medium text-foreground">
-                                    step {trace.step_index}
+                            <div className="flex items-center justify-between gap-4">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-[12px] font-medium text-foreground">
+                                  step {trace.step_index}
+                                </span>
+                                <Badge
+                                  variant={traceStatusVariant(trace.status)}
+                                  className="text-[10px]"
+                                >
+                                  {trace.status}
+                                </Badge>
+                                <span className="text-[11px] text-muted-foreground/70">
+                                  {trace.request_kind}
+                                </span>
+                                {trace.stop_reason ? (
+                                  <span className="text-[11px] text-muted-foreground/60">
+                                    {trace.stop_reason}
                                   </span>
-                                  <Badge
-                                    variant={traceStatusVariant(trace.status)}
-                                    className="text-[10px]"
-                                  >
-                                    {trace.status}
-                                  </Badge>
-                                  <Badge
-                                    variant="outline"
-                                    className="text-[10px]"
-                                  >
-                                    {trace.request_kind}
-                                  </Badge>
-                                  {trace.stop_reason ? (
-                                    <Badge
-                                      variant="outline"
-                                      className="text-[10px]"
-                                    >
-                                      {trace.stop_reason}
-                                    </Badge>
-                                  ) : null}
-                                </div>
-                                <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                                  <span>
-                                    {formatDateTime(trace.started_at_ms)}
-                                  </span>
-                                  <span>{trace.duration_ms ?? "-"} ms</span>
-                                  <span>{trace.total_tokens ?? 0} tokens</span>
-                                  {trace.status_code != null ? (
-                                    <span>HTTP {trace.status_code}</span>
-                                  ) : null}
-                                </div>
+                                ) : null}
+                                <span className="text-[11px] tabular-nums text-muted-foreground/80">
+                                  {trace.duration_ms ?? "-"}ms · {trace.total_tokens ?? 0} tok
+                                  {trace.status_code != null ? ` · HTTP ${trace.status_code}` : ""}
+                                </span>
+                              </div>
+                              <div className="shrink-0 text-[11px] text-muted-foreground/60">
+                                {formatDateTime(trace.started_at_ms)}
                               </div>
                             </div>
                             {trace.error ? (
