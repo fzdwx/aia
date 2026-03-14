@@ -1,12 +1,10 @@
-use std::convert::Infallible;
-
 use axum::{
     Json,
     extract::{Path, State},
     http::StatusCode,
     response::{
         IntoResponse,
-        sse::{Event, KeepAlive, Sse},
+        sse::{KeepAlive, Sse},
     },
 };
 use serde::{Deserialize, Serialize};
@@ -16,7 +14,7 @@ use std::collections::BTreeMap;
 
 use agent_core::{Role, StreamEvent};
 use agent_runtime::{RuntimeEvent, TurnLifecycle};
-use provider_registry::{ModelConfig, ProviderKind};
+use provider_registry::{ModelConfig, ModelLimit, ProviderKind};
 use session_tape::SessionProviderBinding;
 
 use crate::{
@@ -275,15 +273,33 @@ pub struct ProviderListItem {
     pub active: bool,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct ModelLimitDto {
+    pub context: Option<u32>,
+    pub output: Option<u32>,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ModelConfigDto {
     pub id: String,
     pub display_name: Option<String>,
-    pub context_window: Option<u32>,
+    pub limit: Option<ModelLimitDto>,
     pub default_temperature: Option<f32>,
     #[serde(default)]
     pub supports_reasoning: bool,
     pub reasoning_effort: Option<String>,
+}
+
+impl From<&ModelLimit> for ModelLimitDto {
+    fn from(limit: &ModelLimit) -> Self {
+        Self { context: limit.context, output: limit.output }
+    }
+}
+
+impl From<ModelLimitDto> for ModelLimit {
+    fn from(dto: ModelLimitDto) -> Self {
+        Self { context: dto.context, output: dto.output }
+    }
 }
 
 impl From<&ModelConfig> for ModelConfigDto {
@@ -291,7 +307,7 @@ impl From<&ModelConfig> for ModelConfigDto {
         Self {
             id: m.id.clone(),
             display_name: m.display_name.clone(),
-            context_window: m.context_window,
+            limit: m.limit.as_ref().map(ModelLimitDto::from),
             default_temperature: m.default_temperature,
             supports_reasoning: m.supports_reasoning,
             reasoning_effort: m.reasoning_effort.clone(),
@@ -304,7 +320,7 @@ impl From<ModelConfigDto> for ModelConfig {
         Self {
             id: dto.id,
             display_name: dto.display_name,
-            context_window: dto.context_window,
+            limit: dto.limit.map(ModelLimit::from),
             default_temperature: dto.default_temperature,
             supports_reasoning: dto.supports_reasoning,
             reasoning_effort: dto.reasoning_effort,
@@ -527,13 +543,18 @@ mod tests {
     use agent_core::{Message, ModelDisposition, ModelIdentity, Role, ToolCall, ToolResult};
     use agent_runtime::{AgentRuntime, TurnLifecycle};
     use builtin_tools::build_tool_registry;
-    use provider_registry::{ModelConfig, ProviderKind, ProviderProfile, ProviderRegistry};
+    use provider_registry::{
+        ModelConfig, ModelLimit, ProviderKind, ProviderProfile, ProviderRegistry,
+    };
     use session_tape::{SessionProviderBinding, SessionTape, TapeEntry};
     use tokio::sync::broadcast;
 
     use crate::{model::BootstrapModel, state::AppState};
 
-    use super::{prepare_runtime_sync, rebuild_turn_history_from_tape, sync_runtime_to_registry};
+    use super::{
+        ModelConfigDto, ModelLimitDto, prepare_runtime_sync, rebuild_turn_history_from_tape,
+        sync_runtime_to_registry,
+    };
 
     fn provider(name: &str, model: &str) -> ProviderProfile {
         ProviderProfile {
@@ -544,7 +565,7 @@ mod tests {
             models: vec![ModelConfig {
                 id: model.to_string(),
                 display_name: None,
-                context_window: None,
+                limit: Some(ModelLimit { context: Some(200_000), output: Some(131_072) }),
                 default_temperature: None,
                 supports_reasoning: false,
                 reasoning_effort: None,
@@ -655,7 +676,7 @@ mod tests {
             models: vec![ModelConfig {
                 id: "gpt-4.1-mini".to_string(),
                 display_name: None,
-                context_window: None,
+                limit: Some(ModelLimit { context: Some(200_000), output: Some(131_072) }),
                 default_temperature: None,
                 supports_reasoning: false,
                 reasoning_effort: None,
@@ -792,6 +813,24 @@ mod tests {
         assert_eq!(turns.len(), 1);
         assert_eq!(turns[0], legacy_turn);
     }
+
+    #[test]
+    fn model_config_dto_round_trip_preserves_limit() {
+        let dto = ModelConfigDto {
+            id: "gpt-4.1".into(),
+            display_name: Some("GPT-4.1".into()),
+            limit: Some(ModelLimitDto { context: Some(200_000), output: Some(131_072) }),
+            default_temperature: Some(0.2),
+            supports_reasoning: true,
+            reasoning_effort: Some("medium".into()),
+        };
+
+        let model = ModelConfig::from(dto.clone());
+        assert_eq!(model.limit, Some(ModelLimit { context: Some(200_000), output: Some(131_072) }));
+
+        let round_trip = ModelConfigDto::from(&model);
+        assert_eq!(round_trip.limit, dto.limit);
+    }
 }
 
 pub async fn get_history(State(state): State<SharedState>) -> impl IntoResponse {
@@ -801,20 +840,18 @@ pub async fn get_history(State(state): State<SharedState>) -> impl IntoResponse 
 }
 
 /// Global SSE endpoint — client connects once, receives all events.
-pub async fn events(
-    State(state): State<SharedState>,
-) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
+pub async fn events(State(state): State<SharedState>) -> impl IntoResponse {
     let rx = {
         let s = state.lock().expect("lock poisoned");
         s.broadcast_tx.subscribe()
     };
 
-    let stream = BroadcastStream::new(rx).filter_map(|result| match result {
+    let stream = BroadcastStream::new(rx).filter_map(move |result| match result {
         Ok(payload) => Some(payload.into_axum_event()),
         Err(_) => None, // lagged — skip missed events
     });
 
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    Sse::new(stream).keep_alive(KeepAlive::default()).into_response()
 }
 
 /// Fire-and-forget turn submission. Events arrive via the global SSE stream.

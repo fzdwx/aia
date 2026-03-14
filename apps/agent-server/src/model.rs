@@ -1,6 +1,6 @@
 use agent_core::{
     Completion, CompletionRequest, CoreError, LanguageModel, ModelDisposition, ModelIdentity,
-    StreamEvent,
+    ModelLimit, StreamEvent,
 };
 use openai_adapter::{
     OpenAiAdapterError, OpenAiChatCompletionsConfig, OpenAiChatCompletionsModel,
@@ -101,8 +101,14 @@ pub fn build_model_from_selection(
                 .or_else(|| profile.active_model.clone())
                 .unwrap_or_default();
             let reasoning_effort = model_config.and_then(|m| m.reasoning_effort.clone());
+            let limit = model_config.and_then(|m| {
+                m.limit
+                    .as_ref()
+                    .map(|limit| ModelLimit { context: limit.context, output: limit.output })
+            });
             let identity = ModelIdentity::new("openai", &model_id, ModelDisposition::Balanced)
-                .with_reasoning_effort(reasoning_effort);
+                .with_reasoning_effort(reasoning_effort)
+                .with_limit(limit);
             match profile.kind {
                 ProviderKind::OpenAiResponses => {
                     let config =

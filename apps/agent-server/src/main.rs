@@ -19,7 +19,6 @@ use session_tape::{SessionTape, default_session_path};
 use model::{ProviderLaunchChoice, build_model_from_selection};
 use state::AppState;
 
-const SERVER_DEFAULT_MAX_TURN_STEPS: usize = 50;
 const SERVER_DEFAULT_MAX_TOOL_CALLS_PER_TURN: usize = 50;
 
 fn choose_provider(registry: &ProviderRegistry, tape: &SessionTape) -> ProviderLaunchChoice {
@@ -71,7 +70,6 @@ async fn main() {
     let mut runtime = AgentRuntime::with_tape(model, tools, identity, tape)
         .with_instructions("你是 aia 的助手。给出清晰、结构化的答案。")
         .with_workspace_root(workspace_root)
-        .with_max_turn_steps(SERVER_DEFAULT_MAX_TURN_STEPS)
         .with_max_tool_calls_per_turn(SERVER_DEFAULT_MAX_TOOL_CALLS_PER_TURN);
 
     let subscriber = runtime.subscribe();
