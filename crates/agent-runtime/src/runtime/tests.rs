@@ -887,8 +887,11 @@ fn 成功轮会聚合成完整轮次块事件() {
                 &tool_invocations[0],
                 ToolInvocationLifecycle {
                     call,
+                    started_at_ms,
+                    finished_at_ms,
                     outcome: ToolInvocationOutcome::Succeeded { result },
-                } if result.invocation_id == call.invocation_id
+                } if started_at_ms <= finished_at_ms
+                    && result.invocation_id == call.invocation_id
             )
     )));
 }
@@ -928,8 +931,12 @@ fn 工具失败后成功收尾的轮次也会聚合完整块事件() {
                 &tool_invocations[0],
                 ToolInvocationLifecycle {
                     call,
+                    started_at_ms,
+                    finished_at_ms,
                     outcome: ToolInvocationOutcome::Failed { message },
-                } if call.tool_name == "search" && message.contains("工具结果不匹配")
+                } if started_at_ms <= finished_at_ms
+                    && call.tool_name == "search"
+                    && message.contains("工具结果不匹配")
             )
     )));
 }

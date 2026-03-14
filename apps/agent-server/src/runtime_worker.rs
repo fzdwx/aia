@@ -23,6 +23,8 @@ pub struct CurrentToolOutput {
     pub invocation_id: String,
     pub tool_name: String,
     pub arguments: serde_json::Value,
+    pub started_at_ms: u64,
+    pub finished_at_ms: Option<u64>,
     pub output: String,
     pub completed: bool,
     pub result_content: Option<String>,
@@ -509,6 +511,8 @@ fn update_current_turn_from_stream(
                         invocation_id: invocation_id.clone(),
                         tool_name: tool_name.clone(),
                         arguments: object_value(arguments),
+                        started_at_ms: now_timestamp_ms(),
+                        finished_at_ms: None,
                         output: String::new(),
                         completed: false,
                         result_content: None,
@@ -535,6 +539,8 @@ fn update_current_turn_from_stream(
                         invocation_id: invocation_id.clone(),
                         tool_name: String::new(),
                         arguments: json!({}),
+                        started_at_ms: now_timestamp_ms(),
+                        finished_at_ms: None,
                         output: text.clone(),
                         completed: false,
                         result_content: None,
@@ -562,6 +568,7 @@ fn update_current_turn_from_stream(
             ) {
                 tool.tool_name = tool_name.clone();
                 tool.completed = true;
+                tool.finished_at_ms = Some(now_timestamp_ms());
                 tool.result_content = Some(content.clone());
                 tool.result_details = details.clone();
                 tool.failed = Some(*failed);
@@ -690,6 +697,8 @@ impl TurnHistoryBuilder {
             });
             let invocation = agent_runtime::ToolInvocationLifecycle {
                 call,
+                started_at_ms: timestamp_ms,
+                finished_at_ms: timestamp_ms,
                 outcome: agent_runtime::ToolInvocationOutcome::Succeeded { result },
             };
             self.blocks
@@ -791,6 +800,8 @@ impl TurnHistoryBuilder {
                                 invocation_id: invocation.call.invocation_id,
                                 tool_name: invocation.call.tool_name,
                                 arguments: object_value(&invocation.call.arguments),
+                                started_at_ms: invocation.started_at_ms,
+                                finished_at_ms: Some(invocation.finished_at_ms),
                                 output: String::new(),
                                 completed: true,
                                 result_content,

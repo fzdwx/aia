@@ -11,7 +11,7 @@ use crate::{RuntimeEvent, ToolInvocationLifecycle, ToolInvocationOutcome};
 
 use super::{
     AgentRuntime, RuntimeError,
-    helpers::{PreviousToolCall, build_tool_source_entry_ids, tool_call_signature},
+    helpers::{PreviousToolCall, build_tool_source_entry_ids, now_timestamp_ms, tool_call_signature},
 };
 
 impl<M, T> AgentRuntime<M, T>
@@ -29,6 +29,7 @@ where
         source_entry_ids: &mut Vec<u64>,
         on_delta: &mut dyn FnMut(StreamEvent),
     ) -> Result<ToolInvocationLifecycle, RuntimeError> {
+        let started_at_ms = now_timestamp_ms();
         let available_tool_names = self
             .visible_tools()
             .into_iter()
@@ -43,6 +44,7 @@ where
                 assistant_entry_id,
                 tool_call_entry_id,
                 call,
+                started_at_ms,
                 source_entry_ids,
                 "tool_call_rejected",
                 runtime_error,
@@ -83,6 +85,7 @@ where
                         assistant_entry_id,
                         tool_call_entry_id,
                         call,
+                        started_at_ms,
                         source_entry_ids,
                         "tool_result_rejected",
                         runtime_error,
@@ -126,7 +129,12 @@ where
                     call: call.clone(),
                     outcome: outcome.clone(),
                 });
-                let lifecycle = ToolInvocationLifecycle { call: call.clone(), outcome };
+                let lifecycle = ToolInvocationLifecycle {
+                    call: call.clone(),
+                    started_at_ms,
+                    finished_at_ms: now_timestamp_ms(),
+                    outcome,
+                };
                 seen_tool_calls
                     .insert(call_signature, PreviousToolCall::from_outcome(&lifecycle.outcome));
                 Ok(lifecycle)
@@ -137,6 +145,7 @@ where
                     assistant_entry_id,
                     tool_call_entry_id,
                     call,
+                    started_at_ms,
                     source_entry_ids,
                     "tool_call_failed",
                     RuntimeError::tool(error),
@@ -155,6 +164,7 @@ where
         assistant_entry_id: Option<u64>,
         tool_call_entry_id: u64,
         call: &ToolCall,
+        started_at_ms: u64,
         source_entry_ids: &mut Vec<u64>,
         event_name: &str,
         runtime_error: RuntimeError,
@@ -194,6 +204,11 @@ where
             details: None,
             failed: true,
         });
-        Ok(ToolInvocationLifecycle { call: call.clone(), outcome })
+        Ok(ToolInvocationLifecycle {
+            call: call.clone(),
+            started_at_ms,
+            finished_at_ms: now_timestamp_ms(),
+            outcome,
+        })
     }
 }

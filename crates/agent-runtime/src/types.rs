@@ -17,6 +17,8 @@ pub type RuntimeSubscriberId = u64;
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ToolInvocationLifecycle {
     pub call: ToolCall,
+    pub started_at_ms: u64,
+    pub finished_at_ms: u64,
     pub outcome: ToolInvocationOutcome,
 }
 

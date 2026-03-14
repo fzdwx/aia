@@ -51,6 +51,9 @@ function getToolStats(details: Record<string, unknown> | undefined): {
   removed?: number
   lines?: number
   matches?: number
+  returned?: number
+  limit?: number
+  truncated?: boolean
   linesRead?: number
   totalLines?: number
   exitCode?: number
@@ -61,6 +64,10 @@ function getToolStats(details: Record<string, unknown> | undefined): {
     removed: typeof details.removed === "number" ? details.removed : undefined,
     lines: typeof details.lines === "number" ? details.lines : undefined,
     matches: typeof details.matches === "number" ? details.matches : undefined,
+    returned: typeof details.returned === "number" ? details.returned : undefined,
+    limit: typeof details.limit === "number" ? details.limit : undefined,
+    truncated:
+      typeof details.truncated === "boolean" ? details.truncated : undefined,
     linesRead:
       typeof details.lines_read === "number" ? details.lines_read : undefined,
     totalLines:
@@ -91,6 +98,8 @@ type ToolRowItem = {
   id: string
   toolName: string
   arguments: Record<string, unknown>
+  startedAtMs?: number
+  finishedAtMs?: number
   succeeded: boolean
   outputContent: string
   details?: Record<string, unknown>
@@ -103,6 +112,8 @@ function fromInvocation(inv: ToolInvocationLifecycle): ToolRowItem {
       id: call.invocation_id,
       toolName: call.tool_name,
       arguments: call.arguments,
+      startedAtMs: inv.started_at_ms,
+      finishedAtMs: inv.finished_at_ms,
       succeeded: true,
       outputContent: outcome.result.content,
       details: outcome.result.details,
@@ -112,6 +123,8 @@ function fromInvocation(inv: ToolInvocationLifecycle): ToolRowItem {
     id: call.invocation_id,
     toolName: call.tool_name,
     arguments: call.arguments,
+    startedAtMs: inv.started_at_ms,
+    finishedAtMs: inv.finished_at_ms,
     succeeded: false,
     outputContent: outcome.status === "failed" ? outcome.message : "",
   }
@@ -122,18 +135,46 @@ function fromStreamingTool(tool: StreamingToolOutput): ToolRowItem {
     id: tool.invocationId,
     toolName: tool.toolName,
     arguments: tool.arguments,
+    startedAtMs: tool.startedAtMs,
+    finishedAtMs: tool.finishedAtMs,
     succeeded: !tool.failed,
     outputContent: tool.resultContent ?? tool.output,
     details: tool.resultDetails,
   }
 }
 
+function formatDurationMs(
+  startedAtMs: number | undefined,
+  finishedAtMs?: number
+): string | null {
+  if (!startedAtMs) return null
+  const end = finishedAtMs ?? Date.now()
+  const duration = Math.max(0, end - startedAtMs)
+  if (duration < 1000) return `${duration} ms`
+  if (duration < 60_000) return `${(duration / 1000).toFixed(1)} s`
+  const minutes = Math.floor(duration / 60_000)
+  const seconds = Math.floor((duration % 60_000) / 1000)
+  return `${minutes}m ${seconds}s`
+}
+
 // --- Shared tool group + row ---
 
-function ToolGroup({ items }: { items: ToolRowItem[] }) {
-  const [open, setOpen] = useState(false)
+function ToolGroup({
+  items,
+  isStreaming = false,
+}: {
+  items: ToolRowItem[]
+  isStreaming?: boolean
+}) {
+  const [open, setOpen] = useState(isStreaming)
   const allSucceeded = items.every((item) => item.succeeded)
   const summary = buildCategorySummary(items)
+
+  useEffect(() => {
+    if (isStreaming) {
+      setOpen(true)
+    }
+  }, [isStreaming])
 
   return (
     <div className="mb-3">
@@ -141,12 +182,16 @@ function ToolGroup({ items }: { items: ToolRowItem[] }) {
         onClick={() => setOpen(!open)}
         className="flex items-center gap-1.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
       >
-        <span className="font-medium">Explored</span>
-        <span className="text-muted-foreground/70">
-          {summary
-            .map((s) => `${s.count} ${s.label}${s.count > 1 ? "s" : ""}`)
-            .join(", ")}
+        <span className="font-medium">
+          {isStreaming ? "Exploring" : "Explored"}
         </span>
+        {!open && (
+          <span className="text-muted-foreground/70">
+            {summary
+              .map((s) => `${s.count} ${s.label}${s.count > 1 ? "s" : ""}`)
+              .join(", ")}
+          </span>
+        )}
         {allSucceeded && <Check className="size-3.5 text-emerald-500/70" />}
       </button>
       {open && (
@@ -163,7 +208,12 @@ function ToolGroup({ items }: { items: ToolRowItem[] }) {
 function ToolRow({ item }: { item: ToolRowItem }) {
   const [showOutput, setShowOutput] = useState(false)
   const stats = getToolStats(item.details)
-  const displayPath = getToolDisplayPath(item.details, item.arguments)
+  const displayPath = getToolDisplayPath(
+    item.toolName,
+    item.details,
+    item.arguments
+  )
+  const duration = formatDurationMs(item.startedAtMs, item.finishedAtMs)
 
   return (
     <div>
@@ -174,7 +224,10 @@ function ToolRow({ item }: { item: ToolRowItem }) {
         <span className="shrink-0 font-medium text-muted-foreground/70">
           {item.toolName}
         </span>
-        <span className="truncate">{displayPath}</span>
+        <span className="min-w-0 flex-1 truncate">{displayPath}</span>
+        {duration && (
+          <span className="shrink-0 text-muted-foreground/50">{duration}</span>
+        )}
         {stats.added != null && (
           <span className="shrink-0 text-emerald-500">+{stats.added}</span>
         )}
@@ -187,6 +240,11 @@ function ToolRow({ item }: { item: ToolRowItem }) {
         {stats.matches != null && (
           <span className="shrink-0 text-muted-foreground/50">
             {stats.matches} matches
+          </span>
+        )}
+        {stats.truncated && stats.matches != null && (
+          <span className="shrink-0 text-amber-600/80">
+            {stats.matches} matches (showing {stats.returned})
           </span>
         )}
         {stats.linesRead != null && stats.totalLines != null && (
@@ -265,7 +323,7 @@ function StreamingToolGroup({
   return (
     <div className="mb-2">
       {completed.length > 0 && (
-        <ToolGroup items={completed.map(fromStreamingTool)} />
+        <ToolGroup items={completed.map(fromStreamingTool)} isStreaming />
       )}
 
       {active.length > 0 && (
@@ -290,9 +348,12 @@ function StreamingToolGroup({
                 {tool.toolName && (
                   <span className="shrink-0 font-medium">{tool.toolName}</span>
                 )}
-                <span className="truncate">
-                  {getToolDisplayPath(undefined, tool.arguments) ||
+                <span className="min-w-0 flex-1 truncate">
+                  {getToolDisplayPath(tool.toolName, undefined, tool.arguments) ||
                     tool.invocationId}
+                </span>
+                <span className="shrink-0 text-muted-foreground/50">
+                  {formatDurationMs(tool.startedAtMs, tool.finishedAtMs) ?? "0 ms"}
                 </span>
               </div>
             ))}
@@ -362,9 +423,6 @@ const STATUS_LABELS: Record<StreamingTurn["status"], string> = {
 }
 
 function StatusIndicator({ status }: { status: StreamingTurn["status"] }) {
-  // Working status has its own UI (StreamingToolGroup)
-  if (status === "working") return null
-
   return (
     <div className="py-2">
       <Shimmer as="span" className="text-[14px] font-medium" duration={2}>

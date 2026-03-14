@@ -5,12 +5,25 @@ mod read;
 mod shell;
 mod write;
 
+use ignore::DirEntry;
+
 pub use edit::EditTool;
 pub use glob::GlobTool;
 pub use grep::GrepTool;
 pub use read::ReadTool;
 pub use shell::ShellTool;
 pub use write::WriteTool;
+
+pub fn should_skip_directory(entry: &DirEntry) -> bool {
+    if entry.depth() == 0 || !entry.file_type().is_some_and(|ft| ft.is_dir()) {
+        return false;
+    }
+
+    matches!(
+        entry.file_name().to_str(),
+        Some(".git" | "node_modules" | "target")
+    )
+}
 
 use agent_core::ToolRegistry;
 

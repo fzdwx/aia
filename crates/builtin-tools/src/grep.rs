@@ -4,7 +4,11 @@ use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
 
+use crate::should_skip_directory;
+
 pub struct GrepTool;
+const DEFAULT_MATCH_LIMIT: usize = 200;
+const MAX_MATCH_LIMIT: usize = 1000;
 
 impl Tool for GrepTool {
     fn name(&self) -> &str {
@@ -14,7 +18,9 @@ impl Tool for GrepTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "grep".into(),
-            description: "Search file contents with regex (respects .gitignore)".into(),
+            description:
+                "Search file contents with regex (respects .gitignore and skips .git/node_modules/target)"
+                    .into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -29,6 +35,10 @@ impl Tool for GrepTool {
                     "glob": {
                         "type": "string",
                         "description": "File glob filter (e.g. *.rs)"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum matched files to return (default 200, max 1000)"
                     }
                 },
                 "required": ["pattern"],
@@ -44,6 +54,7 @@ impl Tool for GrepTool {
         context: &ToolExecutionContext,
     ) -> Result<ToolResult, CoreError> {
         let pattern = call.str_arg("pattern")?;
+        let limit = call.opt_usize_arg("limit").unwrap_or(DEFAULT_MATCH_LIMIT).min(MAX_MATCH_LIMIT);
         let base = call
             .opt_str_arg("path")
             .map(|p| context.resolve_path(&p))
@@ -55,6 +66,7 @@ impl Tool for GrepTool {
             .map_err(|e| CoreError::new(format!("invalid regex pattern: {e}")))?;
 
         let mut walker_builder = ignore::WalkBuilder::new(&base);
+        walker_builder.filter_entry(|entry| !should_skip_directory(entry));
         if let Some(ref glob_pat) = glob_filter {
             let mut overrides = ignore::overrides::OverrideBuilder::new(&base);
             overrides
@@ -91,9 +103,31 @@ impl Tool for GrepTool {
         }
 
         let match_count = matched_files.len();
-        Ok(ToolResult::from_call(call, matched_files.join("\n")).with_details(serde_json::json!({
+        let returned = matched_files.len().min(limit);
+        let truncated = match_count > limit;
+        Ok(ToolResult::from_call(
+            call,
+            matched_files.into_iter().take(limit).collect::<Vec<_>>().join("\n"),
+        )
+        .with_details(serde_json::json!({
             "pattern": pattern,
             "matches": match_count,
+            "returned": returned,
+            "limit": limit,
+            "truncated": truncated,
         })))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grep_tool_definition_mentions_gitignore_and_common_ignores() {
+        let definition = GrepTool.definition();
+
+        assert!(definition.description.contains(".gitignore"));
+        assert!(definition.description.contains("node_modules"));
     }
 }

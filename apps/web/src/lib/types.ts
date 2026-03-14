@@ -47,6 +47,8 @@ export type ToolCall = {
 
 export type ToolInvocationLifecycle = {
   call: ToolCall
+  started_at_ms: number
+  finished_at_ms: number
   outcome: ToolInvocationOutcome
 }
 
@@ -91,6 +93,8 @@ export type CurrentToolOutput = {
   invocation_id: string
   tool_name: string
   arguments: Record<string, unknown>
+  started_at_ms: number
+  finished_at_ms: number | null
   output: string
   completed: boolean
   result_content: string | null
@@ -115,6 +119,8 @@ export type StreamingToolOutput = {
   invocationId: string
   toolName: string
   arguments: Record<string, unknown>
+  startedAtMs: number
+  finishedAtMs?: number
   output: string
   completed: boolean
   resultContent?: string

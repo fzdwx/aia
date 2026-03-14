@@ -5,7 +5,11 @@ use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
 
+use crate::should_skip_directory;
+
 pub struct GlobTool;
+const DEFAULT_MATCH_LIMIT: usize = 200;
+const MAX_MATCH_LIMIT: usize = 1000;
 
 impl Tool for GlobTool {
     fn name(&self) -> &str {
@@ -15,7 +19,9 @@ impl Tool for GlobTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "glob".into(),
-            description: "Find files matching a glob pattern (respects .gitignore)".into(),
+            description:
+                "Find files matching a glob pattern (respects .gitignore and skips .git/node_modules/target)"
+                    .into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -26,6 +32,10 @@ impl Tool for GlobTool {
                     "path": {
                         "type": "string",
                         "description": "Base directory to search in"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum matched files to return (default 200, max 1000)"
                     }
                 },
                 "required": ["pattern"],
@@ -41,6 +51,7 @@ impl Tool for GlobTool {
         context: &ToolExecutionContext,
     ) -> Result<ToolResult, CoreError> {
         let pattern = call.str_arg("pattern")?;
+        let limit = call.opt_usize_arg("limit").unwrap_or(DEFAULT_MATCH_LIMIT).min(MAX_MATCH_LIMIT);
         let base = call
             .opt_str_arg("path")
             .map(|p| context.resolve_path(&p))
@@ -51,7 +62,9 @@ impl Tool for GlobTool {
             .map_err(|e| CoreError::new(format!("invalid glob pattern: {e}")))?
             .compile_matcher();
 
-        let walker = ignore::WalkBuilder::new(&base).build();
+        let mut builder = ignore::WalkBuilder::new(&base);
+        builder.filter_entry(|entry| !should_skip_directory(entry));
+        let walker = builder.build();
 
         let mut entries: Vec<(PathBuf, SystemTime)> = Vec::new();
         for entry in walker {
@@ -74,12 +87,33 @@ impl Tool for GlobTool {
         entries.sort_by(|a, b| b.1.cmp(&a.1));
 
         let match_count = entries.len();
-        let result =
-            entries.iter().map(|(p, _)| p.display().to_string()).collect::<Vec<_>>().join("\n");
+        let returned = entries.len().min(limit);
+        let truncated = match_count > limit;
+        let result = entries
+            .iter()
+            .take(limit)
+            .map(|(p, _)| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
 
         Ok(ToolResult::from_call(call, result).with_details(serde_json::json!({
             "pattern": pattern,
             "matches": match_count,
+            "returned": returned,
+            "limit": limit,
+            "truncated": truncated,
         })))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn glob_tool_definition_mentions_gitignore_and_common_ignores() {
+        let definition = GlobTool.definition();
+
+        assert!(definition.description.contains(".gitignore"));
     }
 }
