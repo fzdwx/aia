@@ -1,6 +1,8 @@
-import { Fragment, useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Check, X as XIcon } from "lucide-react"
+import { MarkdownContent } from "@/components/markdown-content"
 import { Shimmer } from "@/components/ai-elements/shimmer"
+import { getToolDisplayPath } from "@/lib/tool-display"
 import { useChatStore } from "@/stores/chat-store"
 import type {
   StreamingToolOutput,
@@ -9,72 +11,6 @@ import type {
   TurnBlock,
   TurnLifecycle,
 } from "@/lib/types"
-
-// --- Markdown rendering ---
-
-function renderInline(text: string) {
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g)
-  return parts.map((part, i) => {
-    if (part.startsWith("**") && part.endsWith("**")) {
-      return (
-        <strong key={i} className="font-semibold text-foreground">
-          {part.slice(2, -2)}
-        </strong>
-      )
-    }
-    if (part.startsWith("`") && part.endsWith("`")) {
-      return (
-        <code
-          key={i}
-          className="rounded-[4px] bg-muted px-1.5 py-0.5 font-mono text-[0.85em]"
-        >
-          {part.slice(1, -1)}
-        </code>
-      )
-    }
-    return <Fragment key={i}>{part}</Fragment>
-  })
-}
-
-function MarkdownContent({ content }: { content: string }) {
-  const segments = content.split(/(```[\s\S]*?```)/g)
-
-  return (
-    <>
-      {segments.map((segment, i) => {
-        if (segment.startsWith("```")) {
-          const inner = segment.slice(3, -3)
-          const firstNewline = inner.indexOf("\n")
-          const code = firstNewline >= 0 ? inner.slice(firstNewline + 1) : inner
-          return (
-            <pre
-              key={i}
-              className="my-3 overflow-x-auto rounded-lg border border-border/40 bg-muted/60 p-4 font-mono text-[13px] leading-relaxed"
-            >
-              <code>{code}</code>
-            </pre>
-          )
-        }
-
-        const paragraphs = segment.split(/\n\n+/)
-        return paragraphs.map((para, j) => {
-          if (!para.trim()) return null
-          const lines = para.split("\n")
-          return (
-            <p key={`${i}-${j}`} className="mb-2.5 last:mb-0">
-              {lines.map((line, k) => (
-                <Fragment key={k}>
-                  {k > 0 && <br />}
-                  {renderInline(line)}
-                </Fragment>
-              ))}
-            </p>
-          )
-        })
-      })}
-    </>
-  )
-}
 
 // --- Tool categorization & labeling ---
 
@@ -107,23 +43,6 @@ const CATEGORY_LABELS: Record<ToolCategory, string> = {
 
 function categorize(toolName: string): ToolCategory {
   return TOOL_CATEGORIES[toolName.toLowerCase()] ?? "other"
-}
-
-/** Extract display label from tool details (backend-provided) or fallback to first arg */
-function getToolDisplayPath(
-  details: Record<string, unknown> | undefined,
-  args: Record<string, unknown>
-): string {
-  if (details) {
-    if (typeof details.file_path === "string") return details.file_path
-    if (typeof details.pattern === "string") return details.pattern
-    if (typeof details.command === "string") return details.command
-  }
-  // fallback: first string arg
-  const firstStr = Object.values(args).find((v) => typeof v === "string") as
-    | string
-    | undefined
-  return firstStr ?? ""
 }
 
 /** Extract diff/line stats from backend details */
@@ -389,11 +308,7 @@ function BlockRenderer({ block }: { block: TurnBlock }) {
     case "thinking":
       return <ThinkingBlock content={block.content} />
     case "assistant":
-      return (
-        <div className="text-[14px] leading-[1.75] text-foreground/85">
-          <MarkdownContent content={block.content} />
-        </div>
-      )
+      return <MarkdownContent content={block.content} />
     case "failure":
       return (
         <div className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-[13px] text-destructive">
@@ -532,14 +447,7 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
           if (group.type === "tools") {
             return <StreamingToolGroup key={i} toolOutputs={group.tools} />
           }
-          return (
-            <div
-              key={i}
-              className="text-[14px] leading-[1.75] text-foreground/85"
-            >
-              <MarkdownContent content={group.content} />
-            </div>
-          )
+          return <MarkdownContent key={i} content={group.content} streaming />
         })}
       </div>
     </div>
