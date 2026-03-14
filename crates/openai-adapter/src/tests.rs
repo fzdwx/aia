@@ -5,9 +5,9 @@ use std::{
 };
 
 use agent_core::{
-    CompletionRequest, CompletionSegment, ConversationItem, LanguageModel, Message,
-    ModelCheckpoint, ModelDisposition, ModelIdentity, Role, StreamEvent, ToolCall, ToolDefinition,
-    ToolResult,
+    CompletionRequest, CompletionSegment, CompletionStopReason, ConversationItem, LanguageModel,
+    Message, ModelCheckpoint, ModelDisposition, ModelIdentity, Role, StreamEvent, ToolCall,
+    ToolDefinition, ToolResult,
 };
 use serde_json::{Value, json};
 
@@ -188,6 +188,7 @@ fn 响应体可解析文本与工具调用() {
         .expect("响应解析成功");
 
     assert_eq!(completion.plain_text(), "第一段\n第二段");
+    assert_eq!(completion.stop_reason, CompletionStopReason::ToolUse);
     assert!(completion.segments.iter().any(|segment| matches!(
         segment,
         agent_core::CompletionSegment::ToolUse(ToolCall { tool_name, response_id, .. })
@@ -230,6 +231,7 @@ fn 响应体可解析推理摘要() {
 
     assert_eq!(completion.thinking_text(), Some("我先分析需求，然后给出方案".into()));
     assert_eq!(completion.plain_text(), "这是回答");
+    assert_eq!(completion.stop_reason, CompletionStopReason::Stop);
 }
 
 #[test]
@@ -263,6 +265,7 @@ fn 可通过本地假服务完成一次真实调用() {
 
     handle.join().expect("服务线程退出");
     assert_eq!(completion.plain_text(), "来自假服务");
+    assert_eq!(completion.stop_reason, CompletionStopReason::Stop);
 }
 
 #[test]
@@ -661,6 +664,7 @@ fn 聊天补全响应体可解析文本与工具调用() {
         .expect("响应解析成功");
 
     assert_eq!(completion.plain_text(), "第一段\n第二段");
+    assert_eq!(completion.stop_reason, CompletionStopReason::ToolUse);
     assert!(completion.segments.iter().any(|segment| matches!(
         segment,
         agent_core::CompletionSegment::ToolUse(ToolCall { tool_name, invocation_id, .. })
@@ -702,6 +706,7 @@ fn 聊天补全可通过本地假服务完成一次真实调用() {
 
     handle.join().expect("服务线程退出");
     assert_eq!(completion.plain_text(), "来自聊天补全假服务");
+    assert_eq!(completion.stop_reason, CompletionStopReason::Stop);
 }
 
 #[test]
@@ -748,6 +753,7 @@ fn 聊天补全流式调用可逐段收到文本与工具() {
     handle.join().expect("服务线程退出");
     assert_eq!(completion.thinking_text(), Some("先分析".into()));
     assert_eq!(completion.plain_text(), "答案");
+    assert_eq!(completion.stop_reason, CompletionStopReason::ToolUse);
     assert!(completion.segments.iter().any(|segment| matches!(
         segment,
         CompletionSegment::ToolUse(ToolCall { tool_name, invocation_id, .. })

@@ -17,6 +17,7 @@ pub enum SsePayload {
     Stream(StreamEvent),
     Status(TurnStatus),
     TurnCompleted(TurnLifecycle),
+    ContextCompressed { summary: String },
     Error(String),
 }
 
@@ -28,6 +29,11 @@ struct StatusData {
 #[derive(Serialize)]
 struct ErrorData {
     message: String,
+}
+
+#[derive(Serialize)]
+struct ContextCompressedData {
+    summary: String,
 }
 
 impl SsePayload {
@@ -44,6 +50,11 @@ impl SsePayload {
             Self::TurnCompleted(turn) => {
                 let data = serde_json::to_string(&turn).unwrap_or_default();
                 Ok(Event::default().event("turn_completed").data(data))
+            }
+            Self::ContextCompressed { summary } => {
+                let data =
+                    serde_json::to_string(&ContextCompressedData { summary }).unwrap_or_default();
+                Ok(Event::default().event("context_compressed").data(data))
             }
             Self::Error(message) => {
                 let data = serde_json::to_string(&ErrorData { message }).unwrap_or_default();

@@ -2,6 +2,8 @@ use agent_core::{
     CompletionRequest, ConversationItem, LanguageModel, ToolDefinition, ToolExecutor,
 };
 
+use crate::ContextStats;
+
 use super::{AgentRuntime, helpers::anchor_state_message};
 
 const CONTEXT_HEADROOM_SAFETY_TOKENS: u32 = 32;
@@ -118,5 +120,49 @@ where
 
     fn approximate_text_units(text: &str) -> u32 {
         text.chars().count().min(u32::MAX as usize) as u32
+    }
+
+    pub fn context_stats(&self) -> ContextStats {
+        let view = self.tape.default_view();
+        let anchors = self.tape.anchors();
+        let anchor_count = anchors.len();
+        let entries_since_last_anchor = view.entries.len();
+        let total_entries = self.tape.entries().len();
+
+        let available_tools = self.visible_tools();
+        let instructions = self.instructions.as_ref().filter(|text| !text.is_empty()).cloned();
+        let estimated_context_units = Self::approximate_request_units(
+            instructions.as_deref(),
+            &view.conversation,
+            &available_tools,
+        );
+
+        let context_limit = self.model_identity.limit.as_ref().and_then(|limit| limit.context);
+        let output_limit = self.model_identity.limit.as_ref().and_then(|limit| limit.output);
+        let pressure_ratio =
+            context_limit.map(|limit| estimated_context_units as f64 / limit as f64);
+
+        ContextStats {
+            total_entries,
+            anchor_count,
+            entries_since_last_anchor,
+            estimated_context_units,
+            context_limit,
+            output_limit,
+            pressure_ratio,
+        }
+    }
+
+    pub(super) fn context_pressure_ratio(&self) -> Option<f64> {
+        let context_limit = self.model_identity.limit.as_ref().and_then(|limit| limit.context)?;
+        let view = self.tape.default_view();
+        let available_tools = self.visible_tools();
+        let instructions = self.instructions.as_ref().filter(|text| !text.is_empty()).cloned();
+        let estimated = Self::approximate_request_units(
+            instructions.as_deref(),
+            &view.conversation,
+            &available_tools,
+        );
+        Some(estimated as f64 / context_limit as f64)
     }
 }

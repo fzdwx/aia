@@ -1,3 +1,4 @@
+mod compress;
 mod error;
 mod events;
 mod finalize;
@@ -18,6 +19,7 @@ use crate::{RuntimeEvent, RuntimeSubscriberId};
 pub use self::error::RuntimeError;
 
 const DEFAULT_MAX_TOOL_CALLS_PER_TURN: usize = 50;
+const DEFAULT_CONTEXT_PRESSURE_THRESHOLD: f64 = 0.80;
 
 pub struct AgentRuntime<M, T> {
     model: M,
@@ -28,6 +30,7 @@ pub struct AgentRuntime<M, T> {
     disabled_tools: BTreeSet<String>,
     workspace_root: Option<std::path::PathBuf>,
     max_tool_calls_per_turn: usize,
+    context_pressure_threshold: f64,
     events: Vec<RuntimeEvent>,
     subscribers: BTreeMap<RuntimeSubscriberId, usize>,
     next_subscriber_id: RuntimeSubscriberId,
@@ -52,6 +55,7 @@ where
             disabled_tools: BTreeSet::new(),
             workspace_root: None,
             max_tool_calls_per_turn: DEFAULT_MAX_TOOL_CALLS_PER_TURN,
+            context_pressure_threshold: DEFAULT_CONTEXT_PRESSURE_THRESHOLD,
             events: Vec::new(),
             subscribers: BTreeMap::new(),
             next_subscriber_id: 1,
@@ -70,6 +74,11 @@ where
 
     pub fn with_max_tool_calls_per_turn(mut self, max_tool_calls_per_turn: usize) -> Self {
         self.max_tool_calls_per_turn = max_tool_calls_per_turn.max(1);
+        self
+    }
+
+    pub fn with_context_pressure_threshold(mut self, threshold: f64) -> Self {
+        self.context_pressure_threshold = threshold.clamp(0.0, 1.0);
         self
     }
 

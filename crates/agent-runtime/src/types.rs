@@ -1,6 +1,17 @@
 use agent_core::{Completion, ToolCall, ToolDefinition, ToolResult};
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ContextStats {
+    pub total_entries: usize,
+    pub anchor_count: usize,
+    pub entries_since_last_anchor: usize,
+    pub estimated_context_units: u32,
+    pub context_limit: Option<u32>,
+    pub output_limit: Option<u32>,
+    pub pressure_ratio: Option<f64>,
+}
+
 pub type RuntimeSubscriberId = u64;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -47,6 +58,7 @@ pub enum RuntimeEvent {
     ToolInvocation { call: ToolCall, outcome: ToolInvocationOutcome },
     TurnLifecycle { turn: TurnLifecycle },
     TurnFailed { message: String },
+    ContextCompressed { summary: String },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

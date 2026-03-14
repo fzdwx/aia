@@ -4,7 +4,17 @@ use serde::Deserialize;
 pub(crate) struct ResponsesResponse {
     #[serde(default)]
     pub id: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub incomplete_details: Option<ResponsesIncompleteDetails>,
     pub output: Vec<ResponsesOutput>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct ResponsesIncompleteDetails {
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -49,6 +59,8 @@ pub(crate) struct ChatCompletionsResponse {
 #[derive(Deserialize)]
 pub(crate) struct ChatCompletionChoice {
     pub message: ChatCompletionMessage,
+    #[serde(default)]
+    pub finish_reason: Option<String>,
 }
 
 #[derive(Deserialize)]

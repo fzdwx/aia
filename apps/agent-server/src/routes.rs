@@ -13,7 +13,7 @@ use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 use std::collections::BTreeMap;
 
 use agent_core::{Role, StreamEvent};
-use agent_runtime::{RuntimeEvent, TurnLifecycle};
+use agent_runtime::{ContextStats, RuntimeEvent, TurnLifecycle};
 use provider_registry::{ModelConfig, ModelLimit, ProviderKind};
 use session_tape::SessionProviderBinding;
 
@@ -26,6 +26,12 @@ use crate::{
 #[derive(Deserialize)]
 pub struct TurnRequest {
     pub prompt: String,
+}
+
+#[derive(Deserialize)]
+pub struct HandoffRequest {
+    pub name: String,
+    pub summary: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -261,6 +267,30 @@ fn parse_iso8601_utc_seconds(input: &str) -> Option<u64> {
     let total_seconds = days_since_epoch * 86_400 + hour * 3_600 + minute * 60 + second;
 
     (total_seconds >= 0).then_some((total_seconds as u64) * 1000)
+}
+
+fn broadcast_runtime_events(
+    events: Vec<RuntimeEvent>,
+    broadcast_tx: &tokio::sync::broadcast::Sender<SsePayload>,
+) -> Option<TurnLifecycle> {
+    let mut turn = None;
+
+    for event in events {
+        match event {
+            RuntimeEvent::TurnLifecycle { turn: lifecycle } => {
+                turn = Some(lifecycle);
+            }
+            RuntimeEvent::ContextCompressed { summary } => {
+                let _ = broadcast_tx.send(SsePayload::ContextCompressed { summary });
+            }
+            RuntimeEvent::UserMessage { .. }
+            | RuntimeEvent::AssistantMessage { .. }
+            | RuntimeEvent::ToolInvocation { .. }
+            | RuntimeEvent::TurnFailed { .. } => {}
+        }
+    }
+
+    turn
 }
 
 #[derive(Serialize)]
@@ -541,7 +571,7 @@ mod tests {
     use std::path::PathBuf;
 
     use agent_core::{Message, ModelDisposition, ModelIdentity, Role, ToolCall, ToolResult};
-    use agent_runtime::{AgentRuntime, TurnLifecycle};
+    use agent_runtime::{AgentRuntime, RuntimeEvent, TurnLifecycle};
     use builtin_tools::build_tool_registry;
     use provider_registry::{
         ModelConfig, ModelLimit, ProviderKind, ProviderProfile, ProviderRegistry,
@@ -549,11 +579,11 @@ mod tests {
     use session_tape::{SessionProviderBinding, SessionTape, TapeEntry};
     use tokio::sync::broadcast;
 
-    use crate::{model::BootstrapModel, state::AppState};
+    use crate::{model::BootstrapModel, sse::SsePayload, state::AppState};
 
     use super::{
-        ModelConfigDto, ModelLimitDto, prepare_runtime_sync, rebuild_turn_history_from_tape,
-        sync_runtime_to_registry,
+        ModelConfigDto, ModelLimitDto, broadcast_runtime_events, prepare_runtime_sync,
+        rebuild_turn_history_from_tape, sync_runtime_to_registry,
     };
 
     fn provider(name: &str, model: &str) -> ProviderProfile {
@@ -831,6 +861,65 @@ mod tests {
         let round_trip = ModelConfigDto::from(&model);
         assert_eq!(round_trip.limit, dto.limit);
     }
+
+    #[test]
+    fn broadcast_runtime_events_forwards_context_compression_and_turn() {
+        let (broadcast_tx, mut broadcast_rx) = broadcast::channel(8);
+        let turn = TurnLifecycle {
+            turn_id: "turn-1".to_string(),
+            started_at_ms: 1000,
+            finished_at_ms: 2000,
+            source_entry_ids: vec![1, 2, 3],
+            user_message: "你好".to_string(),
+            blocks: vec![agent_runtime::TurnBlock::Assistant { content: "已完成".to_string() }],
+            assistant_message: Some("已完成".to_string()),
+            thinking: None,
+            tool_invocations: vec![],
+            failure_message: Some("模型执行失败：上下文过长".to_string()),
+        };
+
+        let forwarded_turn = broadcast_runtime_events(
+            vec![
+                RuntimeEvent::ContextCompressed {
+                    summary: "摘要：已压缩历史上下文".to_string()
+                },
+                RuntimeEvent::TurnLifecycle { turn: turn.clone() },
+            ],
+            &broadcast_tx,
+        );
+
+        assert_eq!(forwarded_turn, Some(turn));
+        assert!(matches!(
+            broadcast_rx.try_recv().expect("应先转发压缩事件"),
+            SsePayload::ContextCompressed { summary } if summary == "摘要：已压缩历史上下文"
+        ));
+    }
+}
+
+pub async fn get_session_info(State(state): State<SharedState>) -> Json<ContextStats> {
+    let s = state.lock().expect("lock poisoned");
+    Json(s.runtime.context_stats())
+}
+
+pub async fn create_handoff(
+    State(state): State<SharedState>,
+    Json(body): Json<HandoffRequest>,
+) -> impl IntoResponse {
+    let mut s = state.lock().expect("lock poisoned");
+    let handoff = s.runtime.handoff(
+        &body.name,
+        serde_json::json!({
+            "phase": body.name,
+            "summary": body.summary,
+            "next_steps": [],
+            "source_entry_ids": [],
+            "owner": "user"
+        }),
+    );
+    if let Err(e) = s.runtime.tape().save_jsonl(&s.session_path) {
+        eprintln!("session save failed: {e}");
+    }
+    (StatusCode::OK, Json(serde_json::json!({ "anchor_entry_id": handoff.anchor.entry_id })))
 }
 
 pub async fn get_history(State(state): State<SharedState>) -> impl IntoResponse {
@@ -897,10 +986,7 @@ pub async fn submit_turn(
                 let mut s = state.lock().expect("lock poisoned");
                 let sub = s.subscriber;
                 let events = s.runtime.collect_events(sub).unwrap_or_default();
-                let turn = events.into_iter().find_map(|event| match event {
-                    RuntimeEvent::TurnLifecycle { turn } => Some(turn),
-                    _ => None,
-                });
+                let turn = broadcast_runtime_events(events, &broadcast_tx);
                 if let Some(turn) = turn {
                     let _ = broadcast_tx.send(SsePayload::TurnCompleted(turn));
                 }
@@ -909,6 +995,16 @@ pub async fn submit_turn(
                 }
             }
             Err(error) => {
+                let mut s = state.lock().expect("lock poisoned");
+                let sub = s.subscriber;
+                let events = s.runtime.collect_events(sub).unwrap_or_default();
+                let turn = broadcast_runtime_events(events, &broadcast_tx);
+                if let Some(turn) = turn {
+                    let _ = broadcast_tx.send(SsePayload::TurnCompleted(turn));
+                }
+                if let Err(e) = s.runtime.tape().save_jsonl(&s.session_path) {
+                    eprintln!("session save failed: {e}");
+                }
                 let _ = broadcast_tx.send(SsePayload::Error(error.to_string()));
             }
         }

@@ -45,6 +45,7 @@ where
                 source_entry_ids,
                 "tool_call_skipped_duplicate",
                 RuntimeError::duplicate_tool_call(call, previous),
+                on_delta,
             );
         }
 
@@ -58,6 +59,7 @@ where
                 source_entry_ids,
                 "tool_call_rejected",
                 runtime_error,
+                on_delta,
             );
             seen_tool_calls
                 .insert(call_signature, PreviousToolCall::from_outcome(&lifecycle.outcome));
@@ -97,6 +99,7 @@ where
                         source_entry_ids,
                         "tool_result_rejected",
                         runtime_error,
+                        on_delta,
                     );
                     seen_tool_calls
                         .insert(call_signature, PreviousToolCall::from_outcome(&lifecycle.outcome));
@@ -123,6 +126,14 @@ where
                 );
                 source_entry_ids.push(tool_result_event_id);
 
+                on_delta(StreamEvent::ToolCallCompleted {
+                    invocation_id: call.invocation_id.clone(),
+                    tool_name: call.tool_name.clone(),
+                    content: result.content.clone(),
+                    details: result.details.clone(),
+                    failed: false,
+                });
+
                 let outcome = ToolInvocationOutcome::Succeeded { result: result.clone() };
                 self.publish_event(RuntimeEvent::ToolInvocation {
                     call: call.clone(),
@@ -142,6 +153,7 @@ where
                     source_entry_ids,
                     "tool_call_failed",
                     RuntimeError::tool(error),
+                    on_delta,
                 );
                 seen_tool_calls
                     .insert(call_signature, PreviousToolCall::from_outcome(&lifecycle.outcome));
@@ -159,6 +171,7 @@ where
         source_entry_ids: &mut Vec<u64>,
         event_name: &str,
         runtime_error: RuntimeError,
+        on_delta: &mut dyn FnMut(StreamEvent),
     ) -> ToolInvocationLifecycle {
         let failure_message = runtime_error.to_string();
         let failed_result = ToolResult::from_call(call, failure_message.clone());
@@ -186,6 +199,13 @@ where
         self.publish_event(RuntimeEvent::ToolInvocation {
             call: call.clone(),
             outcome: outcome.clone(),
+        });
+        on_delta(StreamEvent::ToolCallCompleted {
+            invocation_id: call.invocation_id.clone(),
+            tool_name: call.tool_name.clone(),
+            content: failure_message.clone(),
+            details: None,
+            failed: true,
         });
         ToolInvocationLifecycle { call: call.clone(), outcome }
     }

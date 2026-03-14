@@ -71,6 +71,13 @@ pub enum StreamEvent {
     TextDelta { text: String },
     ToolCallStarted { invocation_id: String, tool_name: String, arguments: serde_json::Value },
     ToolOutputDelta { invocation_id: String, stream: ToolOutputStream, text: String },
+    ToolCallCompleted {
+        invocation_id: String,
+        tool_name: String,
+        content: String,
+        details: Option<serde_json::Value>,
+        failed: bool,
+    },
     Log { text: String },
     Done,
 }

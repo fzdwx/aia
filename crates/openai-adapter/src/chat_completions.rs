@@ -4,7 +4,8 @@ use std::{
 };
 
 use agent_core::{
-    Completion, CompletionRequest, CompletionSegment, LanguageModel, StreamEvent, ToolCall,
+    Completion, CompletionRequest, CompletionSegment, CompletionStopReason, LanguageModel,
+    StreamEvent, ToolCall,
 };
 use reqwest::blocking::Client;
 use serde_json::{Value, json};
@@ -42,6 +43,23 @@ struct StreamingToolCallState {
 }
 
 impl OpenAiChatCompletionsModel {
+    fn map_finish_reason(
+        finish_reason: Option<&str>,
+        has_tool_calls: bool,
+    ) -> CompletionStopReason {
+        if has_tool_calls {
+            return CompletionStopReason::ToolUse;
+        }
+
+        match finish_reason {
+            Some("tool_calls") => CompletionStopReason::ToolUse,
+            Some("length") => CompletionStopReason::MaxTokens,
+            Some("content_filter") => CompletionStopReason::ContentFilter,
+            Some("stop") | None => CompletionStopReason::Stop,
+            Some(other) => CompletionStopReason::Unknown(other.to_string()),
+        }
+    }
+
     pub fn new(config: OpenAiChatCompletionsConfig) -> Result<Self, OpenAiAdapterError> {
         if config.base_url.is_empty() || config.api_key.is_empty() || config.model.is_empty() {
             return Err(OpenAiAdapterError::new("配置缺失"));
@@ -97,7 +115,12 @@ impl OpenAiChatCompletionsModel {
             .map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
 
         let mut segments = Vec::new();
+        let mut finish_reason = None;
+        let mut has_tool_calls = false;
         for (index, choice) in payload.choices.into_iter().enumerate() {
+            if finish_reason.is_none() {
+                finish_reason = choice.finish_reason.clone();
+            }
             if let Some(reasoning) = choice.message.reasoning.filter(|value| !value.is_empty()) {
                 segments.push(CompletionSegment::Thinking(reasoning));
             }
@@ -105,6 +128,7 @@ impl OpenAiChatCompletionsModel {
                 segments.push(CompletionSegment::Text(content));
             }
             for tool_call in choice.message.tool_calls {
+                has_tool_calls = true;
                 let invocation_id =
                     tool_call.id.unwrap_or_else(|| format!("openai-chat-call-{}", index + 1));
                 segments.push(CompletionSegment::ToolUse(
@@ -115,7 +139,11 @@ impl OpenAiChatCompletionsModel {
             }
         }
 
-        Ok(Completion { segments, checkpoint: None })
+        Ok(Completion {
+            segments,
+            stop_reason: Self::map_finish_reason(finish_reason.as_deref(), has_tool_calls),
+            checkpoint: None,
+        })
     }
 
     pub fn config(&self) -> &OpenAiChatCompletionsConfig {
@@ -181,6 +209,7 @@ impl LanguageModel for OpenAiChatCompletionsModel {
         let mut text_buf = String::new();
         let mut thinking_buf = String::new();
         let mut tool_calls: BTreeMap<usize, StreamingToolCallState> = BTreeMap::new();
+        let mut finish_reason = None;
 
         for line in reader.lines() {
             let line = line.map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
@@ -198,6 +227,13 @@ impl LanguageModel for OpenAiChatCompletionsModel {
             let Some(delta) = event["choices"].get(0).and_then(|choice| choice.get("delta")) else {
                 continue;
             };
+            if finish_reason.is_none() {
+                finish_reason = event["choices"]
+                    .get(0)
+                    .and_then(|choice| choice.get("finish_reason"))
+                    .and_then(|value| value.as_str())
+                    .map(ToString::to_string);
+            }
 
             if let Some(reasoning) = delta.get("reasoning").and_then(|value| value.as_str()) {
                 if !reasoning.is_empty() {
@@ -275,6 +311,12 @@ impl LanguageModel for OpenAiChatCompletionsModel {
             ));
         }
         sink(StreamEvent::Done);
-        Ok(Completion { segments, checkpoint: None })
+        let has_tool_calls =
+            segments.iter().any(|segment| matches!(segment, CompletionSegment::ToolUse(_)));
+        Ok(Completion {
+            segments,
+            stop_reason: Self::map_finish_reason(finish_reason.as_deref(), has_tool_calls),
+            checkpoint: None,
+        })
     }
 }

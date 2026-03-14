@@ -1,9 +1,9 @@
 use std::cell::RefCell;
 
 use agent_core::{
-    Completion, CompletionRequest, CompletionSegment, ConversationItem, CoreError, LanguageModel,
-    Message, ModelCheckpoint, ModelDisposition, ModelIdentity, Role, ToolCall, ToolDefinition,
-    ToolExecutionContext, ToolExecutor, ToolOutputDelta, ToolResult,
+    Completion, CompletionRequest, CompletionSegment, CompletionStopReason, ConversationItem,
+    CoreError, LanguageModel, Message, ModelCheckpoint, ModelDisposition, ModelIdentity, Role,
+    ToolCall, ToolDefinition, ToolExecutionContext, ToolExecutor, ToolOutputDelta, ToolResult,
 };
 use serde_json::json;
 use session_tape::SessionTape;
@@ -61,6 +61,7 @@ impl LanguageModel for StubModel {
                 CompletionSegment::Text(format!("准备处理：{latest}")),
                 CompletionSegment::ToolUse(ToolCall::new("search")),
             ],
+            stop_reason: CompletionStopReason::ToolUse,
             checkpoint: None,
         })
     }
@@ -108,6 +109,7 @@ impl LanguageModel for ContinueAfterToolModel {
                     CompletionSegment::Thinking("先查一下".into()),
                     CompletionSegment::ToolUse(ToolCall::new("search")),
                 ],
+                stop_reason: CompletionStopReason::ToolUse,
                 checkpoint: None,
             })
         } else {
@@ -164,6 +166,7 @@ impl LanguageModel for ManyToolRoundsModel {
             segments: vec![CompletionSegment::ToolUse(
                 ToolCall::new("search").with_argument("query", format!("step-{step}")),
             )],
+            stop_reason: CompletionStopReason::ToolUse,
             checkpoint: None,
         })
     }
@@ -191,6 +194,7 @@ impl LanguageModel for DuplicateToolLoopModel {
                 segments: vec![CompletionSegment::ToolUse(
                     ToolCall::new("search").with_argument("query", "date"),
                 )],
+                stop_reason: CompletionStopReason::ToolUse,
                 checkpoint: None,
             });
         }
@@ -199,6 +203,7 @@ impl LanguageModel for DuplicateToolLoopModel {
             segments: vec![CompletionSegment::ToolUse(
                 ToolCall::new("search").with_argument("query", "date"),
             )],
+            stop_reason: CompletionStopReason::ToolUse,
             checkpoint: None,
         })
     }
@@ -269,11 +274,45 @@ impl LanguageModel for CheckpointRecordingModel {
         self.seen_requests.borrow_mut().push(request);
         Ok(Completion {
             segments: vec![CompletionSegment::Text(format!("第{}轮完成", index + 1))],
+            stop_reason: CompletionStopReason::Stop,
             checkpoint: Some(ModelCheckpoint::new(
                 "openai-responses",
                 format!("resp_{}", index + 1),
             )),
         })
+    }
+}
+
+struct StopReasonDrivenModel {
+    seen_requests: RefCell<Vec<CompletionRequest>>,
+}
+
+impl StopReasonDrivenModel {
+    fn new() -> Self {
+        Self { seen_requests: RefCell::new(Vec::new()) }
+    }
+}
+
+impl LanguageModel for StopReasonDrivenModel {
+    type Error = CoreError;
+
+    fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+        let index = self.seen_requests.borrow().len();
+        self.seen_requests.borrow_mut().push(request);
+
+        if index == 0 {
+            Ok(Completion {
+                segments: vec![CompletionSegment::ToolUse(ToolCall::new("search"))],
+                stop_reason: CompletionStopReason::ToolUse,
+                checkpoint: None,
+            })
+        } else {
+            Ok(Completion {
+                segments: vec![CompletionSegment::Text("按 stop reason 收尾".into())],
+                stop_reason: CompletionStopReason::Stop,
+                checkpoint: None,
+            })
+        }
     }
 }
 
@@ -470,6 +509,44 @@ fn 运行时不会自动追加最大步数收尾消息() {
     assert!(requests.iter().all(|request| request.conversation.iter().all(|item| {
         item.as_message().is_none_or(|message| !message.content.contains("最大步骤数"))
     })));
+}
+
+#[test]
+fn 运行时按_stop_reason_而非工具片段决定是否继续() {
+    let identity = ModelIdentity::new("local", "stop-reason", ModelDisposition::Balanced);
+    let model = StopReasonDrivenModel::new();
+    let mut runtime = AgentRuntime::new(model, StubTools, identity);
+
+    let output = runtime.handle_turn("开始").expect("应按 stop reason 继续后再收尾");
+
+    assert_eq!(output.assistant_text, "按 stop reason 收尾");
+    assert_eq!(runtime.model.seen_requests.borrow().len(), 2);
+}
+
+#[test]
+fn 工具片段与_stop_reason_不一致时会报错() {
+    struct MismatchModel;
+
+    impl LanguageModel for MismatchModel {
+        type Error = CoreError;
+
+        fn complete(&self, _request: CompletionRequest) -> Result<Completion, Self::Error> {
+            Ok(Completion {
+                segments: vec![CompletionSegment::ToolUse(ToolCall::new("search"))],
+                stop_reason: CompletionStopReason::Stop,
+                checkpoint: None,
+            })
+        }
+    }
+
+    let identity = ModelIdentity::new("local", "mismatch", ModelDisposition::Balanced);
+    let mut runtime = AgentRuntime::new(MismatchModel, StubTools, identity);
+
+    let error = runtime.handle_turn("开始").expect_err("停止原因不匹配应失败");
+
+    assert!(error.to_string().contains("停止原因与完成内容不匹配"));
+    assert!(runtime.tape().entries().iter().all(|entry| entry.as_tool_call().is_none()));
+    assert!(runtime.tape().entries().iter().all(|entry| entry.as_tool_result().is_none()));
 }
 
 #[test]
@@ -860,5 +937,246 @@ fn 工具失败后成功收尾的轮次也会聚合完整块事件() {
                     outcome: ToolInvocationOutcome::Failed { message },
                 } if call.tool_name == "search" && message.contains("工具结果不匹配")
             )
+    )));
+}
+
+// --- Context compression tests ---
+
+struct SummarizerModel {
+    seen_requests: RefCell<Vec<CompletionRequest>>,
+}
+
+impl SummarizerModel {
+    fn new() -> Self {
+        Self { seen_requests: RefCell::new(Vec::new()) }
+    }
+}
+
+impl LanguageModel for SummarizerModel {
+    type Error = CoreError;
+
+    fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+        self.seen_requests.borrow_mut().push(request.clone());
+        // If instructions contain "Summarize", this is a compression call
+        if request.instructions.as_ref().is_some_and(|i| i.contains("Summarize the conversation")) {
+            return Ok(Completion::text("摘要：对话进行了多轮测试交互。"));
+        }
+        Ok(Completion::text("记录完成"))
+    }
+}
+
+struct ContextLengthErrorModel {
+    seen_requests: RefCell<Vec<CompletionRequest>>,
+    fail_count: RefCell<usize>,
+    max_failures: usize,
+}
+
+impl ContextLengthErrorModel {
+    fn new(max_failures: usize) -> Self {
+        Self { seen_requests: RefCell::new(Vec::new()), fail_count: RefCell::new(0), max_failures }
+    }
+}
+
+impl LanguageModel for ContextLengthErrorModel {
+    type Error = CoreError;
+
+    fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+        // Compression calls always succeed
+        if request.instructions.as_ref().is_some_and(|i| i.contains("Summarize the conversation")) {
+            return Ok(Completion::text("压缩摘要：之前讨论了文件编辑。"));
+        }
+
+        self.seen_requests.borrow_mut().push(request);
+        let count = *self.fail_count.borrow();
+        if count < self.max_failures {
+            *self.fail_count.borrow_mut() += 1;
+            Err(CoreError::new("context_length_exceeded: max 128000 tokens, got 150000"))
+        } else {
+            Ok(Completion::text("压缩后成功"))
+        }
+    }
+}
+
+#[test]
+fn 上下文未超阈值时不触发压缩() {
+    let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced)
+        .with_limit(Some(agent_core::ModelLimit { context: Some(200_000), output: Some(8192) }));
+    let model = SummarizerModel::new();
+    let mut runtime =
+        AgentRuntime::new(model, StubTools, identity).with_context_pressure_threshold(0.80);
+
+    let _ = runtime.handle_turn("你好").expect("应成功完成");
+
+    // No compression call should have been made — only the regular turn call
+    let requests = runtime.model.seen_requests.borrow();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].instructions.as_ref().is_none_or(|i| !i.contains("Summarize")));
+    // No compression anchor
+    assert!(runtime.tape().anchors().iter().all(|a| a.name != "context_compression"));
+}
+
+#[test]
+fn 上下文超阈值时触发压缩生成锚点() {
+    // Use a very small context limit so that even short messages trigger compression
+    let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced)
+        .with_limit(Some(agent_core::ModelLimit { context: Some(32), output: Some(16) }));
+    let model = SummarizerModel::new();
+    let mut tape = SessionTape::new();
+    // Fill tape with enough content (>= 4 conversation items after adding user message)
+    tape.append(Message::new(Role::User, "这是一段很长的历史消息用来填充上下文窗口。"));
+    tape.append(Message::new(Role::Assistant, "这是一段很长的历史回答用来填充上下文窗口。"));
+    tape.append(Message::new(Role::User, "第二轮历史消息。"));
+    tape.append(Message::new(Role::Assistant, "第二轮历史回答。"));
+
+    let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape)
+        .with_context_pressure_threshold(0.50);
+
+    let _ = runtime.handle_turn("继续").expect("应成功完成");
+
+    // A compression anchor should have been created
+    assert!(runtime.tape().anchors().iter().any(|a| a.name == "context_compression"));
+}
+
+#[test]
+fn 压缩锚点记录来源_entry_ids() {
+    let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced)
+        .with_limit(Some(agent_core::ModelLimit { context: Some(32), output: Some(16) }));
+    let model = SummarizerModel::new();
+    let mut tape = SessionTape::new();
+    tape.append(Message::new(Role::User, "历史消息一"));
+    tape.append(Message::new(Role::Assistant, "历史回答一"));
+    tape.append(Message::new(Role::User, "历史消息二"));
+    tape.append(Message::new(Role::Assistant, "历史回答二"));
+
+    let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape)
+        .with_context_pressure_threshold(0.50);
+
+    let _ = runtime.handle_turn("继续").expect("应成功完成");
+
+    let anchor = runtime
+        .tape()
+        .anchors()
+        .into_iter()
+        .find(|anchor| anchor.name == "context_compression")
+        .expect("应创建压缩锚点");
+    let source_entry_ids = anchor
+        .state
+        .get("source_entry_ids")
+        .and_then(|value| value.as_array())
+        .expect("压缩锚点应记录来源条目");
+
+    assert_eq!(source_entry_ids.len(), 5);
+    assert_eq!(
+        source_entry_ids
+            .iter()
+            .map(|value| value.as_u64().expect("来源条目 id 应为整数"))
+            .collect::<Vec<_>>(),
+        vec![1, 2, 3, 4, 5]
+    );
+}
+
+#[test]
+fn 压缩后_default_view_从新锚点开始() {
+    let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced)
+        .with_limit(Some(agent_core::ModelLimit { context: Some(32), output: Some(16) }));
+    let model = SummarizerModel::new();
+    let mut tape = SessionTape::new();
+    tape.append(Message::new(Role::User, "历史消息一"));
+    tape.append(Message::new(Role::Assistant, "历史回答一"));
+    tape.append(Message::new(Role::User, "历史消息二"));
+    tape.append(Message::new(Role::Assistant, "历史回答二"));
+
+    let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape)
+        .with_context_pressure_threshold(0.50);
+
+    let _ = runtime.handle_turn("新消息").expect("应成功完成");
+
+    let view = runtime.tape().default_view();
+    // The view should start from the compression anchor, not include old messages
+    assert!(view.origin_anchor.as_ref().is_some_and(|a| a.name == "context_compression"));
+    // Old messages ("历史消息一") should not appear in the view
+    assert!(view.messages.iter().all(|m| m.content != "历史消息一"));
+}
+
+#[test]
+fn 模型返回_context_length_exceeded_时压缩并重试() {
+    let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced)
+        .with_limit(Some(agent_core::ModelLimit { context: Some(200_000), output: Some(8192) }));
+    // First call fails with context error, after compression the second call succeeds
+    let model = ContextLengthErrorModel::new(1);
+    let mut tape = SessionTape::new();
+    // Need enough entries for compress_context() to proceed (>= 4 conversation items)
+    tape.append(Message::new(Role::User, "历史消息一"));
+    tape.append(Message::new(Role::Assistant, "历史回答一"));
+    tape.append(Message::new(Role::User, "历史消息二"));
+    tape.append(Message::new(Role::Assistant, "历史回答二"));
+    let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape);
+
+    let output = runtime.handle_turn("你好").expect("压缩重试后应成功");
+
+    assert_eq!(output.assistant_text, "压缩后成功");
+    assert!(runtime.tape().anchors().iter().any(|a| a.name == "context_compression"));
+}
+
+#[test]
+fn 压缩重试最多一次() {
+    let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced)
+        .with_limit(Some(agent_core::ModelLimit { context: Some(200_000), output: Some(8192) }));
+    // Fail twice — first triggers compress+retry, second should propagate error
+    let model = ContextLengthErrorModel::new(2);
+    let mut tape = SessionTape::new();
+    tape.append(Message::new(Role::User, "历史消息一"));
+    tape.append(Message::new(Role::Assistant, "历史回答一"));
+    tape.append(Message::new(Role::User, "历史消息二"));
+    tape.append(Message::new(Role::Assistant, "历史回答二"));
+    let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape);
+
+    let error = runtime.handle_turn("你好").expect_err("第二次失败应传播");
+
+    assert!(error.to_string().contains("模型执行失败"));
+    assert!(error.to_string().contains("context_length_exceeded"));
+}
+
+#[test]
+fn context_stats_返回正确的压力比值() {
+    let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced)
+        .with_limit(Some(agent_core::ModelLimit { context: Some(1000), output: Some(500) }));
+    let model = RecordingModel::new();
+    let mut tape = SessionTape::new();
+    tape.append(Message::new(Role::User, "测试消息"));
+    let runtime = AgentRuntime::with_tape(model, StubTools, identity, tape);
+
+    let stats = runtime.context_stats();
+
+    assert_eq!(stats.total_entries, 1);
+    assert_eq!(stats.anchor_count, 0);
+    assert_eq!(stats.context_limit, Some(1000));
+    assert_eq!(stats.output_limit, Some(500));
+    assert!(stats.pressure_ratio.is_some());
+    assert!(stats.pressure_ratio.unwrap() > 0.0);
+    assert!(stats.pressure_ratio.unwrap() < 1.0);
+}
+
+#[test]
+fn 压缩事件会被发布到事件流() {
+    let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced)
+        .with_limit(Some(agent_core::ModelLimit { context: Some(32), output: Some(16) }));
+    let model = SummarizerModel::new();
+    let mut tape = SessionTape::new();
+    tape.append(Message::new(Role::User, "填充历史消息用来触发压力检测。"));
+    tape.append(Message::new(Role::Assistant, "填充历史回答用来触发压力检测。"));
+    tape.append(Message::new(Role::User, "第二轮历史消息。"));
+    tape.append(Message::new(Role::Assistant, "第二轮历史回答。"));
+
+    let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape)
+        .with_context_pressure_threshold(0.50);
+    let subscriber = runtime.subscribe();
+
+    let _ = runtime.handle_turn("继续").expect("应成功完成");
+    let events = runtime.collect_events(subscriber).expect("读取事件成功");
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        RuntimeEvent::ContextCompressed { summary } if summary.contains("摘要")
     )));
 }

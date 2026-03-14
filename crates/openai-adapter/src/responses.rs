@@ -1,8 +1,8 @@
 use std::io::{self, BufRead};
 
 use agent_core::{
-    Completion, CompletionRequest, CompletionSegment, LanguageModel, ModelCheckpoint, StreamEvent,
-    ToolCall,
+    Completion, CompletionRequest, CompletionSegment, CompletionStopReason, LanguageModel,
+    ModelCheckpoint, StreamEvent, ToolCall,
 };
 use reqwest::blocking::Client;
 use serde_json::{Value, json};
@@ -35,6 +35,23 @@ pub struct OpenAiResponsesModel {
 }
 
 impl OpenAiResponsesModel {
+    fn map_stop_reason(
+        status: Option<&str>,
+        incomplete_reason: Option<&str>,
+        has_tool_calls: bool,
+    ) -> CompletionStopReason {
+        if has_tool_calls {
+            return CompletionStopReason::ToolUse;
+        }
+
+        match (status, incomplete_reason) {
+            (_, Some("max_output_tokens" | "max_tokens")) => CompletionStopReason::MaxTokens,
+            (Some("incomplete"), _) => CompletionStopReason::MaxTokens,
+            (Some("completed") | None, _) => CompletionStopReason::Stop,
+            (Some(other), _) => CompletionStopReason::Unknown(other.to_string()),
+        }
+    }
+
     pub fn new(config: OpenAiResponsesConfig) -> Result<Self, OpenAiAdapterError> {
         if config.base_url.is_empty() || config.api_key.is_empty() || config.model.is_empty() {
             return Err(OpenAiAdapterError::new("配置缺失"));
@@ -89,8 +106,12 @@ impl OpenAiResponsesModel {
         let payload: ResponsesResponse = serde_json::from_str(body)
             .map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
         let response_id = payload.id.clone();
+        let status = payload.status.clone();
+        let incomplete_reason =
+            payload.incomplete_details.as_ref().and_then(|details| details.reason.clone());
 
         let mut segments = Vec::new();
+        let mut has_tool_calls = false;
 
         for (index, item) in payload.output.into_iter().enumerate() {
             match item {
@@ -115,6 +136,7 @@ impl OpenAiResponsesModel {
                     }
                 }
                 ResponsesOutput::FunctionCall { id, call_id, name, arguments } => {
+                    has_tool_calls = true;
                     let invocation_id =
                         id.or(call_id).unwrap_or_else(|| format!("openai-call-{}", index + 1));
                     segments.push(CompletionSegment::ToolUse({
@@ -133,6 +155,11 @@ impl OpenAiResponsesModel {
 
         Ok(Completion {
             segments,
+            stop_reason: Self::map_stop_reason(
+                status.as_deref(),
+                incomplete_reason.as_deref(),
+                has_tool_calls,
+            ),
             checkpoint: payload.id.clone().map(|id| ModelCheckpoint::new("openai-responses", id)),
         })
     }
@@ -206,6 +233,8 @@ impl LanguageModel for OpenAiResponsesModel {
         let mut current_tool_name = String::new();
         let mut current_tool_args = String::new();
         let mut response_id: Option<String> = None;
+        let mut response_status: Option<String> = None;
+        let mut incomplete_reason: Option<String> = None;
 
         for line in reader.lines() {
             let line = line.map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
@@ -293,6 +322,15 @@ impl LanguageModel for OpenAiResponsesModel {
                     if response_id.is_none() {
                         response_id = event["response"]["id"].as_str().map(ToString::to_string);
                     }
+                    if response_status.is_none() {
+                        response_status =
+                            event["response"]["status"].as_str().map(ToString::to_string);
+                    }
+                    if incomplete_reason.is_none() {
+                        incomplete_reason = event["response"]["incomplete_details"]["reason"]
+                            .as_str()
+                            .map(ToString::to_string);
+                    }
                 }
                 Some(other) => {
                     sink(StreamEvent::Log { text: format!("[sse] {other}") });
@@ -320,8 +358,15 @@ impl LanguageModel for OpenAiResponsesModel {
             }));
         }
         sink(StreamEvent::Done);
+        let has_tool_calls =
+            segments.iter().any(|segment| matches!(segment, CompletionSegment::ToolUse(_)));
         Ok(Completion {
             segments,
+            stop_reason: Self::map_stop_reason(
+                response_status.as_deref(),
+                incomplete_reason.as_deref(),
+                has_tool_calls,
+            ),
             checkpoint: response_id.map(|id| ModelCheckpoint::new("openai-responses", id)),
         })
     }

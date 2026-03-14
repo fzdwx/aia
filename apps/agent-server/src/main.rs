@@ -92,6 +92,8 @@ async fn main() {
         .route("/api/providers/{name}", delete(routes::delete_provider))
         .route("/api/providers/switch", post(routes::switch_provider))
         .route("/api/session/history", get(routes::get_history))
+        .route("/api/session/info", get(routes::get_session_info))
+        .route("/api/session/handoff", post(routes::create_handoff))
         .route("/api/events", get(routes::events))
         .route("/api/turn", post(routes::submit_turn))
         .layer(CorsLayer::permissive())

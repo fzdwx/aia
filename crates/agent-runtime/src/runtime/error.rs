@@ -1,6 +1,6 @@
 use std::fmt;
 
-use agent_core::{ToolCall, ToolResult};
+use agent_core::{CompletionStopReason, ToolCall, ToolResult};
 
 use super::helpers::PreviousToolCall;
 
@@ -37,6 +37,10 @@ impl RuntimeError {
 
     pub fn tool_call_limit(max_tool_calls: usize) -> Self {
         Self { message: format!("轮次超过最大工具调用次数：{max_tool_calls}") }
+    }
+
+    pub fn stop_reason_mismatch(stop_reason: &CompletionStopReason) -> Self {
+        Self { message: format!("停止原因与完成内容不匹配：{stop_reason:?}") }
     }
 
     pub(super) fn duplicate_tool_call(call: &ToolCall, previous: &PreviousToolCall) -> Self {

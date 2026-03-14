@@ -21,10 +21,18 @@ fn 完成结果可提取纯文本() {
             CompletionSegment::ToolUse(ToolCall::new("search")),
             CompletionSegment::Text("第二行".into()),
         ],
+        stop_reason: CompletionStopReason::Stop,
         checkpoint: None,
     };
 
     assert_eq!(completion.plain_text(), "第一行\n第二行");
+}
+
+#[test]
+fn 文本完成默认_stop_reason_为_stop() {
+    let completion = Completion::text("你好");
+
+    assert_eq!(completion.stop_reason, CompletionStopReason::Stop);
 }
 
 #[test]

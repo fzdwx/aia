@@ -3,6 +3,6 @@ mod types;
 
 pub use runtime::{AgentRuntime, RuntimeError};
 pub use types::{
-    RuntimeEvent, RuntimeSubscriberId, ToolInvocationLifecycle, ToolInvocationOutcome, TurnBlock,
-    TurnLifecycle, TurnOutput,
+    ContextStats, RuntimeEvent, RuntimeSubscriberId, ToolInvocationLifecycle,
+    ToolInvocationOutcome, TurnBlock, TurnLifecycle, TurnOutput,
 };

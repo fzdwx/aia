@@ -73,15 +73,36 @@ pub enum CompletionSegment {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum CompletionStopReason {
+    Stop,
+    ToolUse,
+    MaxTokens,
+    ContentFilter,
+    Unknown(String),
+}
+
+impl Default for CompletionStopReason {
+    fn default() -> Self {
+        Self::Stop
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Completion {
     pub segments: Vec<CompletionSegment>,
+    #[serde(default)]
+    pub stop_reason: CompletionStopReason,
     #[serde(default)]
     pub checkpoint: Option<ModelCheckpoint>,
 }
 
 impl Completion {
     pub fn text(content: impl Into<String>) -> Self {
-        Self { segments: vec![CompletionSegment::Text(content.into())], checkpoint: None }
+        Self {
+            segments: vec![CompletionSegment::Text(content.into())],
+            stop_reason: CompletionStopReason::Stop,
+            checkpoint: None,
+        }
     }
 
     pub fn plain_text(&self) -> String {

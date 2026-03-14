@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
 use agent_core::{
-    Completion, CompletionSegment, LanguageModel, Message, Role, StreamEvent, ToolExecutor,
+    Completion, CompletionSegment, CompletionStopReason, LanguageModel, Message, Role, StreamEvent,
+    ToolExecutor,
 };
 use session_tape::TapeEntry;
 
@@ -9,6 +10,7 @@ use crate::{RuntimeEvent, ToolInvocationLifecycle, TurnBlock, TurnOutput};
 
 use super::{
     AgentRuntime, RuntimeError,
+    compress::is_context_length_error,
     helpers::{next_turn_id, now_timestamp_ms},
 };
 
@@ -67,11 +69,26 @@ where
         let mut buffers = TurnBuffers::new(user_entry_id);
         self.publish_event(RuntimeEvent::UserMessage { content: user_message.content.clone() });
 
+        // Pre-turn context pressure check
+        if let Some(ratio) = self.context_pressure_ratio() {
+            if ratio >= self.context_pressure_threshold {
+                let _ = self.compress_context();
+            }
+        }
+
+        let mut already_compressed = false;
+
         loop {
             let request = self.build_completion_request();
             let completion = match self.model.complete_streaming(request, &mut on_delta) {
                 Ok(completion) => completion,
                 Err(error) => {
+                    if !already_compressed && is_context_length_error(&error.to_string()) {
+                        already_compressed = true;
+                        if self.compress_context().is_ok() {
+                            continue;
+                        }
+                    }
                     let runtime_error = RuntimeError::model(error);
                     self.record_turn_failure(
                         &turn_id,
@@ -87,6 +104,21 @@ where
                     return Err(runtime_error);
                 }
             };
+
+            if let Err(runtime_error) = self.validate_completion_stop_reason(&completion) {
+                self.record_turn_failure(
+                    &turn_id,
+                    started_at_ms,
+                    &mut buffers.source_entry_ids,
+                    &user_message.content,
+                    &buffers.blocks,
+                    buffers.last_assistant_text.clone(),
+                    buffers.aggregated_thinking.as_str(),
+                    &buffers.tool_invocations,
+                    runtime_error.clone(),
+                );
+                return Err(runtime_error);
+            }
 
             let assistant_text = completion.plain_text();
             let saw_tool_calls = match self.process_completion_segments(
@@ -112,25 +144,80 @@ where
                 }
             };
 
-            if !saw_tool_calls {
-                let thinking = buffers.thinking();
-                self.finish_success_turn(
-                    turn_id,
-                    started_at_ms,
-                    buffers.source_entry_ids,
-                    user_message.content,
-                    buffers.blocks,
-                    buffers.last_assistant_text.clone(),
-                    thinking,
-                    buffers.tool_invocations,
-                );
+            match completion.stop_reason {
+                CompletionStopReason::ToolUse => {
+                    if !saw_tool_calls {
+                        let runtime_error =
+                            RuntimeError::stop_reason_mismatch(&completion.stop_reason);
+                        self.record_turn_failure(
+                            &turn_id,
+                            started_at_ms,
+                            &mut buffers.source_entry_ids,
+                            &user_message.content,
+                            &buffers.blocks,
+                            buffers.last_assistant_text.clone(),
+                            buffers.aggregated_thinking.as_str(),
+                            &buffers.tool_invocations,
+                            runtime_error.clone(),
+                        );
+                        return Err(runtime_error);
+                    }
+                }
+                _ => {
+                    if saw_tool_calls {
+                        let runtime_error =
+                            RuntimeError::stop_reason_mismatch(&completion.stop_reason);
+                        self.record_turn_failure(
+                            &turn_id,
+                            started_at_ms,
+                            &mut buffers.source_entry_ids,
+                            &user_message.content,
+                            &buffers.blocks,
+                            buffers.last_assistant_text.clone(),
+                            buffers.aggregated_thinking.as_str(),
+                            &buffers.tool_invocations,
+                            runtime_error.clone(),
+                        );
+                        return Err(runtime_error);
+                    }
 
-                return Ok(TurnOutput {
-                    assistant_text,
-                    completion,
-                    visible_tools: self.visible_tools(),
-                });
+                    let thinking = buffers.thinking();
+                    self.finish_success_turn(
+                        turn_id,
+                        started_at_ms,
+                        buffers.source_entry_ids,
+                        user_message.content,
+                        buffers.blocks,
+                        buffers.last_assistant_text.clone(),
+                        thinking,
+                        buffers.tool_invocations,
+                    );
+
+                    return Ok(TurnOutput {
+                        assistant_text,
+                        completion,
+                        visible_tools: self.visible_tools(),
+                    });
+                }
             }
+        }
+    }
+
+    fn validate_completion_stop_reason(&self, completion: &Completion) -> Result<(), RuntimeError> {
+        let has_tool_use_segment = completion
+            .segments
+            .iter()
+            .any(|segment| matches!(segment, CompletionSegment::ToolUse(_)));
+
+        match completion.stop_reason {
+            CompletionStopReason::ToolUse if !has_tool_use_segment => {
+                Err(RuntimeError::stop_reason_mismatch(&completion.stop_reason))
+            }
+            CompletionStopReason::ToolUse => Ok(()),
+            _ if has_tool_use_segment => {
+                Err(RuntimeError::stop_reason_mismatch(&completion.stop_reason))
+            }
+            _ => Ok(()),
         }
     }
 
