@@ -9,6 +9,7 @@ import {
   updateProvider as apiUpdateProvider,
   deleteProvider as apiDeleteProvider,
 } from "@/lib/api"
+import { normalizeToolArguments } from "@/lib/tool-display"
 import type {
   AppView,
   ChatState,
@@ -143,8 +144,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         } else if (data.kind === "tool_call_started") {
           const exists = blocks.some(
             (b) =>
-              b.type === "tool" &&
-              b.tool.invocationId === data.invocation_id,
+              b.type === "tool" && b.tool.invocationId === data.invocation_id
           )
           if (!exists) {
             blocks.push({
@@ -152,7 +152,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
               tool: {
                 invocationId: data.invocation_id,
                 toolName: data.tool_name,
-                arguments: data.arguments,
+                arguments: normalizeToolArguments(data.arguments),
                 output: "",
               },
             })
