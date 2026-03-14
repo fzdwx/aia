@@ -47,6 +47,7 @@
 - 完成 Web 端 provider 创建、更新、删除、切换与当前 provider / provider 列表刷新链路
 - 完成 provider 变更的事务式提交：候选 registry 校验、registry 落盘、session tape 落盘全部成功后才提交到内存 runtime / tape
 - 完成 provider 持久化失败路径回归测试，保证落盘失败不会留下 registry / runtime / tape 分叉状态
+- 完成 Web 端 Markdown 渲染入口收敛为共享前端组件，并参考 opencode 的消息排版规则统一标题、列表、引用、表格与代码块样式
 
 ## 正在进行
 

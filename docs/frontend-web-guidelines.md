@@ -69,6 +69,7 @@ idle → (submitTurn) → active/waiting → thinking → working → generating
 3. 页面中的重复视觉块必须抽成组件，不允许复制粘贴三次以上。
 4. 组件 props 要表达语义，不要用含糊开关名。
 5. 默认优先无状态展示组件；只有确实需要时再引入本地状态。
+6. Markdown 展示必须通过共享渲染组件统一处理，禁止在消息组件里继续手写零散解析逻辑。
 
 ## 5. 类型规范
 
