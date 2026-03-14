@@ -3,7 +3,6 @@ use agent_runtime::TurnLifecycle;
 use axum::response::sse::Event;
 use serde::Serialize;
 
-/// Status phases visible to the frontend
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnStatus {
@@ -15,13 +14,9 @@ pub enum TurnStatus {
 
 #[derive(Clone)]
 pub enum SsePayload {
-    /// Stream delta from the model
     Stream(StreamEvent),
-    /// Turn status changed
     Status(TurnStatus),
-    /// Turn completed with full lifecycle
     TurnCompleted(TurnLifecycle),
-    /// Error occurred
     Error(String),
 }
 
@@ -55,5 +50,45 @@ impl SsePayload {
                 Ok(Event::default().event("error").data(data))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use agent_core::StreamEvent;
+    use agent_runtime::TurnLifecycle;
+
+    use super::{SsePayload, TurnStatus};
+
+    #[test]
+    fn status_payload_can_convert_to_event() {
+        let event = SsePayload::Status(TurnStatus::Thinking).into_axum_event();
+        assert!(event.is_ok());
+    }
+
+    #[test]
+    fn turn_completed_payload_can_convert_to_event() {
+        let turn = TurnLifecycle {
+            turn_id: "turn-1".into(),
+            started_at_ms: 1,
+            finished_at_ms: 2,
+            source_entry_ids: vec![1],
+            user_message: "# 用户".into(),
+            blocks: vec![agent_runtime::TurnBlock::Assistant { content: "# 回答".into() }],
+            assistant_message: Some("# 回答".into()),
+            thinking: None,
+            tool_invocations: vec![],
+            failure_message: None,
+        };
+
+        let event = SsePayload::TurnCompleted(turn).into_axum_event();
+        assert!(event.is_ok());
+    }
+
+    #[test]
+    fn stream_payload_can_convert_to_event() {
+        let event =
+            SsePayload::Stream(StreamEvent::TextDelta { text: "增量".into() }).into_axum_event();
+        assert!(event.is_ok());
     }
 }
