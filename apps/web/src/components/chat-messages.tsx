@@ -219,47 +219,49 @@ function ToolRow({ item }: { item: ToolRowItem }) {
     <div>
       <button
         onClick={() => setShowOutput(!showOutput)}
-        className="flex w-full items-center gap-2 py-0.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+        className="grid w-full grid-cols-[minmax(56px,max-content)_1fr_auto] items-center gap-x-2 py-0.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
       >
-        <span className="shrink-0 font-medium text-muted-foreground/70">
+        <span className="truncate text-left font-medium text-muted-foreground/70">
           {item.toolName}
         </span>
-        <span className="min-w-0 flex-1 truncate">{displayPath}</span>
-        {duration && (
-          <span className="shrink-0 text-muted-foreground/50">{duration}</span>
-        )}
-        {stats.added != null && (
-          <span className="shrink-0 text-emerald-500">+{stats.added}</span>
-        )}
-        {stats.removed != null && (
-          <span className="shrink-0 text-red-400">-{stats.removed}</span>
-        )}
-        {stats.lines != null && (
-          <span className="shrink-0 text-emerald-500">+{stats.lines}</span>
-        )}
-        {stats.matches != null && (
-          <span className="shrink-0 text-muted-foreground/50">
-            {stats.matches} matches
-          </span>
-        )}
-        {stats.truncated && stats.matches != null && (
-          <span className="shrink-0 text-amber-600/80">
-            {stats.matches} matches (showing {stats.returned})
-          </span>
-        )}
-        {stats.linesRead != null && stats.totalLines != null && (
-          <span className="shrink-0 text-muted-foreground/50">
-            {stats.linesRead}/{stats.totalLines}
-          </span>
-        )}
-        {item.succeeded ? (
-          <Check className="size-3 shrink-0 text-foreground/30" />
-        ) : (
-          <XIcon className="size-3 shrink-0 text-destructive/70" />
-        )}
+        <span className="truncate text-left">{displayPath}</span>
+        <div className="flex items-center gap-2">
+          {duration && (
+            <span className="shrink-0 text-muted-foreground/50">{duration}</span>
+          )}
+          {stats.added != null && (
+            <span className="shrink-0 text-emerald-500">+{stats.added}</span>
+          )}
+          {stats.removed != null && (
+            <span className="shrink-0 text-red-400">-{stats.removed}</span>
+          )}
+          {stats.lines != null && (
+            <span className="shrink-0 text-emerald-500">+{stats.lines}</span>
+          )}
+          {stats.matches != null && !stats.truncated && (
+            <span className="shrink-0 text-muted-foreground/50">
+              {stats.matches} matches
+            </span>
+          )}
+          {stats.truncated && stats.matches != null && (
+            <span className="shrink-0 text-amber-600/80">
+              {stats.matches} matches (showing {stats.returned})
+            </span>
+          )}
+          {stats.linesRead != null && stats.totalLines != null && (
+            <span className="shrink-0 text-muted-foreground/50">
+              {stats.linesRead}/{stats.totalLines}
+            </span>
+          )}
+          {item.succeeded ? (
+            <Check className="size-3 shrink-0 text-foreground/30" />
+          ) : (
+            <XIcon className="size-3 shrink-0 text-destructive/70" />
+          )}
+        </div>
       </button>
       {showOutput && item.outputContent && (
-        <pre className="mt-0.5 mb-1 ml-5 max-h-[300px] overflow-auto rounded border border-border/40 bg-muted/40 p-2 font-mono text-[12px] leading-relaxed text-muted-foreground/80">
+        <pre className="mt-0.5 mb-1 ml-3 max-h-[300px] overflow-auto rounded border border-border/40 bg-muted/40 p-2 font-mono text-[12px] leading-relaxed text-muted-foreground/80">
           {item.outputContent}
         </pre>
       )}
@@ -339,16 +341,16 @@ function StreamingToolGroup({
                 .join(", ")}
             </span>
           </div>
-          <div className="mt-0.5 ml-5">
+          <div className="mt-0.5 ml-3 space-y-0.5">
             {active.map((tool) => (
               <div
                 key={tool.invocationId}
-                className="flex items-center gap-2 py-0.5 text-[13px] text-muted-foreground/60"
+                className="grid grid-cols-[minmax(48px,max-content)_1fr_auto] items-center gap-x-2 py-0.5 text-[13px] text-muted-foreground/60"
               >
                 {tool.toolName && (
-                  <span className="shrink-0 font-medium">{tool.toolName}</span>
+                  <span className="truncate text-left font-medium">{tool.toolName}</span>
                 )}
-                <span className="min-w-0 flex-1 truncate">
+                <span className="truncate text-left">
                   {getToolDisplayPath(tool.toolName, undefined, tool.arguments) ||
                     tool.invocationId}
                 </span>
