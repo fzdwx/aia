@@ -47,8 +47,6 @@ pub struct LlmTraceRecord {
     pub status: LlmTraceStatus,
     pub stop_reason: Option<String>,
     pub error: Option<String>,
-    pub checkpoint_in: Option<String>,
-    pub checkpoint_out: Option<String>,
     pub request_summary: Value,
     pub provider_request: Value,
     pub response_summary: Value,
@@ -172,8 +170,6 @@ impl SqliteLlmTraceStore {
                     status TEXT NOT NULL,
                     stop_reason TEXT,
                     error TEXT,
-                    checkpoint_in TEXT,
-                    checkpoint_out TEXT,
                     request_summary TEXT NOT NULL,
                     provider_request TEXT NOT NULL,
                     response_summary TEXT NOT NULL,
@@ -198,16 +194,14 @@ impl LlmTraceStore for SqliteLlmTraceStore {
                 id, turn_id, run_id, request_kind, step_index,
                 provider, protocol, model, base_url, endpoint_path,
                 streaming, started_at_ms, finished_at_ms, duration_ms, status_code,
-                status, stop_reason, error, checkpoint_in, checkpoint_out,
-                request_summary, provider_request, response_summary, response_body,
-                input_tokens, output_tokens, total_tokens
+                status, stop_reason, error, request_summary, provider_request,
+                response_summary, response_body, input_tokens, output_tokens, total_tokens
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5,
                 ?6, ?7, ?8, ?9, ?10,
                 ?11, ?12, ?13, ?14, ?15,
                 ?16, ?17, ?18, ?19, ?20,
-                ?21, ?22, ?23, ?24,
-                ?25, ?26, ?27
+                ?21, ?22, ?23, ?24, ?25
             )
             ",
             params![
@@ -229,8 +223,6 @@ impl LlmTraceStore for SqliteLlmTraceStore {
                 record.status.as_str(),
                 record.stop_reason,
                 record.error,
-                record.checkpoint_in,
-                record.checkpoint_out,
                 serde_json::to_string(&record.request_summary)?,
                 serde_json::to_string(&record.provider_request)?,
                 serde_json::to_string(&record.response_summary)?,
@@ -295,9 +287,8 @@ impl LlmTraceStore for SqliteLlmTraceStore {
             SELECT id, turn_id, run_id, request_kind, step_index,
                    provider, protocol, model, base_url, endpoint_path,
                    streaming, started_at_ms, finished_at_ms, duration_ms, status_code,
-                   status, stop_reason, error, checkpoint_in, checkpoint_out,
-                   request_summary, provider_request, response_summary, response_body,
-                   input_tokens, output_tokens, total_tokens
+                   status, stop_reason, error, request_summary, provider_request,
+                   response_summary, response_body, input_tokens, output_tokens, total_tokens
             FROM llm_request_traces
             WHERE id = ?1
             ",
@@ -323,9 +314,23 @@ impl LlmTraceStore for SqliteLlmTraceStore {
                 status: LlmTraceStatus::from_str(row.get::<_, String>(15)?.as_str()),
                 stop_reason: row.get(16)?,
                 error: row.get(17)?,
-                checkpoint_in: row.get(18)?,
-                checkpoint_out: row.get(19)?,
-                request_summary: serde_json::from_str::<Value>(&row.get::<_, String>(20)?)
+                request_summary: serde_json::from_str::<Value>(&row.get::<_, String>(18)?)
+                    .map_err(|err| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            18,
+                            rusqlite::types::Type::Text,
+                            Box::new(err),
+                        )
+                    })?,
+                provider_request: serde_json::from_str::<Value>(&row.get::<_, String>(19)?)
+                    .map_err(|err| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            19,
+                            rusqlite::types::Type::Text,
+                            Box::new(err),
+                        )
+                    })?,
+                response_summary: serde_json::from_str::<Value>(&row.get::<_, String>(20)?)
                     .map_err(|err| {
                         rusqlite::Error::FromSqlConversionFailure(
                             20,
@@ -333,26 +338,10 @@ impl LlmTraceStore for SqliteLlmTraceStore {
                             Box::new(err),
                         )
                     })?,
-                provider_request: serde_json::from_str::<Value>(&row.get::<_, String>(21)?)
-                    .map_err(|err| {
-                        rusqlite::Error::FromSqlConversionFailure(
-                            21,
-                            rusqlite::types::Type::Text,
-                            Box::new(err),
-                        )
-                    })?,
-                response_summary: serde_json::from_str::<Value>(&row.get::<_, String>(22)?)
-                    .map_err(|err| {
-                        rusqlite::Error::FromSqlConversionFailure(
-                            22,
-                            rusqlite::types::Type::Text,
-                            Box::new(err),
-                        )
-                    })?,
-                response_body: row.get(23)?,
-                input_tokens: row.get::<_, Option<u64>>(24)?,
-                output_tokens: row.get::<_, Option<u64>>(25)?,
-                total_tokens: row.get::<_, Option<u64>>(26)?,
+                response_body: row.get(21)?,
+                input_tokens: row.get::<_, Option<u64>>(22)?,
+                output_tokens: row.get::<_, Option<u64>>(23)?,
+                total_tokens: row.get::<_, Option<u64>>(24)?,
             })
         })
         .optional()
@@ -506,8 +495,6 @@ mod tests {
             status: LlmTraceStatus::Succeeded,
             stop_reason: Some("stop".into()),
             error: None,
-            checkpoint_in: Some("resp_prev".into()),
-            checkpoint_out: Some("resp_next".into()),
             request_summary: json!({"conversation_items": 2}),
             provider_request: json!({"model": "gpt-5.4"}),
             response_summary: json!({"assistant_text": "你好"}),
@@ -560,8 +547,6 @@ mod tests {
                 status: LlmTraceStatus::Succeeded,
                 stop_reason: Some("stop".into()),
                 error: None,
-                checkpoint_in: None,
-                checkpoint_out: None,
                 request_summary: json!({}),
                 provider_request: json!({
                     "messages": [
@@ -604,8 +589,6 @@ mod tests {
                 status: LlmTraceStatus::Succeeded,
                 stop_reason: Some("stop".into()),
                 error: None,
-                checkpoint_in: None,
-                checkpoint_out: None,
                 request_summary: json!({}),
                 provider_request: json!({
                     "input": [

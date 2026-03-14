@@ -2,8 +2,6 @@ use std::fmt;
 
 use agent_core::{CompletionStopReason, ToolCall, ToolResult};
 
-use super::helpers::PreviousToolCall;
-
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct RuntimeError {
     message: String,
@@ -41,15 +39,6 @@ impl RuntimeError {
 
     pub fn stop_reason_mismatch(stop_reason: &CompletionStopReason) -> Self {
         Self { message: format!("停止原因与完成内容不匹配：{stop_reason:?}") }
-    }
-
-    pub(super) fn duplicate_tool_call(call: &ToolCall, previous: &PreviousToolCall) -> Self {
-        Self {
-            message: format!(
-                "重复工具调用已跳过：{}#{} 在本轮内已用相同参数执行过。请直接基于已有结果继续。上次结果：{}",
-                call.tool_name, call.invocation_id, previous.summary
-            ),
-        }
     }
 }
 

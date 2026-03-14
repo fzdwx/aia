@@ -33,7 +33,6 @@ where
             model: self.model_identity.clone(),
             instructions: Some(SUMMARY_PROMPT.to_string()),
             conversation: view.conversation,
-            resume_checkpoint: None,
             max_output_tokens: Some(SUMMARY_MAX_OUTPUT_TOKENS),
             available_tools: Vec::new(),
             trace_context: turn_id.map(|turn_id| LlmTraceRequestContext {

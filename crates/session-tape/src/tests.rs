@@ -4,7 +4,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use agent_core::{ConversationItem, Message, ModelCheckpoint, Role, ToolCall, ToolResult};
+use agent_core::{ConversationItem, Message, Role, ToolCall, ToolResult};
 use serde_json::json;
 
 use crate::entry::now_iso8601;
@@ -195,21 +195,6 @@ fn 默认视图会保留结构化工具调用与结果() {
         if result.tool_name == "search"
             && result.invocation_id == "call-1"
             && result.content == "ok"));
-}
-
-#[test]
-fn 会记住最近一次模型检查点() {
-    let mut tape = SessionTape::new();
-    let first = ModelCheckpoint::new("openai-responses", "resp_1");
-    let second = ModelCheckpoint::new("openai-responses", "resp_2");
-
-    let _ = tape.record_model_checkpoint(&first, 3, "turn-1");
-    let _ = tape.record_model_checkpoint(&second, 8, "turn-2");
-
-    assert_eq!(
-        tape.latest_model_checkpoint(),
-        Some(crate::StoredModelCheckpoint { checkpoint: second, checkpoint_entry_id: 8 })
-    );
 }
 
 #[test]

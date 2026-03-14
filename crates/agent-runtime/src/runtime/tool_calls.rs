@@ -36,19 +36,6 @@ where
             .collect::<BTreeSet<_>>();
         let call_signature = tool_call_signature(call);
 
-        if let Some(previous) = seen_tool_calls.get(&call_signature) {
-            return self.record_failed_tool_call(
-                turn_id,
-                assistant_entry_id,
-                tool_call_entry_id,
-                call,
-                source_entry_ids,
-                "tool_call_skipped_duplicate",
-                RuntimeError::duplicate_tool_call(call, previous),
-                on_delta,
-            );
-        }
-
         if !available_tool_names.contains(&call.tool_name) {
             let runtime_error = RuntimeError::tool_unavailable(call.tool_name.clone());
             let lifecycle = self.record_failed_tool_call(

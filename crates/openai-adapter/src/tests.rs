@@ -6,8 +6,8 @@ use std::{
 
 use agent_core::{
     CompletionRequest, CompletionSegment, CompletionStopReason, ConversationItem, LanguageModel,
-    Message, ModelCheckpoint, ModelDisposition, ModelIdentity, Role, StreamEvent, ToolCall,
-    ToolDefinition, ToolResult,
+    Message, ModelDisposition, ModelIdentity, Role, StreamEvent, ToolCall, ToolDefinition,
+    ToolResult,
 };
 use serde_json::{Value, json};
 
@@ -24,7 +24,6 @@ fn sample_request() -> CompletionRequest {
             ConversationItem::Message(Message::new(Role::System, "你是代码助手")),
             ConversationItem::Message(Message::new(Role::User, "帮我总结当前工作区")),
         ],
-        resume_checkpoint: None,
         max_output_tokens: None,
         available_tools: vec![ToolDefinition::new("search_code", "搜索代码").with_parameter(
             "query",
@@ -113,7 +112,7 @@ fn responses_请求体会保留结构化工具调用与结果() {
 }
 
 #[test]
-fn responses_工具续调会带_previous_response_id_且只发送工具结果() {
+fn responses_工具结果请求体会发送完整上下文() {
     let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
         "http://127.0.0.1:1",
         "test-key",
@@ -130,30 +129,12 @@ fn responses_工具续调会带_previous_response_id_且只发送工具结果() 
 
     let body = model.build_request_body(&request);
 
-    assert_eq!(body["previous_response_id"], json!("resp_123"));
-    assert_eq!(body["input"].as_array().map(|items| items.len()), Some(1));
-    assert_eq!(body["input"][0]["type"], json!("function_call_output"));
-    assert_eq!(body["input"][0]["call_id"], json!("call_1"));
-}
-
-#[test]
-fn responses_新一轮用户输入会沿用_previous_response_id() {
-    let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
-        "http://127.0.0.1:1",
-        "test-key",
-        "gpt-4.1-mini",
-    ))
-    .expect("模型创建成功");
-    let mut request = sample_request();
-    request.resume_checkpoint = Some(ModelCheckpoint::new("openai-responses", "resp_123"));
-    request.conversation = vec![ConversationItem::Message(Message::new(Role::User, "第二轮问题"))];
-
-    let body = model.build_request_body(&request);
-
-    assert_eq!(body["previous_response_id"], json!("resp_123"));
-    assert_eq!(body["input"].as_array().map(|items| items.len()), Some(1));
-    assert_eq!(body["input"][0]["role"], json!("user"));
-    assert_eq!(body["input"][0]["content"], json!("第二轮问题"));
+    assert!(body.get("previous_response_id").is_none());
+    assert_eq!(body["input"].as_array().map(|items| items.len()), Some(4));
+    assert_eq!(body["input"][2]["type"], json!("function_call"));
+    assert_eq!(body["input"][2]["call_id"], json!("call_1"));
+    assert_eq!(body["input"][3]["type"], json!("function_call_output"));
+    assert_eq!(body["input"][3]["call_id"], json!("call_1"));
 }
 
 #[test]

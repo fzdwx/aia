@@ -20,32 +20,11 @@ where
         step_index: u32,
     ) -> CompletionRequest {
         let view = self.tape.default_view();
-        let checkpoint = self.tape.latest_model_checkpoint();
-        let should_resume_from_checkpoint = self
-            .tape
-            .latest_provider_binding()
-            .and_then(|binding| match binding {
-                session_tape::SessionProviderBinding::Provider { protocol, .. } => Some(protocol),
-                session_tape::SessionProviderBinding::Bootstrap => None,
-            })
-            .is_some_and(|protocol| {
-                protocol == "openai-responses"
-                    && checkpoint.as_ref().is_some_and(|checkpoint| {
-                        checkpoint.checkpoint.protocol == "openai-responses"
-                    })
-            });
-        let conversation = if should_resume_from_checkpoint {
-            self.tape.conversation_since(
-                checkpoint.as_ref().map(|checkpoint| checkpoint.checkpoint_entry_id).unwrap_or(0),
-            )
-        } else {
-            let mut conversation = Vec::new();
-            if let Some(anchor) = view.origin_anchor.as_ref() {
-                conversation.push(ConversationItem::Message(anchor_state_message(anchor)));
-            }
-            conversation.extend(view.conversation);
-            conversation
-        };
+        let mut conversation = Vec::new();
+        if let Some(anchor) = view.origin_anchor.as_ref() {
+            conversation.push(ConversationItem::Message(anchor_state_message(anchor)));
+        }
+        conversation.extend(view.conversation);
 
         let available_tools = self.visible_tools();
         let instructions = self.instructions.as_ref().filter(|text| !text.is_empty()).cloned();
@@ -59,11 +38,6 @@ where
             model: self.model_identity.clone(),
             instructions,
             conversation,
-            resume_checkpoint: if should_resume_from_checkpoint {
-                checkpoint.map(|value| value.checkpoint)
-            } else {
-                None
-            },
             max_output_tokens,
             available_tools,
             trace_context: Some(LlmTraceRequestContext {

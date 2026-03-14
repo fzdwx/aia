@@ -54,18 +54,6 @@ impl ModelIdentity {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ModelCheckpoint {
-    pub protocol: String,
-    pub token: String,
-}
-
-impl ModelCheckpoint {
-    pub fn new(protocol: impl Into<String>, token: impl Into<String>) -> Self {
-        Self { protocol: protocol.into(), token: token.into() }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum CompletionSegment {
     Text(String),
     Thinking(String),
@@ -100,8 +88,6 @@ pub struct Completion {
     #[serde(default)]
     pub stop_reason: CompletionStopReason,
     #[serde(default)]
-    pub checkpoint: Option<ModelCheckpoint>,
-    #[serde(default)]
     pub usage: Option<CompletionUsage>,
     #[serde(default)]
     pub response_body: Option<String>,
@@ -114,7 +100,6 @@ impl Completion {
         Self {
             segments: vec![CompletionSegment::Text(content.into())],
             stop_reason: CompletionStopReason::Stop,
-            checkpoint: None,
             usage: None,
             response_body: None,
             http_status_code: None,
@@ -159,7 +144,6 @@ pub struct CompletionRequest {
     pub model: ModelIdentity,
     pub instructions: Option<String>,
     pub conversation: Vec<ConversationItem>,
-    pub resume_checkpoint: Option<ModelCheckpoint>,
     pub max_output_tokens: Option<u32>,
     pub available_tools: Vec<ToolDefinition>,
     pub trace_context: Option<LlmTraceRequestContext>,

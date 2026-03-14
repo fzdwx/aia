@@ -22,7 +22,6 @@ fn 完成结果可提取纯文本() {
             CompletionSegment::Text("第二行".into()),
         ],
         stop_reason: CompletionStopReason::Stop,
-        checkpoint: None,
         usage: None,
         response_body: None,
         http_status_code: None,

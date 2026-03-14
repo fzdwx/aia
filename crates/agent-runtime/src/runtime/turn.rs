@@ -234,7 +234,6 @@ where
         on_delta: &mut dyn FnMut(StreamEvent),
     ) -> Result<bool, RuntimeError> {
         let mut assistant_entry_id = None;
-        let mut last_step_entry_id = None;
         let mut saw_tool_calls = false;
 
         for segment in &completion.segments {
@@ -245,7 +244,6 @@ where
                     buffers.source_entry_ids.push(thinking_entry_id);
                     buffers.aggregated_thinking.push_str(text);
                     buffers.blocks.push(TurnBlock::Thinking { content: text.clone() });
-                    last_step_entry_id = Some(thinking_entry_id);
                 }
                 CompletionSegment::Text(text) if !text.is_empty() => {
                     let assistant_message = Message::new(Role::Assistant, text.clone());
@@ -257,7 +255,6 @@ where
                     buffers.last_assistant_text = Some(text.clone());
                     buffers.blocks.push(TurnBlock::Assistant { content: text.clone() });
                     assistant_entry_id = Some(entry_id);
-                    last_step_entry_id = Some(entry_id);
                 }
                 CompletionSegment::ToolUse(call) => {
                     if buffers.tool_invocations.len() >= self.max_tool_calls_per_turn {
@@ -267,7 +264,6 @@ where
                     let tool_call_entry_id =
                         self.tape.append_entry(TapeEntry::tool_call(call).with_run_id(turn_id));
                     buffers.source_entry_ids.push(tool_call_entry_id);
-                    last_step_entry_id = Some(tool_call_entry_id);
                     let invocation = self.execute_tool_call(
                         turn_id,
                         assistant_entry_id,
@@ -284,15 +280,6 @@ where
                 }
                 CompletionSegment::Thinking(_) | CompletionSegment::Text(_) => {}
             }
-        }
-
-        if let Some(checkpoint) = completion.checkpoint.as_ref() {
-            let checkpoint_entry_id = last_step_entry_id
-                .or(assistant_entry_id)
-                .unwrap_or(*buffers.source_entry_ids.first().unwrap_or(&0));
-            let checkpoint_event_id =
-                self.tape.record_model_checkpoint(checkpoint, checkpoint_entry_id, turn_id);
-            buffers.source_entry_ids.push(checkpoint_event_id);
         }
 
         Ok(saw_tool_calls)

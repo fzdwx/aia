@@ -18,7 +18,7 @@ use crate::{RuntimeEvent, RuntimeSubscriberId};
 
 pub use self::error::RuntimeError;
 
-const DEFAULT_MAX_TOOL_CALLS_PER_TURN: usize = 50;
+const DEFAULT_MAX_TOOL_CALLS_PER_TURN: usize = 1000;
 const DEFAULT_CONTEXT_PRESSURE_THRESHOLD: f64 = 0.80;
 
 pub struct AgentRuntime<M, T> {

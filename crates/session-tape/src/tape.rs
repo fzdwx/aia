@@ -1,12 +1,12 @@
 use std::{fs, path::Path};
 
-use agent_core::{ConversationItem, Message, ModelCheckpoint};
+use agent_core::{ConversationItem, Message};
 use serde_json::Value;
 
 use crate::{
     Anchor, Handoff, SessionProviderBinding, SessionTapeError, SessionTapeFork, SessionView,
-    StoredModelCheckpoint, TapeEntry, TapeQuery, anchor_from_entry, decode_persisted_line,
-    project_conversation_item, project_message,
+    TapeEntry, TapeQuery, anchor_from_entry, decode_persisted_line, project_conversation_item,
+    project_message,
 };
 
 pub fn default_session_path() -> std::path::PathBuf {
@@ -83,38 +83,6 @@ impl SessionTape {
             .rev()
             .filter(|entry| entry.kind == "event")
             .filter(|entry| entry.event_name() == Some("provider_binding"))
-            .find_map(|entry| {
-                entry.event_data().and_then(|data| serde_json::from_value(data.clone()).ok())
-            })
-    }
-
-    pub fn record_model_checkpoint(
-        &mut self,
-        checkpoint: &ModelCheckpoint,
-        checkpoint_entry_id: u64,
-        run_id: &str,
-    ) -> u64 {
-        self.append_entry(
-            TapeEntry::event(
-                "model_checkpoint",
-                Some(
-                    serde_json::to_value(StoredModelCheckpoint {
-                        checkpoint: checkpoint.clone(),
-                        checkpoint_entry_id,
-                    })
-                    .unwrap_or_default(),
-                ),
-            )
-            .with_run_id(run_id),
-        )
-    }
-
-    pub fn latest_model_checkpoint(&self) -> Option<StoredModelCheckpoint> {
-        self.entries
-            .iter()
-            .rev()
-            .filter(|entry| entry.kind == "event")
-            .filter(|entry| entry.event_name() == Some("model_checkpoint"))
             .find_map(|entry| {
                 entry.event_data().and_then(|data| serde_json::from_value(data.clone()).ok())
             })

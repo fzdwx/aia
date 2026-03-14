@@ -1,4 +1,4 @@
-use agent_core::{CompletionRequest, ConversationItem, Role};
+use agent_core::{ConversationItem, Role};
 use serde_json::{Value, json};
 
 use crate::OpenAiAdapterError;
@@ -30,59 +30,6 @@ pub(crate) fn responses_input_item(item: &ConversationItem) -> Value {
             "output": result.content,
         }),
     }
-}
-
-pub(crate) fn responses_continuation(request: &CompletionRequest) -> Option<(String, Vec<Value>)> {
-    if let Some(checkpoint) = request.resume_checkpoint.as_ref() {
-        if checkpoint.protocol == "openai-responses" {
-            let input = request
-                .conversation
-                .iter()
-                .filter_map(|item| match item {
-                    ConversationItem::ToolResult(_) | ConversationItem::Message(_) => {
-                        Some(responses_input_item(item))
-                    }
-                    ConversationItem::ToolCall(_) => None,
-                })
-                .collect::<Vec<_>>();
-            if !input.is_empty() {
-                return Some((checkpoint.token.clone(), input));
-            }
-        }
-    }
-
-    let latest_response_id = request.conversation.iter().rev().find_map(|item| match item {
-        ConversationItem::ToolResult(result) => result.response_id.clone(),
-        ConversationItem::Message(_) | ConversationItem::ToolCall(_) => None,
-    })?;
-
-    let last_user_index = request
-        .conversation
-        .iter()
-        .enumerate()
-        .rev()
-        .find_map(|(index, item)| {
-            item.as_message().filter(|message| message.role == Role::User).map(|_| index)
-        })
-        .unwrap_or(0);
-
-    let input = request
-        .conversation
-        .iter()
-        .skip(last_user_index + 1)
-        .filter_map(|item| match item {
-            ConversationItem::ToolResult(result)
-                if result.response_id.as_deref() == Some(latest_response_id.as_str()) =>
-            {
-                Some(responses_input_item(item))
-            }
-            ConversationItem::Message(_)
-            | ConversationItem::ToolCall(_)
-            | ConversationItem::ToolResult(_) => None,
-        })
-        .collect::<Vec<_>>();
-
-    if input.is_empty() { None } else { Some((latest_response_id, input)) }
 }
 
 pub(crate) fn chat_completion_messages(conversation: &[ConversationItem]) -> Vec<Value> {

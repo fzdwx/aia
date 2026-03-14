@@ -64,7 +64,7 @@
 - Web 流式 turn 已与共享运行时失败语义对齐：当前轮失败会通过 SSE 发出错误事件，但不会直接结束整个交互会话
 - 模型续调上下文已不再只依赖扁平文本消息；工具调用与工具结果已作为结构化会话条目贯穿核心层到适配层
 - OpenAI Responses 与 OpenAI 兼容 Chat Completions 在工具续调时已能按各自协议原生形态重建请求，而不是把工具结果压平为普通文本
-- OpenAI Responses 现已支持基于 `previous_response_id` 的会话续调：同轮工具输出与下一轮用户输入都可沿用上一响应链，而不是重复回放全量历史
+- OpenAI Responses 与 OpenAI 兼容 Chat Completions 当前都基于统一结构化会话条目重建请求，不再把 provider 私有续调状态暴露到共享协议层
 - 运行时步数与工具调用预算已配置化：默认安全护栏保留在核心层，当前 Web 运行壳使用更高预算，模型同时收到剩余预算提示以便更早收尾
 - 已建立 `docs/frontend-web-guidelines.md` 作为 Web 前端开发规范
 - 已建立 `apps/agent-server` axum HTTP+SSE 服务器，作为 Web 前端与 Rust 运行时的桥接层

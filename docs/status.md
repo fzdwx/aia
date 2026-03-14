@@ -19,8 +19,8 @@
 - 完成本地 provider 注册、活动项持久化与协议类型区分
 - 完成 OpenAI Responses 与 OpenAI 兼容 Chat Completions 双协议适配
 - 完成会话磁带扁平化、锚点、handoff、fork / merge、查询切片与旧格式兼容
-- 完成结构化工具调用 / 工具结果 / 模型检查点贯穿运行时主链
-- 完成 Responses 的 `previous_response_id` 续调与 Chat Completions 的原生工具链路映射
+- 完成结构化工具调用 / 工具结果贯穿运行时主链，并统一沉淀为可重建请求的会话条目
+- 完成 OpenAI Responses 与 Chat Completions 的原生工具链路映射
 - 完成运行时单轮多步模型 / 工具循环、重复工具调用防重、预算提示、文本收尾步与独立工具调用上限
 - 完成 `apps/web` 首页从模板页替换为项目主界面骨架
 - 完成 `apps/web` 工作台首页重构，并接入 `shadcn` 基础组件体系（card、badge、input、textarea、separator、scroll-area）
@@ -55,6 +55,8 @@
 - 完成 trace 记录对真实 HTTP 状态码的保留：不再在成功路径硬编码 `200`，OpenAI 适配器错误也会把上游状态码与响应体带回 trace
 - 完成 trace 列表按 agent loop 聚合展示：列表先显示同一轮的 LLM 调用次数、总耗时、总 token 与 stop reason 路径，展开后再查看每个 step
 - 完成 trace loop 列表项直接基于 trace payload 提炼并展示本轮用户消息预览，不再依赖 chat store 关联，进入 trace 页面即可先判断这一轮在处理什么，再决定是否展开 step 明细
+- 完成对 `openai-responses` provider 私有续接链路的移除，统一回退为发送完整结构化上下文，规避兼容端在续接路径上的 5xx 失败
+- 完成共享协议层与 trace/UI 对 provider 私有 checkpoint 概念的彻底移除：`Completion` / `CompletionRequest` / `session-tape` / trace API / trace 页面不再暴露或持久化该能力
 
 ## 正在进行
 

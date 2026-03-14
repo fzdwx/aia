@@ -1,4 +1,4 @@
-use agent_core::{ConversationItem, Message, ModelCheckpoint, Role};
+use agent_core::{ConversationItem, Message, Role};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -23,12 +23,6 @@ pub struct SessionView {
     pub entries: Vec<TapeEntry>,
     pub messages: Vec<Message>,
     pub conversation: Vec<ConversationItem>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct StoredModelCheckpoint {
-    pub checkpoint: ModelCheckpoint,
-    pub checkpoint_entry_id: u64,
 }
 
 pub(crate) fn anchor_from_entry(entry: &TapeEntry) -> Option<Anchor> {

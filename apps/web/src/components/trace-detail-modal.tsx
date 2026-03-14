@@ -714,7 +714,6 @@ function ResponsesRequestContextCard({
   const tools = asArray(request?.tools)
   const reasoning = asRecord(request?.reasoning)
   const inputSummary = summarizeResponsesInput(input)
-  const resumeCheckpoint = asString(summary?.resume_checkpoint)
   const toolNames = asArray(summary?.tool_names).filter(
     (value): value is string => typeof value === "string"
   )
@@ -770,10 +769,6 @@ function ResponsesRequestContextCard({
               label: "Output limit",
               value: formatPrimitive(asNumber(request?.max_output_tokens)),
             },
-            {
-              label: "Previous response",
-              value: formatPrimitive(asString(request?.previous_response_id)),
-            },
             { label: "Input items", value: formatPrimitive(input.length) },
             {
               label: "Message items",
@@ -796,9 +791,6 @@ function ResponsesRequestContextCard({
               label: "Streaming",
               value: formatPrimitive(asBoolean(request?.stream)),
             },
-            ...(resumeCheckpoint
-              ? [{ label: "Resume checkpoint", value: resumeCheckpoint }]
-              : []),
             ...(toolNames.length > 0
               ? [{ label: "Enabled tools", value: renderToolBadges(toolNames) }]
               : []),
@@ -832,7 +824,6 @@ function ChatCompletionsRequestContextCard({
 }) {
   const messages = asArray(request?.messages)
   const messageSummary = summarizeChatMessages(messages)
-  const resumeCheckpoint = asString(summary?.resume_checkpoint)
   const toolNames = asArray(summary?.tool_names).filter(
     (value): value is string => typeof value === "string"
   )
@@ -893,9 +884,6 @@ function ChatCompletionsRequestContextCard({
               label: "Assistant tool call blocks",
               value: formatPrimitive(messageSummary.assistantToolCalls),
             },
-            ...(resumeCheckpoint
-              ? [{ label: "Resume checkpoint", value: resumeCheckpoint }]
-              : []),
             ...(toolNames.length > 0
               ? [{ label: "Enabled tools", value: renderToolBadges(toolNames) }]
               : []),
@@ -1105,7 +1093,6 @@ function ResultSection({ trace }: { trace: TraceRecord }) {
   const responseSummary = asRecord(trace.response_summary)
   const assistantText = asString(responseSummary?.assistant_text)
   const thinkingText = asString(responseSummary?.thinking_text)
-  const checkpoint = asString(responseSummary?.checkpoint)
 
   return (
     <Card size="sm">
@@ -1150,25 +1137,12 @@ function ResultSection({ trace }: { trace: TraceRecord }) {
           </div>
         )}
 
-        {(thinkingText || checkpoint || trace.checkpoint_out) && (
+        {thinkingText && (
           <SectionPanel
             title="Completion metadata"
             description="Only the remaining result details that are not already in the top summary."
           >
-            <DetailList
-              items={[
-                {
-                  label: "Checkpoint out",
-                  value: formatPrimitive(trace.checkpoint_out ?? checkpoint),
-                },
-              ]}
-            />
-            {thinkingText ? (
-              <>
-                <Separator className="my-4 opacity-40" />
-                <TextBlock value={thinkingText} className="max-h-[220px]" />
-              </>
-            ) : null}
+            <TextBlock value={thinkingText} className="max-h-[220px]" />
           </SectionPanel>
         )}
       </CardContent>

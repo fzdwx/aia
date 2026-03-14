@@ -11,7 +11,7 @@ pub use chat_completions::{OpenAiChatCompletionsConfig, OpenAiChatCompletionsMod
 pub use error::OpenAiAdapterError;
 pub(crate) use mapping::{
     chat_completion_messages, extract_reasoning_stream_text, extract_stream_text,
-    parse_tool_arguments, responses_continuation, responses_input_item,
+    parse_tool_arguments, responses_input_item,
 };
 pub(crate) use payloads::{
     ChatCompletionsResponse, ChatCompletionsUsage, ReasoningSummaryPart, ResponsesContent,

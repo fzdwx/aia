@@ -2,7 +2,7 @@ use std::io::{self, BufRead};
 
 use agent_core::{
     Completion, CompletionRequest, CompletionSegment, CompletionStopReason, CompletionUsage,
-    LanguageModel, ModelCheckpoint, StreamEvent, ToolCall,
+    LanguageModel, StreamEvent, ToolCall,
 };
 use reqwest::blocking::Client;
 use serde_json::{Value, json};
@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use crate::{
     OpenAiAdapterError, ReasoningSummaryPart, ResponsesContent, ResponsesOutput, ResponsesResponse,
     ResponsesUsage, extract_reasoning_stream_text, extract_stream_text, parse_tool_arguments,
-    responses_continuation, responses_input_item,
+    responses_input_item,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -83,10 +83,7 @@ impl OpenAiResponsesModel {
     }
 
     pub fn build_request_body(&self, request: &CompletionRequest) -> Value {
-        let continuation = responses_continuation(request);
-        let input = continuation.as_ref().map(|(_, items)| items.clone()).unwrap_or_else(|| {
-            request.conversation.iter().map(responses_input_item).collect::<Vec<_>>()
-        });
+        let input = request.conversation.iter().map(responses_input_item).collect::<Vec<_>>();
 
         let tools = request
             .available_tools
@@ -112,9 +109,6 @@ impl OpenAiResponsesModel {
         }
         if let Some(effort) = &request.model.reasoning_effort {
             body["reasoning"] = json!({"effort": effort, "summary": "auto"});
-        }
-        if let Some((previous_response_id, _)) = continuation {
-            body["previous_response_id"] = json!(previous_response_id);
         }
         body
     }
@@ -184,7 +178,6 @@ impl OpenAiResponsesModel {
                 incomplete_reason.as_deref(),
                 has_tool_calls,
             ),
-            checkpoint: payload.id.clone().map(|id| ModelCheckpoint::new("openai-responses", id)),
             usage,
             response_body: Some(body.to_string()),
             http_status_code: None,
@@ -404,7 +397,6 @@ impl LanguageModel for OpenAiResponsesModel {
                 incomplete_reason.as_deref(),
                 has_tool_calls,
             ),
-            checkpoint: response_id.map(|id| ModelCheckpoint::new("openai-responses", id)),
             usage,
             response_body: Some(response_events.join("\n")),
             http_status_code: Some(status.as_u16()),

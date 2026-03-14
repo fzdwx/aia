@@ -179,8 +179,6 @@ export type TraceRecord = {
   status: TraceStatus
   stop_reason: string | null
   error: string | null
-  checkpoint_in: string | null
-  checkpoint_out: string | null
   request_summary: Record<string, unknown> | null
   provider_request: Record<string, unknown> | null
   response_summary: Record<string, unknown> | null

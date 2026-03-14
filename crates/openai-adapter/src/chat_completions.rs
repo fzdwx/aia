@@ -168,7 +168,6 @@ impl OpenAiChatCompletionsModel {
         Ok(Completion {
             segments,
             stop_reason: Self::map_finish_reason(finish_reason.as_deref(), has_tool_calls),
-            checkpoint: None,
             usage,
             response_body: Some(body.to_string()),
             http_status_code: None,
@@ -353,7 +352,6 @@ impl LanguageModel for OpenAiChatCompletionsModel {
         Ok(Completion {
             segments,
             stop_reason: Self::map_finish_reason(finish_reason.as_deref(), has_tool_calls),
-            checkpoint: None,
             usage,
             response_body: Some(response_events.join("\n")),
             http_status_code: Some(status.as_u16()),

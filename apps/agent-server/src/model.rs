@@ -168,11 +168,6 @@ impl ServerModel {
             status: LlmTraceStatus::Succeeded,
             stop_reason: None,
             error: None,
-            checkpoint_in: request
-                .resume_checkpoint
-                .as_ref()
-                .map(|checkpoint| checkpoint.token.clone()),
-            checkpoint_out: None,
             request_summary: request_summary(request),
             provider_request,
             response_summary: Value::Null,
@@ -205,8 +200,6 @@ impl ServerModel {
                 record.status = LlmTraceStatus::Succeeded;
                 record.status_code = completion.http_status_code;
                 record.stop_reason = Some(stop_reason_label(&completion.stop_reason));
-                record.checkpoint_out =
-                    completion.checkpoint.as_ref().map(|checkpoint| checkpoint.token.clone());
                 record.response_summary = response_summary(completion);
                 record.response_body =
                     completion.response_body.clone().or_else(|| Some(completion.plain_text()));
@@ -313,7 +306,6 @@ fn request_summary(request: &CompletionRequest) -> Value {
         "conversation_items": request.conversation.len(),
         "tool_names": request.available_tools.iter().map(|tool| tool.name.clone()).collect::<Vec<_>>(),
         "max_output_tokens": request.max_output_tokens,
-        "resume_checkpoint": request.resume_checkpoint.as_ref().map(|checkpoint| checkpoint.token.clone()),
     })
 }
 
@@ -322,7 +314,6 @@ fn response_summary(completion: &Completion) -> Value {
         "assistant_text": completion.plain_text(),
         "thinking_text": completion.thinking_text(),
         "stop_reason": stop_reason_label(&completion.stop_reason),
-        "checkpoint": completion.checkpoint.as_ref().map(|checkpoint| checkpoint.token.clone()),
         "usage": completion.usage.as_ref().map(|usage| json!({
             "input_tokens": usage.input_tokens,
             "output_tokens": usage.output_tokens,
@@ -448,7 +439,6 @@ mod tests {
                     model: ModelIdentity::new("openai", "gpt-5.4", ModelDisposition::Balanced),
                     instructions: Some("保持简洁".into()),
                     conversation: vec![ConversationItem::Message(Message::new(Role::User, "hi"))],
-                    resume_checkpoint: None,
                     max_output_tokens: Some(128),
                     available_tools: vec![],
                     trace_context: Some(agent_core::LlmTraceRequestContext {
@@ -525,7 +515,6 @@ mod tests {
                 model: ModelIdentity::new("openai", "gpt-5.4", ModelDisposition::Balanced),
                 instructions: Some("保持简洁".into()),
                 conversation: vec![ConversationItem::Message(Message::new(Role::User, "hi"))],
-                resume_checkpoint: None,
                 max_output_tokens: Some(128),
                 available_tools: vec![],
                 trace_context: Some(agent_core::LlmTraceRequestContext {

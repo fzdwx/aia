@@ -20,5 +20,5 @@ pub use fork::SessionTapeFork;
 pub use query::TapeQuery;
 pub use storage::{InMemoryTapeStorage, JsonlTapeStorage, NamedTapeStorage};
 pub use tape::{SessionTape, default_session_path};
-pub use view::{Anchor, Handoff, SessionView, StoredModelCheckpoint};
+pub use view::{Anchor, Handoff, SessionView};
 pub(crate) use view::{anchor_from_entry, project_conversation_item, project_message};

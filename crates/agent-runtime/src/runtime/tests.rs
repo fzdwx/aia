@@ -2,8 +2,8 @@ use std::cell::RefCell;
 
 use agent_core::{
     Completion, CompletionRequest, CompletionSegment, CompletionStopReason, ConversationItem,
-    CoreError, LanguageModel, Message, ModelCheckpoint, ModelDisposition, ModelIdentity, Role,
-    ToolCall, ToolDefinition, ToolExecutionContext, ToolExecutor, ToolOutputDelta, ToolResult,
+    CoreError, LanguageModel, Message, ModelDisposition, ModelIdentity, Role, ToolCall,
+    ToolDefinition, ToolExecutionContext, ToolExecutor, ToolOutputDelta, ToolResult,
 };
 use serde_json::json;
 use session_tape::SessionTape;
@@ -62,7 +62,6 @@ impl LanguageModel for StubModel {
                 CompletionSegment::ToolUse(ToolCall::new("search")),
             ],
             stop_reason: CompletionStopReason::ToolUse,
-            checkpoint: None,
             usage: None,
             response_body: None,
             http_status_code: None,
@@ -113,7 +112,6 @@ impl LanguageModel for ContinueAfterToolModel {
                     CompletionSegment::ToolUse(ToolCall::new("search")),
                 ],
                 stop_reason: CompletionStopReason::ToolUse,
-                checkpoint: None,
                 usage: None,
                 response_body: None,
                 http_status_code: None,
@@ -173,7 +171,6 @@ impl LanguageModel for ManyToolRoundsModel {
                 ToolCall::new("search").with_argument("query", format!("step-{step}")),
             )],
             stop_reason: CompletionStopReason::ToolUse,
-            checkpoint: None,
             usage: None,
             response_body: None,
             http_status_code: None,
@@ -204,7 +201,6 @@ impl LanguageModel for DuplicateToolLoopModel {
                     ToolCall::new("search").with_argument("query", "date"),
                 )],
                 stop_reason: CompletionStopReason::ToolUse,
-                checkpoint: None,
                 usage: None,
                 response_body: None,
                 http_status_code: None,
@@ -216,7 +212,6 @@ impl LanguageModel for DuplicateToolLoopModel {
                 ToolCall::new("search").with_argument("query", "date"),
             )],
             stop_reason: CompletionStopReason::ToolUse,
-            checkpoint: None,
             usage: None,
             response_body: None,
             http_status_code: None,
@@ -271,17 +266,17 @@ impl LanguageModel for BudgetRecordingModel {
     }
 }
 
-struct CheckpointRecordingModel {
+struct RequestRecordingModel {
     seen_requests: RefCell<Vec<CompletionRequest>>,
 }
 
-impl CheckpointRecordingModel {
+impl RequestRecordingModel {
     fn new() -> Self {
         Self { seen_requests: RefCell::new(Vec::new()) }
     }
 }
 
-impl LanguageModel for CheckpointRecordingModel {
+impl LanguageModel for RequestRecordingModel {
     type Error = CoreError;
 
     fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
@@ -290,10 +285,6 @@ impl LanguageModel for CheckpointRecordingModel {
         Ok(Completion {
             segments: vec![CompletionSegment::Text(format!("第{}轮完成", index + 1))],
             stop_reason: CompletionStopReason::Stop,
-            checkpoint: Some(ModelCheckpoint::new(
-                "openai-responses",
-                format!("resp_{}", index + 1),
-            )),
             usage: None,
             response_body: None,
             http_status_code: None,
@@ -322,7 +313,6 @@ impl LanguageModel for StopReasonDrivenModel {
             Ok(Completion {
                 segments: vec![CompletionSegment::ToolUse(ToolCall::new("search"))],
                 stop_reason: CompletionStopReason::ToolUse,
-                checkpoint: None,
                 usage: None,
                 response_body: None,
                 http_status_code: None,
@@ -331,7 +321,6 @@ impl LanguageModel for StopReasonDrivenModel {
             Ok(Completion {
                 segments: vec![CompletionSegment::Text("按 stop reason 收尾".into())],
                 stop_reason: CompletionStopReason::Stop,
-                checkpoint: None,
                 usage: None,
                 response_body: None,
                 http_status_code: None,
@@ -487,25 +476,6 @@ fn 工具失败不会直接让整轮报错() {
 }
 
 #[test]
-fn 同一轮内相同工具与参数的重复调用会被跳过() {
-    let identity = ModelIdentity::new("local", "duplicate", ModelDisposition::Balanced);
-    let model = DuplicateToolLoopModel::new();
-    let mut runtime = AgentRuntime::new(model, StubTools, identity);
-
-    let output = runtime.handle_turn("今天星期几").expect("应在跳过重复调用后完成");
-
-    assert_eq!(output.assistant_text, "已停止重复调用并给出最终回答");
-    let duplicate_results = runtime
-        .tape()
-        .entries()
-        .iter()
-        .filter_map(|entry| entry.as_tool_result())
-        .filter(|result| result.content.contains("重复工具调用已跳过"))
-        .count();
-    assert_eq!(duplicate_results, 1);
-}
-
-#[test]
 fn 运行时不会在旧默认步数后强行中断整轮() {
     let identity = ModelIdentity::new("local", "many-steps", ModelDisposition::Balanced);
     let model = ManyToolRoundsModel::new();
@@ -558,7 +528,6 @@ fn 工具片段与_stop_reason_不一致时会报错() {
             Ok(Completion {
                 segments: vec![CompletionSegment::ToolUse(ToolCall::new("search"))],
                 stop_reason: CompletionStopReason::Stop,
-                checkpoint: None,
                 usage: None,
                 response_body: None,
                 http_status_code: None,
@@ -730,9 +699,9 @@ fn 载入现有磁带后会继续沿用已保存上下文() {
 }
 
 #[test]
-fn responses_检查点存在时下一轮只发送增量上下文() {
+fn responses_下一轮请求会重放结构化上下文() {
     let identity = ModelIdentity::new("openai", "responses", ModelDisposition::Balanced);
-    let model = CheckpointRecordingModel::new();
+    let model = RequestRecordingModel::new();
     let mut tape = SessionTape::new();
     tape.bind_provider(session_tape::SessionProviderBinding::Provider {
         name: "resp".into(),
@@ -747,12 +716,9 @@ fn responses_检查点存在时下一轮只发送增量上下文() {
 
     let requests = runtime.model.seen_requests.borrow();
     assert_eq!(requests.len(), 2);
-    assert!(requests[1].resume_checkpoint.as_ref().is_some_and(|checkpoint| checkpoint.protocol
-        == "openai-responses"
-        && checkpoint.token == "resp_1"));
-    assert_eq!(requests[1].conversation.len(), 1);
+    assert_eq!(requests[1].conversation.len(), 3);
     assert!(matches!(
-        &requests[1].conversation[0],
+        &requests[1].conversation[2],
         ConversationItem::Message(message) if message.role == Role::User && message.content == "第二轮"
     ));
 }
