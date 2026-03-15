@@ -2,7 +2,7 @@ use agent_core::{
     Completion, CompletionRequest, CompletionStopReason, CoreError, LanguageModel,
     ModelDisposition, ModelIdentity, ModelLimit, StreamEvent,
 };
-use llm_trace::{LlmTraceEvent, LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus, LlmTraceStore};
+use aia_store::{LlmTraceEvent, LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus, LlmTraceStore};
 use openai_adapter::{
     OpenAiAdapterError, OpenAiChatCompletionsConfig, OpenAiChatCompletionsModel,
     OpenAiResponsesConfig, OpenAiResponsesModel,
@@ -604,7 +604,7 @@ mod tests {
         CompletionRequest, ConversationItem, LanguageModel, Message, ModelDisposition,
         ModelIdentity, Role,
     };
-    use llm_trace::{LlmTraceStore, SqliteLlmTraceStore};
+    use aia_store::{LlmTraceStore, AiaStore};
     use provider_registry::{ModelConfig, ModelLimit, ProviderKind, ProviderProfile};
 
     use super::{ProviderLaunchChoice, build_model_from_selection};
@@ -633,7 +633,7 @@ mod tests {
             stream.write_all(response.as_bytes()).expect("response write should succeed");
         });
 
-        let store = Arc::new(SqliteLlmTraceStore::in_memory().expect("trace store should init"));
+        let store = Arc::new(AiaStore::in_memory().expect("trace store should init"));
         let profile = ProviderProfile {
             name: "rayin".to_string(),
             kind: ProviderKind::OpenAiResponses,
@@ -717,7 +717,7 @@ mod tests {
             stream.write_all(response.as_bytes()).expect("response write should succeed");
         });
 
-        let store = Arc::new(SqliteLlmTraceStore::in_memory().expect("trace store should init"));
+        let store = Arc::new(AiaStore::in_memory().expect("trace store should init"));
         let profile = ProviderProfile {
             name: "rayin".to_string(),
             kind: ProviderKind::OpenAiResponses,
@@ -764,7 +764,7 @@ mod tests {
 
         let trace =
             store.get("trace-502").expect("trace query should succeed").expect("trace exists");
-        assert_eq!(trace.status, llm_trace::LlmTraceStatus::Failed);
+        assert_eq!(trace.status, aia_store::LlmTraceStatus::Failed);
         assert_eq!(trace.status_code, Some(502));
         assert!(
             trace.response_body.as_deref().is_some_and(|body| body.contains("gateway failure"))

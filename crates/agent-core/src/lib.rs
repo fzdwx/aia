@@ -17,7 +17,8 @@ pub use conversation::{ConversationItem, Message, Role};
 pub use error::CoreError;
 pub use registry::ToolRegistry;
 pub use streaming::{
-    AbortSignal, StreamEvent, ToolExecutionContext, ToolOutputDelta, ToolOutputStream,
+    AbortSignal, RuntimeToolContext, RuntimeToolContextStats, StreamEvent, ToolExecutionContext,
+    ToolOutputDelta, ToolOutputStream,
 };
 pub use tooling::{ToolCall, ToolDefinition, ToolResult};
 pub use traits::{LanguageModel, Tool, ToolExecutor};

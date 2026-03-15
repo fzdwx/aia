@@ -95,13 +95,33 @@ export type ProviderInfo = {
   connected: boolean
 }
 
-// SSE event types from the global /api/events stream
+// Session list item from GET /api/sessions
+export type SessionListItem = {
+  id: string
+  title: string
+  created_at: string
+  updated_at: string
+  model: string
+}
+
+// SSE event types from the global /api/events stream — all carry session_id
 export type SseEvent =
-  | { type: "stream"; data: StreamEvent }
-  | { type: "status"; data: { status: TurnStatus } }
-  | { type: "turn_completed"; data: TurnLifecycle }
-  | { type: "context_compressed"; data: { summary: string } }
-  | { type: "error"; data: { message: string } }
+  | { type: "stream"; data: StreamEvent & { session_id: string } }
+  | { type: "status"; data: { session_id: string; status: TurnStatus } }
+  | {
+      type: "turn_completed"
+      data: TurnLifecycle & { session_id: string }
+    }
+  | {
+      type: "context_compressed"
+      data: { session_id: string; summary: string }
+    }
+  | { type: "error"; data: { session_id: string; message: string } }
+  | {
+      type: "session_created"
+      data: { session_id: string; title: string }
+    }
+  | { type: "session_deleted"; data: { session_id: string } }
 
 // Mirrors Rust TurnStatus
 export type TurnStatus = "waiting" | "thinking" | "working" | "generating"

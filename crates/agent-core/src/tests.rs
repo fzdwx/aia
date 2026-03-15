@@ -95,6 +95,7 @@ fn resolve_path_绝对路径直接返回() {
         run_id: "r1".into(),
         workspace_root: Some(PathBuf::from("/workspace")),
         abort: AbortSignal::new(),
+        runtime: None,
     };
     assert_eq!(ctx.resolve_path("/etc/hosts"), PathBuf::from("/etc/hosts"));
 }
@@ -105,6 +106,7 @@ fn resolve_path_相对路径拼接_workspace_root() {
         run_id: "r1".into(),
         workspace_root: Some(PathBuf::from("/workspace")),
         abort: AbortSignal::new(),
+        runtime: None,
     };
     assert_eq!(ctx.resolve_path("src/main.rs"), PathBuf::from("/workspace/src/main.rs"));
 }
@@ -115,6 +117,7 @@ fn resolve_path_无_workspace_root_时返回原样() {
         run_id: "r1".into(),
         workspace_root: None,
         abort: AbortSignal::new(),
+        runtime: None,
     };
     assert_eq!(ctx.resolve_path("src/main.rs"), PathBuf::from("src/main.rs"));
 }
@@ -160,6 +163,7 @@ fn 注册表按名称分派工具调用() {
         run_id: "r1".into(),
         workspace_root: None,
         abort: AbortSignal::new(),
+        runtime: None,
     };
     let result = ToolExecutor::call(&registry, &call, &mut |_| {}, &ctx).unwrap();
     assert_eq!(result.content, "你好");
@@ -173,6 +177,7 @@ fn 注册表未知工具返回错误() {
         run_id: "r1".into(),
         workspace_root: None,
         abort: AbortSignal::new(),
+        runtime: None,
     };
     let err = ToolExecutor::call(&registry, &call, &mut |_| {}, &ctx).unwrap_err();
     assert!(err.to_string().contains("unknown tool"));

@@ -67,6 +67,7 @@
 - 完成 runtime tool span 的后端真实落盘：工具执行不再只是前端基于 turn history 的临时推导节点，而是会继承当前 loop trace/root span 语义，在 `apps/agent-server` 中直接持久化为 INTERNAL span record，并带本地 tool started/completed/failed events
 - 完成 Web trace 页改为优先消费真实 tool span 记录：timeline / inspector 选中工具节点时会直接查看该工具 span 的 request/response/attributes/events，而不是回退查看父 LLM span
 - 完成流式工具事件语义拆分：模型侧只发 `tool_call_detected` 表示“已经决定要调工具”，runtime 真正开始执行时才发 `tool_call_started`，避免前端把一次工具调用误看成两次 start
+- 完成 `tape.info` / `tape.handoff` 从 runtime 特判式实现收口到 `Tool` trait + runtime tool registry：schema 暴露与调用路径改为真正的工具注册模型，只通过 `ToolExecutionContext` 注入最小 runtime host 能力
 
 ## 正在进行
 

@@ -4,6 +4,9 @@ import {
   fetchHistory,
   fetchProviders,
   fetchSessionInfo,
+  fetchSessions as apiFetchSessions,
+  createSession as apiCreateSession,
+  deleteSession as apiDeleteSession,
   listProviders as apiListProviders,
   switchProvider as apiSwitchProvider,
   submitTurn as apiSubmitTurn,
@@ -19,6 +22,7 @@ import type {
   ModelConfig,
   ProviderInfo,
   ProviderListItem,
+  SessionListItem,
   SseEvent,
   StreamingTurn,
   TurnLifecycle,
@@ -60,6 +64,11 @@ function currentTurnToStreamingTurn(
 }
 
 type ChatStore = {
+  // Session management
+  sessions: SessionListItem[]
+  activeSessionId: string | null
+
+  // Per-session state
   turns: TurnLifecycle[]
   streamingTurn: StreamingTurn | null
   chatState: ChatState
@@ -100,9 +109,17 @@ type ChatStore = {
     }
   ) => Promise<void>
   deleteProvider: (name: string) => Promise<void>
+
+  // Session actions
+  fetchSessions: () => Promise<void>
+  createSession: () => Promise<void>
+  switchSession: (id: string) => Promise<void>
+  deleteSession: (id: string) => Promise<void>
 }
 
 export const useChatStore = create<ChatStore>((set, get) => ({
+  sessions: [],
+  activeSessionId: null,
   turns: [],
   streamingTurn: null,
   chatState: "idle",
@@ -122,26 +139,42 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     get()
       ._refreshProviderInfo()
       .catch(() => {})
-    Promise.all([fetchHistory(), fetchCurrentTurn()])
-      .then(([turns, currentTurn]) =>
-        set({
-          turns,
-          streamingTurn: currentTurn
-            ? currentTurnToStreamingTurn(currentTurn)
-            : null,
-          chatState: currentTurn ? "active" : "idle",
-        })
-      )
+
+    // Load sessions first, then load data for the first session
+    apiFetchSessions()
+      .then((sessions) => {
+        const activeId = sessions[0]?.id ?? null
+        set({ sessions, activeSessionId: activeId })
+        if (activeId) {
+          Promise.all([fetchHistory(activeId), fetchCurrentTurn(activeId)])
+            .then(([turns, currentTurn]) =>
+              set({
+                turns,
+                streamingTurn: currentTurn
+                  ? currentTurnToStreamingTurn(currentTurn)
+                  : null,
+                chatState: currentTurn ? "active" : "idle",
+              })
+            )
+            .catch(() => {})
+          fetchSessionInfo(activeId)
+            .then((info) => set({ contextPressure: info.pressure_ratio }))
+            .catch(() => {})
+        }
+      })
       .catch(() => {})
-    fetchSessionInfo()
-      .then((info) => set({ contextPressure: info.pressure_ratio }))
-      .catch(() => {})
+
     get().refreshProviders()
   },
 
   handleSseEvent: (event: SseEvent) => {
+    const activeId = get().activeSessionId
+
     switch (event.type) {
       case "status": {
+        // Filter by active session
+        if (event.data.session_id !== activeId) break
+
         const status = event.data.status as TurnStatus
         if (status === "waiting") {
           const prev = get().streamingTurn
@@ -172,6 +205,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         break
       }
       case "stream": {
+        // Filter by active session
+        if (event.data.session_id !== activeId) break
+
         const data = event.data
         const prev = get().streamingTurn
         if (!prev) break
@@ -317,24 +353,29 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         break
       }
       case "turn_completed": {
+        // Filter by active session
+        if (event.data.session_id !== activeId) break
+
         set((state) => ({
           turns: [...state.turns, event.data],
           streamingTurn: null,
           chatState: "idle" as const,
           error: null,
         }))
-        fetchSessionInfo()
+        fetchSessionInfo(activeId ?? undefined)
           .then((info) => set({ contextPressure: info.pressure_ratio }))
           .catch(() => {})
         break
       }
       case "context_compressed": {
-        fetchSessionInfo()
+        if (event.data.session_id !== activeId) break
+        fetchSessionInfo(activeId ?? undefined)
           .then((info) => set({ contextPressure: info.pressure_ratio }))
           .catch(() => {})
         break
       }
       case "error": {
+        if (event.data.session_id !== activeId) break
         const latestTurn = get().turns[get().turns.length - 1]
         if (
           !get().streamingTurn &&
@@ -349,11 +390,32 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         })
         break
       }
+      case "session_created": {
+        // Add to session list
+        get().fetchSessions()
+        break
+      }
+      case "session_deleted": {
+        const deletedId = event.data.session_id
+        set((state) => {
+          const sessions = state.sessions.filter((s) => s.id !== deletedId)
+          // If the deleted session was active, switch to first available
+          if (state.activeSessionId === deletedId) {
+            const newActive = sessions[0]?.id ?? null
+            return { sessions, activeSessionId: newActive }
+          }
+          return { sessions }
+        })
+        break
+      }
     }
   },
 
   submitTurn: (prompt: string) => {
     if (get().chatState === "active") return
+    const sessionId = get().activeSessionId
+    if (!sessionId) return
+
     set({
       error: null,
       _pendingPrompt: prompt,
@@ -364,7 +426,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         blocks: [],
       },
     })
-    apiSubmitTurn(prompt).catch((err: unknown) => {
+    apiSubmitTurn(prompt, sessionId).catch((err: unknown) => {
       set({
         error: err instanceof Error ? err.message : "Network error",
         _pendingPrompt: null,
@@ -408,5 +470,74 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   deleteProvider: async (name) => {
     await apiDeleteProvider(name)
     get().refreshProviders()
+  },
+
+  // ── Session actions ────────────────────────────────────────
+
+  fetchSessions: async () => {
+    const sessions = await apiFetchSessions()
+    set({ sessions })
+  },
+
+  createSession: async () => {
+    const session = await apiCreateSession()
+    set((state) => ({
+      sessions: [...state.sessions, session],
+    }))
+    // Auto-switch to the new session
+    await get().switchSession(session.id)
+  },
+
+  switchSession: async (id: string) => {
+    set({
+      activeSessionId: id,
+      turns: [],
+      streamingTurn: null,
+      chatState: "idle",
+      error: null,
+      contextPressure: null,
+    })
+
+    try {
+      const [turns, currentTurn] = await Promise.all([
+        fetchHistory(id),
+        fetchCurrentTurn(id),
+      ])
+      set({
+        turns,
+        streamingTurn: currentTurn
+          ? currentTurnToStreamingTurn(currentTurn)
+          : null,
+        chatState: currentTurn ? "active" : "idle",
+      })
+    } catch {
+      // ignore
+    }
+
+    fetchSessionInfo(id)
+      .then((info) => set({ contextPressure: info.pressure_ratio }))
+      .catch(() => {})
+  },
+
+  deleteSession: async (id: string) => {
+    await apiDeleteSession(id)
+    const state = get()
+    const remaining = state.sessions.filter((s) => s.id !== id)
+    set({ sessions: remaining })
+
+    // If we deleted the active session, switch to first remaining
+    if (state.activeSessionId === id) {
+      const next = remaining[0]
+      if (next) {
+        await get().switchSession(next.id)
+      } else {
+        set({
+          activeSessionId: null,
+          turns: [],
+          streamingTurn: null,
+          chatState: "idle",
+        })
+      }
+    }
   },
 }))

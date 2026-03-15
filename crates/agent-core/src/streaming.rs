@@ -1,5 +1,6 @@
 use std::{
     path::{Path, PathBuf},
+    rc::Rc,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -7,6 +8,8 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+
+use crate::CoreError;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -45,10 +48,26 @@ impl Default for AbortSignal {
 }
 
 #[derive(Clone, Debug)]
+pub struct RuntimeToolContextStats {
+    pub total_entries: usize,
+    pub anchor_count: usize,
+    pub entries_since_last_anchor: usize,
+    pub estimated_context_units: u32,
+    pub context_limit: Option<u32>,
+    pub output_limit: Option<u32>,
+    pub pressure_ratio: Option<f64>,
+}
+
+pub trait RuntimeToolContext {
+    fn context_stats(&self) -> RuntimeToolContextStats;
+    fn record_handoff(&self, name: &str, summary: &str) -> Result<(), CoreError>;
+}
+
 pub struct ToolExecutionContext {
     pub run_id: String,
     pub workspace_root: Option<PathBuf>,
     pub abort: AbortSignal,
+    pub runtime: Option<Rc<dyn RuntimeToolContext>>,
 }
 
 impl ToolExecutionContext {

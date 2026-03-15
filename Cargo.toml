@@ -5,7 +5,7 @@ members = [
   "crates/agent-prompts",
   "crates/agent-runtime",
   "crates/builtin-tools",
-  "crates/llm-trace",
+  "crates/aia-store",
   "crates/openai-adapter",
   "crates/provider-registry",
   "crates/session-tape",

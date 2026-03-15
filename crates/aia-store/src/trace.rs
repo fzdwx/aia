@@ -1,9 +1,8 @@
-use std::path::Path;
-use std::sync::Mutex;
-
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+use crate::{AiaStore, AiaStoreError};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LlmTraceStatus {
@@ -35,7 +34,7 @@ pub enum LlmTraceSpanKind {
 }
 
 impl LlmTraceSpanKind {
-    fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             Self::Client => "CLIENT",
             Self::Internal => "INTERNAL",
@@ -132,64 +131,15 @@ pub struct LlmTraceSummary {
     pub total_tokens: u64,
 }
 
-#[derive(Debug)]
-pub struct LlmTraceStoreError {
-    message: String,
-}
-
-impl LlmTraceStoreError {
-    fn new(message: impl Into<String>) -> Self {
-        Self { message: message.into() }
-    }
-}
-
-impl std::fmt::Display for LlmTraceStoreError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.message)
-    }
-}
-
-impl std::error::Error for LlmTraceStoreError {}
-
-impl From<rusqlite::Error> for LlmTraceStoreError {
-    fn from(value: rusqlite::Error) -> Self {
-        Self::new(value.to_string())
-    }
-}
-
-impl From<serde_json::Error> for LlmTraceStoreError {
-    fn from(value: serde_json::Error) -> Self {
-        Self::new(value.to_string())
-    }
-}
-
 pub trait LlmTraceStore: Send + Sync {
-    fn record(&self, record: &LlmTraceRecord) -> Result<(), LlmTraceStoreError>;
-    fn list(&self, limit: usize) -> Result<Vec<LlmTraceListItem>, LlmTraceStoreError>;
-    fn get(&self, id: &str) -> Result<Option<LlmTraceRecord>, LlmTraceStoreError>;
-    fn summary(&self) -> Result<LlmTraceSummary, LlmTraceStoreError>;
+    fn record(&self, record: &LlmTraceRecord) -> Result<(), AiaStoreError>;
+    fn list(&self, limit: usize) -> Result<Vec<LlmTraceListItem>, AiaStoreError>;
+    fn get(&self, id: &str) -> Result<Option<LlmTraceRecord>, AiaStoreError>;
+    fn summary(&self) -> Result<LlmTraceSummary, AiaStoreError>;
 }
 
-pub struct SqliteLlmTraceStore {
-    conn: Mutex<Connection>,
-}
-
-impl SqliteLlmTraceStore {
-    pub fn new(path: impl AsRef<Path>) -> Result<Self, LlmTraceStoreError> {
-        let conn = Connection::open(path).map_err(LlmTraceStoreError::from)?;
-        let store = Self { conn: Mutex::new(conn) };
-        store.init()?;
-        Ok(store)
-    }
-
-    pub fn in_memory() -> Result<Self, LlmTraceStoreError> {
-        let conn = Connection::open_in_memory().map_err(LlmTraceStoreError::from)?;
-        let store = Self { conn: Mutex::new(conn) };
-        store.init()?;
-        Ok(store)
-    }
-
-    fn init(&self) -> Result<(), LlmTraceStoreError> {
+impl AiaStore {
+    pub(crate) fn init_trace_schema(&self) -> Result<(), AiaStoreError> {
         let conn = self.conn.lock().expect("lock poisoned");
         conn.execute_batch(
             "
@@ -237,22 +187,37 @@ impl SqliteLlmTraceStore {
         ensure_column(&conn, "llm_request_traces", "span_id", "TEXT NOT NULL DEFAULT ''")?;
         ensure_column(&conn, "llm_request_traces", "parent_span_id", "TEXT")?;
         ensure_column(&conn, "llm_request_traces", "root_span_id", "TEXT NOT NULL DEFAULT ''")?;
-        ensure_column(&conn, "llm_request_traces", "operation_name", "TEXT NOT NULL DEFAULT ''")?;
-        ensure_column(&conn, "llm_request_traces", "span_kind", "TEXT NOT NULL DEFAULT 'CLIENT'")?;
+        ensure_column(
+            &conn,
+            "llm_request_traces",
+            "operation_name",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        ensure_column(
+            &conn,
+            "llm_request_traces",
+            "span_kind",
+            "TEXT NOT NULL DEFAULT 'CLIENT'",
+        )?;
         ensure_column(
             &conn,
             "llm_request_traces",
             "otel_attributes",
             "TEXT NOT NULL DEFAULT '{}'",
         )?;
-        ensure_column(&conn, "llm_request_traces", "events", "TEXT NOT NULL DEFAULT '[]'")?;
+        ensure_column(
+            &conn,
+            "llm_request_traces",
+            "events",
+            "TEXT NOT NULL DEFAULT '[]'",
+        )?;
 
         Ok(())
     }
 }
 
-impl LlmTraceStore for SqliteLlmTraceStore {
-    fn record(&self, record: &LlmTraceRecord) -> Result<(), LlmTraceStoreError> {
+impl LlmTraceStore for AiaStore {
+    fn record(&self, record: &LlmTraceRecord) -> Result<(), AiaStoreError> {
         self.conn.lock().expect("lock poisoned").execute(
             "
             INSERT OR REPLACE INTO llm_request_traces (
@@ -312,7 +277,7 @@ impl LlmTraceStore for SqliteLlmTraceStore {
         Ok(())
     }
 
-    fn list(&self, limit: usize) -> Result<Vec<LlmTraceListItem>, LlmTraceStoreError> {
+    fn list(&self, limit: usize) -> Result<Vec<LlmTraceListItem>, AiaStoreError> {
         let conn = self.conn.lock().expect("lock poisoned");
         let mut stmt = conn.prepare(
             "
@@ -361,10 +326,10 @@ impl LlmTraceStore for SqliteLlmTraceStore {
                 error: row.get(22)?,
             })
         })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(LlmTraceStoreError::from)
+        rows.collect::<Result<Vec<_>, _>>().map_err(AiaStoreError::from)
     }
 
-    fn get(&self, id: &str) -> Result<Option<LlmTraceRecord>, LlmTraceStoreError> {
+    fn get(&self, id: &str) -> Result<Option<LlmTraceRecord>, AiaStoreError> {
         let conn = self.conn.lock().expect("lock poisoned");
         let mut stmt = conn.prepare(
             "
@@ -453,10 +418,10 @@ impl LlmTraceStore for SqliteLlmTraceStore {
             })
         })
         .optional()
-        .map_err(LlmTraceStoreError::from)
+        .map_err(AiaStoreError::from)
     }
 
-    fn summary(&self) -> Result<LlmTraceSummary, LlmTraceStoreError> {
+    fn summary(&self) -> Result<LlmTraceSummary, AiaStoreError> {
         let conn = self.conn.lock().expect("lock poisoned");
         let (
             total_requests,
@@ -518,11 +483,11 @@ impl LlmTraceStore for SqliteLlmTraceStore {
 }
 
 fn ensure_column(
-    conn: &Connection,
+    conn: &rusqlite::Connection,
     table: &str,
     column: &str,
     definition: &str,
-) -> Result<(), LlmTraceStoreError> {
+) -> Result<(), AiaStoreError> {
     let pragma = format!("PRAGMA table_info({table})");
     let mut stmt = conn.prepare(&pragma)?;
     let existing =
@@ -601,12 +566,12 @@ mod tests {
 
     use super::{
         LlmTraceEvent, LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus, LlmTraceStore,
-        SqliteLlmTraceStore,
     };
+    use crate::AiaStore;
 
     #[test]
-    fn sqlite_store_records_round_trip_and_summary() {
-        let store = SqliteLlmTraceStore::in_memory().expect("store should initialize");
+    fn store_records_round_trip_and_summary() {
+        let store = AiaStore::in_memory().expect("store should initialize");
         let record = LlmTraceRecord {
             id: "trace-1".into(),
             trace_id: "trace-group-1".into(),
@@ -668,8 +633,8 @@ mod tests {
     }
 
     #[test]
-    fn sqlite_list_extracts_user_message_from_chat_completions_request() {
-        let store = SqliteLlmTraceStore::in_memory().expect("store should initialize");
+    fn list_extracts_user_message_from_chat_completions_request() {
+        let store = AiaStore::in_memory().expect("store should initialize");
         store
             .record(&LlmTraceRecord {
                 id: "trace-chat".into(),
@@ -718,8 +683,8 @@ mod tests {
     }
 
     #[test]
-    fn sqlite_list_extracts_user_message_from_responses_request() {
-        let store = SqliteLlmTraceStore::in_memory().expect("store should initialize");
+    fn list_extracts_user_message_from_responses_request() {
+        let store = AiaStore::in_memory().expect("store should initialize");
         store
             .record(&LlmTraceRecord {
                 id: "trace-responses".into(),

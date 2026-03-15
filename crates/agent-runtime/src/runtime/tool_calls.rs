@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
 
 use agent_core::{
     AbortSignal, LanguageModel, LlmTraceRequestContext, StreamEvent, ToolCall,
@@ -63,15 +64,27 @@ where
             return Ok(lifecycle);
         }
 
-        // Intercept tape tools — they need direct access to the runtime.
-        if tape_tools::is_tape_tool(&call.tool_name) {
+        if tape_tools::is_runtime_tool(&call.tool_name) {
             on_delta(StreamEvent::ToolCallStarted {
                 invocation_id: call.invocation_id.clone(),
                 tool_name: call.tool_name.clone(),
                 arguments: call.arguments.clone(),
             });
 
-            let result = self.execute_tape_tool(call)?;
+            let runtime_tools = tape_tools::build_runtime_tool_registry();
+            let runtime_bridge = tape_tools::RuntimeToolContextBridge::new(self);
+            let result = runtime_tools
+                .call(
+                    call,
+                    &mut |_| {},
+                    &ToolExecutionContext {
+                        run_id: turn_id.to_string(),
+                        workspace_root: self.workspace_root.clone(),
+                        abort: AbortSignal::new(),
+                        runtime: Some(runtime_bridge as Rc<dyn agent_core::RuntimeToolContext>),
+                    },
+                )
+                .map_err(RuntimeError::tool)?;
 
             let tool_result_entry_id =
                 self.append_tape_entry(TapeEntry::tool_result(&result).with_run_id(turn_id))?;
@@ -137,6 +150,7 @@ where
                 run_id: turn_id.to_string(),
                 workspace_root: self.workspace_root.clone(),
                 abort: AbortSignal::new(),
+                runtime: None,
             },
         ) {
             Ok(result) => {

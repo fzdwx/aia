@@ -1,21 +1,21 @@
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{
         IntoResponse,
         sse::{KeepAlive, Sse},
     },
 };
-use llm_trace::LlmTraceStoreError;
+use aia_store::{LlmTraceStore, LlmTraceStoreError};
 use serde::{Deserialize, Serialize};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
 use provider_registry::{ModelConfig, ModelLimit, ProviderKind};
 
 use crate::{
-    runtime_worker::{
-        CreateProviderInput, CurrentTurnSnapshot, ProviderInfoSnapshot, RuntimeWorkerError,
+    session_manager::{
+        CreateProviderInput, ProviderInfoSnapshot, RuntimeWorkerError,
         SwitchProviderInput, UpdateProviderInput,
     },
     sse::{SsePayload, TurnStatus},
@@ -25,12 +25,19 @@ use crate::{
 #[derive(Deserialize)]
 pub struct TurnRequest {
     pub prompt: String,
+    pub session_id: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub struct HandoffRequest {
     pub name: String,
     pub summary: String,
+    pub session_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct SessionQuery {
+    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -130,6 +137,11 @@ pub struct SwitchProviderRequest {
     pub model_id: Option<String>,
 }
 
+#[derive(Deserialize)]
+pub struct CreateSessionRequest {
+    pub title: Option<String>,
+}
+
 fn provider_info_from_snapshot(snapshot: &ProviderInfoSnapshot) -> ProviderInfo {
     ProviderInfo {
         name: snapshot.name.clone(),
@@ -148,10 +160,65 @@ fn trace_store_error_response(error: LlmTraceStoreError) -> (StatusCode, Json<se
     (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": error.to_string() })))
 }
 
+/// Resolve session_id: use provided, or fall back to first session from DB
+fn resolve_session_id(state: &crate::state::AppState, session_id: Option<String>) -> Option<String> {
+    if let Some(id) = session_id {
+        return Some(id);
+    }
+    // Fall back to first session
+    state
+        .store
+        .list_sessions()
+        .ok()
+        .and_then(|sessions| sessions.first().map(|s| s.id.clone()))
+}
+
+// ── Session management ─────────────────────────────────────────
+
+pub async fn list_sessions(
+    State(state): State<SharedState>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    match state.store.list_sessions() {
+        Ok(sessions) => (
+            StatusCode::OK,
+            Json(serde_json::to_value(sessions).expect("serialize sessions")),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        ),
+    }
+}
+
+pub async fn create_session(
+    State(state): State<SharedState>,
+    Json(body): Json<CreateSessionRequest>,
+) -> impl IntoResponse {
+    match state.session_manager.create_session(body.title).await {
+        Ok(record) => (
+            StatusCode::CREATED,
+            Json(serde_json::to_value(record).expect("serialize session")),
+        ),
+        Err(error) => runtime_worker_error_response(error),
+    }
+}
+
+pub async fn delete_session(
+    State(state): State<SharedState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match state.session_manager.delete_session(id).await {
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))),
+        Err(error) => runtime_worker_error_response(error),
+    }
+}
+
+// ── Trace endpoints (unchanged) ────────────────────────────────
+
 pub async fn list_traces(
     State(state): State<SharedState>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let store = state.trace_store.clone();
+    let store = state.store.clone();
     match tokio::task::spawn_blocking(move || store.list(100)).await {
         Ok(Ok(items)) => {
             (StatusCode::OK, Json(serde_json::to_value(items).expect("serialize traces")))
@@ -168,7 +235,7 @@ pub async fn get_trace(
     State(state): State<SharedState>,
     Path(id): Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let store = state.trace_store.clone();
+    let store = state.store.clone();
     let missing_id = id.clone();
     match tokio::task::spawn_blocking(move || store.get(&id)).await {
         Ok(Ok(Some(trace))) => {
@@ -189,7 +256,7 @@ pub async fn get_trace(
 pub async fn get_trace_summary(
     State(state): State<SharedState>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let store = state.trace_store.clone();
+    let store = state.store.clone();
     match tokio::task::spawn_blocking(move || store.summary()).await {
         Ok(Ok(summary)) => {
             (StatusCode::OK, Json(serde_json::to_value(summary).expect("serialize trace summary")))
@@ -201,6 +268,8 @@ pub async fn get_trace_summary(
         ),
     }
 }
+
+// ── Provider endpoints ─────────────────────────────────────────
 
 pub async fn get_providers(State(state): State<SharedState>) -> Json<ProviderInfo> {
     let snapshot = state.provider_info_snapshot.read().expect("lock poisoned");
@@ -242,7 +311,7 @@ pub async fn create_provider(
 
     let models: Vec<ModelConfig> = body.models.into_iter().map(ModelConfig::from).collect();
     let result = state
-        .worker
+        .session_manager
         .create_provider(CreateProviderInput {
             name: body.name,
             kind,
@@ -278,7 +347,7 @@ pub async fn update_provider(
         }
     } else {
         match state
-            .worker
+            .session_manager
             .update_provider(
                 name,
                 UpdateProviderInput {
@@ -297,7 +366,7 @@ pub async fn update_provider(
     };
 
     let result = state
-        .worker
+        .session_manager
         .update_provider(
             name,
             UpdateProviderInput {
@@ -320,7 +389,7 @@ pub async fn delete_provider(
     State(state): State<SharedState>,
     Path(name): Path<String>,
 ) -> impl IntoResponse {
-    if let Err(error) = state.worker.delete_provider(name).await {
+    if let Err(error) = state.session_manager.delete_provider(name).await {
         return runtime_worker_error_response(error);
     }
 
@@ -332,7 +401,7 @@ pub async fn switch_provider(
     Json(body): Json<SwitchProviderRequest>,
 ) -> impl IntoResponse {
     let info = match state
-        .worker
+        .session_manager
         .switch_provider(SwitchProviderInput { name: body.name, model_id: body.model_id })
         .await
     {
@@ -343,455 +412,19 @@ pub async fn switch_provider(
     (StatusCode::OK, Json(serde_json::json!(provider_info_from_snapshot(&info))))
 }
 
-#[cfg(test)]
-mod tests {
-    use std::sync::{Arc, RwLock};
+// ── Session-scoped endpoints ───────────────────────────────────
 
-    use agent_core::{Message, Role, ToolCall, ToolResult};
-    use agent_runtime::{AgentRuntime, RuntimeEvent, TurnLifecycle};
-    use axum::Json;
-    use axum::http::StatusCode;
-    use llm_trace::{
-        LlmTraceListItem, LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus, LlmTraceStore,
-        LlmTraceSummary, SqliteLlmTraceStore,
+pub async fn get_session_info(
+    State(state): State<SharedState>,
+    Query(query): Query<SessionQuery>,
+) -> impl IntoResponse {
+    let Some(session_id) = resolve_session_id(&state, query.session_id) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "no session available" })),
+        );
     };
-    use provider_registry::{
-        ModelConfig, ModelLimit, ProviderKind, ProviderProfile, ProviderRegistry,
-    };
-    use session_tape::{SessionTape, TapeEntry};
-    use tokio::sync::broadcast;
-
-    use crate::{
-        runtime_worker::{self, ProviderInfoSnapshot, RuntimeOwnerState, spawn_runtime_worker},
-        sse::{SsePayload, TurnStatus},
-        state::AppState,
-    };
-
-    use super::{
-        ModelConfigDto, ModelLimitDto, get_current_turn, get_history, get_providers, get_trace,
-        get_trace_summary, list_providers, list_traces,
-    };
-
-    fn provider(name: &str, model: &str) -> ProviderProfile {
-        ProviderProfile {
-            name: name.to_string(),
-            kind: ProviderKind::OpenAiResponses,
-            base_url: "https://api.openai.com/v1".to_string(),
-            api_key: "test-key".to_string(),
-            models: vec![ModelConfig {
-                id: model.to_string(),
-                display_name: None,
-                limit: Some(ModelLimit { context: Some(200_000), output: Some(131_072) }),
-                default_temperature: None,
-                supports_reasoning: false,
-                reasoning_effort: None,
-            }],
-            active_model: Some(model.to_string()),
-        }
-    }
-
-    fn shared_state_with_snapshots(
-        provider_info: ProviderInfoSnapshot,
-        registry: ProviderRegistry,
-    ) -> Arc<AppState> {
-        let mut runtime = AgentRuntime::new(
-            crate::model::ServerModel::bootstrap(),
-            builtin_tools::build_tool_registry(),
-            agent_core::ModelIdentity::new(
-                "local",
-                "bootstrap",
-                agent_core::ModelDisposition::Balanced,
-            ),
-        );
-        let subscriber = runtime.subscribe();
-        let (broadcast_tx, _) = broadcast::channel(16);
-        let trace_store: Arc<dyn LlmTraceStore> =
-            Arc::new(SqliteLlmTraceStore::in_memory().expect("trace store should init"));
-        let provider_registry_snapshot = Arc::new(RwLock::new(registry.clone()));
-        let provider_info_snapshot = Arc::new(RwLock::new(provider_info.clone()));
-        let history_snapshot = Arc::new(RwLock::new(Vec::new()));
-        let current_turn_snapshot = Arc::new(RwLock::new(None));
-        let worker = spawn_runtime_worker(RuntimeOwnerState {
-            runtime,
-            subscriber,
-            session_path: std::path::PathBuf::from("/tmp/session.jsonl"),
-            registry: registry.clone(),
-            store_path: std::path::PathBuf::from("/tmp/providers.json"),
-            trace_store: trace_store.clone(),
-            broadcast_tx: broadcast_tx.clone(),
-            provider_registry_snapshot: provider_registry_snapshot.clone(),
-            provider_info_snapshot: provider_info_snapshot.clone(),
-            history_snapshot: history_snapshot.clone(),
-            current_turn_snapshot: current_turn_snapshot.clone(),
-        });
-
-        let state = Arc::new(AppState {
-            worker,
-            broadcast_tx,
-            provider_registry_snapshot,
-            provider_info_snapshot,
-            history_snapshot,
-            current_turn_snapshot,
-            trace_store,
-        });
-        *state.provider_info_snapshot.write().expect("lock poisoned") = provider_info;
-        *state.provider_registry_snapshot.write().expect("lock poisoned") = registry;
-        state
-    }
-
-    #[test]
-    fn rebuild_turn_history_from_tape_restores_completed_turns() {
-        let mut tape = SessionTape::new();
-        let turn_id = "turn-1";
-        let user = Message::new(Role::User, "你好");
-        let assistant = Message::new(Role::Assistant, "已完成");
-        let call = ToolCall::new("read").with_invocation_id("call-1");
-        let result = ToolResult::from_call(&call, "内容");
-
-        tape.append_entry(TapeEntry::message(&user).with_run_id(turn_id));
-        tape.append_entry(TapeEntry::thinking("思考中").with_run_id(turn_id));
-        tape.append_entry(TapeEntry::tool_call(&call).with_run_id(turn_id));
-        tape.append_entry(TapeEntry::tool_result(&result).with_run_id(turn_id));
-        tape.append_entry(TapeEntry::message(&assistant).with_run_id(turn_id));
-        tape.append_entry(TapeEntry::event("turn_completed", None).with_run_id(turn_id));
-
-        let turns = runtime_worker::rebuild_turn_history_from_tape(&tape);
-
-        assert_eq!(turns.len(), 1);
-        let turn = &turns[0];
-        assert_eq!(turn.turn_id, turn_id);
-        assert_eq!(turn.user_message, "你好");
-        assert_eq!(turn.assistant_message.as_deref(), Some("已完成"));
-        assert_eq!(turn.thinking.as_deref(), Some("思考中"));
-        assert_eq!(turn.tool_invocations.len(), 1);
-        assert_eq!(turn.blocks.len(), 3);
-    }
-
-    #[test]
-    fn rebuild_session_snapshots_from_tape_keeps_incomplete_turn_out_of_history() {
-        let mut tape = SessionTape::new();
-        let turn_id = "turn-1";
-        tape.append_entry(
-            TapeEntry::message(&Message::new(Role::User, "处理中")).with_run_id(turn_id),
-        );
-        tape.append_entry(TapeEntry::thinking("先分析").with_run_id(turn_id));
-
-        let snapshots = runtime_worker::rebuild_session_snapshots_from_tape(&tape);
-
-        assert!(snapshots.history.is_empty());
-        let current = snapshots.current_turn.expect("应保留当前未完成轮次");
-        assert_eq!(current.user_message, "处理中");
-        assert_eq!(current.status, crate::sse::TurnStatus::Thinking);
-        assert!(current.started_at_ms > 0);
-        assert_eq!(
-            current.blocks,
-            vec![runtime_worker::CurrentTurnBlock::Thinking { content: "先分析".to_string() }]
-        );
-    }
-
-    #[test]
-    fn rebuild_turn_history_from_tape_restores_legacy_turn_record() {
-        let mut tape = SessionTape::new();
-        let legacy_turn = TurnLifecycle {
-            turn_id: "legacy-turn-1".to_string(),
-            started_at_ms: 1000,
-            finished_at_ms: 2000,
-            source_entry_ids: vec![1, 2],
-            user_message: "旧问题".to_string(),
-            blocks: vec![agent_runtime::TurnBlock::Assistant { content: "旧回答".to_string() }],
-            assistant_message: Some("旧回答".to_string()),
-            thinking: None,
-            tool_invocations: vec![],
-            failure_message: None,
-        };
-        tape.append_entry(TapeEntry::event(
-            "turn_record",
-            Some(serde_json::to_value(&legacy_turn).expect("legacy turn should serialize")),
-        ));
-
-        let turns = runtime_worker::rebuild_turn_history_from_tape(&tape);
-
-        assert_eq!(turns.len(), 1);
-        assert_eq!(turns[0], legacy_turn);
-    }
-
-    #[test]
-    fn model_config_dto_round_trip_preserves_limit() {
-        let dto = ModelConfigDto {
-            id: "gpt-4.1".into(),
-            display_name: Some("GPT-4.1".into()),
-            limit: Some(ModelLimitDto { context: Some(200_000), output: Some(131_072) }),
-            default_temperature: Some(0.2),
-            supports_reasoning: true,
-            reasoning_effort: Some("medium".into()),
-        };
-
-        let model = ModelConfig::from(dto.clone());
-        assert_eq!(model.limit, Some(ModelLimit { context: Some(200_000), output: Some(131_072) }));
-
-        let round_trip = ModelConfigDto::from(&model);
-        assert_eq!(round_trip.limit, dto.limit);
-    }
-
-    #[test]
-    fn broadcast_runtime_events_forwards_context_compression_and_turn() {
-        let (broadcast_tx, mut broadcast_rx) = broadcast::channel(8);
-        let turn = TurnLifecycle {
-            turn_id: "turn-1".to_string(),
-            started_at_ms: 1000,
-            finished_at_ms: 2000,
-            source_entry_ids: vec![1, 2, 3],
-            user_message: "你好".to_string(),
-            blocks: vec![agent_runtime::TurnBlock::Assistant { content: "已完成".to_string() }],
-            assistant_message: Some("已完成".to_string()),
-            thinking: None,
-            tool_invocations: vec![],
-            failure_message: Some("模型执行失败：上下文过长".to_string()),
-        };
-
-        let forwarded_turn = runtime_worker::broadcast_runtime_events(
-            vec![
-                RuntimeEvent::ContextCompressed {
-                    summary: "摘要：已压缩历史上下文".to_string()
-                },
-                RuntimeEvent::TurnLifecycle { turn: turn.clone() },
-            ],
-            &broadcast_tx,
-        );
-
-        assert_eq!(forwarded_turn, Some(turn));
-        assert!(matches!(
-            broadcast_rx.try_recv().expect("应先转发压缩事件"),
-            SsePayload::ContextCompressed { summary } if summary == "摘要：已压缩历史上下文"
-        ));
-    }
-
-    #[tokio::test]
-    async fn get_providers_reads_provider_info_snapshot() {
-        let state = shared_state_with_snapshots(
-            ProviderInfoSnapshot {
-                name: "openai".to_string(),
-                model: "gpt-4.1".to_string(),
-                connected: true,
-            },
-            ProviderRegistry::default(),
-        );
-
-        let Json(info) = get_providers(axum::extract::State(state)).await;
-
-        assert_eq!(info.name, "openai");
-        assert_eq!(info.model, "gpt-4.1");
-        assert!(info.connected);
-    }
-
-    #[tokio::test]
-    async fn list_providers_reads_registry_snapshot() {
-        let mut registry = ProviderRegistry::default();
-        registry.upsert(provider("alpha", "gpt-4.1-mini"));
-        registry.upsert(provider("beta", "gpt-4.1"));
-        registry.set_active("beta").expect("beta should exist");
-        let state = shared_state_with_snapshots(
-            ProviderInfoSnapshot {
-                name: "openai".to_string(),
-                model: "gpt-4.1".to_string(),
-                connected: true,
-            },
-            registry,
-        );
-
-        let Json(items) = list_providers(axum::extract::State(state)).await;
-
-        assert_eq!(items.len(), 2);
-        assert!(items.iter().any(|item| item.name == "beta" && item.active));
-        assert!(items.iter().any(|item| item.name == "alpha" && !item.active));
-    }
-
-    #[tokio::test]
-    async fn get_history_reads_history_snapshot_directly() {
-        let state = shared_state_with_snapshots(
-            ProviderInfoSnapshot {
-                name: "openai".to_string(),
-                model: "gpt-4.1".to_string(),
-                connected: true,
-            },
-            ProviderRegistry::default(),
-        );
-        *state.history_snapshot.write().expect("lock poisoned") = vec![TurnLifecycle {
-            turn_id: "turn-1".to_string(),
-            started_at_ms: 1,
-            finished_at_ms: 2,
-            source_entry_ids: vec![1],
-            user_message: "你好".to_string(),
-            blocks: vec![agent_runtime::TurnBlock::Assistant { content: "已完成".to_string() }],
-            assistant_message: Some("已完成".to_string()),
-            thinking: None,
-            tool_invocations: vec![],
-            failure_message: None,
-        }];
-
-        let (status, Json(value)) = get_history(axum::extract::State(state)).await;
-        let turns: Vec<TurnLifecycle> = serde_json::from_value(value).expect("decode history");
-
-        assert_eq!(status, StatusCode::OK);
-        assert_eq!(turns.len(), 1);
-        assert_eq!(turns[0].turn_id, "turn-1");
-    }
-
-    #[tokio::test]
-    async fn get_current_turn_reads_current_turn_snapshot_directly() {
-        let state = shared_state_with_snapshots(
-            ProviderInfoSnapshot {
-                name: "openai".to_string(),
-                model: "gpt-4.1".to_string(),
-                connected: true,
-            },
-            ProviderRegistry::default(),
-        );
-        *state.current_turn_snapshot.write().expect("lock poisoned") =
-            Some(runtime_worker::CurrentTurnSnapshot {
-                started_at_ms: 1,
-                user_message: "处理中".to_string(),
-                status: TurnStatus::Working,
-                blocks: vec![runtime_worker::CurrentTurnBlock::Thinking {
-                    content: "先分析".to_string(),
-                }],
-            });
-
-        let (status, Json(value)) = get_current_turn(axum::extract::State(state)).await;
-        let current: Option<runtime_worker::CurrentTurnSnapshot> =
-            serde_json::from_value(value).expect("decode current turn");
-
-        assert_eq!(status, StatusCode::OK);
-        assert_eq!(current.expect("应返回当前轮次").user_message, "处理中");
-    }
-
-    #[tokio::test]
-    async fn list_traces_reads_trace_store() {
-        let state = shared_state_with_snapshots(
-            ProviderInfoSnapshot {
-                name: "openai".to_string(),
-                model: "gpt-5.4".to_string(),
-                connected: true,
-            },
-            ProviderRegistry::default(),
-        );
-        state
-            .trace_store
-            .record(&LlmTraceRecord {
-                id: "trace-1".to_string(),
-                trace_id: "aia-trace-turn-1".to_string(),
-                span_id: "trace-1".to_string(),
-                parent_span_id: Some("aia-span-turn-1-root".to_string()),
-                root_span_id: "aia-span-turn-1-root".to_string(),
-                operation_name: "chat".to_string(),
-                span_kind: LlmTraceSpanKind::Client,
-                turn_id: "turn-1".to_string(),
-                run_id: "turn-1".to_string(),
-                request_kind: "completion".to_string(),
-                step_index: 0,
-                provider: "openai".to_string(),
-                protocol: "openai-responses".to_string(),
-                model: "gpt-5.4".to_string(),
-                base_url: "https://example.com".to_string(),
-                endpoint_path: "/responses".to_string(),
-                streaming: true,
-                started_at_ms: 10,
-                finished_at_ms: Some(20),
-                duration_ms: Some(10),
-                status_code: Some(200),
-                status: LlmTraceStatus::Succeeded,
-                stop_reason: Some("stop".to_string()),
-                error: None,
-                request_summary: serde_json::json!({"conversation_items": 1}),
-                provider_request: serde_json::json!({"model": "gpt-5.4"}),
-                response_summary: serde_json::json!({"assistant_text": "ok"}),
-                response_body: Some("ok".to_string()),
-                input_tokens: Some(10),
-                output_tokens: Some(5),
-                total_tokens: Some(15),
-                otel_attributes: serde_json::json!({"gen_ai.operation.name": "chat"}),
-                events: vec![],
-            })
-            .expect("trace should persist");
-
-        let (status, Json(value)) = list_traces(axum::extract::State(state)).await;
-        let items: Vec<LlmTraceListItem> = serde_json::from_value(value).expect("decode traces");
-
-        assert_eq!(status, StatusCode::OK);
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].id, "trace-1");
-        assert_eq!(items[0].user_message, None);
-    }
-
-    #[tokio::test]
-    async fn trace_detail_and_summary_routes_read_trace_store() {
-        let state = shared_state_with_snapshots(
-            ProviderInfoSnapshot {
-                name: "openai".to_string(),
-                model: "gpt-5.4".to_string(),
-                connected: true,
-            },
-            ProviderRegistry::default(),
-        );
-        let record = LlmTraceRecord {
-            id: "trace-2".to_string(),
-            trace_id: "aia-trace-turn-2".to_string(),
-            span_id: "trace-2".to_string(),
-            parent_span_id: Some("aia-span-turn-2-root".to_string()),
-            root_span_id: "aia-span-turn-2-root".to_string(),
-            operation_name: "chat".to_string(),
-            span_kind: LlmTraceSpanKind::Client,
-            turn_id: "turn-2".to_string(),
-            run_id: "turn-2".to_string(),
-            request_kind: "completion".to_string(),
-            step_index: 1,
-            provider: "openai".to_string(),
-            protocol: "openai-chat-completions".to_string(),
-            model: "gpt-5.4".to_string(),
-            base_url: "https://example.com".to_string(),
-            endpoint_path: "/chat/completions".to_string(),
-            streaming: true,
-            started_at_ms: 100,
-            finished_at_ms: Some(160),
-            duration_ms: Some(60),
-            status_code: Some(500),
-            status: LlmTraceStatus::Failed,
-            stop_reason: None,
-            error: Some("boom".to_string()),
-            request_summary: serde_json::json!({"conversation_items": 2}),
-            provider_request: serde_json::json!({"model": "gpt-5.4"}),
-            response_summary: serde_json::json!({"error": "boom"}),
-            response_body: None,
-            input_tokens: Some(10),
-            output_tokens: Some(0),
-            total_tokens: Some(10),
-            otel_attributes: serde_json::json!({"gen_ai.operation.name": "chat"}),
-            events: vec![],
-        };
-        state.trace_store.record(&record).expect("trace should persist");
-
-        let (detail_status, Json(detail_value)) = get_trace(
-            axum::extract::State(state.clone()),
-            axum::extract::Path("trace-2".to_string()),
-        )
-        .await;
-        let detail: LlmTraceRecord =
-            serde_json::from_value(detail_value).expect("decode trace detail");
-        assert_eq!(detail_status, StatusCode::OK);
-        assert_eq!(detail.id, "trace-2");
-
-        let (summary_status, Json(summary_value)) =
-            get_trace_summary(axum::extract::State(state)).await;
-        let summary: LlmTraceSummary =
-            serde_json::from_value(summary_value).expect("decode trace summary");
-        assert_eq!(summary_status, StatusCode::OK);
-        assert_eq!(summary.total_requests, 1);
-        assert_eq!(summary.failed_requests, 1);
-    }
-}
-
-pub async fn get_session_info(State(state): State<SharedState>) -> impl IntoResponse {
-    match state.worker.get_session_info().await {
+    match state.session_manager.get_session_info(session_id).await {
         Ok(stats) => (StatusCode::OK, Json(serde_json::to_value(stats).expect("serialize stats"))),
         Err(error) => runtime_worker_error_response(error),
     }
@@ -801,7 +434,13 @@ pub async fn create_handoff(
     State(state): State<SharedState>,
     Json(body): Json<HandoffRequest>,
 ) -> impl IntoResponse {
-    match state.worker.create_handoff(body.name, body.summary).await {
+    let Some(session_id) = resolve_session_id(&state, body.session_id) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "no session available" })),
+        );
+    };
+    match state.session_manager.create_handoff(session_id, body.name, body.summary).await {
         Ok(anchor_entry_id) => {
             (StatusCode::OK, Json(serde_json::json!({ "anchor_entry_id": anchor_entry_id })))
         }
@@ -811,17 +450,30 @@ pub async fn create_handoff(
 
 pub async fn get_history(
     State(state): State<SharedState>,
+    Query(query): Query<SessionQuery>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let turns = state.history_snapshot.read().expect("lock poisoned").clone();
-    (StatusCode::OK, Json(serde_json::to_value(turns).expect("serialize history")))
+    let Some(session_id) = resolve_session_id(&state, query.session_id) else {
+        return (StatusCode::OK, Json(serde_json::to_value(Vec::<()>::new()).expect("empty")));
+    };
+    match state.session_manager.get_history(session_id).await {
+        Ok(turns) => (StatusCode::OK, Json(serde_json::to_value(turns).expect("serialize history"))),
+        Err(error) => runtime_worker_error_response(error),
+    }
 }
 
 pub async fn get_current_turn(
     State(state): State<SharedState>,
+    Query(query): Query<SessionQuery>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let current: Option<CurrentTurnSnapshot> =
-        state.current_turn_snapshot.read().expect("lock poisoned").clone();
-    (StatusCode::OK, Json(serde_json::to_value(current).expect("serialize current turn")))
+    let Some(session_id) = resolve_session_id(&state, query.session_id) else {
+        return (StatusCode::OK, Json(serde_json::to_value(Option::<()>::None).expect("null")));
+    };
+    match state.session_manager.get_current_turn(session_id).await {
+        Ok(current) => {
+            (StatusCode::OK, Json(serde_json::to_value(current).expect("serialize current turn")))
+        }
+        Err(error) => runtime_worker_error_response(error),
+    }
 }
 
 /// Global SSE endpoint — client connects once, receives all events.
@@ -841,10 +493,43 @@ pub async fn submit_turn(
     State(state): State<SharedState>,
     Json(body): Json<TurnRequest>,
 ) -> impl IntoResponse {
-    let _ = state.broadcast_tx.send(SsePayload::Status(TurnStatus::Waiting));
-    if let Err(error) = state.worker.submit_turn(body.prompt) {
+    let Some(session_id) = resolve_session_id(&state, body.session_id) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "no session available" })),
+        );
+    };
+    let _ = state.broadcast_tx.send(SsePayload::Status {
+        session_id: session_id.clone(),
+        status: TurnStatus::Waiting,
+    });
+    if let Err(error) = state.session_manager.submit_turn(session_id, body.prompt) {
         return runtime_worker_error_response(error);
     }
 
     (StatusCode::ACCEPTED, Json(serde_json::json!({ "ok": true })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ModelConfigDto, ModelLimitDto};
+    use provider_registry::{ModelConfig, ModelLimit};
+
+    #[test]
+    fn model_config_dto_round_trip_preserves_limit() {
+        let dto = ModelConfigDto {
+            id: "gpt-4.1".into(),
+            display_name: Some("GPT-4.1".into()),
+            limit: Some(ModelLimitDto { context: Some(200_000), output: Some(131_072) }),
+            default_temperature: Some(0.2),
+            supports_reasoning: true,
+            reasoning_effort: Some("medium".into()),
+        };
+
+        let model = ModelConfig::from(dto.clone());
+        assert_eq!(model.limit, Some(ModelLimit { context: Some(200_000), output: Some(131_072) }));
+
+        let round_trip = ModelConfigDto::from(&model);
+        assert_eq!(round_trip.limit, dto.limit);
+    }
 }

@@ -1,6 +1,7 @@
 mod model;
 mod routes;
 mod runtime_worker;
+mod session_manager;
 mod sse;
 mod state;
 
@@ -10,56 +11,132 @@ use axum::{
     Router,
     routing::{delete, get, post, put},
 };
-use llm_trace::{LlmTraceStore, SqliteLlmTraceStore};
+use aia_store::{AiaStore, SessionRecord, generate_session_id, iso8601_now};
 use tower_http::cors::CorsLayer;
 
-use agent_runtime::AgentRuntime;
-use builtin_tools::build_tool_registry;
 use provider_registry::ProviderRegistry;
-use session_tape::{SessionTape, default_session_path};
+use session_tape::SessionTape;
 
 use model::{ProviderLaunchChoice, build_model_from_selection};
-use runtime_worker::{ProviderInfoSnapshot, RuntimeOwnerState, spawn_runtime_worker};
+use session_manager::{
+    ProviderInfoSnapshot, SessionManagerConfig, spawn_session_manager,
+};
 use state::AppState;
 
-fn default_trace_store_path() -> std::path::PathBuf {
+fn default_aia_store_path() -> std::path::PathBuf {
     provider_registry::default_registry_path()
         .parent()
         .unwrap_or_else(|| std::path::Path::new("."))
-        .join("llm-traces.sqlite3")
+        .join("store.sqlite3")
 }
 
-fn choose_provider(registry: &ProviderRegistry, tape: &SessionTape) -> ProviderLaunchChoice {
-    use session_tape::SessionProviderBinding;
+fn default_sessions_dir() -> std::path::PathBuf {
+    provider_registry::default_registry_path()
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join("sessions")
+}
 
-    if let Some(binding) = tape.latest_provider_binding() {
-        match binding {
-            SessionProviderBinding::Bootstrap => return ProviderLaunchChoice::Bootstrap,
-            SessionProviderBinding::Provider { name, model, base_url, protocol } => {
-                if let Some(profile) = registry.providers().iter().find(|provider| {
-                    provider.name == name
-                        && provider.has_model(&model)
-                        && provider.base_url == base_url
-                        && provider.kind.protocol_name() == protocol.as_str()
-                }) {
-                    return ProviderLaunchChoice::OpenAi(profile.clone());
-                }
-            }
+fn old_session_path() -> std::path::PathBuf {
+    session_tape::default_session_path()
+}
+
+/// Migrate legacy .aia/session.jsonl to sessions/{id}.jsonl + SQLite record
+fn migrate_legacy_session(
+    store: &AiaStore,
+    sessions_dir: &std::path::Path,
+    registry: &ProviderRegistry,
+) {
+    let legacy_path = old_session_path();
+    if !legacy_path.exists() {
+        return;
+    }
+
+    // Check if we already have sessions (don't re-migrate)
+    if let Ok(existing) = store.list_sessions() {
+        if !existing.is_empty() {
+            return;
         }
     }
 
-    registry
-        .active_provider()
-        .cloned()
-        .map(ProviderLaunchChoice::OpenAi)
-        .unwrap_or(ProviderLaunchChoice::Bootstrap)
+    let session_id = generate_session_id();
+    let now = iso8601_now();
+
+    // Ensure sessions dir exists
+    if let Err(e) = std::fs::create_dir_all(sessions_dir) {
+        eprintln!("sessions 目录创建失败: {e}");
+        return;
+    }
+
+    // Move file
+    let new_path = sessions_dir.join(format!("{session_id}.jsonl"));
+    if let Err(e) = std::fs::rename(&legacy_path, &new_path) {
+        // If rename fails (cross-device), try copy + delete
+        if let Err(e2) = std::fs::copy(&legacy_path, &new_path) {
+            eprintln!("session 迁移失败: rename={e}, copy={e2}");
+            return;
+        }
+        let _ = std::fs::remove_file(&legacy_path);
+    }
+
+    // Get model from the tape or registry
+    let model_name = if let Ok(tape) = SessionTape::load_jsonl_or_default(&new_path) {
+        tape.latest_provider_binding()
+            .and_then(|b| match b {
+                session_tape::SessionProviderBinding::Provider { model, .. } => Some(model),
+                _ => None,
+            })
+            .or_else(|| {
+                registry
+                    .active_provider()
+                    .and_then(|p| p.active_model.clone())
+            })
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let record = SessionRecord {
+        id: session_id,
+        title: "Default session".to_string(),
+        created_at: now.clone(),
+        updated_at: now,
+        model: model_name,
+    };
+
+    if let Err(e) = store.create_session(&record) {
+        eprintln!("session 迁移 DB 写入失败: {e}");
+    }
+}
+
+/// Migrate legacy .aia/llm-traces.sqlite3 and .aia/sessions.sqlite3 into unified store.sqlite3
+fn migrate_legacy_db(store: &AiaStore, aia_dir: &std::path::Path) {
+    let old_traces = aia_dir.join("llm-traces.sqlite3");
+    if old_traces.exists() {
+        match store.migrate_from_legacy_file(&old_traces, "llm_request_traces") {
+            Ok(()) => {
+                let _ = std::fs::remove_file(&old_traces);
+            }
+            Err(e) => eprintln!("trace 数据迁移失败: {e}"),
+        }
+    }
+
+    let old_sessions = aia_dir.join("sessions.sqlite3");
+    if old_sessions.exists() {
+        match store.migrate_from_legacy_file(&old_sessions, "sessions") {
+            Ok(()) => {
+                let _ = std::fs::remove_file(&old_sessions);
+            }
+            Err(e) => eprintln!("session 数据迁移失败: {e}"),
+        }
+    }
 }
 
 #[tokio::main]
 async fn main() {
-    let store_path = provider_registry::default_registry_path();
-    let session_path = default_session_path();
-    let trace_store_path = default_trace_store_path();
+    let registry_path = provider_registry::default_registry_path();
+    let aia_store_path = default_aia_store_path();
+    let sessions_dir = default_sessions_dir();
     let workspace_root = match std::env::current_dir() {
         Ok(path) => path,
         Err(error) => {
@@ -68,61 +145,72 @@ async fn main() {
         }
     };
 
-    let registry = ProviderRegistry::load_or_default(&store_path).expect("provider 注册表加载失败");
-    let tape = SessionTape::load_jsonl_or_default(&session_path).expect("session 磁带加载失败");
-    let trace_store: Arc<dyn LlmTraceStore> =
-        Arc::new(SqliteLlmTraceStore::new(&trace_store_path).expect("trace 数据库初始化失败"));
+    let registry = ProviderRegistry::load_or_default(&registry_path).expect("provider 注册表加载失败");
 
-    let selection = choose_provider(&registry, &tape);
-    let (identity, model) =
-        build_model_from_selection(selection, Some(trace_store.clone())).expect("模型构建失败");
+    // Initialize unified store (traces + sessions in one DB)
+    let store = Arc::new(AiaStore::new(&aia_store_path).expect("数据库初始化失败"));
 
-    let tools = build_tool_registry();
-    let session_append_path = session_path.clone();
+    // Migrate legacy separate DB files into unified store
+    if let Some(aia_dir) = aia_store_path.parent() {
+        migrate_legacy_db(&store, aia_dir);
+    }
 
-    let mut runtime = AgentRuntime::with_tape(model, tools, identity, tape)
-        .with_instructions(format!(
-            "你是 aia 的助手。给出清晰、结构化的答案。\n\n{}",
-            agent_prompts::context_contract(
-                agent_prompts::AGENT_HANDOFF_THRESHOLD,
-                agent_prompts::AUTO_COMPRESSION_THRESHOLD,
-            ),
-        ))
-        .with_workspace_root(workspace_root)
-        .with_tape_entry_listener(move |entry| {
-            SessionTape::append_jsonl_entry(&session_append_path, entry)
-        })
-        .with_max_tool_calls_per_turn(100000);
+    // Ensure sessions directory exists
+    std::fs::create_dir_all(&sessions_dir).expect("sessions 目录创建失败");
 
-    let subscriber = runtime.subscribe();
+    // Migrate legacy session.jsonl if needed
+    migrate_legacy_session(&store, &sessions_dir, &registry);
+
+    // If no sessions exist, create a default one
+    if store.list_sessions().map(|s| s.is_empty()).unwrap_or(true) {
+        let session_id = generate_session_id();
+        let now = iso8601_now();
+        let model_name = registry
+            .active_provider()
+            .and_then(|p| p.active_model.clone())
+            .unwrap_or_default();
+        let record = SessionRecord {
+            id: session_id,
+            title: "New session".to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+            model: model_name,
+        };
+        store.create_session(&record).expect("默认 session 创建失败");
+    }
+
+    // Determine initial model
+    let selection = registry
+        .active_provider()
+        .cloned()
+        .map(ProviderLaunchChoice::OpenAi)
+        .unwrap_or(ProviderLaunchChoice::Bootstrap);
+
+    let (identity, _model) =
+        build_model_from_selection(selection, Some(store.clone())).expect("模型构建失败");
+
     let (broadcast_tx, _) = tokio::sync::broadcast::channel(512);
     let provider_registry_snapshot = Arc::new(RwLock::new(registry.clone()));
     let provider_info_snapshot =
-        Arc::new(RwLock::new(ProviderInfoSnapshot::from_identity(runtime.model_identity())));
-    let history_snapshot = Arc::new(RwLock::new(Vec::new()));
-    let current_turn_snapshot = Arc::new(RwLock::new(None));
-    let worker = spawn_runtime_worker(RuntimeOwnerState {
-        runtime,
-        subscriber,
-        session_path,
+        Arc::new(RwLock::new(ProviderInfoSnapshot::from_identity(&identity)));
+
+    let session_manager = spawn_session_manager(SessionManagerConfig {
+        sessions_dir,
+        store: store.clone(),
         registry,
-        store_path,
-        trace_store: trace_store.clone(),
+        store_path: registry_path,
         broadcast_tx: broadcast_tx.clone(),
         provider_registry_snapshot: provider_registry_snapshot.clone(),
         provider_info_snapshot: provider_info_snapshot.clone(),
-        history_snapshot: history_snapshot.clone(),
-        current_turn_snapshot: current_turn_snapshot.clone(),
+        workspace_root,
     });
 
     let state = Arc::new(AppState {
-        worker,
+        session_manager,
         broadcast_tx,
         provider_registry_snapshot,
         provider_info_snapshot,
-        history_snapshot,
-        current_turn_snapshot,
-        trace_store,
+        store,
     });
 
     let app = Router::new()
@@ -135,6 +223,11 @@ async fn main() {
         .route("/api/providers/{name}", put(routes::update_provider))
         .route("/api/providers/{name}", delete(routes::delete_provider))
         .route("/api/providers/switch", post(routes::switch_provider))
+        // Session management
+        .route("/api/sessions", get(routes::list_sessions))
+        .route("/api/sessions", post(routes::create_session))
+        .route("/api/sessions/{id}", delete(routes::delete_session))
+        // Per-session endpoints
         .route("/api/session/history", get(routes::get_history))
         .route("/api/session/current-turn", get(routes::get_current_turn))
         .route("/api/session/info", get(routes::get_session_info))

@@ -14,51 +14,96 @@ pub enum TurnStatus {
 
 #[derive(Clone)]
 pub enum SsePayload {
-    Stream(StreamEvent),
-    Status(TurnStatus),
-    TurnCompleted(TurnLifecycle),
-    ContextCompressed { summary: String },
-    Error(String),
+    Stream { session_id: String, event: StreamEvent },
+    Status { session_id: String, status: TurnStatus },
+    TurnCompleted { session_id: String, turn: TurnLifecycle },
+    ContextCompressed { session_id: String, summary: String },
+    Error { session_id: String, message: String },
+    SessionCreated { session_id: String, title: String },
+    SessionDeleted { session_id: String },
 }
 
 #[derive(Serialize)]
 struct StatusData {
+    session_id: String,
     status: TurnStatus,
 }
 
 #[derive(Serialize)]
 struct ErrorData {
+    session_id: String,
     message: String,
 }
 
 #[derive(Serialize)]
 struct ContextCompressedData {
+    session_id: String,
     summary: String,
+}
+
+#[derive(Serialize)]
+struct StreamData {
+    session_id: String,
+    #[serde(flatten)]
+    event: StreamEvent,
+}
+
+#[derive(Serialize)]
+struct TurnCompletedData {
+    session_id: String,
+    #[serde(flatten)]
+    turn: TurnLifecycle,
+}
+
+#[derive(Serialize)]
+struct SessionCreatedData {
+    session_id: String,
+    title: String,
+}
+
+#[derive(Serialize)]
+struct SessionDeletedData {
+    session_id: String,
 }
 
 impl SsePayload {
     pub fn into_axum_event(self) -> Result<Event, std::convert::Infallible> {
         match self {
-            Self::Stream(event) => {
-                let data = serde_json::to_string(&event).unwrap_or_default();
+            Self::Stream { session_id, event } => {
+                let data =
+                    serde_json::to_string(&StreamData { session_id, event }).unwrap_or_default();
                 Ok(Event::default().event("stream").data(data))
             }
-            Self::Status(status) => {
-                let data = serde_json::to_string(&StatusData { status }).unwrap_or_default();
+            Self::Status { session_id, status } => {
+                let data =
+                    serde_json::to_string(&StatusData { session_id, status }).unwrap_or_default();
                 Ok(Event::default().event("status").data(data))
             }
-            Self::TurnCompleted(turn) => {
-                let data = serde_json::to_string(&turn).unwrap_or_default();
+            Self::TurnCompleted { session_id, turn } => {
+                let data = serde_json::to_string(&TurnCompletedData { session_id, turn })
+                    .unwrap_or_default();
                 Ok(Event::default().event("turn_completed").data(data))
             }
-            Self::ContextCompressed { summary } => {
+            Self::ContextCompressed { session_id, summary } => {
                 let data =
-                    serde_json::to_string(&ContextCompressedData { summary }).unwrap_or_default();
+                    serde_json::to_string(&ContextCompressedData { session_id, summary })
+                        .unwrap_or_default();
                 Ok(Event::default().event("context_compressed").data(data))
             }
-            Self::Error(message) => {
-                let data = serde_json::to_string(&ErrorData { message }).unwrap_or_default();
+            Self::Error { session_id, message } => {
+                let data =
+                    serde_json::to_string(&ErrorData { session_id, message }).unwrap_or_default();
                 Ok(Event::default().event("error").data(data))
+            }
+            Self::SessionCreated { session_id, title } => {
+                let data = serde_json::to_string(&SessionCreatedData { session_id, title })
+                    .unwrap_or_default();
+                Ok(Event::default().event("session_created").data(data))
+            }
+            Self::SessionDeleted { session_id } => {
+                let data = serde_json::to_string(&SessionDeletedData { session_id })
+                    .unwrap_or_default();
+                Ok(Event::default().event("session_deleted").data(data))
             }
         }
     }
@@ -73,7 +118,11 @@ mod tests {
 
     #[test]
     fn status_payload_can_convert_to_event() {
-        let event = SsePayload::Status(TurnStatus::Thinking).into_axum_event();
+        let event = SsePayload::Status {
+            session_id: "s1".into(),
+            status: TurnStatus::Thinking,
+        }
+        .into_axum_event();
         assert!(event.is_ok());
     }
 
@@ -92,14 +141,33 @@ mod tests {
             failure_message: None,
         };
 
-        let event = SsePayload::TurnCompleted(turn).into_axum_event();
+        let event = SsePayload::TurnCompleted { session_id: "s1".into(), turn }.into_axum_event();
         assert!(event.is_ok());
     }
 
     #[test]
     fn stream_payload_can_convert_to_event() {
-        let event =
-            SsePayload::Stream(StreamEvent::TextDelta { text: "增量".into() }).into_axum_event();
+        let event = SsePayload::Stream {
+            session_id: "s1".into(),
+            event: StreamEvent::TextDelta { text: "增量".into() },
+        }
+        .into_axum_event();
+        assert!(event.is_ok());
+    }
+
+    #[test]
+    fn session_created_payload_can_convert_to_event() {
+        let event = SsePayload::SessionCreated {
+            session_id: "s1".into(),
+            title: "New session".into(),
+        }
+        .into_axum_event();
+        assert!(event.is_ok());
+    }
+
+    #[test]
+    fn session_deleted_payload_can_convert_to_event() {
+        let event = SsePayload::SessionDeleted { session_id: "s1".into() }.into_axum_event();
         assert!(event.is_ok());
     }
 }

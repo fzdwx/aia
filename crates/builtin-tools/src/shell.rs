@@ -249,6 +249,7 @@ mod tests {
             run_id: "test-run".into(),
             workspace_root: Some(Path::new(".").to_path_buf()),
             abort: AbortSignal::new(),
+            runtime: None,
         };
         let mut deltas = Vec::new();
 

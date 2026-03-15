@@ -1,5 +1,5 @@
 [package]
-name = "llm-trace"
+name = "aia-store"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

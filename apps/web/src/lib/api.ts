@@ -3,6 +3,7 @@ import type {
   ModelConfig,
   ProviderInfo,
   ProviderListItem,
+  SessionListItem,
   SseEvent,
   TraceListItem,
   TraceRecord,
@@ -20,38 +21,83 @@ export type ContextStats = {
   pressure_ratio: number | null
 }
 
-export async function fetchSessionInfo(): Promise<ContextStats> {
-  const res = await fetch("/api/session/info")
+// ── Session management ─────────────────────────────────────────
+
+export async function fetchSessions(): Promise<SessionListItem[]> {
+  const res = await fetch("/api/sessions")
+  if (!res.ok) throw new Error(`GET /api/sessions failed: ${res.status}`)
+  return res.json() as Promise<SessionListItem[]>
+}
+
+export async function createSession(
+  title?: string
+): Promise<SessionListItem> {
+  const res = await fetch("/api/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  })
+  if (!res.ok) throw new Error(`POST /api/sessions failed: ${res.status}`)
+  return res.json() as Promise<SessionListItem>
+}
+
+export async function deleteSession(id: string): Promise<void> {
+  const res = await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  })
+  if (!res.ok)
+    throw new Error(`DELETE /api/sessions/${id} failed: ${res.status}`)
+}
+
+// ── Session-scoped endpoints ───────────────────────────────────
+
+export async function fetchSessionInfo(
+  sessionId?: string
+): Promise<ContextStats> {
+  const params = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ""
+  const res = await fetch(`/api/session/info${params}`)
   if (!res.ok) throw new Error(`GET /api/session/info failed: ${res.status}`)
   return res.json() as Promise<ContextStats>
 }
 
-export async function fetchProviders(): Promise<ProviderInfo> {
-  const res = await fetch("/api/providers")
-  if (!res.ok) throw new Error(`GET /api/providers failed: ${res.status}`)
-  return res.json() as Promise<ProviderInfo>
-}
-
-export async function fetchHistory(): Promise<TurnLifecycle[]> {
-  const res = await fetch("/api/session/history")
-  if (!res.ok) throw new Error(`GET /api/session/history failed: ${res.status}`)
+export async function fetchHistory(
+  sessionId?: string
+): Promise<TurnLifecycle[]> {
+  const params = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ""
+  const res = await fetch(`/api/session/history${params}`)
+  if (!res.ok)
+    throw new Error(`GET /api/session/history failed: ${res.status}`)
   return res.json() as Promise<TurnLifecycle[]>
 }
 
-export async function fetchCurrentTurn(): Promise<CurrentTurnSnapshot | null> {
-  const res = await fetch("/api/session/current-turn")
+export async function fetchCurrentTurn(
+  sessionId?: string
+): Promise<CurrentTurnSnapshot | null> {
+  const params = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ""
+  const res = await fetch(`/api/session/current-turn${params}`)
   if (!res.ok)
     throw new Error(`GET /api/session/current-turn failed: ${res.status}`)
   return res.json() as Promise<CurrentTurnSnapshot | null>
 }
 
-export async function submitTurn(prompt: string): Promise<void> {
+export async function submitTurn(
+  prompt: string,
+  sessionId?: string
+): Promise<void> {
   const res = await fetch("/api/turn", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify({ prompt, session_id: sessionId }),
   })
   if (!res.ok) throw new Error(`POST /api/turn failed: ${res.status}`)
+}
+
+// ── Provider endpoints (unchanged) ─────────────────────────────
+
+export async function fetchProviders(): Promise<ProviderInfo> {
+  const res = await fetch("/api/providers")
+  if (!res.ok) throw new Error(`GET /api/providers failed: ${res.status}`)
+  return res.json() as Promise<ProviderInfo>
 }
 
 export async function listProviders(): Promise<ProviderListItem[]> {
@@ -157,6 +203,8 @@ export function connectEvents(onEvent: (event: SseEvent) => void): () => void {
   es.addEventListener("turn_completed", handle("turn_completed"))
   es.addEventListener("context_compressed", handle("context_compressed"))
   es.addEventListener("error", handle("error"))
+  es.addEventListener("session_created", handle("session_created"))
+  es.addEventListener("session_deleted", handle("session_deleted"))
 
   return () => es.close()
 }

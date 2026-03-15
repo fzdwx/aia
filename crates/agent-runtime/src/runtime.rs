@@ -111,7 +111,7 @@ where
             .into_iter()
             .filter(|definition| !self.disabled_tools.contains(&definition.name))
             .collect();
-        tools.extend(tape_tools::tape_tool_definitions());
+        tools.extend(tape_tools::runtime_tool_definitions());
         tools
     }
 
