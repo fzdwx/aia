@@ -472,6 +472,7 @@ fn request_summary(request: &CompletionRequest) -> Value {
         "conversation_items": request.conversation.len(),
         "tool_names": request.available_tools.iter().map(|tool| tool.name.clone()).collect::<Vec<_>>(),
         "max_output_tokens": request.max_output_tokens,
+        "user_agent": request.user_agent,
         "prompt_cache": request.prompt_cache.as_ref().map(|cache| json!({
             "key": cache.key,
             "retention": cache.retention.as_ref().map(|value| value.as_api_value()),
@@ -507,6 +508,7 @@ fn trace_attributes(
         "gen_ai.provider.name": provider,
         "server.address": base_url,
         "http.request.method": "POST",
+        "http.request.header.user_agent": request.user_agent.as_deref(),
         "http.route": endpoint_path,
         "aia.turn_id": context.turn_id.as_str(),
         "aia.run_id": context.run_id.as_str(),
@@ -620,6 +622,7 @@ mod tests {
     };
     use agent_store::{AiaStore, LlmTraceStatus, LlmTraceStore};
     use provider_registry::{ModelConfig, ModelLimit, ProviderKind, ProviderProfile};
+    use serde_json::json;
 
     use super::{ProviderLaunchChoice, build_model_from_selection};
 
@@ -677,6 +680,7 @@ mod tests {
                     max_output_tokens: Some(128),
                     available_tools: vec![],
                     prompt_cache: None,
+                    user_agent: Some("aia-test/1.0".into()),
                     trace_context: Some(agent_core::LlmTraceRequestContext {
                         trace_id: "aia-trace-turn-1".into(),
                         span_id: "trace-1".into(),
@@ -709,6 +713,10 @@ mod tests {
         assert_eq!(trace.output_tokens, Some(9));
         assert_eq!(trace.total_tokens, Some(30));
         assert_eq!(trace.cached_tokens, Some(0));
+        assert_eq!(
+            trace.otel_attributes.get("http.request.header.user_agent"),
+            Some(&json!("aia-test/1.0"))
+        );
         assert!(
             trace.response_body.as_deref().is_some_and(|body| body.contains("response.completed"))
         );
@@ -762,6 +770,7 @@ mod tests {
                 max_output_tokens: Some(128),
                 available_tools: vec![],
                 prompt_cache: None,
+                user_agent: Some("aia-test/1.0".into()),
                 trace_context: Some(agent_core::LlmTraceRequestContext {
                     trace_id: "aia-trace-turn-1".into(),
                     span_id: "trace-502".into(),

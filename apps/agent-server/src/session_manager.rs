@@ -61,6 +61,7 @@ enum SessionCommand {
     SubmitTurn {
         session_id: SessionId,
         prompt: String,
+        user_agent: Option<String>,
         reply: oneshot::Sender<Result<(), RuntimeWorkerError>>,
     },
     GetHistory {
@@ -131,10 +132,11 @@ impl SessionManagerHandle {
         &self,
         session_id: String,
         prompt: String,
+        user_agent: Option<String>,
     ) -> Result<(), RuntimeWorkerError> {
         let (reply_tx, _reply_rx) = oneshot::channel();
         self.tx
-            .try_send(SessionCommand::SubmitTurn { session_id, prompt, reply: reply_tx })
+            .try_send(SessionCommand::SubmitTurn { session_id, prompt, user_agent, reply: reply_tx })
             .map_err(|_| RuntimeWorkerError::unavailable())?;
         Ok(())
     }
@@ -281,8 +283,8 @@ async fn session_manager_loop(
                         let result = handle_delete_session(&mut slots, &config, &session_id);
                         let _ = reply.send(result);
                     }
-                    SessionCommand::SubmitTurn { session_id, prompt, reply } => {
-                        let result = handle_submit_turn(&mut slots, &config, &return_tx, &session_id, prompt);
+                    SessionCommand::SubmitTurn { session_id, prompt, user_agent, reply } => {
+                        let result = handle_submit_turn(&mut slots, &config, &return_tx, &session_id, prompt, user_agent);
                         let _ = reply.send(result);
                     }
                     SessionCommand::GetHistory { session_id, reply } => {
@@ -478,6 +480,7 @@ fn handle_submit_turn(
     return_tx: &mpsc::Sender<RuntimeReturn>,
     session_id: &str,
     prompt: String,
+    user_agent: Option<String>,
 ) -> Result<(), RuntimeWorkerError> {
     let slot = slots
         .get_mut(session_id)
@@ -518,7 +521,7 @@ fn handle_submit_turn(
         let sid2 = sid.clone();
         let cts = current_turn_snapshot.clone();
 
-        let result = runtime.handle_turn_streaming(prompt, |event| {
+        let result = runtime.handle_turn_streaming_with_user_agent(prompt, user_agent, |event| {
             let new_status = match &event {
                 StreamEvent::ThinkingDelta { .. } => CurrentStatusInner::Thinking,
                 StreamEvent::TextDelta { .. } => CurrentStatusInner::Generating,
