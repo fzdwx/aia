@@ -1,6 +1,6 @@
 use std::sync::{Arc, RwLock};
 
-use aia_store::AiaStore;
+use agent_store::AiaStore;
 use provider_registry::ProviderRegistry;
 use tokio::sync::broadcast;
 

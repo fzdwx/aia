@@ -2,13 +2,13 @@ use agent_core::{
     Completion, CompletionRequest, CompletionStopReason, CoreError, LanguageModel,
     ModelDisposition, ModelIdentity, ModelLimit, StreamEvent,
 };
-use aia_store::{LlmTraceEvent, LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus, LlmTraceStore};
+use agent_store::{LlmTraceEvent, LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus, LlmTraceStore};
 use openai_adapter::{
     OpenAiAdapterError, OpenAiChatCompletionsConfig, OpenAiChatCompletionsModel,
     OpenAiResponsesConfig, OpenAiResponsesModel,
 };
 use provider_registry::{ProviderKind, ProviderProfile};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::{
     sync::Arc,
     time::{Instant, SystemTime, UNIX_EPOCH},
@@ -604,10 +604,10 @@ mod tests {
         CompletionRequest, ConversationItem, LanguageModel, Message, ModelDisposition,
         ModelIdentity, Role,
     };
-    use aia_store::{LlmTraceStore, AiaStore};
+    use agent_store::{AiaStore, LlmTraceStore};
     use provider_registry::{ModelConfig, ModelLimit, ProviderKind, ProviderProfile};
 
-    use super::{ProviderLaunchChoice, build_model_from_selection};
+    use super::{build_model_from_selection, ProviderLaunchChoice};
 
     #[test]
     fn responses_model_call_writes_llm_trace_record() {
@@ -693,9 +693,10 @@ mod tests {
         assert_eq!(trace.input_tokens, Some(21));
         assert_eq!(trace.output_tokens, Some(9));
         assert_eq!(trace.total_tokens, Some(30));
-        assert!(
-            trace.response_body.as_deref().is_some_and(|body| body.contains("response.completed"))
-        );
+        assert!(trace
+            .response_body
+            .as_deref()
+            .is_some_and(|body| body.contains("response.completed")));
     }
 
     #[test]
@@ -766,8 +767,9 @@ mod tests {
             store.get("trace-502").expect("trace query should succeed").expect("trace exists");
         assert_eq!(trace.status, aia_store::LlmTraceStatus::Failed);
         assert_eq!(trace.status_code, Some(502));
-        assert!(
-            trace.response_body.as_deref().is_some_and(|body| body.contains("gateway failure"))
-        );
+        assert!(trace
+            .response_body
+            .as_deref()
+            .is_some_and(|body| body.contains("gateway failure")));
     }
 }

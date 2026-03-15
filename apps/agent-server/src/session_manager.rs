@@ -5,7 +5,7 @@ use std::sync::{Arc, RwLock};
 use agent_core::{ModelIdentity, StreamEvent, ToolRegistry};
 use agent_runtime::{AgentRuntime, ContextStats, RuntimeEvent, RuntimeSubscriberId, TurnLifecycle};
 use builtin_tools::build_tool_registry;
-use aia_store::{AiaStore, LlmTraceStore, SessionRecord, generate_session_id, iso8601_now};
+use agent_store::{AiaStore, LlmTraceStore, SessionRecord, generate_session_id, iso8601_now};
 use provider_registry::ProviderRegistry;
 use session_tape::{
     SessionProviderBinding, SessionTape,
@@ -948,7 +948,7 @@ fn object_value(value: &serde_json::Value) -> serde_json::Value {
 }
 
 fn persist_tool_trace_spans(turn: &TurnLifecycle, store: &dyn LlmTraceStore) {
-    use aia_store::{LlmTraceEvent, LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus};
+    use agent_store::{LlmTraceEvent, LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus};
     use serde_json::json;
 
     for invocation in &turn.tool_invocations {

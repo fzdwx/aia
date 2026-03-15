@@ -38,7 +38,7 @@ dependencies = [
  "agent-core",
  "agent-prompts",
  "agent-runtime",
- "aia-store",
+ "agent-store",
  "axum",
  "builtin-tools",
  "openai-adapter",
@@ -49,6 +49,15 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tower-http",
+]
+
+[[package]]
+name = "agent-store"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -70,15 +79,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ddd31a130427c27518df266943a5308ed92d4b226cc639f5a8f1002816174301"
 dependencies = [
  "memchr",
-]
-
-[[package]]
-name = "aia-store"
-version = "0.1.0"
-dependencies = [
- "rusqlite",
- "serde",
- "serde_json",
 ]
 
 [[package]]

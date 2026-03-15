@@ -7,7 +7,7 @@ use axum::{
         sse::{KeepAlive, Sse},
     },
 };
-use aia_store::{LlmTraceStore, LlmTraceStoreError};
+use agent_store::{LlmTraceStore, LlmTraceStoreError};
 use serde::{Deserialize, Serialize};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 

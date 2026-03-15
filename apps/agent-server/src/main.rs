@@ -11,7 +11,7 @@ use axum::{
     Router,
     routing::{delete, get, post, put},
 };
-use aia_store::{AiaStore, SessionRecord, generate_session_id, iso8601_now};
+use agent_store::{AiaStore, SessionRecord, generate_session_id, iso8601_now};
 use tower_http::cors::CorsLayer;
 
 use provider_registry::ProviderRegistry;
