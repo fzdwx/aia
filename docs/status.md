@@ -3,7 +3,7 @@
 ## 当前阶段
 
 - 阶段：核心工作区搭建之后的当前细分步骤：Web 界面 ↔ 运行时桥接收口
-- 当前步骤：在 Web + server 主路径稳定的基础上，继续收口“可作为其他客户端驱动接口”的 server 形态，并把 trace 诊断链路从“LLM 请求日志 + 前端推导 tool 节点”推进到“后端真实 span 持久化 + 前端直接消费真实 span”视角；`apps/agent-server` 已把 `AgentRuntime` 从全局锁中拆出，改为后台 runtime worker，读路径也逐步改成 provider / history / current-turn 快照，Web 端用户消息已改为发送即显示
+- 当前步骤：在 Web + server 主路径稳定的基础上，继续收口“可作为其他客户端驱动接口”的 server 形态，并把 trace 诊断链路从“LLM 请求日志 + 前端推导 tool 节点”推进到“后端真实 span 持久化 + 前端直接消费真实 span”视角；当前已补上 OpenAI prompt caching 的统一接入：server 自动为每个 session 生成稳定 cache key，固定 `24h` retention，并把 `cached_tokens` 打通到 usage / trace / Web 展示
 
 ## 已完成
 
@@ -72,6 +72,7 @@
 - 完成真实 token usage 贯通到 turn 主链：provider 返回的 `completion.usage` 现在会进入 `TurnLifecycle`、随 `turn_completed` SSE 与 session history 一起返回，并持久化到 `turn_completed` tape event，Web 聊天视图可直接显示本轮 input/output/total tokens
 - 完成 Web 端 turn 提交请求的 `keepalive` 加固：页面刷新或跳转时，已发出的 `POST /api/turn` 不再容易因为浏览器中断请求而导致本轮根本未进入 server worker
 - 完成 provider 注册表加载的旧路径兼容：当 `.aia/providers.json` 缺失时，server 会自动回退读取历史遗留的 `.aia/sessions/providers.json`，避免已有 provider 数据因为路径迁移而在启动后表现为“空配置”
+- 完成 OpenAI prompt caching 统一接入：`apps/agent-server` 现在会自动为同一 session 生成稳定 `prompt_cache_key`，并固定发送 `24h` retention；Responses / Chat Completions 的 `cached_tokens` 也已进入 completion usage、trace SQLite、trace summary 与 Web 聊天/诊断视图
 
 ## 正在进行
 

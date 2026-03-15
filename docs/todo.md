@@ -85,3 +85,7 @@
 - **bub**: ForkTapeStore 事务隔离 + context_contract 让 agent 自管理
 - **republic**: TapeQuery 丰富查询（after_anchor/between_anchors/between_dates） + TapeContext 可定制投影
 - **共同模式**: append-only 时间线、anchor 分界点、JSONL 存储
+
+# 生成式 UI（Generative UI）Widget 系统
+
+https://github.com/op7418/CodePilot/blob/85a07daa93dbc91015259f88cee64f7cc54d090e/docs/handover/generative-ui.md?plain=1#L103

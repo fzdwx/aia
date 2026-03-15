@@ -37,6 +37,7 @@
 - 共享核心库边界已拆分为 `agent-core`、`session-tape`、`agent-runtime`
 - `provider-registry` 已承担本地 provider 管理与持久化
 - 首个真实模型适配库 `openai-adapter` 已建立，并已同时覆盖 Responses 与 OpenAI 兼容 Chat Completions 两条协议链路
+- OpenAI 请求当前已自动启用 prompt caching：server 会为同一 session 生成稳定 `prompt_cache_key`，并固定使用 `24h` retention
 - `apps/agent-server` 已可编译、测试并运行，作为 Web 主界面的共享运行时桥接壳
 - 会话磁带、结构化锚点、handoff 事件、工具启停基础能力已落地
 - 工具调用与工具结果已进入类型化会话磁带，并能投影到后续默认上下文
@@ -65,6 +66,7 @@
 - 模型续调上下文已不再只依赖扁平文本消息；工具调用与工具结果已作为结构化会话条目贯穿核心层到适配层
 - OpenAI Responses 与 OpenAI 兼容 Chat Completions 在工具续调时已能按各自协议原生形态重建请求，而不是把工具结果压平为普通文本
 - OpenAI Responses 与 OpenAI 兼容 Chat Completions 当前都基于统一结构化会话条目重建请求，不再把 provider 私有续调状态暴露到共享协议层
+- cached prompt usage 已贯通到 `completion.usage`、trace 存储、trace 汇总与 Web 聊天/诊断展示，可直接观察缓存命中效果
 - 运行时步数与工具调用预算已配置化：默认安全护栏保留在核心层，当前 Web 运行壳使用更高预算，模型同时收到剩余预算提示以便更早收尾
 - 已建立 `docs/frontend-web-guidelines.md` 作为 Web 前端开发规范
 - 已建立 `apps/agent-server` axum HTTP+SSE 服务器，作为 Web 前端与 Rust 运行时的桥接层
