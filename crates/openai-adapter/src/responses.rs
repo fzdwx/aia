@@ -4,7 +4,10 @@ use agent_core::{
     Completion, CompletionRequest, CompletionSegment, CompletionStopReason, CompletionUsage,
     LanguageModel, StreamEvent, ToolCall,
 };
-use reqwest::blocking::Client;
+use reqwest::{
+    blocking::Client,
+    header::{HeaderValue, USER_AGENT},
+};
 use serde_json::{Value, json};
 
 use crate::{
@@ -60,6 +63,20 @@ impl OpenAiResponsesModel {
         ))
         .with_status_code(Some(status.as_u16()))
         .with_response_body(Some(body.to_string()))
+    }
+
+    fn apply_user_agent(
+        &self,
+        request: reqwest::blocking::RequestBuilder,
+        user_agent: Option<&str>,
+    ) -> reqwest::blocking::RequestBuilder {
+        let Some(user_agent) = user_agent.filter(|value| !value.is_empty()) else {
+            return request;
+        };
+        let Ok(value) = HeaderValue::from_str(user_agent) else {
+            return request;
+        };
+        request.header(USER_AGENT, value)
     }
 
     fn map_stop_reason(
@@ -212,10 +229,14 @@ impl LanguageModel for OpenAiResponsesModel {
             )));
         }
 
-        let response = Client::new()
-            .post(self.endpoint_url())
-            .bearer_auth(&self.config.api_key)
-            .json(&self.build_request_body(&request))
+        let response = self
+            .apply_user_agent(
+                Client::new()
+                    .post(self.endpoint_url())
+                    .bearer_auth(&self.config.api_key)
+                    .json(&self.build_request_body(&request)),
+                request.user_agent.as_deref(),
+            )
             .send()
             .map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
 
@@ -243,10 +264,14 @@ impl LanguageModel for OpenAiResponsesModel {
             )));
         }
 
-        let response = Client::new()
-            .post(self.endpoint_url())
-            .bearer_auth(&self.config.api_key)
-            .json(&self.build_streaming_request_body(&request))
+        let response = self
+            .apply_user_agent(
+                Client::new()
+                    .post(self.endpoint_url())
+                    .bearer_auth(&self.config.api_key)
+                    .json(&self.build_streaming_request_body(&request)),
+                request.user_agent.as_deref(),
+            )
             .send()
             .map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
 

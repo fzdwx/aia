@@ -31,6 +31,7 @@ fn sample_request() -> CompletionRequest {
             true,
         )],
         prompt_cache: None,
+        user_agent: None,
         trace_context: None,
     }
 }
@@ -342,6 +343,43 @@ fn 可通过本地假服务完成一次真实调用() {
     handle.join().expect("服务线程退出");
     assert_eq!(completion.plain_text(), "来自假服务");
     assert_eq!(completion.stop_reason, CompletionStopReason::Stop);
+}
+
+#[test]
+fn 真实调用会透传_user_agent_请求头() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("监听成功");
+    let address = listener.local_addr().expect("读取地址成功");
+
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("接受连接成功");
+        let mut buffer = [0_u8; 4096];
+        let size = stream.read(&mut buffer).expect("读取请求成功");
+        let request_text = String::from_utf8_lossy(&buffer[..size]).to_lowercase();
+        assert!(request_text.contains("user-agent: aia-test/1.0\r\n"));
+
+        let body = r#"{"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"来自假服务"}]}]}"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+
+        stream.write_all(response.as_bytes()).expect("写回响应成功");
+    });
+
+    let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
+        format!("http://{address}"),
+        "test-key",
+        "gpt-4.1-mini",
+    ))
+    .expect("模型创建成功");
+
+    let mut request = sample_request();
+    request.user_agent = Some("aia-test/1.0".into());
+    let completion = model.complete(request).expect("调用成功");
+
+    handle.join().expect("服务线程退出");
+    assert_eq!(completion.plain_text(), "来自假服务");
 }
 
 #[test]
