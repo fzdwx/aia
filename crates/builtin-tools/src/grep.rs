@@ -64,19 +64,15 @@ impl Tool for GrepTool {
 
         let matcher = grep_regex::RegexMatcher::new(&pattern)
             .map_err(|e| CoreError::new(format!("invalid regex pattern: {e}")))?;
+        let glob_matcher = glob_filter
+            .as_deref()
+            .map(globset::Glob::new)
+            .transpose()
+            .map_err(|e| CoreError::new(format!("invalid glob filter: {e}")))?
+            .map(|glob| glob.compile_matcher());
 
         let mut walker_builder = ignore::WalkBuilder::new(&base);
         walker_builder.filter_entry(|entry| !should_skip_directory(entry));
-        if let Some(ref glob_pat) = glob_filter {
-            let mut overrides = ignore::overrides::OverrideBuilder::new(&base);
-            overrides
-                .add(glob_pat)
-                .map_err(|e| CoreError::new(format!("invalid glob filter: {e}")))?;
-            let built = overrides
-                .build()
-                .map_err(|e| CoreError::new(format!("failed to build glob filter: {e}")))?;
-            walker_builder.overrides(built);
-        }
 
         let mut matched_files: Vec<String> = Vec::new();
         let mut searcher = grep_searcher::Searcher::new();
@@ -90,6 +86,12 @@ impl Tool for GrepTool {
                 continue;
             }
             let path = entry.into_path();
+            if let Some(glob_matcher) = &glob_matcher {
+                let relative = path.strip_prefix(&base).unwrap_or(&path);
+                if !glob_matcher.is_match(relative) && !glob_matcher.is_match(&path) {
+                    continue;
+                }
+            }
             let mut found = false;
             let sink = grep_searcher::sinks::UTF8(|_line_num, _line| {
                 found = true;
@@ -121,7 +123,56 @@ impl Tool for GrepTool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::{
+        collections::BTreeSet,
+        error::Error,
+        fs,
+        path::{Path, PathBuf},
+        process,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use agent_core::{AbortSignal, Tool, ToolCall, ToolExecutionContext};
+
+    use super::GrepTool;
+
+    struct TestDir {
+        path: PathBuf,
+    }
+
+    impl TestDir {
+        fn new() -> Result<Self, Box<dyn Error>> {
+            let unique =
+                SystemTime::now().duration_since(UNIX_EPOCH).map(|duration| duration.as_nanos())?;
+            let path = std::env::temp_dir()
+                .join(format!("aia-builtin-grep-tests-{}-{unique}", process::id()));
+            fs::create_dir_all(&path)?;
+            Ok(Self { path })
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn test_context(workspace_root: &Path) -> ToolExecutionContext {
+        ToolExecutionContext {
+            run_id: "test-run".into(),
+            workspace_root: Some(workspace_root.to_path_buf()),
+            abort: AbortSignal::new(),
+            runtime: None,
+        }
+    }
+
+    fn result_paths(result: &str) -> BTreeSet<String> {
+        result.lines().filter(|line| !line.is_empty()).map(ToOwned::to_owned).collect()
+    }
 
     #[test]
     fn grep_tool_definition_mentions_gitignore_and_common_ignores() {
@@ -129,5 +180,77 @@ mod tests {
 
         assert!(definition.description.contains(".gitignore"));
         assert!(definition.description.contains("node_modules"));
+    }
+
+    #[test]
+    fn grep_tool_respects_gitignore_and_glob_filter() -> Result<(), Box<dyn Error>> {
+        let dir = TestDir::new()?;
+        fs::create_dir_all(dir.path().join(".git"))?;
+        fs::write(dir.path().join(".gitignore"), "ignored.rs\n")?;
+        fs::write(dir.path().join("keep.rs"), "needle\n")?;
+        fs::write(dir.path().join("keep.txt"), "needle\n")?;
+        fs::write(dir.path().join("ignored.rs"), "needle\n")?;
+
+        let node_modules = dir.path().join("node_modules");
+        fs::create_dir_all(&node_modules)?;
+        fs::write(node_modules.join("dep.rs"), "needle\n")?;
+
+        let tool = GrepTool;
+        let call = ToolCall::new("grep").with_arguments_value(serde_json::json!({
+            "pattern": "needle",
+            "glob": "*.rs"
+        }));
+        let result = tool
+            .call(&call, &mut |_| {}, &test_context(dir.path()))
+            .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
+
+        let paths = result_paths(&result.content);
+        assert!(paths.contains(&dir.path().join("keep.rs").display().to_string()));
+        assert!(!paths.contains(&dir.path().join("keep.txt").display().to_string()));
+        assert!(!paths.contains(&dir.path().join("ignored.rs").display().to_string()));
+        assert!(!paths.contains(&node_modules.join("dep.rs").display().to_string()));
+
+        let details = match result.details {
+            Some(details) => details,
+            None => return Err("grep result should include details".into()),
+        };
+        assert_eq!(details["matches"], 1);
+        assert_eq!(details["returned"], 1);
+        assert_eq!(details["truncated"], false);
+        Ok(())
+    }
+
+    #[test]
+    fn grep_tool_skips_binary_files_and_reports_truncation() -> Result<(), Box<dyn Error>> {
+        let dir = TestDir::new()?;
+        fs::write(dir.path().join("match-a.txt"), "needle\n")?;
+        fs::write(dir.path().join("match-b.txt"), "prefix needle suffix\n")?;
+        fs::write(
+            dir.path().join("binary.bin"),
+            [0xff_u8, 0xfe_u8, b'n', b'e', b'e', b'd', b'l', b'e'],
+        )?;
+
+        let tool = GrepTool;
+        let call = ToolCall::new("grep").with_arguments_value(serde_json::json!({
+            "pattern": "needle",
+            "limit": 1
+        }));
+        let result = tool
+            .call(&call, &mut |_| {}, &test_context(dir.path()))
+            .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
+
+        let paths = result_paths(&result.content);
+        assert_eq!(paths.len(), 1);
+        assert!(!paths.contains(&dir.path().join("binary.bin").display().to_string()));
+
+        let details = match result.details {
+            Some(details) => details,
+            None => return Err("grep result should include details".into()),
+        };
+        assert_eq!(details["matches"], 2);
+        assert_eq!(details["returned"], 1);
+        assert_eq!(details["limit"], 1);
+        assert_eq!(details["truncated"], true);
+        Ok(())
     }
 }
