@@ -33,3 +33,15 @@
 - `docs/evolution-log.md`：追加本次演进记录。
 **验证**：`cargo check` 通过；`cargo test` 通过；为 runtime 上下文压力逻辑新增 3 个回归测试。
 **下次方向**：继续评估统一工具取消/超时机制，或把当前“请求估算值 vs 上次真实 usage”口径进一步整理为更显式的上下文统计字段，避免前端/工具侧误读。
+
+## 2026-03-15 Session 4
+
+**诊断**：runtime tool bridge 仍依赖裸指针 + `unsafe` 回调访问 `AgentRuntime`，既违背项目的 `unsafe_code = "forbid"` 目标，也让 `tape_handoff` 这类 runtime tool 的执行时序更难推理。
+**决策**：先把 runtime tool bridge 改成无 `unsafe` 的快照 + 延迟提交模型；这能立刻消除核心运行时里的不安全代码，并让 runtime tool 对会话的写操作边界更清晰。
+**变更**：
+- `crates/agent-runtime/src/runtime/tape_tools.rs`：移除裸指针桥接，改为保存 `context_stats` 快照并在 bridge 内缓存待提交的 handoff 请求，不再使用 `unsafe`。
+- `crates/agent-runtime/src/runtime/tool_calls.rs`：runtime tool 执行后统一 drain 并提交 handoff 请求，保持 tool result 与后续锚点写入链路可控。
+- `crates/agent-runtime/src/runtime/tests.rs`：新增 runtime tool bridge 回归测试，验证 handoff 后续请求会正确过滤孤立 `tool_result`。
+- `docs/evolution-log.md`：追加本次演进记录。
+**验证**：`cargo check` 通过；`cargo test` 通过；为 runtime tool bridge 新增 1 个回归测试。
+**下次方向**：优先继续把统一取消/中断机制上推到 runtime 工具执行层，或补一轮 workspace lint 配置收口，确保 `unsafe_code`/clippy 约束被各 crate 真正继承。

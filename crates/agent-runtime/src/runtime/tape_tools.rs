@@ -4,7 +4,6 @@ use agent_core::{
     CoreError, LanguageModel, RuntimeToolContext, RuntimeToolContextStats, Tool, ToolCall,
     ToolDefinition, ToolExecutionContext, ToolExecutor, ToolOutputDelta, ToolRegistry, ToolResult,
 };
-use serde_json::json;
 
 use super::AgentRuntime;
 
@@ -16,66 +15,56 @@ pub(super) fn build_runtime_tool_registry() -> ToolRegistry {
 }
 
 pub(super) struct RuntimeToolContextBridge {
-    runtime: RefCell<*mut ()>,
-    context_stats_fn: fn(*mut ()) -> RuntimeToolContextStats,
-    record_handoff_fn: fn(*mut (), &str, &str) -> Result<(), CoreError>,
+    total_entries: usize,
+    anchor_count: usize,
+    entries_since_last_anchor: usize,
+    estimated_context_units: u32,
+    context_limit: Option<u32>,
+    output_limit: Option<u32>,
+    pressure_ratio: Option<f64>,
+    pending_handoffs: RefCell<Vec<(String, String)>>,
 }
 
 impl RuntimeToolContextBridge {
-    pub(super) fn new<M, T>(runtime: &mut AgentRuntime<M, T>) -> Rc<Self>
+    pub(super) fn new<M, T>(runtime: &AgentRuntime<M, T>) -> Rc<Self>
     where
         M: LanguageModel,
         T: ToolExecutor,
     {
-        fn context_stats_impl<M, T>(runtime: *mut ()) -> RuntimeToolContextStats
-        where
-            M: LanguageModel,
-            T: ToolExecutor,
-        {
-            let runtime = unsafe { &mut *runtime.cast::<AgentRuntime<M, T>>() };
-            let stats = runtime.context_stats();
-            RuntimeToolContextStats {
-                total_entries: stats.total_entries,
-                anchor_count: stats.anchor_count,
-                entries_since_last_anchor: stats.entries_since_last_anchor,
-                estimated_context_units: stats.estimated_context_units,
-                context_limit: stats.context_limit,
-                output_limit: stats.output_limit,
-                pressure_ratio: stats.pressure_ratio,
-            }
-        }
-
-        fn record_handoff_impl<M, T>(
-            runtime: *mut (),
-            name: &str,
-            summary: &str,
-        ) -> Result<(), CoreError>
-        where
-            M: LanguageModel,
-            T: ToolExecutor,
-        {
-            let runtime = unsafe { &mut *runtime.cast::<AgentRuntime<M, T>>() };
-            runtime
-                .record_handoff(name, json!({ "summary": summary }), "ai")
-                .map(|_| ())
-                .map_err(|error| CoreError::new(error.to_string()))
-        }
-
+        let stats = runtime.context_stats();
         Rc::new(Self {
-            runtime: RefCell::new(runtime as *mut AgentRuntime<M, T> as *mut ()),
-            context_stats_fn: context_stats_impl::<M, T>,
-            record_handoff_fn: record_handoff_impl::<M, T>,
+            total_entries: stats.total_entries,
+            anchor_count: stats.anchor_count,
+            entries_since_last_anchor: stats.entries_since_last_anchor,
+            estimated_context_units: stats.estimated_context_units,
+            context_limit: stats.context_limit,
+            output_limit: stats.output_limit,
+            pressure_ratio: stats.pressure_ratio,
+            pending_handoffs: RefCell::new(Vec::new()),
         })
+    }
+
+    pub(super) fn drain_handoffs(&self) -> Vec<(String, String)> {
+        std::mem::take(&mut *self.pending_handoffs.borrow_mut())
     }
 }
 
 impl RuntimeToolContext for RuntimeToolContextBridge {
     fn context_stats(&self) -> RuntimeToolContextStats {
-        (self.context_stats_fn)(*self.runtime.borrow())
+        RuntimeToolContextStats {
+            total_entries: self.total_entries,
+            anchor_count: self.anchor_count,
+            entries_since_last_anchor: self.entries_since_last_anchor,
+            estimated_context_units: self.estimated_context_units,
+            context_limit: self.context_limit,
+            output_limit: self.output_limit,
+            pressure_ratio: self.pressure_ratio,
+        }
     }
 
     fn record_handoff(&self, name: &str, summary: &str) -> Result<(), CoreError> {
-        (self.record_handoff_fn)(*self.runtime.borrow(), name, summary)
+        self.pending_handoffs.borrow_mut().push((name.to_string(), summary.to_string()));
+        Ok(())
     }
 }
 

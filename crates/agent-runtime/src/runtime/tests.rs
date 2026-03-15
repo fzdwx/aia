@@ -1429,15 +1429,46 @@ fn tape_handoff_工具创建锚点() {
     let output = runtime.handle_turn("创建检查点").expect("应成功完成");
 
     assert_eq!(output.assistant_text, "已创建锚点");
-    // An anchor named "test_anchor" should exist
     assert!(runtime.tape().anchors().iter().any(|a| a.name == "test_anchor"));
-    // The anchor state should contain the summary
     let anchor =
         runtime.tape().anchors().into_iter().find(|a| a.name == "test_anchor").expect("应创建锚点");
     assert_eq!(
         anchor.state.get("summary").and_then(|v| v.as_str()),
         Some("测试摘要：对话进行了多轮交互")
     );
+}
+
+#[test]
+fn runtime_tool_bridge_创建锚点后后续请求会过滤孤立_tool_result() {
+    let identity = ModelIdentity::new("local", "tape-handoff", ModelDisposition::Balanced);
+    let model = TapeHandoffModel::new();
+    let mut tape = SessionTape::new();
+    tape.append(Message::new(Role::User, "历史消息"));
+    tape.append(Message::new(Role::Assistant, "历史回答"));
+    let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape);
+
+    let output = runtime.handle_turn("创建检查点").expect("应成功完成");
+
+    assert_eq!(output.assistant_text, "已创建锚点");
+    let entries = runtime.tape().entries();
+    let tool_result_index = entries
+        .iter()
+        .position(|entry| {
+            entry
+                .as_tool_result()
+                .is_some_and(|result| result.tool_name == "tape_handoff")
+        })
+        .expect("应记录 runtime tool 结果");
+    let anchor_index = entries
+        .iter()
+        .position(|entry| entry.anchor_name() == Some("test_anchor"))
+        .expect("应创建 test_anchor");
+    let request = runtime.build_completion_request("turn-check", "completion", 0);
+
+    assert!(tool_result_index > anchor_index);
+    assert!(request.conversation.iter().all(|item| {
+        item.as_tool_result().map_or(true, |result| result.tool_name != "tape_handoff")
+    }));
 }
 
 #[test]

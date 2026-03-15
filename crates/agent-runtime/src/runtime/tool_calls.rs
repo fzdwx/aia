@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use agent_core::{
-    AbortSignal, LanguageModel, LlmTraceRequestContext, StreamEvent, ToolCall,
+    AbortSignal, LanguageModel, LlmTraceRequestContext, RuntimeToolContext, StreamEvent, ToolCall,
     ToolExecutionContext, ToolExecutor, ToolOutputDelta, ToolResult,
 };
 use serde_json::json;
@@ -73,6 +73,7 @@ where
 
             let runtime_tools = tape_tools::build_runtime_tool_registry();
             let runtime_bridge = tape_tools::RuntimeToolContextBridge::new(self);
+            let runtime_context: Rc<dyn RuntimeToolContext> = runtime_bridge.clone();
             let result = runtime_tools
                 .call(
                     call,
@@ -81,10 +82,11 @@ where
                         run_id: turn_id.to_string(),
                         workspace_root: self.workspace_root.clone(),
                         abort: AbortSignal::new(),
-                        runtime: Some(runtime_bridge as Rc<dyn agent_core::RuntimeToolContext>),
+                        runtime: Some(runtime_context),
                     },
                 )
                 .map_err(RuntimeError::tool)?;
+            self.apply_runtime_tool_handoffs(turn_id, &runtime_bridge)?;
 
             let tool_result_entry_id =
                 self.append_tape_entry(TapeEntry::tool_result(&result).with_run_id(turn_id))?;
@@ -154,8 +156,7 @@ where
             },
         ) {
             Ok(result) => {
-                if result.invocation_id != call.invocation_id || result.tool_name != call.tool_name
-                {
+                if result.invocation_id != call.invocation_id || result.tool_name != call.tool_name {
                     let runtime_error = RuntimeError::tool_result_mismatch(call, &result);
                     let lifecycle = self.record_failed_tool_call(
                         turn_id,
@@ -236,6 +237,17 @@ where
                 Ok(lifecycle)
             }
         }
+    }
+
+    fn apply_runtime_tool_handoffs(
+        &mut self,
+        _turn_id: &str,
+        runtime_bridge: &Rc<tape_tools::RuntimeToolContextBridge>,
+    ) -> Result<(), RuntimeError> {
+        for (name, summary) in runtime_bridge.drain_handoffs() {
+            self.record_handoff(name, json!({ "summary": summary }), "ai")?;
+        }
+        Ok(())
     }
 
     fn record_failed_tool_call(
