@@ -21,17 +21,7 @@ where
         request_kind: &str,
         step_index: u32,
     ) -> CompletionRequest {
-        let view = self.tape.default_view();
-        let mut conversation = Vec::new();
-        if let Some(anchor) = view.origin_anchor.as_ref() {
-            if let Some(msg) = anchor_state_message(anchor) {
-                conversation.push(ConversationItem::Message(msg));
-            }
-        }
-        conversation.extend(drop_orphaned_tool_results(view.conversation));
-
-        let available_tools = self.visible_tools();
-        let instructions = self.instructions.as_ref().filter(|text| !text.is_empty()).cloned();
+        let (instructions, conversation, available_tools) = self.default_request_parts();
         let max_output_tokens = self.effective_max_output_tokens(
             instructions.as_deref(),
             &conversation,
@@ -51,6 +41,54 @@ where
                 step_index,
             )),
         }
+    }
+
+    fn default_request_parts(&self) -> (Option<String>, Vec<ConversationItem>, Vec<ToolDefinition>) {
+        let view = self.tape.default_view();
+        let mut conversation = Vec::new();
+        if let Some(anchor) = view.origin_anchor.as_ref() {
+            if let Some(msg) = anchor_state_message(anchor) {
+                conversation.push(ConversationItem::Message(msg));
+            }
+        }
+        conversation.extend(drop_orphaned_tool_results(view.conversation));
+
+        let available_tools = self.visible_tools();
+        let instructions = self.instructions.as_ref().filter(|text| !text.is_empty()).cloned();
+        (instructions, conversation, available_tools)
+    }
+
+    fn current_context_units(&self) -> u32 {
+        let (instructions, conversation, available_tools) = self.default_request_parts();
+        let estimated_units =
+            Self::approximate_request_units(instructions.as_deref(), &conversation, &available_tools);
+        let Some(last_input_tokens) = self.last_input_tokens.map(|value| value.min(u32::MAX as u64) as u32)
+        else {
+            return estimated_units;
+        };
+
+        if self.has_anchor_after_last_completed_turn() {
+            estimated_units
+        } else {
+            estimated_units.max(last_input_tokens)
+        }
+    }
+
+    fn has_anchor_after_last_completed_turn(&self) -> bool {
+        let Some(last_completed_turn_index) = self.latest_completed_turn_index() else {
+            return false;
+        };
+        self.tape
+            .entries()
+            .iter()
+            .skip(last_completed_turn_index.saturating_add(1))
+            .any(|entry| entry.anchor_name().is_some())
+    }
+
+    fn latest_completed_turn_index(&self) -> Option<usize> {
+        self.tape.entries().iter().enumerate().rev().find_map(|(index, entry)| {
+            (entry.event_name() == Some("turn_completed")).then_some(index)
+        })
     }
 
     fn effective_max_output_tokens(
@@ -122,9 +160,7 @@ where
         let context_limit = self.model_identity.limit.as_ref().and_then(|limit| limit.context);
         let output_limit = self.model_identity.limit.as_ref().and_then(|limit| limit.output);
 
-        // Display: use real token count from last model call, 0 if no call yet.
-        let estimated_context_units =
-            self.last_input_tokens.unwrap_or(0).min(u32::MAX as u64) as u32;
+        let estimated_context_units = self.current_context_units();
         let pressure_ratio =
             context_limit.map(|limit| estimated_context_units as f64 / limit as f64);
 
@@ -141,8 +177,7 @@ where
 
     pub(super) fn context_pressure_ratio(&self) -> Option<f64> {
         let context_limit = self.model_identity.limit.as_ref().and_then(|limit| limit.context)?;
-        let input_tokens = self.last_input_tokens.unwrap_or(0);
-        Some(input_tokens as f64 / context_limit as f64)
+        Some(self.current_context_units() as f64 / context_limit as f64)
     }
 }
 

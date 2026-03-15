@@ -1073,16 +1073,19 @@ fn 上下文未超阈值时不触发压缩() {
 
 #[test]
 fn 上下文超阈值时触发压缩生成锚点() {
-    // Use a very small context limit so that even short messages trigger compression
     let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced)
         .with_limit(Some(agent_core::ModelLimit { context: Some(32), output: Some(16) }));
     let model = SummarizerModel::new();
     let mut tape = SessionTape::new();
-    // Fill tape with enough content (>= 4 conversation items after adding user message)
     tape.append(Message::new(Role::User, "这是一段很长的历史消息用来填充上下文窗口。"));
     tape.append(Message::new(Role::Assistant, "这是一段很长的历史回答用来填充上下文窗口。"));
     tape.append(Message::new(Role::User, "第二轮历史消息。"));
     tape.append(Message::new(Role::Assistant, "第二轮历史回答。"));
+    // Simulate previous turn's real token usage exceeding threshold
+    tape.append_entry(session_tape::TapeEntry::event(
+        "turn_completed",
+        Some(json!({"status": "ok", "usage": {"input_tokens": 28, "output_tokens": 4, "total_tokens": 32}})),
+    ));
 
     let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape)
         .with_context_pressure_threshold(0.50);
@@ -1103,6 +1106,10 @@ fn 压缩锚点仅保留摘要字段() {
     tape.append(Message::new(Role::Assistant, "历史回答一"));
     tape.append(Message::new(Role::User, "历史消息二"));
     tape.append(Message::new(Role::Assistant, "历史回答二"));
+    tape.append_entry(session_tape::TapeEntry::event(
+        "turn_completed",
+        Some(json!({"status": "ok", "usage": {"input_tokens": 28, "output_tokens": 4, "total_tokens": 32}})),
+    ));
 
     let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape)
         .with_context_pressure_threshold(0.50);
@@ -1136,6 +1143,10 @@ fn 压缩后_default_view_从新锚点开始() {
     tape.append(Message::new(Role::Assistant, "历史回答一"));
     tape.append(Message::new(Role::User, "历史消息二"));
     tape.append(Message::new(Role::Assistant, "历史回答二"));
+    tape.append_entry(session_tape::TapeEntry::event(
+        "turn_completed",
+        Some(json!({"status": "ok", "usage": {"input_tokens": 28, "output_tokens": 4, "total_tokens": 32}})),
+    ));
 
     let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape)
         .with_context_pressure_threshold(0.50);
@@ -1189,7 +1200,7 @@ fn 压缩重试最多一次() {
 }
 
 #[test]
-fn context_stats_返回正确的压力比值() {
+fn context_stats_返回当前请求视角的压力比值() {
     let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced)
         .with_limit(Some(agent_core::ModelLimit { context: Some(1000), output: Some(500) }));
     let model = RecordingModel::new();
@@ -1204,8 +1215,68 @@ fn context_stats_返回正确的压力比值() {
     assert_eq!(stats.context_limit, Some(1000));
     assert_eq!(stats.output_limit, Some(500));
     assert!(stats.pressure_ratio.is_some());
-    // Before any model call, pressure is 0 (no real token data yet).
-    assert_eq!(stats.pressure_ratio.unwrap(), 0.0);
+    assert!(stats.estimated_context_units > 0);
+    let expected_ratio = stats.estimated_context_units as f64 / 1000.0;
+    assert!((stats.pressure_ratio.unwrap() - expected_ratio).abs() < f64::EPSILON);
+}
+
+#[test]
+fn 锚点收缩上下文后_context_stats_不再沿用旧_token_统计() {
+    let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced)
+        .with_limit(Some(agent_core::ModelLimit { context: Some(1000), output: Some(500) }));
+    let model = RecordingModel::new();
+    let mut tape = SessionTape::new();
+    tape.append(Message::new(Role::User, "很长的旧历史消息一，很长的旧历史消息一。"));
+    tape.append(Message::new(Role::Assistant, "很长的旧历史回答一，很长的旧历史回答一。"));
+    tape.append(Message::new(Role::User, "很长的旧历史消息二，很长的旧历史消息二。"));
+    tape.append(Message::new(Role::Assistant, "很长的旧历史回答二，很长的旧历史回答二。"));
+    tape.append_entry(session_tape::TapeEntry::event(
+        "turn_completed",
+        Some(json!({"status": "ok", "usage": {"input_tokens": 900, "output_tokens": 64, "total_tokens": 964}})),
+    ));
+    tape.handoff("context_compression", json!({"summary": "摘要：旧历史已经压缩。"}));
+    tape.append(Message::new(Role::User, "新历史一"));
+    tape.append(Message::new(Role::Assistant, "新回答一"));
+    tape.append(Message::new(Role::User, "新历史二"));
+    tape.append(Message::new(Role::Assistant, "新回答二"));
+    let runtime = AgentRuntime::with_tape(model, StubTools, identity, tape);
+
+    let stats = runtime.context_stats();
+
+    assert!(stats.estimated_context_units < 900);
+    assert!(stats.pressure_ratio.is_some_and(|ratio| ratio < 0.9));
+}
+
+#[test]
+fn 锚点收缩上下文后不会因旧_token_统计重复压缩() {
+    let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced)
+        .with_limit(Some(agent_core::ModelLimit { context: Some(1200), output: Some(500) }));
+    let model = SummarizerModel::new();
+    let mut tape = SessionTape::new();
+    tape.append(Message::new(Role::User, "很长的旧历史消息一，很长的旧历史消息一。"));
+    tape.append(Message::new(Role::Assistant, "很长的旧历史回答一，很长的旧历史回答一。"));
+    tape.append(Message::new(Role::User, "很长的旧历史消息二，很长的旧历史消息二。"));
+    tape.append(Message::new(Role::Assistant, "很长的旧历史回答二，很长的旧历史回答二。"));
+    tape.append_entry(session_tape::TapeEntry::event(
+        "turn_completed",
+        Some(json!({"status": "ok", "usage": {"input_tokens": 900, "output_tokens": 64, "total_tokens": 964}})),
+    ));
+    tape.handoff("context_compression", json!({"summary": "摘要：旧历史已经压缩。"}));
+    tape.append(Message::new(Role::User, "新历史一"));
+    tape.append(Message::new(Role::Assistant, "新回答一"));
+    tape.append(Message::new(Role::User, "新历史二"));
+    tape.append(Message::new(Role::Assistant, "新回答二"));
+
+    let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape)
+        .with_context_pressure_threshold(0.60);
+    let pre_turn_stats = runtime.context_stats();
+    assert!(pre_turn_stats.pressure_ratio.is_some_and(|ratio| ratio < 0.60));
+
+    let _ = runtime.handle_turn("继续").expect("应成功完成");
+
+    let requests = runtime.model.seen_requests.borrow();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].instructions.as_ref().is_none_or(|i| !i.contains("handoff summary")));
 }
 
 #[test]
@@ -1218,6 +1289,10 @@ fn 压缩事件会被发布到事件流() {
     tape.append(Message::new(Role::Assistant, "填充历史回答用来触发压力检测。"));
     tape.append(Message::new(Role::User, "第二轮历史消息。"));
     tape.append(Message::new(Role::Assistant, "第二轮历史回答。"));
+    tape.append_entry(session_tape::TapeEntry::event(
+        "turn_completed",
+        Some(json!({"status": "ok", "usage": {"input_tokens": 28, "output_tokens": 4, "total_tokens": 32}})),
+    ));
 
     let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape)
         .with_context_pressure_threshold(0.50);

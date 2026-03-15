@@ -71,7 +71,7 @@ where
 
         let mut llm_step_index = 0_u32;
 
-        // Pre-turn context pressure check
+        // Pre-turn context pressure check (based on last real token count)
         if let Some(ratio) = self.context_pressure_ratio() {
             if ratio >= self.context_pressure_threshold {
                 let _ = self.compress_context(Some(&turn_id), llm_step_index);
