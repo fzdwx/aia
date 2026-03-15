@@ -2,36 +2,47 @@ import { create } from "zustand"
 import { fetchTrace, fetchTraceSummary, fetchTraces } from "@/lib/api"
 import type { TraceListItem, TraceRecord, TraceSummary } from "@/lib/types"
 
+const TRACE_PAGE_SIZE = 12
+
 type TraceStore = {
   traces: TraceListItem[]
+  tracePage: number
+  tracePageSize: number
+  totalTraceLoops: number
   selectedTraceId: string | null
   selectedTrace: TraceRecord | null
   traceSummary: TraceSummary | null
   traceLoading: boolean
   traceError: string | null
-  refreshTraces: () => Promise<void>
+  refreshTraces: (options?: { page?: number }) => Promise<void>
   selectTrace: (traceId: string) => Promise<void>
   clearSelection: () => void
 }
 
 export const useTraceStore = create<TraceStore>((set, get) => ({
   traces: [],
+  tracePage: 1,
+  tracePageSize: TRACE_PAGE_SIZE,
+  totalTraceLoops: 0,
   selectedTraceId: null,
   selectedTrace: null,
   traceSummary: null,
   traceLoading: false,
   traceError: null,
 
-  refreshTraces: async () => {
+  refreshTraces: async (options) => {
     const previousSelectedId = get().selectedTraceId
+    const tracePage = options?.page ?? get().tracePage
+    const tracePageSize = get().tracePageSize
 
     set({ traceLoading: true, traceError: null })
 
     try {
-      const [traceSummary, traces] = await Promise.all([
+      const [traceSummary, tracePageData] = await Promise.all([
         fetchTraceSummary(),
-        fetchTraces(),
+        fetchTraces({ page: tracePage, page_size: tracePageSize }),
       ])
+      const traces = tracePageData.items
 
       const nextSelectedId = traces.some(
         (trace) => trace.id === previousSelectedId
@@ -41,6 +52,9 @@ export const useTraceStore = create<TraceStore>((set, get) => ({
 
       set({
         traces,
+        tracePage: tracePageData.page,
+        tracePageSize: tracePageData.page_size,
+        totalTraceLoops: tracePageData.total_loops,
         traceSummary,
         selectedTraceId: nextSelectedId,
         selectedTrace:

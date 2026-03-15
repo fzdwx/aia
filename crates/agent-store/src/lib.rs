@@ -8,8 +8,8 @@ use rusqlite::Connection;
 
 pub use session::{SessionRecord, generate_session_id, iso8601_now};
 pub use trace::{
-    LlmTraceEvent, LlmTraceListItem, LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus,
-    LlmTraceStore, LlmTraceSummary,
+    LlmTraceEvent, LlmTraceListItem, LlmTraceListPage, LlmTraceRecord, LlmTraceSpanKind,
+    LlmTraceStatus, LlmTraceStore, LlmTraceSummary,
 };
 
 #[derive(Debug)]

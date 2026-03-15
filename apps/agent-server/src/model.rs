@@ -604,7 +604,7 @@ mod tests {
         CompletionRequest, ConversationItem, LanguageModel, Message, ModelDisposition,
         ModelIdentity, Role,
     };
-    use agent_store::{AiaStore, LlmTraceStore};
+    use agent_store::{AiaStore, LlmTraceStatus, LlmTraceStore};
     use provider_registry::{ModelConfig, ModelLimit, ProviderKind, ProviderProfile};
 
     use super::{build_model_from_selection, ProviderLaunchChoice};
@@ -765,7 +765,7 @@ mod tests {
 
         let trace =
             store.get("trace-502").expect("trace query should succeed").expect("trace exists");
-        assert_eq!(trace.status, aia_store::LlmTraceStatus::Failed);
+        assert_eq!(trace.status, LlmTraceStatus::Failed);
         assert_eq!(trace.status_code, Some(502));
         assert!(trace
             .response_body

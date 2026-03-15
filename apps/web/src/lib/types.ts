@@ -240,6 +240,13 @@ export type TraceListItem = {
   error: string | null
 }
 
+export type TraceListPage = {
+  items: TraceListItem[]
+  total_loops: number
+  page: number
+  page_size: number
+}
+
 export type TraceRecord = {
   id: string
   trace_id: string

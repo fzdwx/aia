@@ -3,6 +3,8 @@ import {
   AlertTriangle,
   ArrowLeft,
   Bot,
+  ChevronLeft,
+  ChevronRight,
   Clock3,
   ExternalLink,
   Loader2,
@@ -25,13 +27,13 @@ import {
   type LoopTimelineNode,
   type TraceLoopGroup,
 } from "@/lib/trace-presentation"
-import { getToolDisplayName, getToolDisplayPath } from "@/lib/tool-display"
+import { getToolDisplayName } from "@/lib/tool-display"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat-store"
 import { useTraceStore } from "@/stores/trace-store"
 
 type JsonRecord = Record<string, unknown>
-type InspectorTab = "overview" | "content" | "events"
+type InspectorTab = "content" | "overview" | "events"
 
 function formatDateTime(value: number) {
   return new Date(value).toLocaleString("zh-CN", {
@@ -41,6 +43,16 @@ function formatDateTime(value: number) {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
+  })
+}
+
+function formatCompactDateTime(value: number) {
+  return new Date(value).toLocaleString("zh-CN", {
+    hour12: false,
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
   })
 }
 
@@ -868,39 +880,42 @@ function RecentLoopRow({
     <button
       onClick={onSelect}
       className={cn(
-        "w-full rounded-xl border px-2.5 py-2 text-left transition-all active:scale-[0.98]",
+        "w-full rounded-lg border px-2 py-1.5 text-left transition-all active:scale-[0.98]",
         active
           ? "border-foreground/20 bg-accent/35"
           : "border-border/30 bg-background/70 hover:bg-accent/20"
       )}
     >
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="font-mono text-[11px] text-foreground/90">
-            {compactId(group.key)}
-          </span>
-          <Badge variant={loopBadgeVariant(group.finalStatus)} className="text-[10px]">
-            {group.finalStatus}
-          </Badge>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate font-mono text-[10px] text-foreground/80">
+              {compactId(group.key, 8, 5)}
+            </span>
+            <Badge
+              variant={loopBadgeVariant(group.finalStatus)}
+              className="h-4 px-1.5 text-[9px]"
+            >
+              {group.finalStatus}
+            </Badge>
+          </div>
+          <p className="mt-1 line-clamp-2 text-[12px] leading-4.5 text-foreground/88">
+            {truncate(group.userMessage ?? "User message unavailable.", 72)}
+          </p>
         </div>
-        <span className="text-[10px] text-muted-foreground">
-          {formatDateTime(group.latestStartedAtMs)}
+        <span className="shrink-0 text-[10px] text-muted-foreground">
+          {formatCompactDateTime(group.latestStartedAtMs)}
         </span>
       </div>
 
-      <p className="mt-1.5 text-[12px] leading-5 text-foreground/85">
-        {truncate(group.userMessage ?? "User message unavailable.", 84)}
-      </p>
-
-      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground/75">
-        <span>{group.turnId}</span>
+      <div className="mt-1.5 flex items-center gap-2 text-[10px] text-muted-foreground/75">
         <span>{group.stepCount} llm</span>
         <span>{group.toolCount} tool</span>
         <span>{formatDuration(loopWindowMs(group))}</span>
       </div>
 
       {group.latestError ? (
-        <p className="mt-1.5 line-clamp-2 text-[11px] leading-5 text-destructive">
+        <p className="mt-1 line-clamp-1 text-[10px] leading-4 text-destructive">
           {group.latestError}
         </p>
       ) : null}
@@ -1400,13 +1415,16 @@ export function TracePanel() {
   const traceSummary = useTraceStore((state) => state.traceSummary)
   const traceLoading = useTraceStore((state) => state.traceLoading)
   const traceError = useTraceStore((state) => state.traceError)
+  const tracePage = useTraceStore((state) => state.tracePage)
+  const tracePageSize = useTraceStore((state) => state.tracePageSize)
+  const totalTraceLoops = useTraceStore((state) => state.totalTraceLoops)
   const refreshTraces = useTraceStore((state) => state.refreshTraces)
   const selectTrace = useTraceStore((state) => state.selectTrace)
 
   const [activeLoopKey, setActiveLoopKey] = useState<string | null>(null)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [payloadOpen, setPayloadOpen] = useState(false)
-  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("overview")
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("content")
 
   useEffect(() => {
     refreshTraces().catch(() => {})
@@ -1425,6 +1443,10 @@ export function TracePanel() {
   const partialOrFailedLoops = loopGroups.filter(
     (group) => group.finalStatus !== "completed"
   ).length
+  const traceListPageCount = Math.max(
+    1,
+    Math.ceil(totalTraceLoops / tracePageSize)
+  )
 
   const resolvedActiveLoopKey =
     activeLoopKey && loopGroups.some((group) => group.key === activeLoopKey)
@@ -1451,7 +1473,7 @@ export function TracePanel() {
   )
 
   useEffect(() => {
-    setInspectorTab("overview")
+    setInspectorTab("content")
   }, [activeNode?.id])
 
   useEffect(() => {
@@ -1492,7 +1514,11 @@ export function TracePanel() {
           </div>
         </div>
 
-        <Button variant="outline" size="sm" onClick={() => refreshTraces()}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => refreshTraces({ page: tracePage })}
+        >
           <RefreshCw className="size-3.5" />
           Refresh
         </Button>
@@ -1504,7 +1530,7 @@ export function TracePanel() {
             <SummaryItem
               bare
               label="loops"
-              value={String(loopGroups.length)}
+              value={String(totalTraceLoops)}
               icon={<Waypoints className="size-3.5" />}
             />
             <SummaryItem
@@ -1555,12 +1581,19 @@ export function TracePanel() {
           {loopGroups.length > 0 ? (
             <div className="grid min-h-[700px] overflow-hidden rounded-xl border border-border/30 xl:grid-cols-[280px_minmax(0,1.15fr)_360px]">
               <div className="min-h-0 overflow-hidden">
-                <div className="border-b border-border/25 px-3 py-2.5">
-                  <p className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
-                    Trace list
-                  </p>
+                <div className="border-b border-border/25 px-3 py-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
+                      Trace list
+                    </p>
+                    <span className="text-[11px] text-muted-foreground">
+                      {loopGroups.length === 0
+                        ? "0"
+                        : `${tracePage}/${traceListPageCount}`}
+                    </span>
+                  </div>
                 </div>
-                <div className="min-h-0 space-y-1.5 overflow-auto p-2">
+                <div className="min-h-0 space-y-1 overflow-auto p-1.5">
                   {loopGroups.map((group) => (
                     <RecentLoopRow
                       key={group.key}
@@ -1573,6 +1606,38 @@ export function TracePanel() {
                     />
                   ))}
                 </div>
+                {traceListPageCount > 1 ? (
+                  <div className="flex items-center justify-between border-t border-border/25 px-2.5 py-1.5">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => refreshTraces({ page: tracePage - 1 })}
+                      disabled={tracePage <= 1 || traceLoading}
+                    >
+                      <ChevronLeft className="size-3.5" />
+                      Prev
+                    </Button>
+                    <span className="text-[11px] text-muted-foreground">
+                      {(tracePage - 1) * tracePageSize + 1}-
+                      {Math.min(
+                        tracePage * tracePageSize,
+                        totalTraceLoops
+                      )}{" "}
+                      of {totalTraceLoops}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => refreshTraces({ page: tracePage + 1 })}
+                      disabled={
+                        tracePage >= traceListPageCount || traceLoading
+                      }
+                    >
+                      Next
+                      <ChevronRight className="size-3.5" />
+                    </Button>
+                  </div>
+                ) : null}
               </div>
 
               <div className="min-h-0 overflow-hidden border-l border-border/25">
@@ -1630,16 +1695,16 @@ export function TracePanel() {
                     <div className="rounded-lg border border-border/35 bg-muted/20 p-1">
                       <div className="flex items-center gap-1">
                         <TabButton
-                          active={inspectorTab === "overview"}
-                          onClick={() => setInspectorTab("overview")}
-                        >
-                          overview
-                        </TabButton>
-                        <TabButton
                           active={inspectorTab === "content"}
                           onClick={() => setInspectorTab("content")}
                         >
                           content
+                        </TabButton>
+                        <TabButton
+                          active={inspectorTab === "overview"}
+                          onClick={() => setInspectorTab("overview")}
+                        >
+                          overview
                         </TabButton>
                         <TabButton
                           active={inspectorTab === "events"}

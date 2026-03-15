@@ -5,7 +5,7 @@ import type {
   ProviderListItem,
   SessionListItem,
   SseEvent,
-  TraceListItem,
+  TraceListPage,
   TraceRecord,
   TraceSummary,
   TurnLifecycle,
@@ -106,10 +106,18 @@ export async function listProviders(): Promise<ProviderListItem[]> {
   return res.json() as Promise<ProviderListItem[]>
 }
 
-export async function fetchTraces(): Promise<TraceListItem[]> {
-  const res = await fetch("/api/traces")
+export async function fetchTraces(params?: {
+  page?: number
+  page_size?: number
+}): Promise<TraceListPage> {
+  const search = new URLSearchParams()
+  if (params?.page != null) search.set("page", String(params.page))
+  if (params?.page_size != null)
+    search.set("page_size", String(params.page_size))
+  const query = search.size > 0 ? `?${search.toString()}` : ""
+  const res = await fetch(`/api/traces${query}`)
   if (!res.ok) throw new Error(`GET /api/traces failed: ${res.status}`)
-  return res.json() as Promise<TraceListItem[]>
+  return res.json() as Promise<TraceListPage>
 }
 
 export async function fetchTrace(id: string): Promise<TraceRecord> {

@@ -131,9 +131,18 @@ pub struct LlmTraceSummary {
     pub total_tokens: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LlmTraceListPage {
+    pub items: Vec<LlmTraceListItem>,
+    pub total_loops: u64,
+    pub page: usize,
+    pub page_size: usize,
+}
+
 pub trait LlmTraceStore: Send + Sync {
     fn record(&self, record: &LlmTraceRecord) -> Result<(), AiaStoreError>;
     fn list(&self, limit: usize) -> Result<Vec<LlmTraceListItem>, AiaStoreError>;
+    fn list_page(&self, limit: usize, offset: usize) -> Result<LlmTraceListPage, AiaStoreError>;
     fn get(&self, id: &str) -> Result<Option<LlmTraceRecord>, AiaStoreError>;
     fn summary(&self) -> Result<LlmTraceSummary, AiaStoreError>;
 }
@@ -278,20 +287,36 @@ impl LlmTraceStore for AiaStore {
     }
 
     fn list(&self, limit: usize) -> Result<Vec<LlmTraceListItem>, AiaStoreError> {
+        Ok(self.list_page(limit, 0)?.items)
+    }
+
+    fn list_page(&self, limit: usize, offset: usize) -> Result<LlmTraceListPage, AiaStoreError> {
         let conn = self.conn.lock().expect("lock poisoned");
+        let total_loops = conn.query_row(
+            "SELECT COUNT(DISTINCT trace_id) FROM llm_request_traces",
+            [],
+            |row| row.get::<_, u64>(0),
+        )?;
         let mut stmt = conn.prepare(
             "
-            SELECT id, trace_id, span_id, parent_span_id, root_span_id,
-                   operation_name, span_kind, turn_id, run_id, request_kind,
-                   step_index, provider, protocol, model, endpoint_path,
-                   status, stop_reason, status_code, started_at_ms, duration_ms, total_tokens,
-                   provider_request, error
-            FROM llm_request_traces
-            ORDER BY started_at_ms DESC, id DESC
-            LIMIT ?1
+            WITH paged_loops AS (
+                SELECT trace_id, MAX(started_at_ms) AS latest_started_at_ms
+                FROM llm_request_traces
+                GROUP BY trace_id
+                ORDER BY latest_started_at_ms DESC, trace_id DESC
+                LIMIT ?1 OFFSET ?2
+            )
+            SELECT t.id, t.trace_id, t.span_id, t.parent_span_id, t.root_span_id,
+                   t.operation_name, t.span_kind, t.turn_id, t.run_id, t.request_kind,
+                   t.step_index, t.provider, t.protocol, t.model, t.endpoint_path,
+                   t.status, t.stop_reason, t.status_code, t.started_at_ms, t.duration_ms,
+                   t.total_tokens, t.provider_request, t.error
+            FROM llm_request_traces t
+            JOIN paged_loops p ON p.trace_id = t.trace_id
+            ORDER BY p.latest_started_at_ms DESC, t.started_at_ms DESC, t.id DESC
             ",
         )?;
-        let rows = stmt.query_map([limit as i64], |row| {
+        let rows = stmt.query_map(params![limit as i64, offset as i64], |row| {
             let provider_request = serde_json::from_str::<Value>(&row.get::<_, String>(21)?)
                 .map_err(|err| {
                     rusqlite::Error::FromSqlConversionFailure(
@@ -326,7 +351,12 @@ impl LlmTraceStore for AiaStore {
                 error: row.get(22)?,
             })
         })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(AiaStoreError::from)
+        Ok(LlmTraceListPage {
+            items: rows.collect::<Result<Vec<_>, _>>().map_err(AiaStoreError::from)?,
+            total_loops,
+            page: offset / limit + 1,
+            page_size: limit,
+        })
     }
 
     fn get(&self, id: &str) -> Result<Option<LlmTraceRecord>, AiaStoreError> {
@@ -730,5 +760,73 @@ mod tests {
 
         let list = store.list(10).expect("list should succeed");
         assert_eq!(list[0].user_message.as_deref(), Some("explain the failing test"));
+    }
+
+    #[test]
+    fn list_page_paginates_by_loop_not_individual_span() {
+        let store = AiaStore::in_memory().expect("store should initialize");
+
+        for (loop_index, started_at_ms) in [(1_u32, 300_u64), (2_u32, 200_u64), (3_u32, 100_u64)] {
+            for step_index in 0..2_u32 {
+                store
+                    .record(&LlmTraceRecord {
+                        id: format!("trace-{loop_index}-{step_index}"),
+                        trace_id: format!("loop-{loop_index}"),
+                        span_id: format!("span-{loop_index}-{step_index}"),
+                        parent_span_id: Some(format!("root-{loop_index}")),
+                        root_span_id: format!("root-{loop_index}"),
+                        operation_name: "chat".into(),
+                        span_kind: LlmTraceSpanKind::Client,
+                        turn_id: format!("turn-{loop_index}"),
+                        run_id: format!("run-{loop_index}"),
+                        request_kind: "completion".into(),
+                        step_index,
+                        provider: "openai".into(),
+                        protocol: "openai-responses".into(),
+                        model: "gpt-5".into(),
+                        base_url: "https://api.example.com".into(),
+                        endpoint_path: "/responses".into(),
+                        streaming: false,
+                        started_at_ms: started_at_ms + u64::from(step_index),
+                        finished_at_ms: Some(started_at_ms + u64::from(step_index) + 10),
+                        duration_ms: Some(10),
+                        status_code: Some(200),
+                        status: LlmTraceStatus::Succeeded,
+                        stop_reason: Some("stop".into()),
+                        error: None,
+                        request_summary: json!({}),
+                        provider_request: json!({
+                            "input": [
+                                {"role": "user", "content": format!("message {loop_index}")}
+                            ]
+                        }),
+                        response_summary: json!({}),
+                        response_body: None,
+                        input_tokens: None,
+                        output_tokens: None,
+                        total_tokens: None,
+                        otel_attributes: json!({}),
+                        events: vec![],
+                    })
+                    .expect("record should persist");
+            }
+        }
+
+        let first_page = store.list_page(2, 0).expect("page query should succeed");
+        assert_eq!(first_page.total_loops, 3);
+        assert_eq!(first_page.page, 1);
+        assert_eq!(first_page.page_size, 2);
+        assert_eq!(first_page.items.len(), 4);
+        assert!(first_page.items.iter().all(|item| item.trace_id == "loop-1" || item.trace_id == "loop-2"));
+        assert!(first_page.items.iter().any(|item| item.trace_id == "loop-1"));
+        assert!(first_page.items.iter().any(|item| item.trace_id == "loop-2"));
+        assert!(first_page.items.iter().all(|item| item.trace_id != "loop-3"));
+
+        let second_page = store.list_page(2, 2).expect("page query should succeed");
+        assert_eq!(second_page.total_loops, 3);
+        assert_eq!(second_page.page, 2);
+        assert_eq!(second_page.page_size, 2);
+        assert_eq!(second_page.items.len(), 2);
+        assert!(second_page.items.iter().all(|item| item.trace_id == "loop-3"));
     }
 }

@@ -58,7 +58,7 @@ describe("chat store submitTurn", () => {
 
     const waitingEvent: SseEvent = {
       type: "status",
-      data: { status: "waiting" },
+      data: { session_id: "session-1", status: "waiting" },
     }
 
     useChatStore.getState().handleSseEvent(waitingEvent)
@@ -99,7 +99,10 @@ describe("chat store submitTurn", () => {
 
     const errorEvent: SseEvent = {
       type: "error",
-      data: { message: "模型执行失败：请求失败：502 Bad Gateway" },
+      data: {
+        session_id: "session-1",
+        message: "模型执行失败：请求失败：502 Bad Gateway",
+      },
     }
 
     useChatStore.getState().handleSseEvent(errorEvent)
@@ -120,6 +123,7 @@ describe("chat store submitTurn", () => {
     const startedEvent: SseEvent = {
       type: "stream",
       data: {
+        session_id: "session-1",
         kind: "tool_call_started",
         invocation_id: "functions.read:27",
         tool_name: "functions.read",

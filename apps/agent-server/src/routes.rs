@@ -40,6 +40,12 @@ pub struct SessionQuery {
     pub session_id: Option<String>,
 }
 
+#[derive(Deserialize)]
+pub struct TraceListQuery {
+    pub page: Option<usize>,
+    pub page_size: Option<usize>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ProviderInfo {
     pub name: String,
@@ -217,11 +223,15 @@ pub async fn delete_session(
 
 pub async fn list_traces(
     State(state): State<SharedState>,
+    Query(query): Query<TraceListQuery>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    let page_size = query.page_size.unwrap_or(12).clamp(1, 50);
+    let page = query.page.unwrap_or(1).max(1);
+    let offset = (page - 1) * page_size;
     let store = state.store.clone();
-    match tokio::task::spawn_blocking(move || store.list(100)).await {
-        Ok(Ok(items)) => {
-            (StatusCode::OK, Json(serde_json::to_value(items).expect("serialize traces")))
+    match tokio::task::spawn_blocking(move || store.list_page(page_size, offset)).await {
+        Ok(Ok(result)) => {
+            (StatusCode::OK, Json(serde_json::to_value(result).expect("serialize trace page")))
         }
         Ok(Err(error)) => trace_store_error_response(error),
         Err(error) => (
