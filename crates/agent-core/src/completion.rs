@@ -80,6 +80,34 @@ pub struct CompletionUsage {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub total_tokens: u64,
+    #[serde(default)]
+    pub cached_tokens: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PromptCacheRetention {
+    FiveMinutes,
+    OneHour,
+    OneDay,
+}
+
+impl PromptCacheRetention {
+    pub fn as_api_value(&self) -> &'static str {
+        match self {
+            Self::FiveMinutes => "5m",
+            Self::OneHour => "1h",
+            Self::OneDay => "24h",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PromptCacheConfig {
+    #[serde(default)]
+    pub key: Option<String>,
+    #[serde(default)]
+    pub retention: Option<PromptCacheRetention>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -150,5 +178,7 @@ pub struct CompletionRequest {
     pub conversation: Vec<ConversationItem>,
     pub max_output_tokens: Option<u32>,
     pub available_tools: Vec<ToolDefinition>,
+    #[serde(default)]
+    pub prompt_cache: Option<PromptCacheConfig>,
     pub trace_context: Option<LlmTraceRequestContext>,
 }
