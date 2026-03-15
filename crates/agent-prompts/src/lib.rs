@@ -1,7 +1,7 @@
-/// Auto-compression: structured handoff summary prompt.
+/// Auto-compression: structured handoff summary prompt template.
 ///
-/// Used when the runtime auto-compresses context at the pressure threshold.
-pub const HANDOFF_SUMMARY: &str = include_str!("../prompts/handoff-summary.md");
+/// Contains `{{token_budget}}` — call [`handoff_summary`] to render.
+const HANDOFF_SUMMARY_TEMPLATE: &str = include_str!("../prompts/handoff-summary.md");
 
 /// Context contract template injected into system instructions.
 ///
@@ -9,14 +9,19 @@ pub const HANDOFF_SUMMARY: &str = include_str!("../prompts/handoff-summary.md");
 /// placeholders — call [`context_contract`] to render.
 const CONTEXT_CONTRACT_TEMPLATE: &str = include_str!("../prompts/context-contract.md");
 
-/// Maximum output tokens for the auto-compression summary model call.
-pub const HANDOFF_SUMMARY_MAX_OUTPUT_TOKENS: u32 = 4096;
-
 /// Recommended threshold for the agent to proactively call tape.handoff.
 pub const AGENT_HANDOFF_THRESHOLD: f64 = 0.80;
 
 /// Threshold at which the runtime auto-compresses context.
 pub const AUTO_COMPRESSION_THRESHOLD: f64 = 0.95;
+
+/// Render the handoff summary prompt with the given token budget.
+pub fn handoff_summary(token_budget: u32) -> String {
+    render(
+        HANDOFF_SUMMARY_TEMPLATE,
+        &[("token_budget", &token_budget.to_string())],
+    )
+}
 
 /// Render the context contract block with the given thresholds.
 pub fn context_contract(agent_handoff_threshold: f64, auto_compression_threshold: f64) -> String {
@@ -53,8 +58,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn handoff_summary_is_non_empty() {
-        assert!(HANDOFF_SUMMARY.contains("handoff summary"));
+    fn handoff_summary_renders_token_budget() {
+        let prompt = handoff_summary(8192);
+        assert!(prompt.contains("handoff summary"));
+        assert!(prompt.contains("8192"));
+        assert!(!prompt.contains("{{"));
     }
 
     #[test]

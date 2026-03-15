@@ -36,4 +36,4 @@ Requirements:
 - Be specific: reference file paths, class names, module names, API endpoints, commands, and decision points.
 - Prioritize actionable information that enables the next Agent to continue immediately.
 - End with a concrete "First step for the next Agent" recommendation.
-- Output plain text only. Keep it under 800 words.
+- Output plain text only. Your token budget is {{token_budget}} — use it fully to preserve detail.

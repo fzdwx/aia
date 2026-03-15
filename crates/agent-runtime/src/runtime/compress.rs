@@ -6,6 +6,8 @@ use crate::RuntimeEvent;
 use super::{AgentRuntime, RuntimeError, helpers::build_llm_trace_context};
 
 const MIN_ENTRIES_FOR_COMPRESSION: usize = 4;
+const SUMMARY_OUTPUT_RATIO: f64 = 0.20;
+const SUMMARY_OUTPUT_FALLBACK: u32 = 16384;
 
 impl<M, T> AgentRuntime<M, T>
 where
@@ -22,11 +24,20 @@ where
             return Ok(());
         }
 
+        let summary_max_tokens = self
+            .model_identity
+            .limit
+            .as_ref()
+            .and_then(|l| l.output)
+            .map(|o| (o as f64 * SUMMARY_OUTPUT_RATIO) as u32)
+            .unwrap_or(SUMMARY_OUTPUT_FALLBACK)
+            .max(1);
+
         let request = CompletionRequest {
             model: self.model_identity.clone(),
-            instructions: Some(agent_prompts::HANDOFF_SUMMARY.to_string()),
+            instructions: Some(agent_prompts::handoff_summary(summary_max_tokens)),
             conversation: view.conversation,
-            max_output_tokens: Some(agent_prompts::HANDOFF_SUMMARY_MAX_OUTPUT_TOKENS),
+            max_output_tokens: Some(summary_max_tokens),
             available_tools: Vec::new(),
             trace_context: turn_id.map(|turn_id| {
                 build_llm_trace_context(turn_id, turn_id, "compression", step_index)
