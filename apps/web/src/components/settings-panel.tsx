@@ -415,7 +415,7 @@ export function SettingsPanel() {
                           )}
                         </div>
                         {/* Reasoning toggle */}
-                        <div className="mt-2 flex items-center gap-3">
+                        <div className="mt-2 flex flex-wrap items-center gap-3">
                           <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
                             <Switch
                               checked={row.supports_reasoning}

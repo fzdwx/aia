@@ -73,6 +73,7 @@ export type TurnUsage = {
   input_tokens: number
   output_tokens: number
   total_tokens: number
+  cached_tokens: number
 }
 
 // Mirrors Rust TurnBlock — discriminated union on `kind`
@@ -243,6 +244,7 @@ export type TraceListItem = {
   started_at_ms: number
   duration_ms: number | null
   total_tokens: number | null
+  cached_tokens: number | null
   user_message: string | null
   error: string | null
 }
@@ -286,6 +288,7 @@ export type TraceRecord = {
   input_tokens: number | null
   output_tokens: number | null
   total_tokens: number | null
+  cached_tokens: number | null
   otel_attributes: Record<string, unknown> | null
   events: TraceEvent[]
 }
@@ -298,6 +301,7 @@ export type TraceSummary = {
   total_input_tokens: number
   total_output_tokens: number
   total_tokens: number
+  total_cached_tokens: number
 }
 
 export type AppView = "chat" | "settings" | "trace"

@@ -555,9 +555,13 @@ function StatusIndicator({ status }: { status: StreamingTurn["status"] }) {
 }
 
 function TurnUsageBadge({ usage }: { usage: TurnUsage }) {
+  const cachedSuffix =
+    usage.cached_tokens > 0
+      ? ` · ${usage.cached_tokens.toLocaleString()} cached`
+      : ""
   return (
     <span className="text-[11px] font-normal tracking-normal text-muted-foreground/70 normal-case">
-      {`${usage.input_tokens.toLocaleString()} in · ${usage.output_tokens.toLocaleString()} out · ${usage.total_tokens.toLocaleString()} total tok`}
+      {`${usage.input_tokens.toLocaleString()} in · ${usage.output_tokens.toLocaleString()} out · ${usage.total_tokens.toLocaleString()} total tok${cachedSuffix}`}
     </span>
   )
 }

@@ -992,6 +992,12 @@ function TraceSummaryBar({ trace }: { trace: TraceRecord }) {
             label="Tokens"
             value={String(trace.total_tokens ?? 0)}
           />
+          {trace.cached_tokens != null && trace.cached_tokens > 0 ? (
+            <SummaryBadge
+              label="Cached"
+              value={String(trace.cached_tokens)}
+            />
+          ) : null}
           <SummaryBadge label="Time" value={time} />
         </div>
 
@@ -1026,6 +1032,9 @@ function TraceSummaryBar({ trace }: { trace: TraceRecord }) {
                 {" · "}
                 stream {trace.streaming ? "yes" : "no"}
               </p>
+              {trace.cached_tokens != null && trace.cached_tokens > 0 ? (
+                <p>{`cached ${trace.cached_tokens} / total ${trace.total_tokens ?? 0} input tokens`}</p>
+              ) : null}
               <p className="break-all">{`${trace.base_url}${trace.endpoint_path}`}</p>
             </div>
           </CollapsibleContent>

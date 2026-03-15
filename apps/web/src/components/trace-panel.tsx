@@ -1264,6 +1264,10 @@ function LlmInspector({
               value: formatCount(node.trace.total_tokens ?? 0),
             },
             {
+              label: "cached",
+              value: formatCount(node.trace.cached_tokens ?? 0),
+            },
+            {
               label: "http",
               value:
                 node.trace.status_code != null
