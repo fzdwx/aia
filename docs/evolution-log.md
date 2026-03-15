@@ -32,6 +32,7 @@
 - `crates/agent-runtime/src/runtime/tests.rs`：补充 `context_stats` 当前请求口径、锚点后不沿用旧 token 统计、锚点后不会误触发重复压缩等回归测试，并同步调整现有压缩测试数据以匹配新的真实口径。
 - `docs/evolution-log.md`：追加本次演进记录。
 **验证**：`cargo check` 通过；`cargo test` 通过；为 runtime 上下文压力逻辑新增 3 个回归测试。
+**提交**：`21eede2` `docs: record context pressure fallback update`（配套代码提交：`3b7b5a6 fix: refine context pressure fallback after anchors`）
 **下次方向**：继续评估统一工具取消/超时机制，或把当前“请求估算值 vs 上次真实 usage”口径进一步整理为更显式的上下文统计字段，避免前端/工具侧误读。
 
 ## 2026-03-15 Session 4
@@ -42,6 +43,8 @@
 - `crates/agent-runtime/src/runtime/tape_tools.rs`：移除裸指针桥接，改为保存 `context_stats` 快照并在 bridge 内缓存待提交的 handoff 请求，不再使用 `unsafe`。
 - `crates/agent-runtime/src/runtime/tool_calls.rs`：runtime tool 执行后统一 drain 并提交 handoff 请求，保持 tool result 与后续锚点写入链路可控。
 - `crates/agent-runtime/src/runtime/tests.rs`：新增 runtime tool bridge 回归测试，验证 handoff 后续请求会正确过滤孤立 `tool_result`。
+- `docs/self.md`：强化自进化 prompt 的主动性、未提交改动收口纪律、硬约束优先级与“验证后必须提交”的要求。
 - `docs/evolution-log.md`：追加本次演进记录。
 **验证**：`cargo check` 通过；`cargo test` 通过；为 runtime tool bridge 新增 1 个回归测试。
+**提交**：`760d2bb` `refactor: remove unsafe runtime tool bridge`
 **下次方向**：优先继续把统一取消/中断机制上推到 runtime 工具执行层，或补一轮 workspace lint 配置收口，确保 `unsafe_code`/clippy 约束被各 crate 真正继承。
