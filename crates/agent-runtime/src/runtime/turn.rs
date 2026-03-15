@@ -59,6 +59,15 @@ where
     pub fn handle_turn_streaming(
         &mut self,
         user_input: impl Into<String>,
+        on_delta: impl FnMut(StreamEvent),
+    ) -> Result<TurnOutput, RuntimeError> {
+        self.handle_turn_streaming_with_user_agent(user_input, None, on_delta)
+    }
+
+    pub fn handle_turn_streaming_with_user_agent(
+        &mut self,
+        user_input: impl Into<String>,
+        user_agent: Option<String>,
         mut on_delta: impl FnMut(StreamEvent),
     ) -> Result<TurnOutput, RuntimeError> {
         let turn_id = next_turn_id();
@@ -82,7 +91,8 @@ where
         let mut already_compressed = false;
 
         loop {
-            let request = self.build_completion_request(&turn_id, "completion", llm_step_index);
+            let mut request = self.build_completion_request(&turn_id, "completion", llm_step_index);
+            request.user_agent = user_agent.clone();
             let llm_trace_context = request.trace_context.clone();
             llm_step_index = llm_step_index.saturating_add(1);
             let completion = match self.model.complete_streaming(request, &mut on_delta) {
