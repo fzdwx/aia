@@ -22,13 +22,3 @@
 - `docs/evolution-log.md`：追加本次演进记录。
 **验证**：`cargo check` 通过；`cargo test` 通过；为 `glob`/`grep` 新增 6 个测试。
 **下次方向**：优先评估统一工具取消/超时机制，尤其把 shell 的 abort 能力继续上推到 runtime 工具执行层。
-
-## 2026-03-15 Session 3
-
-**诊断**：`agent-runtime` 在接入真实 `completion.usage` 后，把上下文压力判断完全切到 `last_input_tokens`，导致首轮/压缩前没有历史 token 观测值时自动压缩失效，直接打破了现有压缩锚点与事件流回归测试。
-**决策**：先修复上下文压力估算回退策略：保留真实 token 作为优先信号，但在没有历史 usage 或当前请求更大时仍使用本地请求体估算值；这是最小改动且能立刻恢复 runtime 可靠性的高杠杆修复。
-**变更**：
-- `crates/agent-runtime/src/runtime/request.rs`：新增 `current_request_units()`，统一复用默认视图+工具+指令的请求体估算，并与 `last_input_tokens` 取较大值，修复 `context_stats()` 与 `context_pressure_ratio()` 的前置压缩判断。
-- `docs/evolution-log.md`：追加本次演进记录。
-**验证**：`cargo check` 通过；`cargo test -p agent-runtime --lib` 45/45 通过；`cargo test` 全量通过。
-**下次方向**：优先把“真实 token usage”从单轮末次请求扩展为更细粒度的上下文观测（例如区分当前估算值与上次真实值），避免 `tape_info`/Web 侧只看到单一聚合数字而难以诊断偏差。
