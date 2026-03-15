@@ -447,7 +447,8 @@ mod tests {
                     "usage": {
                         "input_tokens": 21,
                         "output_tokens": 9,
-                        "total_tokens": 30
+                        "total_tokens": 30,
+                        "cached_tokens": 0
                     }
                 })),
             )
@@ -459,7 +460,12 @@ mod tests {
         assert_eq!(turns.len(), 1);
         assert_eq!(
             turns[0].usage,
-            Some(CompletionUsage { input_tokens: 21, output_tokens: 9, total_tokens: 30 })
+            Some(CompletionUsage {
+                input_tokens: 21,
+                output_tokens: 9,
+                total_tokens: 30,
+                cached_tokens: 0,
+            })
         );
     }
 

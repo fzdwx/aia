@@ -144,6 +144,7 @@ impl TraceEventCollector {
                 "input_tokens": record.input_tokens,
                 "output_tokens": record.output_tokens,
                 "total_tokens": record.total_tokens,
+                "cached_tokens": record.cached_tokens,
                 "assistant_preview": preview_text(completion.plain_text().as_str()),
             }),
         });
@@ -331,6 +332,7 @@ impl ServerModel {
             input_tokens: None,
             output_tokens: None,
             total_tokens: None,
+            cached_tokens: None,
             otel_attributes,
             events: vec![],
         })
@@ -365,6 +367,7 @@ impl ServerModel {
                 record.input_tokens = completion.usage.as_ref().map(|usage| usage.input_tokens);
                 record.output_tokens = completion.usage.as_ref().map(|usage| usage.output_tokens);
                 record.total_tokens = completion.usage.as_ref().map(|usage| usage.total_tokens);
+                record.cached_tokens = completion.usage.as_ref().map(|usage| usage.cached_tokens);
                 update_trace_attributes_from_completion(&mut record, completion);
                 event_collector.finish_success(&mut record, completion);
             }
@@ -469,6 +472,10 @@ fn request_summary(request: &CompletionRequest) -> Value {
         "conversation_items": request.conversation.len(),
         "tool_names": request.available_tools.iter().map(|tool| tool.name.clone()).collect::<Vec<_>>(),
         "max_output_tokens": request.max_output_tokens,
+        "prompt_cache": request.prompt_cache.as_ref().map(|cache| json!({
+            "key": cache.key,
+            "retention": cache.retention.as_ref().map(|value| value.as_api_value()),
+        })),
     })
 }
 
@@ -481,6 +488,7 @@ fn response_summary(completion: &Completion) -> Value {
             "input_tokens": usage.input_tokens,
             "output_tokens": usage.output_tokens,
             "total_tokens": usage.total_tokens,
+            "cached_tokens": usage.cached_tokens,
         })),
     })
 }
@@ -507,6 +515,11 @@ fn trace_attributes(
         "aia.streaming": streaming,
         "aia.tool_count": request.available_tools.len(),
         "gen_ai.request.max_output_tokens": request.max_output_tokens,
+        "aia.prompt_cache_key": request.prompt_cache.as_ref().and_then(|cache| cache.key.as_ref()),
+        "aia.prompt_cache_retention": request
+            .prompt_cache
+            .as_ref()
+            .and_then(|cache| cache.retention.as_ref().map(|value| value.as_api_value())),
     })
 }
 
@@ -522,6 +535,7 @@ fn update_trace_attributes_from_completion(record: &mut LlmTraceRecord, completi
         attributes.insert("gen_ai.usage.input_tokens".into(), json!(usage.input_tokens));
         attributes.insert("gen_ai.usage.output_tokens".into(), json!(usage.output_tokens));
         attributes.insert("gen_ai.usage.total_tokens".into(), json!(usage.total_tokens));
+        attributes.insert("gen_ai.usage.cached_tokens".into(), json!(usage.cached_tokens));
     }
 }
 
@@ -662,6 +676,7 @@ mod tests {
                     conversation: vec![ConversationItem::Message(Message::new(Role::User, "hi"))],
                     max_output_tokens: Some(128),
                     available_tools: vec![],
+                    prompt_cache: None,
                     trace_context: Some(agent_core::LlmTraceRequestContext {
                         trace_id: "aia-trace-turn-1".into(),
                         span_id: "trace-1".into(),
@@ -693,6 +708,7 @@ mod tests {
         assert_eq!(trace.input_tokens, Some(21));
         assert_eq!(trace.output_tokens, Some(9));
         assert_eq!(trace.total_tokens, Some(30));
+        assert_eq!(trace.cached_tokens, Some(0));
         assert!(
             trace.response_body.as_deref().is_some_and(|body| body.contains("response.completed"))
         );
@@ -745,6 +761,7 @@ mod tests {
                 conversation: vec![ConversationItem::Message(Message::new(Role::User, "hi"))],
                 max_output_tokens: Some(128),
                 available_tools: vec![],
+                prompt_cache: None,
                 trace_context: Some(agent_core::LlmTraceRequestContext {
                     trace_id: "aia-trace-turn-1".into(),
                     span_id: "trace-502".into(),

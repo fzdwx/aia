@@ -138,6 +138,7 @@ mod tests {
                 input_tokens: 21,
                 output_tokens: 9,
                 total_tokens: 30,
+                cached_tokens: 0,
             }),
             failure_message: None,
         };

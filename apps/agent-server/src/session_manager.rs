@@ -2,7 +2,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-use agent_core::{ModelIdentity, StreamEvent, ToolRegistry};
+use agent_core::{
+    ModelIdentity, PromptCacheConfig, PromptCacheRetention as RuntimePromptCacheRetention,
+    StreamEvent, ToolRegistry,
+};
 use agent_runtime::{AgentRuntime, ContextStats, RuntimeEvent, RuntimeSubscriberId, TurnLifecycle};
 use agent_store::{AiaStore, LlmTraceStore, SessionRecord, generate_session_id, iso8601_now};
 use builtin_tools::build_tool_registry;
@@ -338,6 +341,7 @@ fn create_slot_for_session(
         .map_err(|e| RuntimeWorkerError::internal(format!("tape load failed: {e}")))?;
 
     let selection = choose_provider_for_tape(&config.registry, &tape);
+    let prompt_cache = prompt_cache_for_selection(&selection, session_id);
     let (identity, model) = build_model_from_selection(selection, Some(config.store.clone()))
         .map_err(|e| RuntimeWorkerError::internal(e.to_string()))?;
 
@@ -357,6 +361,9 @@ fn create_slot_for_session(
             SessionTape::append_jsonl_entry(&session_append_path, entry)
         })
         .with_max_tool_calls_per_turn(100000);
+    if let Some(prompt_cache) = prompt_cache {
+        runtime = runtime.with_prompt_cache(prompt_cache);
+    }
 
     let subscriber = runtime.subscribe();
     let snapshots = rebuild_session_snapshots_from_tape(runtime.tape());
@@ -729,7 +736,7 @@ fn sync_all_runtimes_to_registry(
         .map_err(|e| RuntimeWorkerError::internal(format!("provider registry save failed: {e}")))?;
 
     // Update all idle sessions
-    for slot in slots.values_mut() {
+    for (session_id, slot) in slots.iter_mut() {
         if let Some(runtime) = slot.runtime.as_mut() {
             let mut candidate_tape = runtime.tape().clone();
             candidate_tape.bind_provider(binding.clone());
@@ -744,8 +751,10 @@ fn sync_all_runtimes_to_registry(
                 .unwrap_or(ProviderLaunchChoice::Bootstrap);
             let (_, new_model) = build_model_from_selection(selection, Some(config.store.clone()))
                 .map_err(|e| RuntimeWorkerError::internal(e.to_string()))?;
+            let prompt_cache = prompt_cache_for_registry(&candidate_registry, session_id);
 
             runtime.replace_model(new_model, identity.clone());
+            runtime.set_prompt_cache(prompt_cache);
             *runtime.tape_mut() = candidate_tape;
         }
     }
@@ -785,6 +794,28 @@ fn prepare_runtime_sync(
 
     let info = ProviderInfoSnapshot::from_identity(&identity);
     Ok((info, identity, model, binding))
+}
+
+fn prompt_cache_for_registry(
+    registry: &ProviderRegistry,
+    session_id: &str,
+) -> Option<PromptCacheConfig> {
+    let selection = registry.active_provider().cloned().map(ProviderLaunchChoice::OpenAi)?;
+    prompt_cache_for_selection(&selection, session_id)
+}
+
+fn prompt_cache_for_selection(
+    selection: &ProviderLaunchChoice,
+    session_id: &str,
+) -> Option<PromptCacheConfig> {
+    let ProviderLaunchChoice::OpenAi(profile) = selection else {
+        return None;
+    };
+    let model = profile.active_model_config()?;
+    Some(PromptCacheConfig {
+        key: Some(format!("aia:{}:{}:session:{session_id}", profile.name, model.id)),
+        retention: Some(RuntimePromptCacheRetention::OneDay),
+    })
 }
 
 fn broadcast_runtime_events_with_session(
@@ -1002,6 +1033,7 @@ fn persist_tool_trace_spans(turn: &TurnLifecycle, store: &dyn LlmTraceStore) {
             input_tokens: None,
             output_tokens: None,
             total_tokens: None,
+            cached_tokens: None,
             otel_attributes: json!({"aia.operation.name":context.operation_name,"aia.tool.name":invocation.call.tool_name,"aia.tool.invocation_id":invocation.call.invocation_id,"aia.parent.request_kind":context.parent_request_kind,"aia.parent.step_index":context.parent_step_index,"aia.tool.failed":failed,"aia.tool.details":details}),
             events,
         };
