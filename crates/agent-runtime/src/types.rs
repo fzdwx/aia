@@ -1,4 +1,4 @@
-use agent_core::{Completion, ToolCall, ToolDefinition, ToolResult};
+use agent_core::{Completion, CompletionUsage, ToolCall, ToolDefinition, ToolResult};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -46,6 +46,8 @@ pub struct TurnLifecycle {
     pub assistant_message: Option<String>,
     pub thinking: Option<String>,
     pub tool_invocations: Vec<ToolInvocationLifecycle>,
+    #[serde(default)]
+    pub usage: Option<CompletionUsage>,
     pub failure_message: Option<String>,
 }
 

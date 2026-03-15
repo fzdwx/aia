@@ -8,7 +8,7 @@ use openai_adapter::{
     OpenAiResponsesConfig, OpenAiResponsesModel,
 };
 use provider_registry::{ProviderKind, ProviderProfile};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     sync::Arc,
     time::{Instant, SystemTime, UNIX_EPOCH},
@@ -607,7 +607,7 @@ mod tests {
     use agent_store::{AiaStore, LlmTraceStatus, LlmTraceStore};
     use provider_registry::{ModelConfig, ModelLimit, ProviderKind, ProviderProfile};
 
-    use super::{build_model_from_selection, ProviderLaunchChoice};
+    use super::{ProviderLaunchChoice, build_model_from_selection};
 
     #[test]
     fn responses_model_call_writes_llm_trace_record() {
@@ -693,10 +693,9 @@ mod tests {
         assert_eq!(trace.input_tokens, Some(21));
         assert_eq!(trace.output_tokens, Some(9));
         assert_eq!(trace.total_tokens, Some(30));
-        assert!(trace
-            .response_body
-            .as_deref()
-            .is_some_and(|body| body.contains("response.completed")));
+        assert!(
+            trace.response_body.as_deref().is_some_and(|body| body.contains("response.completed"))
+        );
     }
 
     #[test]
@@ -767,9 +766,8 @@ mod tests {
             store.get("trace-502").expect("trace query should succeed").expect("trace exists");
         assert_eq!(trace.status, LlmTraceStatus::Failed);
         assert_eq!(trace.status_code, Some(502));
-        assert!(trace
-            .response_body
-            .as_deref()
-            .is_some_and(|body| body.contains("gateway failure")));
+        assert!(
+            trace.response_body.as_deref().is_some_and(|body| body.contains("gateway failure"))
+        );
     }
 }

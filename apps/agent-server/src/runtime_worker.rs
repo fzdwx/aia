@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use agent_core::Role;
+use agent_core::{CompletionUsage, Role};
 use agent_runtime::TurnLifecycle;
 use axum::http::StatusCode;
 use provider_registry::{ModelConfig, ProviderKind};
@@ -213,6 +213,7 @@ struct TurnHistoryBuilder {
     assistant_message: Option<String>,
     thinking: Option<String>,
     tool_invocations: Vec<agent_runtime::ToolInvocationLifecycle>,
+    usage: Option<CompletionUsage>,
     failure_message: Option<String>,
     pending_tool_calls: BTreeMap<String, agent_core::ToolCall>,
     completed: bool,
@@ -292,6 +293,10 @@ impl TurnHistoryBuilder {
         }
 
         if entry.kind == "event" && entry.event_name() == Some("turn_completed") {
+            self.usage = entry
+                .event_data()
+                .and_then(|value| value.get("usage"))
+                .and_then(|value| serde_json::from_value(value.clone()).ok());
             self.completed = true;
         }
     }
@@ -308,6 +313,7 @@ impl TurnHistoryBuilder {
             assistant_message: self.assistant_message,
             thinking: self.thinking,
             tool_invocations: self.tool_invocations,
+            usage: self.usage,
             failure_message: self.failure_message,
         })
     }
@@ -423,6 +429,41 @@ mod tests {
     }
 
     #[test]
+    fn rebuild_turn_history_from_tape_restores_turn_usage() {
+        let mut tape = SessionTape::new();
+        let turn_id = "turn-usage";
+        tape.append_entry(
+            TapeEntry::message(&Message::new(Role::User, "统计 token")).with_run_id(turn_id),
+        );
+        tape.append_entry(
+            TapeEntry::message(&Message::new(Role::Assistant, "本次调用已完成"))
+                .with_run_id(turn_id),
+        );
+        tape.append_entry(
+            TapeEntry::event(
+                "turn_completed",
+                Some(serde_json::json!({
+                    "status": "ok",
+                    "usage": {
+                        "input_tokens": 21,
+                        "output_tokens": 9,
+                        "total_tokens": 30
+                    }
+                })),
+            )
+            .with_run_id(turn_id),
+        );
+
+        let turns = rebuild_session_snapshots_from_tape(&tape).history;
+
+        assert_eq!(turns.len(), 1);
+        assert_eq!(
+            turns[0].usage,
+            Some(CompletionUsage { input_tokens: 21, output_tokens: 9, total_tokens: 30 })
+        );
+    }
+
+    #[test]
     fn rebuild_session_snapshots_from_tape_keeps_incomplete_turn_out_of_history() {
         let mut tape = SessionTape::new();
         let turn_id = "turn-1";
@@ -457,6 +498,7 @@ mod tests {
             assistant_message: Some("旧回答".to_string()),
             thinking: None,
             tool_invocations: vec![],
+            usage: None,
             failure_message: None,
         };
         tape.append_entry(TapeEntry::event(

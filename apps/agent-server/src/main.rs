@@ -7,20 +7,18 @@ mod state;
 
 use std::sync::{Arc, RwLock};
 
+use agent_store::{AiaStore, SessionRecord, generate_session_id, iso8601_now};
 use axum::{
     Router,
     routing::{delete, get, post, put},
 };
-use agent_store::{AiaStore, SessionRecord, generate_session_id, iso8601_now};
 use tower_http::cors::CorsLayer;
 
 use provider_registry::ProviderRegistry;
 use session_tape::SessionTape;
 
 use model::{ProviderLaunchChoice, build_model_from_selection};
-use session_manager::{
-    ProviderInfoSnapshot, SessionManagerConfig, spawn_session_manager,
-};
+use session_manager::{ProviderInfoSnapshot, SessionManagerConfig, spawn_session_manager};
 use state::AppState;
 
 fn default_aia_store_path() -> std::path::PathBuf {
@@ -37,101 +35,6 @@ fn default_sessions_dir() -> std::path::PathBuf {
         .join("sessions")
 }
 
-fn old_session_path() -> std::path::PathBuf {
-    session_tape::default_session_path()
-}
-
-/// Migrate legacy .aia/session.jsonl to sessions/{id}.jsonl + SQLite record
-fn migrate_legacy_session(
-    store: &AiaStore,
-    sessions_dir: &std::path::Path,
-    registry: &ProviderRegistry,
-) {
-    let legacy_path = old_session_path();
-    if !legacy_path.exists() {
-        return;
-    }
-
-    // Check if we already have sessions (don't re-migrate)
-    if let Ok(existing) = store.list_sessions() {
-        if !existing.is_empty() {
-            return;
-        }
-    }
-
-    let session_id = generate_session_id();
-    let now = iso8601_now();
-
-    // Ensure sessions dir exists
-    if let Err(e) = std::fs::create_dir_all(sessions_dir) {
-        eprintln!("sessions 目录创建失败: {e}");
-        return;
-    }
-
-    // Move file
-    let new_path = sessions_dir.join(format!("{session_id}.jsonl"));
-    if let Err(e) = std::fs::rename(&legacy_path, &new_path) {
-        // If rename fails (cross-device), try copy + delete
-        if let Err(e2) = std::fs::copy(&legacy_path, &new_path) {
-            eprintln!("session 迁移失败: rename={e}, copy={e2}");
-            return;
-        }
-        let _ = std::fs::remove_file(&legacy_path);
-    }
-
-    // Get model from the tape or registry
-    let model_name = if let Ok(tape) = SessionTape::load_jsonl_or_default(&new_path) {
-        tape.latest_provider_binding()
-            .and_then(|b| match b {
-                session_tape::SessionProviderBinding::Provider { model, .. } => Some(model),
-                _ => None,
-            })
-            .or_else(|| {
-                registry
-                    .active_provider()
-                    .and_then(|p| p.active_model.clone())
-            })
-            .unwrap_or_default()
-    } else {
-        String::new()
-    };
-
-    let record = SessionRecord {
-        id: session_id,
-        title: "Default session".to_string(),
-        created_at: now.clone(),
-        updated_at: now,
-        model: model_name,
-    };
-
-    if let Err(e) = store.create_session(&record) {
-        eprintln!("session 迁移 DB 写入失败: {e}");
-    }
-}
-
-/// Migrate legacy .aia/llm-traces.sqlite3 and .aia/sessions.sqlite3 into unified store.sqlite3
-fn migrate_legacy_db(store: &AiaStore, aia_dir: &std::path::Path) {
-    let old_traces = aia_dir.join("llm-traces.sqlite3");
-    if old_traces.exists() {
-        match store.migrate_from_legacy_file(&old_traces, "llm_request_traces") {
-            Ok(()) => {
-                let _ = std::fs::remove_file(&old_traces);
-            }
-            Err(e) => eprintln!("trace 数据迁移失败: {e}"),
-        }
-    }
-
-    let old_sessions = aia_dir.join("sessions.sqlite3");
-    if old_sessions.exists() {
-        match store.migrate_from_legacy_file(&old_sessions, "sessions") {
-            Ok(()) => {
-                let _ = std::fs::remove_file(&old_sessions);
-            }
-            Err(e) => eprintln!("session 数据迁移失败: {e}"),
-        }
-    }
-}
-
 #[tokio::main]
 async fn main() {
     let registry_path = provider_registry::default_registry_path();
@@ -145,30 +48,21 @@ async fn main() {
         }
     };
 
-    let registry = ProviderRegistry::load_or_default(&registry_path).expect("provider 注册表加载失败");
+    let registry =
+        ProviderRegistry::load_or_default(&registry_path).expect("provider 注册表加载失败");
 
     // Initialize unified store (traces + sessions in one DB)
     let store = Arc::new(AiaStore::new(&aia_store_path).expect("数据库初始化失败"));
 
-    // Migrate legacy separate DB files into unified store
-    if let Some(aia_dir) = aia_store_path.parent() {
-        migrate_legacy_db(&store, aia_dir);
-    }
-
     // Ensure sessions directory exists
     std::fs::create_dir_all(&sessions_dir).expect("sessions 目录创建失败");
-
-    // Migrate legacy session.jsonl if needed
-    migrate_legacy_session(&store, &sessions_dir, &registry);
 
     // If no sessions exist, create a default one
     if store.list_sessions().map(|s| s.is_empty()).unwrap_or(true) {
         let session_id = generate_session_id();
         let now = iso8601_now();
-        let model_name = registry
-            .active_provider()
-            .and_then(|p| p.active_model.clone())
-            .unwrap_or_default();
+        let model_name =
+            registry.active_provider().and_then(|p| p.active_model.clone()).unwrap_or_default();
         let record = SessionRecord {
             id: session_id,
             title: "New session".to_string(),

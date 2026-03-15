@@ -198,6 +198,7 @@ where
                         buffers.last_assistant_text.clone(),
                         thinking,
                         buffers.tool_invocations,
+                        completion.usage.clone(),
                     )?;
 
                     return Ok(TurnOutput {

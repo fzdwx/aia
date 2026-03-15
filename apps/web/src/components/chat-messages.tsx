@@ -9,6 +9,7 @@ import type {
   StreamingTurn,
   ToolInvocationLifecycle,
   TurnBlock,
+  TurnUsage,
   TurnLifecycle,
 } from "@/lib/types"
 
@@ -553,6 +554,43 @@ function StatusIndicator({ status }: { status: StreamingTurn["status"] }) {
   )
 }
 
+function TurnUsageBadge({ usage }: { usage: TurnUsage }) {
+  return (
+    <span className="text-[11px] font-normal tracking-normal text-muted-foreground/70 normal-case">
+      {`${usage.input_tokens.toLocaleString()} in · ${usage.output_tokens.toLocaleString()} out · ${usage.total_tokens.toLocaleString()} total tok`}
+    </span>
+  )
+}
+
+function TurnMeta({ turn }: { turn: TurnLifecycle }) {
+  const duration = formatDurationMs(turn.started_at_ms, turn.finished_at_ms)
+
+  if (!duration && !turn.usage) return null
+
+  return (
+    <div className="mt-2 flex items-center gap-3 text-[11px] text-muted-foreground/55 opacity-0 transition-opacity duration-150 group-hover/turn:opacity-100 group-focus-within/turn:opacity-100">
+      {duration && (
+        <span className="tabular-nums text-muted-foreground/65">{`latency ${duration}`}</span>
+      )}
+      {turn.usage && (
+        <span className="pointer-events-none">
+          <TurnUsageBadge usage={turn.usage} />
+        </span>
+      )}
+    </div>
+  )
+}
+
+function UserMessageBlock({ content }: { content: string }) {
+  return (
+    <div className="border-l border-foreground/14 pl-4">
+      <div className="max-w-[64ch] text-[14px] leading-[1.8] text-foreground/90">
+        <MarkdownContent content={content} />
+      </div>
+    </div>
+  )
+}
+
 function TurnView({ turn }: { turn: TurnLifecycle }) {
   const grouped = groupBlocks(turn.blocks)
 
@@ -564,12 +602,10 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
             You
           </span>
         </div>
-        <div className="text-[14px] leading-[1.75] text-foreground/85">
-          <MarkdownContent content={turn.user_message} />
-        </div>
+        <UserMessageBlock content={turn.user_message} />
       </div>
 
-      <div>
+      <div className="group/turn">
         <div className="mb-2 flex items-baseline gap-2.5">
           <span className="text-[11px] font-semibold tracking-[0.1em] text-muted-foreground uppercase">
             aia
@@ -586,6 +622,7 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
           }
           return <BlockRenderer key={i} block={group.block} />
         })}
+        <TurnMeta turn={turn} />
       </div>
     </div>
   )
@@ -627,9 +664,7 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
               You
             </span>
           </div>
-          <div className="text-[14px] leading-[1.75] text-foreground/85">
-            <MarkdownContent content={streaming.userMessage} />
-          </div>
+          <UserMessageBlock content={streaming.userMessage} />
         </div>
       )}
 

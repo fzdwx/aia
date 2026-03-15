@@ -1,3 +1,4 @@
+use agent_store::{LlmTraceStore, LlmTraceStoreError};
 use axum::{
     Json,
     extract::{Path, Query, State},
@@ -7,7 +8,6 @@ use axum::{
         sse::{KeepAlive, Sse},
     },
 };
-use agent_store::{LlmTraceStore, LlmTraceStoreError};
 use serde::{Deserialize, Serialize};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
@@ -15,8 +15,8 @@ use provider_registry::{ModelConfig, ModelLimit, ProviderKind};
 
 use crate::{
     session_manager::{
-        CreateProviderInput, ProviderInfoSnapshot, RuntimeWorkerError,
-        SwitchProviderInput, UpdateProviderInput,
+        CreateProviderInput, ProviderInfoSnapshot, RuntimeWorkerError, SwitchProviderInput,
+        UpdateProviderInput,
     },
     sse::{SsePayload, TurnStatus},
     state::SharedState,
@@ -167,16 +167,15 @@ fn trace_store_error_response(error: LlmTraceStoreError) -> (StatusCode, Json<se
 }
 
 /// Resolve session_id: use provided, or fall back to first session from DB
-fn resolve_session_id(state: &crate::state::AppState, session_id: Option<String>) -> Option<String> {
+fn resolve_session_id(
+    state: &crate::state::AppState,
+    session_id: Option<String>,
+) -> Option<String> {
     if let Some(id) = session_id {
         return Some(id);
     }
     // Fall back to first session
-    state
-        .store
-        .list_sessions()
-        .ok()
-        .and_then(|sessions| sessions.first().map(|s| s.id.clone()))
+    state.store.list_sessions().ok().and_then(|sessions| sessions.first().map(|s| s.id.clone()))
 }
 
 // ── Session management ─────────────────────────────────────────
@@ -185,14 +184,12 @@ pub async fn list_sessions(
     State(state): State<SharedState>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     match state.store.list_sessions() {
-        Ok(sessions) => (
-            StatusCode::OK,
-            Json(serde_json::to_value(sessions).expect("serialize sessions")),
-        ),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        ),
+        Ok(sessions) => {
+            (StatusCode::OK, Json(serde_json::to_value(sessions).expect("serialize sessions")))
+        }
+        Err(e) => {
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e.to_string() })))
+        }
     }
 }
 
@@ -201,10 +198,9 @@ pub async fn create_session(
     Json(body): Json<CreateSessionRequest>,
 ) -> impl IntoResponse {
     match state.session_manager.create_session(body.title).await {
-        Ok(record) => (
-            StatusCode::CREATED,
-            Json(serde_json::to_value(record).expect("serialize session")),
-        ),
+        Ok(record) => {
+            (StatusCode::CREATED, Json(serde_json::to_value(record).expect("serialize session")))
+        }
         Err(error) => runtime_worker_error_response(error),
     }
 }
@@ -466,7 +462,9 @@ pub async fn get_history(
         return (StatusCode::OK, Json(serde_json::to_value(Vec::<()>::new()).expect("empty")));
     };
     match state.session_manager.get_history(session_id).await {
-        Ok(turns) => (StatusCode::OK, Json(serde_json::to_value(turns).expect("serialize history"))),
+        Ok(turns) => {
+            (StatusCode::OK, Json(serde_json::to_value(turns).expect("serialize history")))
+        }
         Err(error) => runtime_worker_error_response(error),
     }
 }
@@ -509,10 +507,9 @@ pub async fn submit_turn(
             Json(serde_json::json!({ "error": "no session available" })),
         );
     };
-    let _ = state.broadcast_tx.send(SsePayload::Status {
-        session_id: session_id.clone(),
-        status: TurnStatus::Waiting,
-    });
+    let _ = state
+        .broadcast_tx
+        .send(SsePayload::Status { session_id: session_id.clone(), status: TurnStatus::Waiting });
     if let Err(error) = state.session_manager.submit_turn(session_id, body.prompt) {
         return runtime_worker_error_response(error);
     }

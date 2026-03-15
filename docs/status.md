@@ -69,6 +69,7 @@
 - 完成流式工具事件语义拆分：模型侧只发 `tool_call_detected` 表示“已经决定要调工具”，runtime 真正开始执行时才发 `tool_call_started`，避免前端把一次工具调用误看成两次 start
 - 完成 `tape.info` / `tape.handoff` 从 runtime 特判式实现收口到 `Tool` trait + runtime tool registry：schema 暴露与调用路径改为真正的工具注册模型，只通过 `ToolExecutionContext` 注入最小 runtime host 能力
 - 完成 trace loop 列表后端分页：`/api/traces` 改为按 loop（`trace_id`）分页返回当前页 span 集合与总 loop 数，Web 端 recent loops 不再在单页内前端切片 12 条，而是直接消费后端页信息
+- 完成真实 token usage 贯通到 turn 主链：provider 返回的 `completion.usage` 现在会进入 `TurnLifecycle`、随 `turn_completed` SSE 与 session history 一起返回，并持久化到 `turn_completed` tape event，Web 聊天视图可直接显示本轮 input/output/total tokens
 
 ## 正在进行
 

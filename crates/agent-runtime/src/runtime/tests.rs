@@ -1,9 +1,9 @@
 use std::cell::RefCell;
 
 use agent_core::{
-    Completion, CompletionRequest, CompletionSegment, CompletionStopReason, ConversationItem,
-    CoreError, LanguageModel, Message, ModelDisposition, ModelIdentity, Role, ToolCall,
-    ToolDefinition, ToolExecutionContext, ToolExecutor, ToolOutputDelta, ToolResult,
+    Completion, CompletionRequest, CompletionSegment, CompletionStopReason, CompletionUsage,
+    ConversationItem, CoreError, LanguageModel, Message, ModelDisposition, ModelIdentity, Role,
+    ToolCall, ToolDefinition, ToolExecutionContext, ToolExecutor, ToolOutputDelta, ToolResult,
 };
 use serde_json::json;
 use session_tape::SessionTape;
@@ -76,6 +76,22 @@ impl LanguageModel for FailingModel {
 
     fn complete(&self, _request: CompletionRequest) -> Result<Completion, Self::Error> {
         Err(CoreError::new("模拟失败"))
+    }
+}
+
+struct UsageModel;
+
+impl LanguageModel for UsageModel {
+    type Error = CoreError;
+
+    fn complete(&self, _request: CompletionRequest) -> Result<Completion, Self::Error> {
+        Ok(Completion {
+            segments: vec![CompletionSegment::Text("带 usage 的回答".into())],
+            stop_reason: CompletionStopReason::Stop,
+            usage: Some(CompletionUsage { input_tokens: 21, output_tokens: 9, total_tokens: 30 }),
+            response_body: None,
+            http_status_code: None,
+        })
     }
 }
 
@@ -868,6 +884,7 @@ fn 成功轮会聚合成完整轮次块事件() {
                 assistant_message: Some(assistant_message),
                 thinking: None,
                 tool_invocations,
+                usage: None,
                 failure_message: None,
             }
         }
@@ -913,6 +930,7 @@ fn 工具失败后成功收尾的轮次也会聚合完整块事件() {
                 assistant_message: Some(assistant_message),
                 thinking: _,
                 tool_invocations,
+                usage: None,
                 failure_message: None,
             }
         }
@@ -935,6 +953,47 @@ fn 工具失败后成功收尾的轮次也会聚合完整块事件() {
                     && message.contains("工具结果不匹配")
             )
     )));
+}
+
+#[test]
+fn 成功轮会保留模型返回的真实_usage() {
+    let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced);
+    let mut runtime = AgentRuntime::new(UsageModel, StubTools, identity);
+    let subscriber = runtime.subscribe();
+
+    let output = runtime.handle_turn("统计这次 token").expect("运行成功");
+    let events = runtime.collect_events(subscriber).expect("读取事件成功");
+
+    assert_eq!(
+        output.completion.usage,
+        Some(CompletionUsage { input_tokens: 21, output_tokens: 9, total_tokens: 30 })
+    );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        RuntimeEvent::TurnLifecycle {
+            turn: TurnLifecycle {
+                usage: Some(CompletionUsage {
+                    input_tokens: 21,
+                    output_tokens: 9,
+                    total_tokens: 30,
+                }),
+                ..
+            }
+        }
+    )));
+    let completion_event = runtime
+        .tape()
+        .entries()
+        .iter()
+        .find(|entry| entry.kind == "event" && entry.event_name() == Some("turn_completed"))
+        .expect("应有完成事件");
+    assert_eq!(
+        completion_event
+            .event_data()
+            .and_then(|value| value.get("usage"))
+            .and_then(|value| serde_json::from_value::<CompletionUsage>(value.clone()).ok()),
+        Some(CompletionUsage { input_tokens: 21, output_tokens: 9, total_tokens: 30 })
+    );
 }
 
 // --- Context compression tests ---

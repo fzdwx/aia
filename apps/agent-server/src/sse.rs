@@ -85,9 +85,8 @@ impl SsePayload {
                 Ok(Event::default().event("turn_completed").data(data))
             }
             Self::ContextCompressed { session_id, summary } => {
-                let data =
-                    serde_json::to_string(&ContextCompressedData { session_id, summary })
-                        .unwrap_or_default();
+                let data = serde_json::to_string(&ContextCompressedData { session_id, summary })
+                    .unwrap_or_default();
                 Ok(Event::default().event("context_compressed").data(data))
             }
             Self::Error { session_id, message } => {
@@ -101,8 +100,8 @@ impl SsePayload {
                 Ok(Event::default().event("session_created").data(data))
             }
             Self::SessionDeleted { session_id } => {
-                let data = serde_json::to_string(&SessionDeletedData { session_id })
-                    .unwrap_or_default();
+                let data =
+                    serde_json::to_string(&SessionDeletedData { session_id }).unwrap_or_default();
                 Ok(Event::default().event("session_deleted").data(data))
             }
         }
@@ -118,11 +117,8 @@ mod tests {
 
     #[test]
     fn status_payload_can_convert_to_event() {
-        let event = SsePayload::Status {
-            session_id: "s1".into(),
-            status: TurnStatus::Thinking,
-        }
-        .into_axum_event();
+        let event = SsePayload::Status { session_id: "s1".into(), status: TurnStatus::Thinking }
+            .into_axum_event();
         assert!(event.is_ok());
     }
 
@@ -138,6 +134,11 @@ mod tests {
             assistant_message: Some("# 回答".into()),
             thinking: None,
             tool_invocations: vec![],
+            usage: Some(agent_core::CompletionUsage {
+                input_tokens: 21,
+                output_tokens: 9,
+                total_tokens: 30,
+            }),
             failure_message: None,
         };
 
@@ -157,11 +158,9 @@ mod tests {
 
     #[test]
     fn session_created_payload_can_convert_to_event() {
-        let event = SsePayload::SessionCreated {
-            session_id: "s1".into(),
-            title: "New session".into(),
-        }
-        .into_axum_event();
+        let event =
+            SsePayload::SessionCreated { session_id: "s1".into(), title: "New session".into() }
+                .into_axum_event();
         assert!(event.is_ok());
     }
 

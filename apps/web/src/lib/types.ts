@@ -69,6 +69,12 @@ export type ToolInvocationLifecycle = {
   outcome: ToolInvocationOutcome
 }
 
+export type TurnUsage = {
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+}
+
 // Mirrors Rust TurnBlock — discriminated union on `kind`
 export type TurnBlock =
   | { kind: "thinking"; content: string }
@@ -86,6 +92,7 @@ export type TurnLifecycle = {
   assistant_message: string | null
   thinking: string | null
   tool_invocations: ToolInvocationLifecycle[]
+  usage: TurnUsage | null
   failure_message: string | null
 }
 

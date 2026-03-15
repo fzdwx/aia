@@ -4,12 +4,10 @@ use std::sync::{Arc, RwLock};
 
 use agent_core::{ModelIdentity, StreamEvent, ToolRegistry};
 use agent_runtime::{AgentRuntime, ContextStats, RuntimeEvent, RuntimeSubscriberId, TurnLifecycle};
-use builtin_tools::build_tool_registry;
 use agent_store::{AiaStore, LlmTraceStore, SessionRecord, generate_session_id, iso8601_now};
+use builtin_tools::build_tool_registry;
 use provider_registry::ProviderRegistry;
-use session_tape::{
-    SessionProviderBinding, SessionTape,
-};
+use session_tape::{SessionProviderBinding, SessionTape};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::{
@@ -18,11 +16,11 @@ use crate::{
 };
 
 // Re-export types that routes and tests still need
+use crate::runtime_worker::rebuild_session_snapshots_from_tape;
 pub use crate::runtime_worker::{
     CreateProviderInput, CurrentToolOutput, CurrentTurnBlock, CurrentTurnSnapshot,
     ProviderInfoSnapshot, RuntimeWorkerError, SwitchProviderInput, UpdateProviderInput,
 };
-use crate::runtime_worker::rebuild_session_snapshots_from_tape;
 
 pub type SessionId = String;
 
@@ -409,11 +407,8 @@ fn handle_create_session(
     let now = iso8601_now();
     let title = title.unwrap_or_else(|| "New session".to_string());
 
-    let model_name = config
-        .provider_info_snapshot
-        .read()
-        .map(|info| info.model.clone())
-        .unwrap_or_default();
+    let model_name =
+        config.provider_info_snapshot.read().map(|info| info.model.clone()).unwrap_or_default();
 
     let record = SessionRecord {
         id: session_id.clone(),
@@ -431,10 +426,9 @@ fn handle_create_session(
     let slot = create_slot_for_session(&session_id, config)?;
     slots.insert(session_id.clone(), slot);
 
-    let _ = config.broadcast_tx.send(SsePayload::SessionCreated {
-        session_id: session_id.clone(),
-        title,
-    });
+    let _ = config
+        .broadcast_tx
+        .send(SsePayload::SessionCreated { session_id: session_id.clone(), title });
 
     Ok(record)
 }
@@ -465,9 +459,8 @@ fn handle_delete_session(
         .delete_session(session_id)
         .map_err(|e| RuntimeWorkerError::internal(format!("session db delete failed: {e}")))?;
 
-    let _ = config.broadcast_tx.send(SsePayload::SessionDeleted {
-        session_id: session_id.to_string(),
-    });
+    let _ =
+        config.broadcast_tx.send(SsePayload::SessionDeleted { session_id: session_id.to_string() });
 
     Ok(())
 }
@@ -487,10 +480,8 @@ fn handle_submit_turn(
         return Err(RuntimeWorkerError::bad_request("a turn is already running in this session"));
     }
 
-    let mut runtime = slot
-        .runtime
-        .take()
-        .ok_or_else(|| RuntimeWorkerError::internal("runtime not available"))?;
+    let mut runtime =
+        slot.runtime.take().ok_or_else(|| RuntimeWorkerError::internal("runtime not available"))?;
     let subscriber = slot.subscriber;
     slot.status = SlotStatus::Running;
 
@@ -511,10 +502,8 @@ fn handle_submit_turn(
     let sid = session_id.to_string();
     let return_tx = return_tx.clone();
 
-    let _ = broadcast_tx.send(SsePayload::Status {
-        session_id: sid.clone(),
-        status: TurnStatus::Waiting,
-    });
+    let _ = broadcast_tx
+        .send(SsePayload::Status { session_id: sid.clone(), status: TurnStatus::Waiting });
 
     tokio::task::spawn_blocking(move || {
         let mut current_status = CurrentStatusInner::Waiting;
@@ -542,38 +531,29 @@ fn handle_submit_turn(
             }
 
             update_current_turn_from_stream(&cts, &event);
-            let _ = btx.send(SsePayload::Stream {
-                session_id: sid2.clone(),
-                event,
-            });
+            let _ = btx.send(SsePayload::Stream { session_id: sid2.clone(), event });
         });
 
         match result {
             Ok(_) => {
                 let events = runtime.collect_events(subscriber).unwrap_or_default();
-                let turn =
-                    broadcast_runtime_events_with_session(events, &broadcast_tx, &sid);
+                let turn = broadcast_runtime_events_with_session(events, &broadcast_tx, &sid);
                 if let Some(turn) = turn {
                     persist_tool_trace_spans(&turn, trace_store.as_ref());
                     history_snapshot.write().expect("lock poisoned").push(turn.clone());
-                    let _ = broadcast_tx.send(SsePayload::TurnCompleted {
-                        session_id: sid.clone(),
-                        turn,
-                    });
+                    let _ = broadcast_tx
+                        .send(SsePayload::TurnCompleted { session_id: sid.clone(), turn });
                 }
                 *current_turn_snapshot.write().expect("lock poisoned") = None;
             }
             Err(error) => {
                 let events = runtime.collect_events(subscriber).unwrap_or_default();
-                let turn =
-                    broadcast_runtime_events_with_session(events, &broadcast_tx, &sid);
+                let turn = broadcast_runtime_events_with_session(events, &broadcast_tx, &sid);
                 if let Some(turn) = turn {
                     persist_tool_trace_spans(&turn, trace_store.as_ref());
                     history_snapshot.write().expect("lock poisoned").push(turn.clone());
-                    let _ = broadcast_tx.send(SsePayload::TurnCompleted {
-                        session_id: sid.clone(),
-                        turn,
-                    });
+                    let _ = broadcast_tx
+                        .send(SsePayload::TurnCompleted { session_id: sid.clone(), turn });
                 }
                 *current_turn_snapshot.write().expect("lock poisoned") = None;
                 let _ = broadcast_tx.send(SsePayload::Error {
@@ -584,11 +564,7 @@ fn handle_submit_turn(
         }
 
         // Return runtime to the session manager
-        let _ = return_tx.blocking_send(RuntimeReturn {
-            session_id: sid,
-            runtime,
-            subscriber,
-        });
+        let _ = return_tx.blocking_send(RuntimeReturn { session_id: sid, runtime, subscriber });
     });
 
     Ok(())
@@ -720,13 +696,10 @@ fn handle_switch_provider(
     config: &mut SessionManagerConfig,
     input: SwitchProviderInput,
 ) -> Result<ProviderInfoSnapshot, RuntimeWorkerError> {
-    let mut profile = config
-        .registry
-        .providers()
-        .iter()
-        .find(|p| p.name == input.name)
-        .cloned()
-        .ok_or_else(|| RuntimeWorkerError::not_found(format!("provider 不存在：{}", input.name)))?;
+    let mut profile =
+        config.registry.providers().iter().find(|p| p.name == input.name).cloned().ok_or_else(
+            || RuntimeWorkerError::not_found(format!("provider 不存在：{}", input.name)),
+        )?;
 
     if let Some(model_id) = &input.model_id {
         if !profile.has_model(model_id) {
@@ -762,9 +735,7 @@ fn sync_all_runtimes_to_registry(
             candidate_tape.bind_provider(binding.clone());
             candidate_tape
                 .save_jsonl(&slot.session_path)
-                .map_err(|e| {
-                    RuntimeWorkerError::internal(format!("session save failed: {e}"))
-                })?;
+                .map_err(|e| RuntimeWorkerError::internal(format!("session save failed: {e}")))?;
 
             let selection = candidate_registry
                 .active_provider()
@@ -956,58 +927,95 @@ fn persist_tool_trace_spans(turn: &TurnLifecycle, store: &dyn LlmTraceStore) {
 
         let failed =
             matches!(&invocation.outcome, agent_runtime::ToolInvocationOutcome::Failed { .. });
-        let (status, error, response_summary, response_body, events, details) =
-            match &invocation.outcome {
-                agent_runtime::ToolInvocationOutcome::Succeeded { result } => (
-                    LlmTraceStatus::Succeeded, None,
-                    json!({"status":"succeeded","tool_name":result.tool_name,"content_preview":preview_text(&result.content)}),
-                    Some(result.content.clone()),
-                    vec![
-                        LlmTraceEvent { name: "tool.started".into(), at_ms: invocation.started_at_ms, attributes: json!({"invocation_id":invocation.call.invocation_id,"tool_name":invocation.call.tool_name}) },
-                        LlmTraceEvent { name: "tool.completed".into(), at_ms: invocation.finished_at_ms, attributes: json!({"invocation_id":result.invocation_id,"tool_name":result.tool_name,"details":result.details}) },
-                    ],
-                    result.details.clone(),
-                ),
-                agent_runtime::ToolInvocationOutcome::Failed { message } => (
-                    LlmTraceStatus::Failed, Some(message.clone()),
-                    json!({"status":"failed","tool_name":invocation.call.tool_name,"error":message}),
-                    Some(message.clone()),
-                    vec![
-                        LlmTraceEvent { name: "tool.started".into(), at_ms: invocation.started_at_ms, attributes: json!({"invocation_id":invocation.call.invocation_id,"tool_name":invocation.call.tool_name}) },
-                        LlmTraceEvent { name: "tool.failed".into(), at_ms: invocation.finished_at_ms, attributes: json!({"invocation_id":invocation.call.invocation_id,"tool_name":invocation.call.tool_name,"error":message}) },
-                    ],
-                    None,
-                ),
-            };
+        let (status, error, response_summary, response_body, events, details) = match &invocation
+            .outcome
+        {
+            agent_runtime::ToolInvocationOutcome::Succeeded { result } => (
+                LlmTraceStatus::Succeeded,
+                None,
+                json!({"status":"succeeded","tool_name":result.tool_name,"content_preview":preview_text(&result.content)}),
+                Some(result.content.clone()),
+                vec![
+                    LlmTraceEvent {
+                        name: "tool.started".into(),
+                        at_ms: invocation.started_at_ms,
+                        attributes: json!({"invocation_id":invocation.call.invocation_id,"tool_name":invocation.call.tool_name}),
+                    },
+                    LlmTraceEvent {
+                        name: "tool.completed".into(),
+                        at_ms: invocation.finished_at_ms,
+                        attributes: json!({"invocation_id":result.invocation_id,"tool_name":result.tool_name,"details":result.details}),
+                    },
+                ],
+                result.details.clone(),
+            ),
+            agent_runtime::ToolInvocationOutcome::Failed { message } => (
+                LlmTraceStatus::Failed,
+                Some(message.clone()),
+                json!({"status":"failed","tool_name":invocation.call.tool_name,"error":message}),
+                Some(message.clone()),
+                vec![
+                    LlmTraceEvent {
+                        name: "tool.started".into(),
+                        at_ms: invocation.started_at_ms,
+                        attributes: json!({"invocation_id":invocation.call.invocation_id,"tool_name":invocation.call.tool_name}),
+                    },
+                    LlmTraceEvent {
+                        name: "tool.failed".into(),
+                        at_ms: invocation.finished_at_ms,
+                        attributes: json!({"invocation_id":invocation.call.invocation_id,"tool_name":invocation.call.tool_name,"error":message}),
+                    },
+                ],
+                None,
+            ),
+        };
 
         let record = LlmTraceRecord {
-            id: context.span_id.clone(), trace_id: context.trace_id.clone(),
-            span_id: context.span_id.clone(), parent_span_id: Some(context.parent_span_id.clone()),
-            root_span_id: context.root_span_id.clone(), operation_name: context.operation_name.clone(),
-            span_kind: LlmTraceSpanKind::Internal, turn_id: turn.turn_id.clone(),
-            run_id: turn.turn_id.clone(), request_kind: "tool".into(),
-            step_index: context.parent_step_index, provider: "runtime".into(),
-            protocol: "tool-runtime".into(), model: invocation.call.tool_name.clone(),
+            id: context.span_id.clone(),
+            trace_id: context.trace_id.clone(),
+            span_id: context.span_id.clone(),
+            parent_span_id: Some(context.parent_span_id.clone()),
+            root_span_id: context.root_span_id.clone(),
+            operation_name: context.operation_name.clone(),
+            span_kind: LlmTraceSpanKind::Internal,
+            turn_id: turn.turn_id.clone(),
+            run_id: turn.turn_id.clone(),
+            request_kind: "tool".into(),
+            step_index: context.parent_step_index,
+            provider: "runtime".into(),
+            protocol: "tool-runtime".into(),
+            model: invocation.call.tool_name.clone(),
             base_url: "local://runtime".into(),
             endpoint_path: format!("/tools/{}", invocation.call.tool_name),
-            streaming: false, started_at_ms: invocation.started_at_ms,
+            streaming: false,
+            started_at_ms: invocation.started_at_ms,
             finished_at_ms: Some(invocation.finished_at_ms),
             duration_ms: Some(invocation.finished_at_ms.saturating_sub(invocation.started_at_ms)),
-            status_code: None, status, stop_reason: None, error,
+            status_code: None,
+            status,
+            stop_reason: None,
+            error,
             request_summary: json!({"tool_name":invocation.call.tool_name,"invocation_id":invocation.call.invocation_id,"parent_request_kind":context.parent_request_kind,"parent_step_index":context.parent_step_index}),
             provider_request: json!({"invocation_id":invocation.call.invocation_id,"tool_name":invocation.call.tool_name,"arguments":invocation.call.arguments}),
-            response_summary, response_body,
-            input_tokens: None, output_tokens: None, total_tokens: None,
+            response_summary,
+            response_body,
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
             otel_attributes: json!({"aia.operation.name":context.operation_name,"aia.tool.name":invocation.call.tool_name,"aia.tool.invocation_id":invocation.call.invocation_id,"aia.parent.request_kind":context.parent_request_kind,"aia.parent.step_index":context.parent_step_index,"aia.tool.failed":failed,"aia.tool.details":details}),
             events,
         };
-        if let Err(e) = store.record(&record) { eprintln!("tool trace record failed: {e}"); }
+        if let Err(e) = store.record(&record) {
+            eprintln!("tool trace record failed: {e}");
+        }
     }
 }
 
 fn preview_text(value: &str) -> String {
     let mut preview = value.chars().take(120).collect::<String>();
-    if value.chars().count() > 120 { preview.push_str("..."); }
+    if value.chars().count() > 120 {
+        preview.push_str("...");
+    }
     preview
 }
 

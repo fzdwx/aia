@@ -196,30 +196,15 @@ impl AiaStore {
         ensure_column(&conn, "llm_request_traces", "span_id", "TEXT NOT NULL DEFAULT ''")?;
         ensure_column(&conn, "llm_request_traces", "parent_span_id", "TEXT")?;
         ensure_column(&conn, "llm_request_traces", "root_span_id", "TEXT NOT NULL DEFAULT ''")?;
-        ensure_column(
-            &conn,
-            "llm_request_traces",
-            "operation_name",
-            "TEXT NOT NULL DEFAULT ''",
-        )?;
-        ensure_column(
-            &conn,
-            "llm_request_traces",
-            "span_kind",
-            "TEXT NOT NULL DEFAULT 'CLIENT'",
-        )?;
+        ensure_column(&conn, "llm_request_traces", "operation_name", "TEXT NOT NULL DEFAULT ''")?;
+        ensure_column(&conn, "llm_request_traces", "span_kind", "TEXT NOT NULL DEFAULT 'CLIENT'")?;
         ensure_column(
             &conn,
             "llm_request_traces",
             "otel_attributes",
             "TEXT NOT NULL DEFAULT '{}'",
         )?;
-        ensure_column(
-            &conn,
-            "llm_request_traces",
-            "events",
-            "TEXT NOT NULL DEFAULT '[]'",
-        )?;
+        ensure_column(&conn, "llm_request_traces", "events", "TEXT NOT NULL DEFAULT '[]'")?;
 
         Ok(())
     }
@@ -292,11 +277,10 @@ impl LlmTraceStore for AiaStore {
 
     fn list_page(&self, limit: usize, offset: usize) -> Result<LlmTraceListPage, AiaStoreError> {
         let conn = self.conn.lock().expect("lock poisoned");
-        let total_loops = conn.query_row(
-            "SELECT COUNT(DISTINCT trace_id) FROM llm_request_traces",
-            [],
-            |row| row.get::<_, u64>(0),
-        )?;
+        let total_loops =
+            conn.query_row("SELECT COUNT(DISTINCT trace_id) FROM llm_request_traces", [], |row| {
+                row.get::<_, u64>(0)
+            })?;
         let mut stmt = conn.prepare(
             "
             WITH paged_loops AS (
@@ -594,9 +578,7 @@ fn extract_text_content(value: &Value) -> Option<String> {
 mod tests {
     use serde_json::json;
 
-    use super::{
-        LlmTraceEvent, LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus, LlmTraceStore,
-    };
+    use super::{LlmTraceEvent, LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus, LlmTraceStore};
     use crate::AiaStore;
 
     #[test]
@@ -817,7 +799,12 @@ mod tests {
         assert_eq!(first_page.page, 1);
         assert_eq!(first_page.page_size, 2);
         assert_eq!(first_page.items.len(), 4);
-        assert!(first_page.items.iter().all(|item| item.trace_id == "loop-1" || item.trace_id == "loop-2"));
+        assert!(
+            first_page
+                .items
+                .iter()
+                .all(|item| item.trace_id == "loop-1" || item.trace_id == "loop-2")
+        );
         assert!(first_page.items.iter().any(|item| item.trace_id == "loop-1"));
         assert!(first_page.items.iter().any(|item| item.trace_id == "loop-2"));
         assert!(first_page.items.iter().all(|item| item.trace_id != "loop-3"));

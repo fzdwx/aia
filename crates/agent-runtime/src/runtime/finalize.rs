@@ -1,7 +1,7 @@
 use serde_json::json;
 use session_tape::TapeEntry;
 
-use agent_core::{LanguageModel, ToolExecutor};
+use agent_core::{CompletionUsage, LanguageModel, ToolExecutor};
 
 use crate::{ToolInvocationLifecycle, TurnBlock, TurnLifecycle};
 
@@ -22,11 +22,15 @@ where
         assistant_message: Option<String>,
         thinking: Option<String>,
         tool_invocations: Vec<ToolInvocationLifecycle>,
+        usage: Option<CompletionUsage>,
     ) -> Result<(), RuntimeError> {
         let completion_event_id = self.append_tape_entry(
-            TapeEntry::event("turn_completed", Some(json!({"status": "ok"})))
-                .with_run_id(&turn_id)
-                .with_meta("source_entry_ids", json!(source_entry_ids.clone())),
+            TapeEntry::event(
+                "turn_completed",
+                Some(json!({"status": "ok", "usage": usage.clone()})),
+            )
+            .with_run_id(&turn_id)
+            .with_meta("source_entry_ids", json!(source_entry_ids.clone())),
         )?;
         let mut source_entry_ids = source_entry_ids;
         source_entry_ids.push(completion_event_id);
@@ -40,6 +44,7 @@ where
             assistant_message,
             thinking,
             tool_invocations,
+            usage,
             failure_message: None,
         });
         Ok(())
@@ -80,6 +85,7 @@ where
                 Some(aggregated_thinking.to_string())
             },
             tool_invocations: tool_invocations.to_vec(),
+            usage: None,
             failure_message: Some(runtime_error.to_string()),
         });
         Ok(())

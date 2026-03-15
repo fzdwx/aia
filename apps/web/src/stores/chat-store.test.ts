@@ -89,6 +89,7 @@ describe("chat store submitTurn", () => {
           assistant_message: null,
           thinking: null,
           tool_invocations: [],
+          usage: null,
           failure_message: "模型执行失败：请求失败：502 Bad Gateway",
         },
       ],
