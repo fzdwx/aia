@@ -49,6 +49,10 @@ impl OpenAiChatCompletionsModel {
             input_tokens: usage.prompt_tokens.unwrap_or(0),
             output_tokens: usage.completion_tokens.unwrap_or(0),
             total_tokens: usage.total_tokens.unwrap_or(0),
+            cached_tokens: usage
+                .prompt_tokens_details
+                .and_then(|details| details.cached_tokens)
+                .unwrap_or(0),
         })
     }
 
@@ -124,6 +128,14 @@ impl OpenAiChatCompletionsModel {
         });
         if let Some(output_limit) = request.max_output_tokens {
             body["max_completion_tokens"] = json!(output_limit);
+        }
+        if let Some(prompt_cache) = request.prompt_cache.as_ref() {
+            if let Some(key) = prompt_cache.key.as_ref().filter(|value| !value.is_empty()) {
+                body["prompt_cache_key"] = json!(key);
+            }
+            if let Some(retention) = prompt_cache.retention.as_ref() {
+                body["prompt_cache_retention"] = json!(retention.as_api_value());
+            }
         }
         body
     }

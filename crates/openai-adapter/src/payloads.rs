@@ -21,6 +21,14 @@ pub(crate) struct ResponsesUsage {
     pub output_tokens: Option<u64>,
     #[serde(default)]
     pub total_tokens: Option<u64>,
+    #[serde(default)]
+    pub input_tokens_details: Option<ResponsesInputTokensDetails>,
+}
+
+#[derive(Clone, Deserialize)]
+pub(crate) struct ResponsesInputTokensDetails {
+    #[serde(default)]
+    pub cached_tokens: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -78,6 +86,14 @@ pub(crate) struct ChatCompletionsUsage {
     pub completion_tokens: Option<u64>,
     #[serde(default)]
     pub total_tokens: Option<u64>,
+    #[serde(default)]
+    pub prompt_tokens_details: Option<ChatCompletionsPromptTokensDetails>,
+}
+
+#[derive(Clone, Deserialize)]
+pub(crate) struct ChatCompletionsPromptTokensDetails {
+    #[serde(default)]
+    pub cached_tokens: Option<u64>,
 }
 
 #[derive(Deserialize)]

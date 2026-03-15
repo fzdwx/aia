@@ -6,8 +6,8 @@ use std::{
 
 use agent_core::{
     CompletionRequest, CompletionSegment, CompletionStopReason, ConversationItem, LanguageModel,
-    Message, ModelDisposition, ModelIdentity, Role, StreamEvent, ToolCall, ToolDefinition,
-    ToolResult,
+    Message, ModelDisposition, ModelIdentity, PromptCacheConfig, PromptCacheRetention, Role,
+    StreamEvent, ToolCall, ToolDefinition, ToolResult,
 };
 use serde_json::{Value, json};
 
@@ -30,6 +30,7 @@ fn sample_request() -> CompletionRequest {
             "关键字",
             true,
         )],
+        prompt_cache: None,
         trace_context: None,
     }
 }
@@ -85,6 +86,26 @@ fn responses_请求体会映射_output_limit() {
     let body = model.build_request_body(&request);
 
     assert_eq!(body["max_output_tokens"], json!(131_072));
+}
+
+#[test]
+fn responses_请求体会映射_prompt_cache() {
+    let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
+        "http://127.0.0.1:1",
+        "test-key",
+        "gpt-4.1-mini",
+    ))
+    .expect("模型创建成功");
+
+    let mut request = sample_request();
+    request.prompt_cache = Some(PromptCacheConfig {
+        key: Some("aia:test-session".into()),
+        retention: Some(PromptCacheRetention::OneDay),
+    });
+    let body = model.build_request_body(&request);
+
+    assert_eq!(body["prompt_cache_key"], json!("aia:test-session"));
+    assert_eq!(body["prompt_cache_retention"], json!("24h"));
 }
 
 #[test]
@@ -207,11 +228,48 @@ fn 响应体可解析文本与工具调用() {
     assert_eq!(completion.usage.as_ref().map(|usage| usage.input_tokens), Some(21));
     assert_eq!(completion.usage.as_ref().map(|usage| usage.output_tokens), Some(9));
     assert_eq!(completion.usage.as_ref().map(|usage| usage.total_tokens), Some(30));
+    assert_eq!(completion.usage.as_ref().map(|usage| usage.cached_tokens), Some(0));
     assert!(completion.segments.iter().any(|segment| matches!(
         segment,
         agent_core::CompletionSegment::ToolUse(ToolCall { tool_name, response_id, .. })
             if tool_name == "search_code" && response_id.as_deref() == Some("resp_123")
     )));
+}
+
+#[test]
+fn responses_响应体可解析_cached_tokens() {
+    let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
+        "http://127.0.0.1:1",
+        "test-key",
+        "gpt-4.1-mini",
+    ))
+    .expect("模型创建成功");
+
+    let completion = model
+        .parse_response_body(
+            r#"{
+                    "usage": {
+                        "input_tokens": 120,
+                        "output_tokens": 12,
+                        "total_tokens": 132,
+                        "input_tokens_details": {
+                            "cached_tokens": 96
+                        }
+                    },
+                    "output": [
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [
+                                {"type": "output_text", "text": "命中缓存"}
+                            ]
+                        }
+                    ]
+                }"#,
+        )
+        .expect("响应解析成功");
+
+    assert_eq!(completion.usage.as_ref().map(|usage| usage.cached_tokens), Some(96));
 }
 
 #[test]
@@ -682,6 +740,27 @@ fn 聊天补全请求体会映射_output_limit() {
 }
 
 #[test]
+fn 聊天补全请求体会映射_prompt_cache() {
+    let model = OpenAiChatCompletionsModel::new(OpenAiChatCompletionsConfig::new(
+        "http://127.0.0.1:1",
+        "test-key",
+        "minum-security-llm",
+    ))
+    .expect("模型创建成功");
+
+    let mut request = sample_request();
+    request.model.name = "minum-security-llm".into();
+    request.prompt_cache = Some(PromptCacheConfig {
+        key: Some("aia:test-session".into()),
+        retention: Some(PromptCacheRetention::OneDay),
+    });
+    let body = model.build_request_body(&request);
+
+    assert_eq!(body["prompt_cache_key"], json!("aia:test-session"));
+    assert_eq!(body["prompt_cache_retention"], json!("24h"));
+}
+
+#[test]
 fn 聊天补全响应体可解析文本与工具调用() {
     let model = OpenAiChatCompletionsModel::new(OpenAiChatCompletionsConfig::new(
         "http://127.0.0.1:1",
@@ -755,11 +834,49 @@ fn 聊天补全响应体可解析文本与工具调用() {
     assert_eq!(completion.usage.as_ref().map(|usage| usage.input_tokens), Some(18));
     assert_eq!(completion.usage.as_ref().map(|usage| usage.output_tokens), Some(7));
     assert_eq!(completion.usage.as_ref().map(|usage| usage.total_tokens), Some(25));
+    assert_eq!(completion.usage.as_ref().map(|usage| usage.cached_tokens), Some(0));
     assert!(completion.segments.iter().any(|segment| matches!(
         segment,
         agent_core::CompletionSegment::ToolUse(ToolCall { tool_name, invocation_id, .. })
             if tool_name == "search_code" && invocation_id == "call_1"
     )));
+}
+
+#[test]
+fn 聊天补全响应体可解析_cached_tokens() {
+    let model = OpenAiChatCompletionsModel::new(OpenAiChatCompletionsConfig::new(
+        "http://127.0.0.1:1",
+        "test-key",
+        "minum-security-llm",
+    ))
+    .expect("模型创建成功");
+
+    let completion = model
+        .parse_response_body(
+            r#"{
+                    "usage": {
+                        "prompt_tokens": 80,
+                        "completion_tokens": 20,
+                        "total_tokens": 100,
+                        "prompt_tokens_details": {
+                            "cached_tokens": 64
+                        }
+                    },
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "命中缓存",
+                                "tool_calls": []
+                            },
+                            "finish_reason": "stop"
+                        }
+                    ]
+                }"#,
+        )
+        .expect("响应解析成功");
+
+    assert_eq!(completion.usage.as_ref().map(|usage| usage.cached_tokens), Some(64));
 }
 
 #[test]
