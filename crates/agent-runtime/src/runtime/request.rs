@@ -35,7 +35,7 @@ where
             max_output_tokens,
             available_tools,
             prompt_cache: self.prompt_cache.clone(),
-            user_agent: None,
+            user_agent: self.user_agent.clone(),
             trace_context: Some(build_llm_trace_context(
                 turn_id,
                 turn_id,
@@ -62,24 +62,12 @@ where
         (instructions, conversation, available_tools)
     }
 
-    fn current_context_units(&self) -> u32 {
-        let (instructions, conversation, available_tools) = self.default_request_parts();
-        let estimated_units = Self::approximate_request_units(
-            instructions.as_deref(),
-            &conversation,
-            &available_tools,
-        );
-        let Some(last_input_tokens) =
-            self.last_input_tokens.map(|value| value.min(u32::MAX as u64) as u32)
-        else {
-            return estimated_units;
-        };
-
+    fn current_input_tokens(&self) -> Option<u32> {
         if self.has_anchor_after_last_completed_turn() {
-            estimated_units
-        } else {
-            estimated_units.max(last_input_tokens)
+            return None;
         }
+
+        self.last_input_tokens.map(|value| value.min(u32::MAX as u64) as u32)
     }
 
     fn has_anchor_after_last_completed_turn(&self) -> bool {
@@ -101,9 +89,9 @@ where
 
     fn effective_max_output_tokens(
         &self,
-        instructions: Option<&str>,
-        conversation: &[ConversationItem],
-        available_tools: &[ToolDefinition],
+        _instructions: Option<&str>,
+        _conversation: &[agent_core::ConversationItem],
+        _available_tools: &[ToolDefinition],
     ) -> Option<u32> {
         let configured_output = self.model_identity.limit.as_ref().and_then(|limit| limit.output);
         let context_limit = self.model_identity.limit.as_ref().and_then(|limit| limit.context);
@@ -111,51 +99,16 @@ where
         let Some(context_limit) = context_limit else {
             return configured_output;
         };
+        let Some(last_input_tokens) = self.current_input_tokens() else {
+            return configured_output;
+        };
 
-        let estimated_usage =
-            Self::approximate_request_units(instructions, conversation, available_tools);
         let usable_headroom = context_limit
-            .saturating_sub(estimated_usage.saturating_add(CONTEXT_HEADROOM_SAFETY_TOKENS));
+            .saturating_sub(last_input_tokens.saturating_add(CONTEXT_HEADROOM_SAFETY_TOKENS));
         let effective =
             configured_output.map_or(usable_headroom, |output| output.min(usable_headroom));
 
         Some(effective.max(1))
-    }
-
-    fn approximate_request_units(
-        instructions: Option<&str>,
-        conversation: &[ConversationItem],
-        available_tools: &[ToolDefinition],
-    ) -> u32 {
-        let instruction_units = instructions.map_or(0, Self::approximate_text_units);
-        let conversation_units = conversation
-            .iter()
-            .map(|item| match item {
-                ConversationItem::Message(message) => {
-                    Self::approximate_text_units(&message.content)
-                }
-                ConversationItem::ToolCall(call) => Self::approximate_text_units(&call.tool_name)
-                    .saturating_add(Self::approximate_text_units(&call.arguments.to_string())),
-                ConversationItem::ToolResult(result) => {
-                    Self::approximate_text_units(&result.tool_name)
-                        .saturating_add(Self::approximate_text_units(&result.content))
-                }
-            })
-            .sum::<u32>();
-        let tool_units = available_tools
-            .iter()
-            .map(|tool| {
-                Self::approximate_text_units(&tool.name)
-                    .saturating_add(Self::approximate_text_units(&tool.description))
-                    .saturating_add(Self::approximate_text_units(&tool.parameters.to_string()))
-            })
-            .sum::<u32>();
-
-        instruction_units.saturating_add(conversation_units).saturating_add(tool_units)
-    }
-
-    fn approximate_text_units(text: &str) -> u32 {
-        text.chars().count().min(u32::MAX as usize) as u32
     }
 
     pub fn context_stats(&self) -> ContextStats {
@@ -168,15 +121,17 @@ where
         let context_limit = self.model_identity.limit.as_ref().and_then(|limit| limit.context);
         let output_limit = self.model_identity.limit.as_ref().and_then(|limit| limit.output);
 
-        let estimated_context_units = self.current_context_units();
-        let pressure_ratio =
-            context_limit.map(|limit| estimated_context_units as f64 / limit as f64);
+        let last_input_tokens = self.current_input_tokens();
+        let pressure_ratio = match (last_input_tokens, context_limit) {
+            (Some(input_tokens), Some(limit)) => Some(input_tokens as f64 / limit as f64),
+            _ => None,
+        };
 
         ContextStats {
             total_entries,
             anchor_count,
             entries_since_last_anchor,
-            estimated_context_units,
+            last_input_tokens,
             context_limit,
             output_limit,
             pressure_ratio,
@@ -185,7 +140,8 @@ where
 
     pub(super) fn context_pressure_ratio(&self) -> Option<f64> {
         let context_limit = self.model_identity.limit.as_ref().and_then(|limit| limit.context)?;
-        Some(self.current_context_units() as f64 / context_limit as f64)
+        let input_tokens = self.current_input_tokens()?;
+        Some(input_tokens as f64 / context_limit as f64)
     }
 }
 

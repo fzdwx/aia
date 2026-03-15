@@ -34,6 +34,13 @@ fn default_sessions_dir() -> std::path::PathBuf {
         .join("sessions")
 }
 
+fn build_server_user_agent() -> String {
+    let os = std::env::consts::OS;
+    let arch = std::env::consts::ARCH;
+    let version = env!("CARGO_PKG_VERSION");
+    format!("aia-{os}-{arch}/{version}")
+}
+
 #[tokio::main]
 async fn main() {
     let registry_path = provider_registry::default_registry_path();
@@ -96,6 +103,7 @@ async fn main() {
         provider_registry_snapshot: provider_registry_snapshot.clone(),
         provider_info_snapshot: provider_info_snapshot.clone(),
         workspace_root,
+        user_agent: build_server_user_agent(),
     });
 
     let state = Arc::new(AppState {

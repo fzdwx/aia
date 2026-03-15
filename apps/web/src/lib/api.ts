@@ -15,7 +15,7 @@ export type ContextStats = {
   total_entries: number
   anchor_count: number
   entries_since_last_anchor: number
-  estimated_context_units: number
+  last_input_tokens: number | null
   context_limit: number | null
   output_limit: number | null
   pressure_ratio: number | null

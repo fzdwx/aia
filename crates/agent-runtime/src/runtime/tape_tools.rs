@@ -18,7 +18,7 @@ pub(super) struct RuntimeToolContextBridge {
     total_entries: usize,
     anchor_count: usize,
     entries_since_last_anchor: usize,
-    estimated_context_units: u32,
+    last_input_tokens: Option<u32>,
     context_limit: Option<u32>,
     output_limit: Option<u32>,
     pressure_ratio: Option<f64>,
@@ -36,7 +36,7 @@ impl RuntimeToolContextBridge {
             total_entries: stats.total_entries,
             anchor_count: stats.anchor_count,
             entries_since_last_anchor: stats.entries_since_last_anchor,
-            estimated_context_units: stats.estimated_context_units,
+            last_input_tokens: stats.last_input_tokens,
             context_limit: stats.context_limit,
             output_limit: stats.output_limit,
             pressure_ratio: stats.pressure_ratio,
@@ -55,7 +55,7 @@ impl RuntimeToolContext for RuntimeToolContextBridge {
             total_entries: self.total_entries,
             anchor_count: self.anchor_count,
             entries_since_last_anchor: self.entries_since_last_anchor,
-            estimated_context_units: self.estimated_context_units,
+            last_input_tokens: self.last_input_tokens,
             context_limit: self.context_limit,
             output_limit: self.output_limit,
             pressure_ratio: self.pressure_ratio,
@@ -94,13 +94,13 @@ impl Tool for TapeInfoTool {
             "entries: {}\n\
              anchors: {}\n\
              entries_since_last_anchor: {}\n\
-             estimated_context_units: {}\n\
+             last_input_tokens: {}\n\
              context_limit: {}\n\
              pressure_ratio: {:.2}",
             stats.total_entries,
             stats.anchor_count,
             stats.entries_since_last_anchor,
-            stats.estimated_context_units,
+            stats.last_input_tokens.map_or("unknown".to_string(), |value| value.to_string()),
             stats.context_limit.map_or("unknown".to_string(), |value| value.to_string()),
             stats.pressure_ratio.unwrap_or(0.0),
         );

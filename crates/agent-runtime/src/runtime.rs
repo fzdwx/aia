@@ -31,6 +31,7 @@ pub struct AgentRuntime<M, T> {
     tape: SessionTape,
     model_identity: ModelIdentity,
     instructions: Option<String>,
+    user_agent: Option<String>,
     disabled_tools: BTreeSet<String>,
     workspace_root: Option<std::path::PathBuf>,
     max_tool_calls_per_turn: usize,
@@ -70,6 +71,7 @@ where
             tape,
             model_identity,
             instructions: None,
+            user_agent: None,
             disabled_tools: BTreeSet::new(),
             workspace_root: None,
             max_tool_calls_per_turn: DEFAULT_MAX_TOOL_CALLS_PER_TURN,
@@ -85,6 +87,11 @@ where
 
     pub fn with_instructions(mut self, instructions: impl Into<String>) -> Self {
         self.instructions = Some(instructions.into());
+        self
+    }
+
+    pub fn with_user_agent(mut self, user_agent: impl Into<String>) -> Self {
+        self.user_agent = Some(user_agent.into());
         self
     }
 

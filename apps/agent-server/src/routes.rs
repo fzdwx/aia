@@ -2,7 +2,7 @@ use agent_store::{LlmTraceStore, LlmTraceStoreError};
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     response::{
         IntoResponse,
         sse::{KeepAlive, Sse},
@@ -26,7 +26,6 @@ use crate::{
 pub struct TurnRequest {
     pub prompt: String,
     pub session_id: Option<String>,
-    pub user_agent: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -500,7 +499,6 @@ pub async fn events(State(state): State<SharedState>) -> impl IntoResponse {
 /// Fire-and-forget turn submission. Events arrive via the global SSE stream.
 pub async fn submit_turn(
     State(state): State<SharedState>,
-    headers: HeaderMap,
     Json(body): Json<TurnRequest>,
 ) -> impl IntoResponse {
     let Some(session_id) = resolve_session_id(&state, body.session_id) else {
@@ -509,16 +507,10 @@ pub async fn submit_turn(
             Json(serde_json::json!({ "error": "no session available" })),
         );
     };
-    let user_agent = body.user_agent.or_else(|| {
-        headers
-            .get(axum::http::header::USER_AGENT)
-            .and_then(|value| value.to_str().ok())
-            .map(std::string::ToString::to_string)
-    });
     let _ = state
         .broadcast_tx
         .send(SsePayload::Status { session_id: session_id.clone(), status: TurnStatus::Waiting });
-    if let Err(error) = state.session_manager.submit_turn(session_id, body.prompt, user_agent) {
+    if let Err(error) = state.session_manager.submit_turn(session_id, body.prompt) {
         return runtime_worker_error_response(error);
     }
 

@@ -598,13 +598,17 @@ fn 上下文接近窗口上限时会自动收紧输出预算() {
         .with_limit(Some(agent_core::ModelLimit { context: Some(128), output: Some(64) }));
     let model = BudgetRecordingModel::new();
     let mut tape = SessionTape::new();
-    tape.append(Message::new(
-        Role::User,
-        "这是一段故意很长的历史消息，用来触发运行时的上下文余量预检提示。",
-    ));
-    tape.append(Message::new(
-        Role::Assistant,
-        "这是一段同样很长的历史回答，用来让近似上下文估算明显超过窗口预算。",
+    tape.append_entry(session_tape::TapeEntry::event(
+        "turn_completed",
+        Some(json!({
+            "status": "ok",
+            "usage": {
+                "input_tokens": 120,
+                "output_tokens": 4,
+                "total_tokens": 124,
+                "cached_tokens": 0
+            }
+        })),
     ));
     let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape);
 
@@ -1222,22 +1226,34 @@ fn context_stats_返回当前请求视角的压力比值() {
     let model = RecordingModel::new();
     let mut tape = SessionTape::new();
     tape.append(Message::new(Role::User, "测试消息"));
+    tape.append_entry(session_tape::TapeEntry::event(
+        "turn_completed",
+        Some(json!({
+            "status": "ok",
+            "usage": {
+                "input_tokens": 320,
+                "output_tokens": 8,
+                "total_tokens": 328,
+                "cached_tokens": 0
+            }
+        })),
+    ));
     let runtime = AgentRuntime::with_tape(model, StubTools, identity, tape);
 
     let stats = runtime.context_stats();
 
-    assert_eq!(stats.total_entries, 1);
+    assert_eq!(stats.total_entries, 2);
     assert_eq!(stats.anchor_count, 0);
     assert_eq!(stats.context_limit, Some(1000));
     assert_eq!(stats.output_limit, Some(500));
     assert!(stats.pressure_ratio.is_some());
-    assert!(stats.estimated_context_units > 0);
-    let expected_ratio = stats.estimated_context_units as f64 / 1000.0;
+    assert_eq!(stats.last_input_tokens, Some(320));
+    let expected_ratio = 320.0 / 1000.0;
     assert!((stats.pressure_ratio.unwrap() - expected_ratio).abs() < f64::EPSILON);
 }
 
 #[test]
-fn 锚点收缩上下文后_context_stats_不再沿用旧_token_统计() {
+fn 锚点收缩上下文后_context_stats_会清空旧_token_统计() {
     let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced)
         .with_limit(Some(agent_core::ModelLimit { context: Some(1000), output: Some(500) }));
     let model = RecordingModel::new();
@@ -1259,8 +1275,8 @@ fn 锚点收缩上下文后_context_stats_不再沿用旧_token_统计() {
 
     let stats = runtime.context_stats();
 
-    assert!(stats.estimated_context_units < 900);
-    assert!(stats.pressure_ratio.is_some_and(|ratio| ratio < 0.9));
+    assert_eq!(stats.last_input_tokens, None);
+    assert_eq!(stats.pressure_ratio, None);
 }
 
 #[test]
@@ -1286,7 +1302,7 @@ fn 锚点收缩上下文后不会因旧_token_统计重复压缩() {
     let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape)
         .with_context_pressure_threshold(0.60);
     let pre_turn_stats = runtime.context_stats();
-    assert!(pre_turn_stats.pressure_ratio.is_some_and(|ratio| ratio < 0.60));
+    assert_eq!(pre_turn_stats.pressure_ratio, None);
 
     let _ = runtime.handle_turn("继续").expect("应成功完成");
 

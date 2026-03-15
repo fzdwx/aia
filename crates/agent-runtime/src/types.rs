@@ -6,7 +6,7 @@ pub struct ContextStats {
     pub total_entries: usize,
     pub anchor_count: usize,
     pub entries_since_last_anchor: usize,
-    pub estimated_context_units: u32,
+    pub last_input_tokens: Option<u32>,
     pub context_limit: Option<u32>,
     pub output_limit: Option<u32>,
     pub pressure_ratio: Option<f64>,
