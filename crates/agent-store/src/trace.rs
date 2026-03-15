@@ -89,6 +89,7 @@ pub struct LlmTraceRecord {
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
     pub total_tokens: Option<u64>,
+    pub cached_tokens: Option<u64>,
     pub otel_attributes: Value,
     pub events: Vec<LlmTraceEvent>,
 }
@@ -116,6 +117,7 @@ pub struct LlmTraceListItem {
     pub started_at_ms: u64,
     pub duration_ms: Option<u64>,
     pub total_tokens: Option<u64>,
+    pub cached_tokens: Option<u64>,
     pub user_message: Option<String>,
     pub error: Option<String>,
 }
@@ -129,6 +131,7 @@ pub struct LlmTraceSummary {
     pub total_input_tokens: u64,
     pub total_output_tokens: u64,
     pub total_tokens: u64,
+    pub total_cached_tokens: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -184,6 +187,7 @@ impl AiaStore {
                 input_tokens INTEGER,
                 output_tokens INTEGER,
                 total_tokens INTEGER,
+                cached_tokens INTEGER,
                 otel_attributes TEXT NOT NULL DEFAULT '{}',
                 events TEXT NOT NULL DEFAULT '[]'
             );
@@ -205,6 +209,7 @@ impl AiaStore {
             "TEXT NOT NULL DEFAULT '{}'",
         )?;
         ensure_column(&conn, "llm_request_traces", "events", "TEXT NOT NULL DEFAULT '[]'")?;
+        ensure_column(&conn, "llm_request_traces", "cached_tokens", "INTEGER")?;
 
         Ok(())
     }
@@ -221,7 +226,7 @@ impl LlmTraceStore for AiaStore {
                 endpoint_path, streaming, started_at_ms, finished_at_ms, duration_ms,
                 status_code, status, stop_reason, error, request_summary,
                 provider_request, response_summary, response_body, input_tokens, output_tokens,
-                total_tokens, otel_attributes, events
+                total_tokens, cached_tokens, otel_attributes, events
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5,
                 ?6, ?7, ?8, ?9, ?10,
@@ -229,7 +234,7 @@ impl LlmTraceStore for AiaStore {
                 ?16, ?17, ?18, ?19, ?20,
                 ?21, ?22, ?23, ?24, ?25,
                 ?26, ?27, ?28, ?29, ?30,
-                ?31, ?32, ?33
+                ?31, ?32, ?33, ?34
             )
             ",
             params![
@@ -264,6 +269,7 @@ impl LlmTraceStore for AiaStore {
                 record.input_tokens.map(|value| value as i64),
                 record.output_tokens.map(|value| value as i64),
                 record.total_tokens.map(|value| value as i64),
+                record.cached_tokens.map(|value| value as i64),
                 serde_json::to_string(&record.otel_attributes)?,
                 serde_json::to_string(&record.events)?,
             ],
@@ -294,17 +300,17 @@ impl LlmTraceStore for AiaStore {
                    t.operation_name, t.span_kind, t.turn_id, t.run_id, t.request_kind,
                    t.step_index, t.provider, t.protocol, t.model, t.endpoint_path,
                    t.status, t.stop_reason, t.status_code, t.started_at_ms, t.duration_ms,
-                   t.total_tokens, t.provider_request, t.error
+                   t.total_tokens, t.cached_tokens, t.provider_request, t.error
             FROM llm_request_traces t
             JOIN paged_loops p ON p.trace_id = t.trace_id
             ORDER BY p.latest_started_at_ms DESC, t.started_at_ms DESC, t.id DESC
             ",
         )?;
         let rows = stmt.query_map(params![limit as i64, offset as i64], |row| {
-            let provider_request = serde_json::from_str::<Value>(&row.get::<_, String>(21)?)
+            let provider_request = serde_json::from_str::<Value>(&row.get::<_, String>(22)?)
                 .map_err(|err| {
                     rusqlite::Error::FromSqlConversionFailure(
-                        21,
+                        22,
                         rusqlite::types::Type::Text,
                         Box::new(err),
                     )
@@ -331,8 +337,9 @@ impl LlmTraceStore for AiaStore {
                 started_at_ms: row.get::<_, u64>(18)?,
                 duration_ms: row.get::<_, Option<u64>>(19)?,
                 total_tokens: row.get::<_, Option<u64>>(20)?,
+                cached_tokens: row.get::<_, Option<u64>>(21)?,
                 user_message: extract_user_message(&provider_request),
-                error: row.get(22)?,
+                error: row.get(23)?,
             })
         })?;
         Ok(LlmTraceListPage {
@@ -353,7 +360,7 @@ impl LlmTraceStore for AiaStore {
                    endpoint_path, streaming, started_at_ms, finished_at_ms, duration_ms,
                    status_code, status, stop_reason, error, request_summary,
                    provider_request, response_summary, response_body, input_tokens, output_tokens,
-                   total_tokens, otel_attributes, events
+                   total_tokens, cached_tokens, otel_attributes, events
             FROM llm_request_traces
             WHERE id = ?1
             ",
@@ -413,18 +420,19 @@ impl LlmTraceStore for AiaStore {
                 input_tokens: row.get::<_, Option<u64>>(28)?,
                 output_tokens: row.get::<_, Option<u64>>(29)?,
                 total_tokens: row.get::<_, Option<u64>>(30)?,
-                otel_attributes: serde_json::from_str::<Value>(&row.get::<_, String>(31)?)
+                cached_tokens: row.get::<_, Option<u64>>(31)?,
+                otel_attributes: serde_json::from_str::<Value>(&row.get::<_, String>(32)?)
                     .map_err(|err| {
                         rusqlite::Error::FromSqlConversionFailure(
-                            31,
+                            32,
                             rusqlite::types::Type::Text,
                             Box::new(err),
                         )
                     })?,
-                events: serde_json::from_str::<Vec<LlmTraceEvent>>(&row.get::<_, String>(32)?)
+                events: serde_json::from_str::<Vec<LlmTraceEvent>>(&row.get::<_, String>(33)?)
                     .map_err(|err| {
                         rusqlite::Error::FromSqlConversionFailure(
-                            32,
+                            33,
                             rusqlite::types::Type::Text,
                             Box::new(err),
                         )
@@ -443,14 +451,16 @@ impl LlmTraceStore for AiaStore {
             total_input_tokens,
             total_output_tokens,
             total_tokens,
-        ): (u64, u64, u64, u64, u64) = conn.query_row(
+            total_cached_tokens,
+        ): (u64, u64, u64, u64, u64, u64) = conn.query_row(
             "
                 SELECT
                     COUNT(*),
                     SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END),
                     SUM(COALESCE(input_tokens, 0)),
                     SUM(COALESCE(output_tokens, 0)),
-                    SUM(COALESCE(total_tokens, 0))
+                    SUM(COALESCE(total_tokens, 0)),
+                    SUM(COALESCE(cached_tokens, 0))
                 FROM llm_request_traces
                 WHERE span_kind = 'CLIENT'
                 ",
@@ -462,6 +472,7 @@ impl LlmTraceStore for AiaStore {
                     row.get::<_, Option<u64>>(2)?.unwrap_or(0),
                     row.get::<_, Option<u64>>(3)?.unwrap_or(0),
                     row.get::<_, Option<u64>>(4)?.unwrap_or(0),
+                    row.get::<_, Option<u64>>(5)?.unwrap_or(0),
                 ))
             },
         )?;
@@ -492,6 +503,7 @@ impl LlmTraceStore for AiaStore {
             total_input_tokens,
             total_output_tokens,
             total_tokens,
+            total_cached_tokens,
         })
     }
 }
@@ -616,6 +628,7 @@ mod tests {
             input_tokens: Some(12),
             output_tokens: Some(6),
             total_tokens: Some(18),
+            cached_tokens: Some(4),
             otel_attributes: json!({"gen_ai.operation.name": "chat"}),
             events: vec![LlmTraceEvent {
                 name: "response.completed".into(),
@@ -635,12 +648,14 @@ mod tests {
         assert_eq!(list[0].status, LlmTraceStatus::Succeeded);
         assert_eq!(list[0].stop_reason.as_deref(), Some("stop"));
         assert_eq!(list[0].total_tokens, Some(18));
+        assert_eq!(list[0].cached_tokens, Some(4));
         assert_eq!(list[0].user_message, None);
 
         let summary = store.summary().expect("summary should succeed");
         assert_eq!(summary.total_requests, 1);
         assert_eq!(summary.failed_requests, 0);
         assert_eq!(summary.total_tokens, 18);
+        assert_eq!(summary.total_cached_tokens, 4);
         assert_eq!(summary.p95_duration_ms, Some(80));
     }
 
@@ -685,6 +700,7 @@ mod tests {
                 input_tokens: None,
                 output_tokens: None,
                 total_tokens: None,
+                cached_tokens: None,
                 otel_attributes: json!({"gen_ai.operation.name": "chat"}),
                 events: vec![],
             })
@@ -735,6 +751,7 @@ mod tests {
                 input_tokens: None,
                 output_tokens: None,
                 total_tokens: None,
+                cached_tokens: None,
                 otel_attributes: json!({"gen_ai.operation.name": "chat"}),
                 events: vec![],
             })
@@ -787,6 +804,7 @@ mod tests {
                         input_tokens: None,
                         output_tokens: None,
                         total_tokens: None,
+                        cached_tokens: None,
                         otel_attributes: json!({}),
                         events: vec![],
                     })
