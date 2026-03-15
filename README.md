@@ -28,10 +28,13 @@ this repository now starts with a library-first rust workspace:
 - `crates/agent-runtime`: minimal runtime that composes models, tools, and session state
 - `crates/provider-registry`: stores local provider profiles and active selection
 - `crates/openai-adapter`: the first real model adapter set, now covering both responses-style and openai-compatible chat-completions-style http interfaces
+- `crates/llm-trace`: local trace persistence for llm request records and loop/span-oriented diagnostics
 - `apps/agent-server`: axum HTTP+SSE server bridging web frontend to shared runtime
 - `apps/web`: the primary web interface shell built with React + Vite
 
 `apps/web` is now the primary client direction for provider management, session timeline, and streaming interaction. `apps/agent-server` is the only application shell in the Rust workspace and stays focused on bridging HTTP + SSE into the shared runtime instead of re-owning agent logic.
+
+the trace workspace is also starting to converge on an otel-shaped presentation: the web trace page now reads each agent loop as a root span, each llm request as a client span, and runtime tool executions as internal spans for inspection. the backend now persists stable local `trace_id` / `span_id` / `parent_span_id`, span kind, operation name, an otel-style attribute map, and local trace events for llm spans, and also persists runtime tool executions as real internal span records instead of leaving them as frontend-only derived nodes. this is still a local diagnostic model, not a full opentelemetry exporter yet.
 
 the builtin coding tool contract is now intentionally short and explicit: `shell`, `read`, `write`, `edit`, `glob`, and `grep`. the shell tool keeps a stable generic name while embedding `brush` as its execution runtime.
 

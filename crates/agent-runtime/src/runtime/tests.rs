@@ -384,7 +384,7 @@ fn 运行时会记录用户与助手消息() {
     assert_eq!(output.assistant_text, "已收到：你好");
     assert_eq!(runtime.tape().entries().len(), 7);
     assert_eq!(runtime.tape().entries()[6].event_name(), Some("turn_completed"));
-    assert_eq!(output.visible_tools.len(), 1);
+    assert_eq!(output.visible_tools.len(), 3);
 }
 
 #[test]
@@ -628,7 +628,7 @@ fn 默认上下文会从最新锚点之后重建() {
     runtime.handle_turn("第一轮").expect("第一轮成功");
     let _ = runtime.handoff(
         "handoff",
-        json!({"phase": "handoff", "summary": "切到实现阶段", "next_steps": ["继续执行"], "source_entry_ids": [], "owner": "agent"}),
+        json!({"summary": "切到实现阶段"}),
     );
     runtime.handle_turn("第二轮").expect("第二轮成功");
 
@@ -651,7 +651,7 @@ fn 锚点状态会注入后续请求上下文() {
     runtime.handle_turn("第一轮").expect("第一轮成功");
     let _ = runtime.handoff(
         "handoff",
-        json!({"phase": "handoff", "summary": "切到实现阶段", "next_steps": ["继续执行"], "source_entry_ids": [], "owner": "agent"}),
+        json!({"summary": "切到实现阶段"}),
     );
     runtime.handle_turn("第二轮").expect("第二轮成功");
 
@@ -661,9 +661,9 @@ fn 锚点状态会注入后续请求上下文() {
     assert!(matches!(
         &last_request.conversation[0],
         ConversationItem::Message(message)
-            if message.role == Role::System
-                && message.content.contains("当前阶段: handoff")
-                && message.content.contains("锚点摘要: 切到实现阶段")
+            if message.role == Role::User
+                && message.content.contains("[context summary]")
+                && message.content.contains("切到实现阶段")
     ));
     assert!(matches!(
         &last_request.conversation[1],
@@ -890,6 +890,7 @@ fn 成功轮会聚合成完整轮次块事件() {
                     started_at_ms,
                     finished_at_ms,
                     outcome: ToolInvocationOutcome::Succeeded { result },
+                    ..
                 } if started_at_ms <= finished_at_ms
                     && result.invocation_id == call.invocation_id
             )
@@ -934,6 +935,7 @@ fn 工具失败后成功收尾的轮次也会聚合完整块事件() {
                     started_at_ms,
                     finished_at_ms,
                     outcome: ToolInvocationOutcome::Failed { message },
+                    ..
                 } if started_at_ms <= finished_at_ms
                     && call.tool_name == "search"
                     && message.contains("工具结果不匹配")
@@ -959,7 +961,7 @@ impl LanguageModel for SummarizerModel {
     fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
         self.seen_requests.borrow_mut().push(request.clone());
         // If instructions contain "Summarize", this is a compression call
-        if request.instructions.as_ref().is_some_and(|i| i.contains("Summarize the conversation")) {
+        if request.instructions.as_ref().is_some_and(|i| i.contains("handoff summary")) {
             return Ok(Completion::text("摘要：对话进行了多轮测试交互。"));
         }
         Ok(Completion::text("记录完成"))
@@ -983,7 +985,7 @@ impl LanguageModel for ContextLengthErrorModel {
 
     fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
         // Compression calls always succeed
-        if request.instructions.as_ref().is_some_and(|i| i.contains("Summarize the conversation")) {
+        if request.instructions.as_ref().is_some_and(|i| i.contains("handoff summary")) {
             return Ok(Completion::text("压缩摘要：之前讨论了文件编辑。"));
         }
 
@@ -1011,7 +1013,7 @@ fn 上下文未超阈值时不触发压缩() {
     // No compression call should have been made — only the regular turn call
     let requests = runtime.model.seen_requests.borrow();
     assert_eq!(requests.len(), 1);
-    assert!(requests[0].instructions.as_ref().is_none_or(|i| !i.contains("Summarize")));
+    assert!(requests[0].instructions.as_ref().is_none_or(|i| !i.contains("handoff summary")));
     // No compression anchor
     assert!(runtime.tape().anchors().iter().all(|a| a.name != "context_compression"));
 }
@@ -1039,7 +1041,7 @@ fn 上下文超阈值时触发压缩生成锚点() {
 }
 
 #[test]
-fn 压缩锚点记录来源_entry_ids() {
+fn 压缩锚点仅保留摘要字段() {
     let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced)
         .with_limit(Some(agent_core::ModelLimit { context: Some(32), output: Some(16) }));
     let model = SummarizerModel::new();
@@ -1060,20 +1062,18 @@ fn 压缩锚点记录来源_entry_ids() {
         .into_iter()
         .find(|anchor| anchor.name == "context_compression")
         .expect("应创建压缩锚点");
-    let source_entry_ids = anchor
+    let summary = anchor
         .state
-        .get("source_entry_ids")
-        .and_then(|value| value.as_array())
-        .expect("压缩锚点应记录来源条目");
+        .get("summary")
+        .and_then(|value| value.as_str())
+        .expect("压缩锚点应包含摘要");
 
-    assert_eq!(source_entry_ids.len(), 5);
-    assert_eq!(
-        source_entry_ids
-            .iter()
-            .map(|value| value.as_u64().expect("来源条目 id 应为整数"))
-            .collect::<Vec<_>>(),
-        vec![1, 2, 3, 4, 5]
-    );
+    assert!(summary.contains("摘要"));
+    // No legacy metadata fields
+    assert!(anchor.state.get("source_entry_ids").is_none());
+    assert!(anchor.state.get("owner").is_none());
+    assert!(anchor.state.get("phase").is_none());
+    assert!(anchor.state.get("next_steps").is_none());
 }
 
 #[test]
@@ -1180,4 +1180,198 @@ fn 压缩事件会被发布到事件流() {
         event,
         RuntimeEvent::ContextCompressed { summary } if summary.contains("摘要")
     )));
+}
+
+// --- Tape tools tests ---
+
+struct TapeInfoModel {
+    seen_requests: RefCell<Vec<CompletionRequest>>,
+}
+
+impl TapeInfoModel {
+    fn new() -> Self {
+        Self { seen_requests: RefCell::new(Vec::new()) }
+    }
+}
+
+impl LanguageModel for TapeInfoModel {
+    type Error = CoreError;
+
+    fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+        let step = self.seen_requests.borrow().len();
+        self.seen_requests.borrow_mut().push(request.clone());
+        if step == 0 {
+            Ok(Completion {
+                segments: vec![CompletionSegment::ToolUse(ToolCall::new("tape.info"))],
+                stop_reason: CompletionStopReason::ToolUse,
+                usage: None,
+                response_body: None,
+                http_status_code: None,
+            })
+        } else {
+            let saw_info = request.conversation.iter().any(|item| {
+                item.as_tool_result()
+                    .is_some_and(|result| result.content.contains("entries:"))
+            });
+            if saw_info {
+                Ok(Completion::text("已获取上下文统计信息"))
+            } else {
+                Err(CoreError::new("未看到 tape.info 结果"))
+            }
+        }
+    }
+}
+
+struct TapeHandoffModel {
+    seen_requests: RefCell<Vec<CompletionRequest>>,
+}
+
+impl TapeHandoffModel {
+    fn new() -> Self {
+        Self { seen_requests: RefCell::new(Vec::new()) }
+    }
+}
+
+impl LanguageModel for TapeHandoffModel {
+    type Error = CoreError;
+
+    fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+        let step = self.seen_requests.borrow().len();
+        self.seen_requests.borrow_mut().push(request.clone());
+        if step == 0 {
+            Ok(Completion {
+                segments: vec![CompletionSegment::ToolUse(
+                    ToolCall::new("tape.handoff").with_arguments_value(
+                        json!({"summary": "测试摘要：对话进行了多轮交互", "name": "test_anchor"}),
+                    ),
+                )],
+                stop_reason: CompletionStopReason::ToolUse,
+                usage: None,
+                response_body: None,
+                http_status_code: None,
+            })
+        } else {
+            // After handoff, the tool_call is before the anchor and gets truncated.
+            // The tool_result becomes orphaned and is filtered out.
+            // Instead, we should see the context summary injected from the anchor.
+            let saw_summary = request.conversation.iter().any(|item| {
+                item.as_message()
+                    .is_some_and(|msg| msg.content.contains("[context summary]"))
+            });
+            if saw_summary {
+                Ok(Completion::text("已创建锚点"))
+            } else {
+                // Fallback: the tool_result might still be visible if not orphaned
+                let saw_anchor = request.conversation.iter().any(|item| {
+                    item.as_tool_result()
+                        .is_some_and(|result| result.content.contains("anchor added"))
+                });
+                if saw_anchor {
+                    Ok(Completion::text("已创建锚点"))
+                } else {
+                    Err(CoreError::new("未看到 tape.handoff 结果或 context summary"))
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn tape_info_工具返回上下文统计() {
+    let identity = ModelIdentity::new("local", "tape-info", ModelDisposition::Balanced)
+        .with_limit(Some(agent_core::ModelLimit { context: Some(100_000), output: Some(8192) }));
+    let model = TapeInfoModel::new();
+    let mut runtime = AgentRuntime::new(model, StubTools, identity);
+
+    let output = runtime.handle_turn("查看上下文状态").expect("应成功完成");
+
+    assert_eq!(output.assistant_text, "已获取上下文统计信息");
+    // Verify the tool result was recorded
+    assert!(runtime.tape().entries().iter().any(|entry| {
+        entry
+            .as_tool_result()
+            .is_some_and(|result| result.tool_name == "tape.info" && result.content.contains("entries:"))
+    }));
+}
+
+#[test]
+fn tape_handoff_工具创建锚点() {
+    let identity = ModelIdentity::new("local", "tape-handoff", ModelDisposition::Balanced);
+    let model = TapeHandoffModel::new();
+    let mut tape = SessionTape::new();
+    tape.append(Message::new(Role::User, "历史消息"));
+    tape.append(Message::new(Role::Assistant, "历史回答"));
+    let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape);
+
+    let output = runtime.handle_turn("创建检查点").expect("应成功完成");
+
+    assert_eq!(output.assistant_text, "已创建锚点");
+    // An anchor named "test_anchor" should exist
+    assert!(runtime.tape().anchors().iter().any(|a| a.name == "test_anchor"));
+    // The anchor state should contain the summary
+    let anchor = runtime
+        .tape()
+        .anchors()
+        .into_iter()
+        .find(|a| a.name == "test_anchor")
+        .expect("应创建锚点");
+    assert_eq!(
+        anchor.state.get("summary").and_then(|v| v.as_str()),
+        Some("测试摘要：对话进行了多轮交互")
+    );
+}
+
+#[test]
+fn 孤立的_tool_result_会被过滤() {
+    use super::request::drop_orphaned_tool_results;
+
+    let call = ToolCall::new("search").with_invocation_id("call-1");
+    let matching_result = agent_core::ToolResult::from_call(&call, "结果");
+    let orphan_result = agent_core::ToolResult {
+        invocation_id: "orphan-id".into(),
+        tool_name: "search".into(),
+        content: "孤立结果".into(),
+        response_id: None,
+        details: None,
+    };
+
+    let conversation = vec![
+        ConversationItem::ToolResult(orphan_result),
+        ConversationItem::ToolCall(call),
+        ConversationItem::ToolResult(matching_result),
+        ConversationItem::Message(Message::new(Role::User, "用户消息")),
+    ];
+
+    let filtered = drop_orphaned_tool_results(conversation);
+
+    assert_eq!(filtered.len(), 3);
+    // The orphan (invocation_id = "orphan-id") should be gone
+    assert!(filtered.iter().all(|item| {
+        item.as_tool_result().map_or(true, |r| r.invocation_id != "orphan-id")
+    }));
+    // The matching result should remain
+    assert!(filtered.iter().any(|item| {
+        item.as_tool_result().is_some_and(|r| r.invocation_id == "call-1")
+    }));
+}
+
+#[test]
+fn 无锚点摘要时不注入上下文消息() {
+    let identity = ModelIdentity::new("local", "recording", ModelDisposition::Balanced);
+    let model = RecordingModel::new();
+    let mut runtime = AgentRuntime::new(model, StubTools, identity);
+
+    runtime.handle_turn("第一轮").expect("第一轮成功");
+    // Handoff with empty summary
+    let _ = runtime.handoff("handoff", json!({"summary": ""}));
+    runtime.handle_turn("第二轮").expect("第二轮成功");
+
+    let requests = runtime.model.seen_requests.borrow();
+    let last_request = requests.last().expect("应记录第二轮请求");
+
+    // First item should be user message, not a context summary
+    assert!(matches!(
+        &last_request.conversation[0],
+        ConversationItem::Message(message) if message.content == "第二轮"
+    ));
 }

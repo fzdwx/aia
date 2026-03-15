@@ -12,8 +12,6 @@ import type {
   TurnLifecycle,
 } from "@/lib/types"
 
-// --- Tool categorization & labeling ---
-
 type ToolCategory = "read" | "search" | "edit" | "other"
 
 const TOOL_CATEGORIES: Record<string, ToolCategory> = {
@@ -38,14 +36,13 @@ const CATEGORY_LABELS: Record<ToolCategory, string> = {
   read: "read",
   search: "search",
   edit: "edit",
-  other: "tool use",
+  other: "tool",
 }
 
 function categorize(toolName: string): ToolCategory {
   return TOOL_CATEGORIES[toolName.toLowerCase()] ?? "other"
 }
 
-/** Extract diff/line stats from backend details */
 function getToolStats(details: Record<string, unknown> | undefined): {
   added?: number
   removed?: number
@@ -64,7 +61,8 @@ function getToolStats(details: Record<string, unknown> | undefined): {
     removed: typeof details.removed === "number" ? details.removed : undefined,
     lines: typeof details.lines === "number" ? details.lines : undefined,
     matches: typeof details.matches === "number" ? details.matches : undefined,
-    returned: typeof details.returned === "number" ? details.returned : undefined,
+    returned:
+      typeof details.returned === "number" ? details.returned : undefined,
     limit: typeof details.limit === "number" ? details.limit : undefined,
     truncated:
       typeof details.truncated === "boolean" ? details.truncated : undefined,
@@ -91,8 +89,6 @@ function buildCategorySummary(
     count,
   }))
 }
-
-// --- Normalized tool row data ---
 
 type ToolRowItem = {
   id: string
@@ -157,7 +153,112 @@ function formatDurationMs(
   return `${minutes}m ${seconds}s`
 }
 
-// --- Shared tool group + row ---
+function formatScalar(value: unknown): string {
+  if (typeof value === "string") return value
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value)
+  }
+  if (value == null) return "-"
+  return JSON.stringify(value)
+}
+
+function StructuredArguments({
+  argumentsValue,
+}: {
+  argumentsValue: Record<string, unknown>
+}) {
+  const entries = Object.entries(argumentsValue)
+  if (entries.length === 0) {
+    return <p className="text-[12px] text-muted-foreground/60">No arguments</p>
+  }
+
+  const scalarEntries = entries.filter(([, value]) => {
+    return (
+      value == null ||
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    )
+  })
+  const nestedEntries = entries.filter(([, value]) => {
+    return !(
+      value == null ||
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    )
+  })
+
+  return (
+    <div className="space-y-2">
+      {scalarEntries.length > 0 ? (
+        <dl className="divide-y divide-border/20 overflow-hidden rounded-md border border-border/30 bg-background/60">
+          {scalarEntries.map(([label, value]) => (
+            <div
+              key={label}
+              className="flex items-start justify-between gap-3 px-2.5 py-2"
+            >
+              <dt className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                {label}
+              </dt>
+              <dd className="text-right text-[12px] leading-5 text-foreground/80">
+                {formatScalar(value)}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      {nestedEntries.map(([label, value]) => (
+        <details
+          key={label}
+          className="overflow-hidden rounded-md border border-border/30 bg-background/60"
+        >
+          <summary className="cursor-pointer px-2.5 py-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+            {label}
+          </summary>
+          <div className="border-t border-border/20 px-2.5 py-2">
+            <pre className="max-h-40 overflow-auto text-[11px] leading-5 text-muted-foreground/80">
+              {JSON.stringify(value, null, 2)}
+            </pre>
+          </div>
+        </details>
+      ))}
+    </div>
+  )
+}
+
+function ExpandableOutput({
+  value,
+  failed,
+}: {
+  value: string
+  failed: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const needsCollapse = value.length > 280 || value.split("\n").length > 10
+
+  return (
+    <div className="space-y-2">
+      <pre
+        className={`overflow-auto rounded-md border p-2 text-[12px] leading-relaxed whitespace-pre-wrap ${
+          failed
+            ? "border-destructive/20 bg-destructive/[0.04] text-destructive/90"
+            : "border-border/30 bg-background/60 text-muted-foreground/80"
+        } ${!open && needsCollapse ? "max-h-44" : ""}`}
+      >
+        {value}
+      </pre>
+      {needsCollapse ? (
+        <button
+          onClick={() => setOpen((current) => !current)}
+          className="text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+        >
+          {open ? "Collapse" : "Expand"}
+        </button>
+      ) : null}
+    </div>
+  )
+}
 
 function ToolGroup({
   items,
@@ -206,7 +307,7 @@ function ToolGroup({
 }
 
 function ToolRow({ item }: { item: ToolRowItem }) {
-  const [showOutput, setShowOutput] = useState(false)
+  const [showDetails, setShowDetails] = useState(false)
   const stats = getToolStats(item.details)
   const displayPath = getToolDisplayPath(
     item.toolName,
@@ -218,8 +319,8 @@ function ToolRow({ item }: { item: ToolRowItem }) {
   return (
     <div>
       <button
-        onClick={() => setShowOutput(!showOutput)}
-        className="grid w-full grid-cols-[minmax(56px,max-content)_1fr_auto] items-center gap-x-2 py-0.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+        onClick={() => setShowDetails(!showDetails)}
+        className="grid w-full grid-cols-[minmax(56px,max-content)_1fr_auto] items-center gap-x-2 py-0.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
       >
         <span className="truncate text-left font-medium text-muted-foreground/70">
           {item.toolName}
@@ -227,7 +328,9 @@ function ToolRow({ item }: { item: ToolRowItem }) {
         <span className="truncate text-left">{displayPath}</span>
         <div className="flex items-center gap-2">
           {duration && (
-            <span className="shrink-0 text-muted-foreground/50">{duration}</span>
+            <span className="shrink-0 text-muted-foreground/50">
+              {duration}
+            </span>
           )}
           {stats.added != null && (
             <span className="shrink-0 text-emerald-500">+{stats.added}</span>
@@ -260,10 +363,26 @@ function ToolRow({ item }: { item: ToolRowItem }) {
           )}
         </div>
       </button>
-      {showOutput && item.outputContent && (
-        <pre className="mt-0.5 mb-1 ml-3 max-h-[300px] overflow-auto rounded border border-border/40 bg-muted/40 p-2 font-mono text-[12px] leading-relaxed text-muted-foreground/80">
-          {item.outputContent}
-        </pre>
+      {showDetails && (
+        <div className="mt-1 mb-2 ml-3 space-y-2.5 rounded-md border border-border/25 bg-muted/15 p-2">
+          <div className="space-y-1.5">
+            <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+              Arguments
+            </p>
+            <StructuredArguments argumentsValue={item.arguments} />
+          </div>
+          {item.outputContent ? (
+            <div className="space-y-1.5">
+              <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                Outcome
+              </p>
+              <ExpandableOutput
+                value={item.outputContent}
+                failed={!item.succeeded}
+              />
+            </div>
+          ) : null}
+        </div>
       )}
     </div>
   )
@@ -307,10 +426,6 @@ function ThinkingBlock({
   )
 }
 
-// --- Completed tool group: collapsible with categorized summary ---
-
-// --- Streaming tool group ---
-
 function StreamingToolGroup({
   toolOutputs,
 }: {
@@ -348,14 +463,20 @@ function StreamingToolGroup({
                 className="grid grid-cols-[minmax(48px,max-content)_1fr_auto] items-center gap-x-2 py-0.5 text-[13px] text-muted-foreground/60"
               >
                 {tool.toolName && (
-                  <span className="truncate text-left font-medium">{tool.toolName}</span>
+                  <span className="truncate text-left font-medium">
+                    {tool.toolName}
+                  </span>
                 )}
                 <span className="truncate text-left">
-                  {getToolDisplayPath(tool.toolName, undefined, tool.arguments) ||
-                    tool.invocationId}
+                  {getToolDisplayPath(
+                    tool.toolName,
+                    undefined,
+                    tool.arguments
+                  ) || tool.invocationId}
                 </span>
                 <span className="shrink-0 text-muted-foreground/50">
-                  {formatDurationMs(tool.startedAtMs, tool.finishedAtMs) ?? "0 ms"}
+                  {formatDurationMs(tool.startedAtMs, tool.finishedAtMs) ??
+                    "0 ms"}
                 </span>
               </div>
             ))}
@@ -365,8 +486,6 @@ function StreamingToolGroup({
     </div>
   )
 }
-
-// --- Block grouping ---
 
 type BlockGroup =
   | { type: "single"; block: TurnBlock }
@@ -390,8 +509,6 @@ function groupBlocks(blocks: TurnBlock[]): BlockGroup[] {
   return result
 }
 
-// --- Block renderer ---
-
 function BlockRenderer({ block }: { block: TurnBlock }) {
   switch (block.kind) {
     case "thinking":
@@ -410,12 +527,9 @@ function BlockRenderer({ block }: { block: TurnBlock }) {
         </div>
       )
     case "tool_invocation":
-      // Handled by grouping — should not reach here in normal flow
       return null
   }
 }
-
-// --- Status indicator ---
 
 const STATUS_LABELS: Record<StreamingTurn["status"], string> = {
   waiting: "Waiting",
@@ -434,14 +548,11 @@ function StatusIndicator({ status }: { status: StreamingTurn["status"] }) {
   )
 }
 
-// --- Turn view ---
-
 function TurnView({ turn }: { turn: TurnLifecycle }) {
   const grouped = groupBlocks(turn.blocks)
 
   return (
     <div className="mb-8 animate-[message-in_250ms_ease-out_both] last:mb-0">
-      {/* User message */}
       <div className="mb-6">
         <div className="mb-2 flex items-baseline gap-2.5">
           <span className="text-[11px] font-semibold tracking-[0.1em] text-foreground/70 uppercase">
@@ -453,7 +564,6 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
         </div>
       </div>
 
-      {/* Assistant response blocks */}
       <div>
         <div className="mb-2 flex items-baseline gap-2.5">
           <span className="text-[11px] font-semibold tracking-[0.1em] text-muted-foreground uppercase">
@@ -475,8 +585,6 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
     </div>
   )
 }
-
-// --- Streaming view ---
 
 type StreamingGroup =
   | { type: "thinking"; content: string }
@@ -507,7 +615,6 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
 
   return (
     <div className="mb-8 animate-[message-in_250ms_ease-out_both]">
-      {/* User message */}
       {streaming.userMessage && (
         <div className="mb-6">
           <div className="mb-2 flex items-baseline gap-2.5">
@@ -521,7 +628,6 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
         </div>
       )}
 
-      {/* Assistant response — blocks in real interleaved order */}
       <div>
         <div className="mb-2 flex items-baseline gap-2.5">
           <span className="text-[11px] font-semibold tracking-[0.1em] text-muted-foreground uppercase">

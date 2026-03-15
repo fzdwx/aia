@@ -352,8 +352,8 @@ mod tests {
     use axum::Json;
     use axum::http::StatusCode;
     use llm_trace::{
-        LlmTraceListItem, LlmTraceRecord, LlmTraceStatus, LlmTraceStore, LlmTraceSummary,
-        SqliteLlmTraceStore,
+        LlmTraceListItem, LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus, LlmTraceStore,
+        LlmTraceSummary, SqliteLlmTraceStore,
     };
     use provider_registry::{
         ModelConfig, ModelLimit, ProviderKind, ProviderProfile, ProviderRegistry,
@@ -362,9 +362,7 @@ mod tests {
     use tokio::sync::broadcast;
 
     use crate::{
-        runtime_worker::{
-            self, ProviderInfoSnapshot, RuntimeOwnerState, spawn_runtime_worker,
-        },
+        runtime_worker::{self, ProviderInfoSnapshot, RuntimeOwnerState, spawn_runtime_worker},
         sse::{SsePayload, TurnStatus},
         state::AppState,
     };
@@ -473,7 +471,9 @@ mod tests {
     fn rebuild_session_snapshots_from_tape_keeps_incomplete_turn_out_of_history() {
         let mut tape = SessionTape::new();
         let turn_id = "turn-1";
-        tape.append_entry(TapeEntry::message(&Message::new(Role::User, "处理中")).with_run_id(turn_id));
+        tape.append_entry(
+            TapeEntry::message(&Message::new(Role::User, "处理中")).with_run_id(turn_id),
+        );
         tape.append_entry(TapeEntry::thinking("先分析").with_run_id(turn_id));
 
         let snapshots = runtime_worker::rebuild_session_snapshots_from_tape(&tape);
@@ -485,9 +485,7 @@ mod tests {
         assert!(current.started_at_ms > 0);
         assert_eq!(
             current.blocks,
-            vec![runtime_worker::CurrentTurnBlock::Thinking {
-                content: "先分析".to_string(),
-            }]
+            vec![runtime_worker::CurrentTurnBlock::Thinking { content: "先分析".to_string() }]
         );
     }
 
@@ -681,6 +679,12 @@ mod tests {
             .trace_store
             .record(&LlmTraceRecord {
                 id: "trace-1".to_string(),
+                trace_id: "aia-trace-turn-1".to_string(),
+                span_id: "trace-1".to_string(),
+                parent_span_id: Some("aia-span-turn-1-root".to_string()),
+                root_span_id: "aia-span-turn-1-root".to_string(),
+                operation_name: "chat".to_string(),
+                span_kind: LlmTraceSpanKind::Client,
                 turn_id: "turn-1".to_string(),
                 run_id: "turn-1".to_string(),
                 request_kind: "completion".to_string(),
@@ -705,6 +709,8 @@ mod tests {
                 input_tokens: Some(10),
                 output_tokens: Some(5),
                 total_tokens: Some(15),
+                otel_attributes: serde_json::json!({"gen_ai.operation.name": "chat"}),
+                events: vec![],
             })
             .expect("trace should persist");
 
@@ -729,6 +735,12 @@ mod tests {
         );
         let record = LlmTraceRecord {
             id: "trace-2".to_string(),
+            trace_id: "aia-trace-turn-2".to_string(),
+            span_id: "trace-2".to_string(),
+            parent_span_id: Some("aia-span-turn-2-root".to_string()),
+            root_span_id: "aia-span-turn-2-root".to_string(),
+            operation_name: "chat".to_string(),
+            span_kind: LlmTraceSpanKind::Client,
             turn_id: "turn-2".to_string(),
             run_id: "turn-2".to_string(),
             request_kind: "completion".to_string(),
@@ -753,6 +765,8 @@ mod tests {
             input_tokens: Some(10),
             output_tokens: Some(0),
             total_tokens: Some(10),
+            otel_attributes: serde_json::json!({"gen_ai.operation.name": "chat"}),
+            events: vec![],
         };
         state.trace_store.record(&record).expect("trace should persist");
 
@@ -795,7 +809,9 @@ pub async fn create_handoff(
     }
 }
 
-pub async fn get_history(State(state): State<SharedState>) -> (StatusCode, Json<serde_json::Value>) {
+pub async fn get_history(
+    State(state): State<SharedState>,
+) -> (StatusCode, Json<serde_json::Value>) {
     let turns = state.history_snapshot.read().expect("lock poisoned").clone();
     (StatusCode::OK, Json(serde_json::to_value(turns).expect("serialize history")))
 }

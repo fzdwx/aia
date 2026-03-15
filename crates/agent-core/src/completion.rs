@@ -133,6 +133,10 @@ impl Completion {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LlmTraceRequestContext {
     pub trace_id: String,
+    pub span_id: String,
+    pub parent_span_id: Option<String>,
+    pub root_span_id: String,
+    pub operation_name: String,
     pub turn_id: String,
     pub run_id: String,
     pub request_kind: String,

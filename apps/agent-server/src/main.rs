@@ -81,7 +81,13 @@ async fn main() {
     let session_append_path = session_path.clone();
 
     let mut runtime = AgentRuntime::with_tape(model, tools, identity, tape)
-        .with_instructions("你是 aia 的助手。给出清晰、结构化的答案。")
+        .with_instructions(format!(
+            "你是 aia 的助手。给出清晰、结构化的答案。\n\n{}",
+            agent_prompts::context_contract(
+                agent_prompts::AGENT_HANDOFF_THRESHOLD,
+                agent_prompts::AUTO_COMPRESSION_THRESHOLD,
+            ),
+        ))
         .with_workspace_root(workspace_root)
         .with_tape_entry_listener(move |entry| {
             SessionTape::append_jsonl_entry(&session_append_path, entry)

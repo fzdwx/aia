@@ -4,6 +4,7 @@ mod events;
 mod finalize;
 mod helpers;
 mod request;
+mod tape_tools;
 #[cfg(test)]
 mod tests;
 mod tool_calls;
@@ -20,7 +21,7 @@ use crate::{RuntimeEvent, RuntimeSubscriberId};
 pub use self::error::RuntimeError;
 
 const DEFAULT_MAX_TOOL_CALLS_PER_TURN: usize = 1000;
-const DEFAULT_CONTEXT_PRESSURE_THRESHOLD: f64 = 0.80;
+const DEFAULT_CONTEXT_PRESSURE_THRESHOLD: f64 = agent_prompts::AUTO_COMPRESSION_THRESHOLD;
 type TapeEntryListener =
     Arc<dyn Fn(&TapeEntry) -> Result<(), SessionTapeError> + Send + Sync + 'static>;
 
@@ -104,11 +105,14 @@ where
     }
 
     pub fn visible_tools(&self) -> Vec<ToolDefinition> {
-        self.tools
+        let mut tools: Vec<ToolDefinition> = self
+            .tools
             .definitions()
             .into_iter()
             .filter(|definition| !self.disabled_tools.contains(&definition.name))
-            .collect()
+            .collect();
+        tools.extend(tape_tools::tape_tool_definitions());
+        tools
     }
 
     pub fn handoff(&mut self, name: impl Into<String>, state: serde_json::Value) -> Handoff {

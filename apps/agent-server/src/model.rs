@@ -2,7 +2,7 @@ use agent_core::{
     Completion, CompletionRequest, CompletionStopReason, CoreError, LanguageModel,
     ModelDisposition, ModelIdentity, ModelLimit, StreamEvent,
 };
-use llm_trace::{LlmTraceRecord, LlmTraceStatus, LlmTraceStore};
+use llm_trace::{LlmTraceEvent, LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus, LlmTraceStore};
 use openai_adapter::{
     OpenAiAdapterError, OpenAiChatCompletionsConfig, OpenAiChatCompletionsModel,
     OpenAiResponsesConfig, OpenAiResponsesModel,
@@ -64,6 +64,127 @@ impl std::fmt::Display for ServerModelError {
 
 impl std::error::Error for ServerModelError {}
 
+struct TraceEventCollector {
+    started_at_ms: u64,
+    first_reasoning_at_ms: Option<u64>,
+    first_text_at_ms: Option<u64>,
+    events: Vec<LlmTraceEvent>,
+}
+
+impl TraceEventCollector {
+    fn new(started_at_ms: u64) -> Self {
+        Self {
+            started_at_ms,
+            first_reasoning_at_ms: None,
+            first_text_at_ms: None,
+            events: vec![LlmTraceEvent {
+                name: "request.started".to_string(),
+                at_ms: started_at_ms,
+                attributes: Value::Null,
+            }],
+        }
+    }
+
+    fn observe(&mut self, event: &StreamEvent) {
+        let at_ms = now_timestamp_ms();
+        match event {
+            StreamEvent::ThinkingDelta { text } => {
+                if self.first_reasoning_at_ms.is_none() && !text.is_empty() {
+                    self.first_reasoning_at_ms = Some(at_ms);
+                    self.events.push(LlmTraceEvent {
+                        name: "response.first_reasoning_delta".to_string(),
+                        at_ms,
+                        attributes: json!({ "preview": preview_text(text) }),
+                    });
+                }
+            }
+            StreamEvent::TextDelta { text } => {
+                if self.first_text_at_ms.is_none() && !text.is_empty() {
+                    self.first_text_at_ms = Some(at_ms);
+                    self.events.push(LlmTraceEvent {
+                        name: "response.first_text_delta".to_string(),
+                        at_ms,
+                        attributes: json!({ "preview": preview_text(text) }),
+                    });
+                }
+            }
+            StreamEvent::ToolCallStarted { invocation_id, tool_name, arguments } => {
+                self.events.push(LlmTraceEvent {
+                    name: "response.tool_call_started".to_string(),
+                    at_ms,
+                    attributes: json!({
+                        "invocation_id": invocation_id,
+                        "tool_name": tool_name,
+                        "arguments": arguments,
+                    }),
+                });
+            }
+            StreamEvent::Done => {
+                self.events.push(LlmTraceEvent {
+                    name: "response.stream_done".to_string(),
+                    at_ms,
+                    attributes: Value::Null,
+                });
+            }
+            StreamEvent::ToolOutputDelta { .. }
+            | StreamEvent::ToolCallCompleted { .. }
+            | StreamEvent::Log { .. } => {}
+        }
+    }
+
+    fn finish_success(&mut self, record: &mut LlmTraceRecord, completion: &Completion) {
+        let finished_at_ms = record.finished_at_ms.unwrap_or(record.started_at_ms);
+        self.events.push(LlmTraceEvent {
+            name: "response.completed".to_string(),
+            at_ms: finished_at_ms,
+            attributes: json!({
+                "stop_reason": record.stop_reason,
+                "http_status_code": record.status_code,
+                "input_tokens": record.input_tokens,
+                "output_tokens": record.output_tokens,
+                "total_tokens": record.total_tokens,
+                "assistant_preview": preview_text(completion.plain_text().as_str()),
+            }),
+        });
+        self.apply_relative_attributes(record);
+        record.events = self.events.clone();
+    }
+
+    fn finish_error(&mut self, record: &mut LlmTraceRecord) {
+        let finished_at_ms = record.finished_at_ms.unwrap_or(record.started_at_ms);
+        self.events.push(LlmTraceEvent {
+            name: "response.failed".to_string(),
+            at_ms: finished_at_ms,
+            attributes: json!({
+                "http_status_code": record.status_code,
+                "error": record.error,
+            }),
+        });
+        self.apply_relative_attributes(record);
+        record.events = self.events.clone();
+    }
+
+    fn apply_relative_attributes(&self, record: &mut LlmTraceRecord) {
+        let Some(attributes) = record.otel_attributes.as_object_mut() else {
+            return;
+        };
+
+        if let Some(first_reasoning_at_ms) = self.first_reasoning_at_ms {
+            attributes.insert(
+                "aia.first_reasoning_delta_ms".into(),
+                json!(first_reasoning_at_ms.saturating_sub(self.started_at_ms)),
+            );
+        }
+
+        if let Some(first_text_at_ms) = self.first_text_at_ms {
+            attributes.insert(
+                "aia.first_text_delta_ms".into(),
+                json!(first_text_at_ms.saturating_sub(self.started_at_ms)),
+            );
+        }
+    }
+}
+
 impl LanguageModel for ServerModel {
     type Error = ServerModelError;
 
@@ -91,31 +212,50 @@ impl ServerModel {
         request: CompletionRequest,
         sink: Option<&mut dyn FnMut(StreamEvent)>,
     ) -> Result<Completion, ServerModelError> {
-        let trace_seed = self.trace_seed(&request, sink.is_some());
         let started_at_ms = now_timestamp_ms();
+        let trace_seed = self.trace_seed(&request, sink.is_some());
+        let mut event_collector = TraceEventCollector::new(started_at_ms);
         let started = Instant::now();
         let result = match (&self.inner, sink) {
             (ServerModelInner::Bootstrap(model), None) => {
                 model.complete(request).map_err(ServerModelError::Bootstrap)
             }
             (ServerModelInner::Bootstrap(model), Some(sink)) => {
-                model.complete_streaming(request, sink).map_err(ServerModelError::Bootstrap)
+                let mut traced_sink = |event: StreamEvent| {
+                    event_collector.observe(&event);
+                    sink(event);
+                };
+                model
+                    .complete_streaming(request, &mut traced_sink)
+                    .map_err(ServerModelError::Bootstrap)
             }
             (ServerModelInner::OpenAiResponses(model), None) => {
                 model.complete(request).map_err(ServerModelError::OpenAi)
             }
             (ServerModelInner::OpenAiResponses(model), Some(sink)) => {
-                model.complete_streaming(request, sink).map_err(ServerModelError::OpenAi)
+                let mut traced_sink = |event: StreamEvent| {
+                    event_collector.observe(&event);
+                    sink(event);
+                };
+                model
+                    .complete_streaming(request, &mut traced_sink)
+                    .map_err(ServerModelError::OpenAi)
             }
             (ServerModelInner::OpenAiChatCompletions(model), None) => {
                 model.complete(request).map_err(ServerModelError::OpenAi)
             }
             (ServerModelInner::OpenAiChatCompletions(model), Some(sink)) => {
-                model.complete_streaming(request, sink).map_err(ServerModelError::OpenAi)
+                let mut traced_sink = |event: StreamEvent| {
+                    event_collector.observe(&event);
+                    sink(event);
+                };
+                model
+                    .complete_streaming(request, &mut traced_sink)
+                    .map_err(ServerModelError::OpenAi)
             }
         };
 
-        self.persist_trace(trace_seed, started_at_ms, started.elapsed(), &result);
+        self.persist_trace(trace_seed, started_at_ms, started.elapsed(), &result, event_collector);
         result
     }
 
@@ -149,8 +289,23 @@ impl ServerModel {
             ),
         };
 
+        let otel_attributes = trace_attributes(
+            request,
+            context,
+            provider.as_str(),
+            base_url.as_str(),
+            endpoint_path.as_str(),
+            streaming,
+        );
+
         Some(LlmTraceRecord {
-            id: context.trace_id.clone(),
+            id: context.span_id.clone(),
+            trace_id: context.trace_id.clone(),
+            span_id: context.span_id.clone(),
+            parent_span_id: context.parent_span_id.clone(),
+            root_span_id: context.root_span_id.clone(),
+            operation_name: context.operation_name.clone(),
+            span_kind: LlmTraceSpanKind::Client,
             turn_id: context.turn_id.clone(),
             run_id: context.run_id.clone(),
             request_kind: context.request_kind.clone(),
@@ -175,6 +330,8 @@ impl ServerModel {
             input_tokens: None,
             output_tokens: None,
             total_tokens: None,
+            otel_attributes,
+            events: vec![],
         })
     }
 
@@ -184,6 +341,7 @@ impl ServerModel {
         started_at_ms: u64,
         duration: std::time::Duration,
         result: &Result<Completion, ServerModelError>,
+        mut event_collector: TraceEventCollector,
     ) {
         let Some(store) = self.trace_store.as_ref() else {
             return;
@@ -206,6 +364,8 @@ impl ServerModel {
                 record.input_tokens = completion.usage.as_ref().map(|usage| usage.input_tokens);
                 record.output_tokens = completion.usage.as_ref().map(|usage| usage.output_tokens);
                 record.total_tokens = completion.usage.as_ref().map(|usage| usage.total_tokens);
+                update_trace_attributes_from_completion(&mut record, completion);
+                event_collector.finish_success(&mut record, completion);
             }
             Err(error) => {
                 record.status = LlmTraceStatus::Failed;
@@ -217,6 +377,8 @@ impl ServerModel {
                     "error": error.to_string(),
                     "http_status_code": record.status_code,
                 });
+                update_trace_attributes_from_error(&mut record);
+                event_collector.finish_error(&mut record);
             }
         }
 
@@ -322,6 +484,56 @@ fn response_summary(completion: &Completion) -> Value {
     })
 }
 
+fn trace_attributes(
+    request: &CompletionRequest,
+    context: &agent_core::LlmTraceRequestContext,
+    provider: &str,
+    base_url: &str,
+    endpoint_path: &str,
+    streaming: bool,
+) -> Value {
+    json!({
+        "gen_ai.operation.name": context.operation_name.as_str(),
+        "gen_ai.request.model": request.model.name.as_str(),
+        "gen_ai.provider.name": provider,
+        "server.address": base_url,
+        "http.request.method": "POST",
+        "http.route": endpoint_path,
+        "aia.turn_id": context.turn_id.as_str(),
+        "aia.run_id": context.run_id.as_str(),
+        "aia.request_kind": context.request_kind.as_str(),
+        "aia.step_index": context.step_index,
+        "aia.streaming": streaming,
+        "aia.tool_count": request.available_tools.len(),
+        "gen_ai.request.max_output_tokens": request.max_output_tokens,
+    })
+}
+
+fn update_trace_attributes_from_completion(record: &mut LlmTraceRecord, completion: &Completion) {
+    let Some(attributes) = record.otel_attributes.as_object_mut() else {
+        return;
+    };
+
+    attributes.insert("gen_ai.response.stop_reason".into(), json!(record.stop_reason));
+    attributes.insert("http.response.status_code".into(), json!(record.status_code));
+
+    if let Some(usage) = completion.usage.as_ref() {
+        attributes.insert("gen_ai.usage.input_tokens".into(), json!(usage.input_tokens));
+        attributes.insert("gen_ai.usage.output_tokens".into(), json!(usage.output_tokens));
+        attributes.insert("gen_ai.usage.total_tokens".into(), json!(usage.total_tokens));
+    }
+}
+
+fn update_trace_attributes_from_error(record: &mut LlmTraceRecord) {
+    let Some(attributes) = record.otel_attributes.as_object_mut() else {
+        return;
+    };
+
+    attributes.insert("http.response.status_code".into(), json!(record.status_code));
+    attributes.insert("error.type".into(), json!("provider_error"));
+    attributes.insert("error.message".into(), json!(record.error));
+}
+
 fn stop_reason_label(reason: &CompletionStopReason) -> String {
     match reason {
         CompletionStopReason::Stop => "stop".to_string(),
@@ -338,6 +550,14 @@ fn parse_status_code(error: &str) -> Option<u16> {
         .nth(1)
         .and_then(|tail| tail.split_whitespace().next())
         .and_then(|value| value.parse::<u16>().ok())
+}
+
+fn preview_text(value: &str) -> String {
+    let mut preview = value.chars().take(120).collect::<String>();
+    if value.chars().count() > 120 {
+        preview.push_str("...");
+    }
+    preview
 }
 
 fn now_timestamp_ms() -> u64 {
@@ -442,7 +662,11 @@ mod tests {
                     max_output_tokens: Some(128),
                     available_tools: vec![],
                     trace_context: Some(agent_core::LlmTraceRequestContext {
-                        trace_id: "trace-1".into(),
+                        trace_id: "aia-trace-turn-1".into(),
+                        span_id: "trace-1".into(),
+                        parent_span_id: Some("aia-span-turn-1-root".into()),
+                        root_span_id: "aia-span-turn-1-root".into(),
+                        operation_name: "chat".into(),
                         turn_id: "turn-1".into(),
                         run_id: "turn-1".into(),
                         request_kind: "completion".into(),
@@ -459,6 +683,9 @@ mod tests {
 
         let trace =
             store.get("trace-1").expect("trace query should succeed").expect("trace exists");
+        assert_eq!(trace.trace_id, "aia-trace-turn-1");
+        assert_eq!(trace.parent_span_id.as_deref(), Some("aia-span-turn-1-root"));
+        assert_eq!(trace.operation_name, "chat");
         assert_eq!(trace.model, "gpt-5.4");
         assert_eq!(trace.endpoint_path, "/responses");
         assert_eq!(trace.status_code, Some(200));
@@ -518,7 +745,11 @@ mod tests {
                 max_output_tokens: Some(128),
                 available_tools: vec![],
                 trace_context: Some(agent_core::LlmTraceRequestContext {
-                    trace_id: "trace-502".into(),
+                    trace_id: "aia-trace-turn-1".into(),
+                    span_id: "trace-502".into(),
+                    parent_span_id: Some("aia-span-turn-1-root".into()),
+                    root_span_id: "aia-span-turn-1-root".into(),
+                    operation_name: "chat".into(),
                     turn_id: "turn-1".into(),
                     run_id: "turn-1".into(),
                     request_kind: "completion".into(),

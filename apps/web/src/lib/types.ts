@@ -45,10 +45,21 @@ export type ToolCall = {
   response_id?: string
 }
 
+export type ToolTraceContext = {
+  trace_id: string
+  span_id: string
+  parent_span_id: string
+  root_span_id: string
+  operation_name: string
+  parent_request_kind: string
+  parent_step_index: number
+}
+
 export type ToolInvocationLifecycle = {
   call: ToolCall
   started_at_ms: number
   finished_at_ms: number
+  trace_context?: ToolTraceContext | null
   outcome: ToolInvocationOutcome
 }
 
@@ -168,9 +179,21 @@ export type ProviderListItem = {
 }
 
 export type TraceStatus = "succeeded" | "failed"
+export type TraceSpanKind = "CLIENT" | "INTERNAL"
+export type TraceEvent = {
+  name: string
+  at_ms: number
+  attributes: Record<string, unknown> | null
+}
 
 export type TraceListItem = {
   id: string
+  trace_id: string
+  span_id: string
+  parent_span_id: string | null
+  root_span_id: string
+  operation_name: string
+  span_kind: TraceSpanKind
   turn_id: string
   run_id: string
   request_kind: string
@@ -191,6 +214,12 @@ export type TraceListItem = {
 
 export type TraceRecord = {
   id: string
+  trace_id: string
+  span_id: string
+  parent_span_id: string | null
+  root_span_id: string
+  operation_name: string
+  span_kind: TraceSpanKind
   turn_id: string
   run_id: string
   request_kind: string
@@ -215,6 +244,8 @@ export type TraceRecord = {
   input_tokens: number | null
   output_tokens: number | null
   total_tokens: number | null
+  otel_attributes: Record<string, unknown> | null
+  events: TraceEvent[]
 }
 
 export type TraceSummary = {

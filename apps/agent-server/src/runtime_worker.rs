@@ -6,7 +6,7 @@ use std::thread;
 use agent_core::{ModelIdentity, Role, StreamEvent};
 use agent_runtime::{AgentRuntime, ContextStats, RuntimeEvent, RuntimeSubscriberId, TurnLifecycle};
 use axum::http::StatusCode;
-use llm_trace::LlmTraceStore;
+use llm_trace::{LlmTraceEvent, LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus, LlmTraceStore};
 use provider_registry::{ModelConfig, ProviderKind, ProviderProfile, ProviderRegistry};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -415,6 +415,7 @@ fn run_turn(owner: &mut RuntimeOwnerState, prompt: String) {
             let events = owner.runtime.collect_events(owner.subscriber).unwrap_or_default();
             let turn = broadcast_runtime_events(events, &broadcast_tx);
             if let Some(turn) = turn {
+                persist_tool_trace_spans(&turn, owner.trace_store.as_ref());
                 history_snapshot.write().expect("lock poisoned").push(turn.clone());
                 let _ = broadcast_tx.send(SsePayload::TurnCompleted(turn));
             }
@@ -424,6 +425,7 @@ fn run_turn(owner: &mut RuntimeOwnerState, prompt: String) {
             let events = owner.runtime.collect_events(owner.subscriber).unwrap_or_default();
             let turn = broadcast_runtime_events(events, &broadcast_tx);
             if let Some(turn) = turn {
+                persist_tool_trace_spans(&turn, owner.trace_store.as_ref());
                 history_snapshot.write().expect("lock poisoned").push(turn.clone());
                 let _ = broadcast_tx.send(SsePayload::TurnCompleted(turn));
             }
@@ -458,6 +460,145 @@ fn now_timestamp_ms() -> u64 {
     }
 }
 
+fn persist_tool_trace_spans(turn: &TurnLifecycle, store: &dyn LlmTraceStore) {
+    for invocation in &turn.tool_invocations {
+        let Some(context) = invocation.trace_context.as_ref() else {
+            continue;
+        };
+
+        let failed =
+            matches!(&invocation.outcome, agent_runtime::ToolInvocationOutcome::Failed { .. });
+        let (status, error, response_summary, response_body, events, details) =
+            match &invocation.outcome {
+                agent_runtime::ToolInvocationOutcome::Succeeded { result } => (
+                    LlmTraceStatus::Succeeded,
+                    None,
+                    json!({
+                        "status": "succeeded",
+                        "tool_name": result.tool_name,
+                        "content_preview": preview_text(&result.content),
+                    }),
+                    Some(result.content.clone()),
+                    vec![
+                        LlmTraceEvent {
+                            name: "tool.started".to_string(),
+                            at_ms: invocation.started_at_ms,
+                            attributes: json!({
+                                "invocation_id": invocation.call.invocation_id,
+                                "tool_name": invocation.call.tool_name,
+                            }),
+                        },
+                        LlmTraceEvent {
+                            name: "tool.completed".to_string(),
+                            at_ms: invocation.finished_at_ms,
+                            attributes: json!({
+                                "invocation_id": result.invocation_id,
+                                "tool_name": result.tool_name,
+                                "details": result.details,
+                            }),
+                        },
+                    ],
+                    result.details.clone(),
+                ),
+                agent_runtime::ToolInvocationOutcome::Failed { message } => (
+                    LlmTraceStatus::Failed,
+                    Some(message.clone()),
+                    json!({
+                        "status": "failed",
+                        "tool_name": invocation.call.tool_name,
+                        "error": message,
+                    }),
+                    Some(message.clone()),
+                    vec![
+                        LlmTraceEvent {
+                            name: "tool.started".to_string(),
+                            at_ms: invocation.started_at_ms,
+                            attributes: json!({
+                                "invocation_id": invocation.call.invocation_id,
+                                "tool_name": invocation.call.tool_name,
+                            }),
+                        },
+                        LlmTraceEvent {
+                            name: "tool.failed".to_string(),
+                            at_ms: invocation.finished_at_ms,
+                            attributes: json!({
+                                "invocation_id": invocation.call.invocation_id,
+                                "tool_name": invocation.call.tool_name,
+                                "error": message,
+                            }),
+                        },
+                    ],
+                    None,
+                ),
+            };
+
+        let record = LlmTraceRecord {
+            id: context.span_id.clone(),
+            trace_id: context.trace_id.clone(),
+            span_id: context.span_id.clone(),
+            parent_span_id: Some(context.parent_span_id.clone()),
+            root_span_id: context.root_span_id.clone(),
+            operation_name: context.operation_name.clone(),
+            span_kind: LlmTraceSpanKind::Internal,
+            turn_id: turn.turn_id.clone(),
+            run_id: turn.turn_id.clone(),
+            request_kind: "tool".to_string(),
+            step_index: context.parent_step_index,
+            provider: "runtime".to_string(),
+            protocol: "tool-runtime".to_string(),
+            model: invocation.call.tool_name.clone(),
+            base_url: "local://runtime".to_string(),
+            endpoint_path: format!("/tools/{}", invocation.call.tool_name),
+            streaming: false,
+            started_at_ms: invocation.started_at_ms,
+            finished_at_ms: Some(invocation.finished_at_ms),
+            duration_ms: Some(invocation.finished_at_ms.saturating_sub(invocation.started_at_ms)),
+            status_code: None,
+            status,
+            stop_reason: None,
+            error,
+            request_summary: json!({
+                "tool_name": invocation.call.tool_name,
+                "invocation_id": invocation.call.invocation_id,
+                "parent_request_kind": context.parent_request_kind,
+                "parent_step_index": context.parent_step_index,
+            }),
+            provider_request: json!({
+                "invocation_id": invocation.call.invocation_id,
+                "tool_name": invocation.call.tool_name,
+                "arguments": invocation.call.arguments,
+            }),
+            response_summary,
+            response_body,
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            otel_attributes: json!({
+                "aia.operation.name": context.operation_name,
+                "aia.tool.name": invocation.call.tool_name,
+                "aia.tool.invocation_id": invocation.call.invocation_id,
+                "aia.parent.request_kind": context.parent_request_kind,
+                "aia.parent.step_index": context.parent_step_index,
+                "aia.tool.failed": failed,
+                "aia.tool.details": details,
+            }),
+            events,
+        };
+
+        if let Err(error) = store.record(&record) {
+            eprintln!("tool trace record failed: {error}");
+        }
+    }
+}
+
+fn preview_text(value: &str) -> String {
+    let mut preview = value.chars().take(120).collect::<String>();
+    if value.chars().count() > 120 {
+        preview.push_str("...");
+    }
+    preview
+}
+
 fn object_value(value: &serde_json::Value) -> serde_json::Value {
     if value.is_object() { value.clone() } else { json!({}) }
 }
@@ -481,28 +622,24 @@ fn update_current_turn_from_stream(
     };
 
     match event {
-        StreamEvent::ThinkingDelta { text } => {
-            match snapshot.blocks.last_mut() {
-                Some(CurrentTurnBlock::Thinking { content }) => content.push_str(text),
-                _ => snapshot.blocks.push(CurrentTurnBlock::Thinking { content: text.clone() }),
-            }
-        }
-        StreamEvent::TextDelta { text } => {
-            match snapshot.blocks.last_mut() {
-                Some(CurrentTurnBlock::Text { content }) => content.push_str(text),
-                _ => snapshot.blocks.push(CurrentTurnBlock::Text { content: text.clone() }),
-            }
-        }
+        StreamEvent::ThinkingDelta { text } => match snapshot.blocks.last_mut() {
+            Some(CurrentTurnBlock::Thinking { content }) => content.push_str(text),
+            _ => snapshot.blocks.push(CurrentTurnBlock::Thinking { content: text.clone() }),
+        },
+        StreamEvent::TextDelta { text } => match snapshot.blocks.last_mut() {
+            Some(CurrentTurnBlock::Text { content }) => content.push_str(text),
+            _ => snapshot.blocks.push(CurrentTurnBlock::Text { content: text.clone() }),
+        },
         StreamEvent::ToolCallStarted { invocation_id, tool_name, arguments } => {
-            if let Some(CurrentTurnBlock::Tool { tool }) = snapshot.blocks.iter_mut().rev().find(
-                |block| {
+            if let Some(CurrentTurnBlock::Tool { tool }) =
+                snapshot.blocks.iter_mut().rev().find(|block| {
                     matches!(
                         block,
                         CurrentTurnBlock::Tool { tool }
                             if tool.invocation_id == *invocation_id
                     )
-                },
-            ) {
+                })
+            {
                 tool.tool_name = tool_name.clone();
                 tool.arguments = object_value(arguments);
             } else {
@@ -523,15 +660,15 @@ fn update_current_turn_from_stream(
             }
         }
         StreamEvent::ToolOutputDelta { invocation_id, text, .. } => {
-            if let Some(CurrentTurnBlock::Tool { tool }) = snapshot.blocks.iter_mut().rev().find(
-                |block| {
+            if let Some(CurrentTurnBlock::Tool { tool }) =
+                snapshot.blocks.iter_mut().rev().find(|block| {
                     matches!(
                         block,
                         CurrentTurnBlock::Tool { tool }
                             if tool.invocation_id == *invocation_id
                     )
-                },
-            ) {
+                })
+            {
                 tool.output.push_str(text);
             } else {
                 snapshot.blocks.push(CurrentTurnBlock::Tool {
@@ -550,22 +687,16 @@ fn update_current_turn_from_stream(
                 });
             }
         }
-        StreamEvent::ToolCallCompleted {
-            invocation_id,
-            tool_name,
-            content,
-            details,
-            failed,
-        } => {
-            if let Some(CurrentTurnBlock::Tool { tool }) = snapshot.blocks.iter_mut().rev().find(
-                |block| {
+        StreamEvent::ToolCallCompleted { invocation_id, tool_name, content, details, failed } => {
+            if let Some(CurrentTurnBlock::Tool { tool }) =
+                snapshot.blocks.iter_mut().rev().find(|block| {
                     matches!(
                         block,
                         CurrentTurnBlock::Tool { tool }
                             if tool.invocation_id == *invocation_id
                     )
-                },
-            ) {
+                })
+            {
                 tool.tool_name = tool_name.clone();
                 tool.completed = true;
                 tool.finished_at_ms = Some(now_timestamp_ms());
@@ -699,6 +830,7 @@ impl TurnHistoryBuilder {
                 call,
                 started_at_ms: timestamp_ms,
                 finished_at_ms: timestamp_ms,
+                trace_context: None,
                 outcome: agent_runtime::ToolInvocationOutcome::Succeeded { result },
             };
             self.blocks
@@ -785,11 +917,9 @@ impl TurnHistoryBuilder {
                     }
                     agent_runtime::TurnBlock::ToolInvocation { invocation } => {
                         let (result_content, result_details, failed) = match invocation.outcome {
-                            agent_runtime::ToolInvocationOutcome::Succeeded { result } => (
-                                Some(result.content),
-                                result.details,
-                                Some(false),
-                            ),
+                            agent_runtime::ToolInvocationOutcome::Succeeded { result } => {
+                                (Some(result.content), result.details, Some(false))
+                            }
                             agent_runtime::ToolInvocationOutcome::Failed { message } => {
                                 (Some(message), None, Some(true))
                             }

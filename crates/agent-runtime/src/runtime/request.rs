@@ -1,11 +1,13 @@
 use agent_core::{
-    CompletionRequest, ConversationItem, LanguageModel, LlmTraceRequestContext, ToolDefinition,
-    ToolExecutor,
+    CompletionRequest, ConversationItem, LanguageModel, ToolDefinition, ToolExecutor,
 };
 
 use crate::ContextStats;
 
-use super::{AgentRuntime, helpers::anchor_state_message};
+use super::{
+    AgentRuntime,
+    helpers::{anchor_state_message, build_llm_trace_context},
+};
 
 const CONTEXT_HEADROOM_SAFETY_TOKENS: u32 = 32;
 impl<M, T> AgentRuntime<M, T>
@@ -22,9 +24,11 @@ where
         let view = self.tape.default_view();
         let mut conversation = Vec::new();
         if let Some(anchor) = view.origin_anchor.as_ref() {
-            conversation.push(ConversationItem::Message(anchor_state_message(anchor)));
+            if let Some(msg) = anchor_state_message(anchor) {
+                conversation.push(ConversationItem::Message(msg));
+            }
         }
-        conversation.extend(view.conversation);
+        conversation.extend(drop_orphaned_tool_results(view.conversation));
 
         let available_tools = self.visible_tools();
         let instructions = self.instructions.as_ref().filter(|text| !text.is_empty()).cloned();
@@ -40,13 +44,12 @@ where
             conversation,
             max_output_tokens,
             available_tools,
-            trace_context: Some(LlmTraceRequestContext {
-                trace_id: format!("{turn_id}-{request_kind}-{step_index}"),
-                turn_id: turn_id.to_string(),
-                run_id: turn_id.to_string(),
-                request_kind: request_kind.to_string(),
+            trace_context: Some(build_llm_trace_context(
+                turn_id,
+                turn_id,
+                request_kind,
                 step_index,
-            }),
+            )),
         }
     }
 
@@ -152,4 +155,29 @@ where
         );
         Some(estimated as f64 / context_limit as f64)
     }
+}
+
+/// Drop ToolResult items whose matching ToolCall was truncated by an anchor.
+///
+/// After a `tape.handoff`, the anchor sits between the tool_call and tool_result entries.
+/// The view only includes entries after the anchor, so the tool_call is gone but the
+/// tool_result remains — an "orphan". Sending an orphaned ToolResult to the model without
+/// a preceding ToolCall causes API errors. This function filters them out.
+pub(super) fn drop_orphaned_tool_results(
+    conversation: Vec<ConversationItem>,
+) -> Vec<ConversationItem> {
+    use std::collections::BTreeSet;
+
+    let known_call_ids: BTreeSet<String> = conversation
+        .iter()
+        .filter_map(|item| item.as_tool_call().map(|call| call.invocation_id.clone()))
+        .collect();
+
+    conversation
+        .into_iter()
+        .filter(|item| {
+            item.as_tool_result()
+                .map_or(true, |result| known_call_ids.contains(&result.invocation_id))
+        })
+        .collect()
 }

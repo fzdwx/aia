@@ -2,6 +2,7 @@
 members = [
   "apps/agent-server",
   "crates/agent-core",
+  "crates/agent-prompts",
   "crates/agent-runtime",
   "crates/builtin-tools",
   "crates/llm-trace",

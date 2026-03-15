@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use agent_core::{
-    Completion, CompletionSegment, CompletionStopReason, LanguageModel, Message, Role, StreamEvent,
-    ToolExecutor,
+    Completion, CompletionSegment, CompletionStopReason, LanguageModel, LlmTraceRequestContext,
+    Message, Role, StreamEvent, ToolExecutor,
 };
 use session_tape::TapeEntry;
 
@@ -83,6 +83,7 @@ where
 
         loop {
             let request = self.build_completion_request(&turn_id, "completion", llm_step_index);
+            let llm_trace_context = request.trace_context.clone();
             llm_step_index = llm_step_index.saturating_add(1);
             let completion = match self.model.complete_streaming(request, &mut on_delta) {
                 Ok(completion) => completion,
@@ -128,6 +129,7 @@ where
             let assistant_text = completion.plain_text();
             let saw_tool_calls = match self.process_completion_segments(
                 &turn_id,
+                llm_trace_context.as_ref(),
                 &completion,
                 &mut buffers,
                 &mut on_delta,
@@ -229,6 +231,7 @@ where
     fn process_completion_segments(
         &mut self,
         turn_id: &str,
+        llm_trace_context: Option<&LlmTraceRequestContext>,
         completion: &Completion,
         buffers: &mut TurnBuffers,
         on_delta: &mut dyn FnMut(StreamEvent),
@@ -247,8 +250,9 @@ where
                 }
                 CompletionSegment::Text(text) if !text.is_empty() => {
                     let assistant_message = Message::new(Role::Assistant, text.clone());
-                    let entry_id = self
-                        .append_tape_entry(TapeEntry::message(&assistant_message).with_run_id(turn_id))?;
+                    let entry_id = self.append_tape_entry(
+                        TapeEntry::message(&assistant_message).with_run_id(turn_id),
+                    )?;
                     buffers.source_entry_ids.push(entry_id);
                     self.publish_event(RuntimeEvent::AssistantMessage { content: text.clone() });
                     buffers.last_assistant_text = Some(text.clone());
@@ -265,6 +269,7 @@ where
                     buffers.source_entry_ids.push(tool_call_entry_id);
                     let invocation = self.execute_tool_call(
                         turn_id,
+                        llm_trace_context,
                         assistant_entry_id,
                         tool_call_entry_id,
                         call,

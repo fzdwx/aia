@@ -27,9 +27,45 @@ impl LlmTraceStatus {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum LlmTraceSpanKind {
+    Client,
+    Internal,
+}
+
+impl LlmTraceSpanKind {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Client => "CLIENT",
+            Self::Internal => "INTERNAL",
+        }
+    }
+
+    fn from_str(value: &str) -> Self {
+        match value {
+            "INTERNAL" | "internal" => Self::Internal,
+            _ => Self::Client,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LlmTraceEvent {
+    pub name: String,
+    pub at_ms: u64,
+    pub attributes: Value,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LlmTraceRecord {
     pub id: String,
+    pub trace_id: String,
+    pub span_id: String,
+    pub parent_span_id: Option<String>,
+    pub root_span_id: String,
+    pub operation_name: String,
+    pub span_kind: LlmTraceSpanKind,
     pub turn_id: String,
     pub run_id: String,
     pub request_kind: String,
@@ -54,11 +90,19 @@ pub struct LlmTraceRecord {
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
     pub total_tokens: Option<u64>,
+    pub otel_attributes: Value,
+    pub events: Vec<LlmTraceEvent>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LlmTraceListItem {
     pub id: String,
+    pub trace_id: String,
+    pub span_id: String,
+    pub parent_span_id: Option<String>,
+    pub root_span_id: String,
+    pub operation_name: String,
+    pub span_kind: LlmTraceSpanKind,
     pub turn_id: String,
     pub run_id: String,
     pub request_kind: String,
@@ -146,43 +190,64 @@ impl SqliteLlmTraceStore {
     }
 
     fn init(&self) -> Result<(), LlmTraceStoreError> {
-        self.conn
-            .lock()
-            .expect("lock poisoned")
-            .execute_batch(
-                "
-                CREATE TABLE IF NOT EXISTS llm_request_traces (
-                    id TEXT PRIMARY KEY,
-                    turn_id TEXT NOT NULL,
-                    run_id TEXT NOT NULL,
-                    request_kind TEXT NOT NULL,
-                    step_index INTEGER NOT NULL,
-                    provider TEXT NOT NULL,
-                    protocol TEXT NOT NULL,
-                    model TEXT NOT NULL,
-                    base_url TEXT NOT NULL,
-                    endpoint_path TEXT NOT NULL,
-                    streaming INTEGER NOT NULL,
-                    started_at_ms INTEGER NOT NULL,
-                    finished_at_ms INTEGER,
-                    duration_ms INTEGER,
-                    status_code INTEGER,
-                    status TEXT NOT NULL,
-                    stop_reason TEXT,
-                    error TEXT,
-                    request_summary TEXT NOT NULL,
-                    provider_request TEXT NOT NULL,
-                    response_summary TEXT NOT NULL,
-                    response_body TEXT,
-                    input_tokens INTEGER,
-                    output_tokens INTEGER,
-                    total_tokens INTEGER
-                );
-                CREATE INDEX IF NOT EXISTS idx_llm_request_traces_started_at_ms
-                    ON llm_request_traces(started_at_ms DESC);
-                ",
-            )
-            .map_err(LlmTraceStoreError::from)
+        let conn = self.conn.lock().expect("lock poisoned");
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS llm_request_traces (
+                id TEXT PRIMARY KEY,
+                trace_id TEXT NOT NULL,
+                span_id TEXT NOT NULL,
+                parent_span_id TEXT,
+                root_span_id TEXT NOT NULL,
+                operation_name TEXT NOT NULL,
+                span_kind TEXT NOT NULL,
+                turn_id TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                request_kind TEXT NOT NULL,
+                step_index INTEGER NOT NULL,
+                provider TEXT NOT NULL,
+                protocol TEXT NOT NULL,
+                model TEXT NOT NULL,
+                base_url TEXT NOT NULL,
+                endpoint_path TEXT NOT NULL,
+                streaming INTEGER NOT NULL,
+                started_at_ms INTEGER NOT NULL,
+                finished_at_ms INTEGER,
+                duration_ms INTEGER,
+                status_code INTEGER,
+                status TEXT NOT NULL,
+                stop_reason TEXT,
+                error TEXT,
+                request_summary TEXT NOT NULL,
+                provider_request TEXT NOT NULL,
+                response_summary TEXT NOT NULL,
+                response_body TEXT,
+                input_tokens INTEGER,
+                output_tokens INTEGER,
+                total_tokens INTEGER,
+                otel_attributes TEXT NOT NULL DEFAULT '{}',
+                events TEXT NOT NULL DEFAULT '[]'
+            );
+            CREATE INDEX IF NOT EXISTS idx_llm_request_traces_started_at_ms
+                ON llm_request_traces(started_at_ms DESC);
+            ",
+        )?;
+
+        ensure_column(&conn, "llm_request_traces", "trace_id", "TEXT NOT NULL DEFAULT ''")?;
+        ensure_column(&conn, "llm_request_traces", "span_id", "TEXT NOT NULL DEFAULT ''")?;
+        ensure_column(&conn, "llm_request_traces", "parent_span_id", "TEXT")?;
+        ensure_column(&conn, "llm_request_traces", "root_span_id", "TEXT NOT NULL DEFAULT ''")?;
+        ensure_column(&conn, "llm_request_traces", "operation_name", "TEXT NOT NULL DEFAULT ''")?;
+        ensure_column(&conn, "llm_request_traces", "span_kind", "TEXT NOT NULL DEFAULT 'CLIENT'")?;
+        ensure_column(
+            &conn,
+            "llm_request_traces",
+            "otel_attributes",
+            "TEXT NOT NULL DEFAULT '{}'",
+        )?;
+        ensure_column(&conn, "llm_request_traces", "events", "TEXT NOT NULL DEFAULT '[]'")?;
+
+        Ok(())
     }
 }
 
@@ -191,21 +256,31 @@ impl LlmTraceStore for SqliteLlmTraceStore {
         self.conn.lock().expect("lock poisoned").execute(
             "
             INSERT OR REPLACE INTO llm_request_traces (
-                id, turn_id, run_id, request_kind, step_index,
-                provider, protocol, model, base_url, endpoint_path,
-                streaming, started_at_ms, finished_at_ms, duration_ms, status_code,
-                status, stop_reason, error, request_summary, provider_request,
-                response_summary, response_body, input_tokens, output_tokens, total_tokens
+                id, trace_id, span_id, parent_span_id, root_span_id,
+                operation_name, span_kind, turn_id, run_id, request_kind,
+                step_index, provider, protocol, model, base_url,
+                endpoint_path, streaming, started_at_ms, finished_at_ms, duration_ms,
+                status_code, status, stop_reason, error, request_summary,
+                provider_request, response_summary, response_body, input_tokens, output_tokens,
+                total_tokens, otel_attributes, events
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5,
                 ?6, ?7, ?8, ?9, ?10,
                 ?11, ?12, ?13, ?14, ?15,
                 ?16, ?17, ?18, ?19, ?20,
-                ?21, ?22, ?23, ?24, ?25
+                ?21, ?22, ?23, ?24, ?25,
+                ?26, ?27, ?28, ?29, ?30,
+                ?31, ?32, ?33
             )
             ",
             params![
                 record.id,
+                record.trace_id,
+                record.span_id,
+                record.parent_span_id,
+                record.root_span_id,
+                record.operation_name,
+                record.span_kind.as_str(),
                 record.turn_id,
                 record.run_id,
                 record.request_kind,
@@ -230,6 +305,8 @@ impl LlmTraceStore for SqliteLlmTraceStore {
                 record.input_tokens.map(|value| value as i64),
                 record.output_tokens.map(|value| value as i64),
                 record.total_tokens.map(|value| value as i64),
+                serde_json::to_string(&record.otel_attributes)?,
+                serde_json::to_string(&record.events)?,
             ],
         )?;
         Ok(())
@@ -239,8 +316,9 @@ impl LlmTraceStore for SqliteLlmTraceStore {
         let conn = self.conn.lock().expect("lock poisoned");
         let mut stmt = conn.prepare(
             "
-            SELECT id, turn_id, run_id, request_kind, step_index,
-                   provider, protocol, model, endpoint_path,
+            SELECT id, trace_id, span_id, parent_span_id, root_span_id,
+                   operation_name, span_kind, turn_id, run_id, request_kind,
+                   step_index, provider, protocol, model, endpoint_path,
                    status, stop_reason, status_code, started_at_ms, duration_ms, total_tokens,
                    provider_request, error
             FROM llm_request_traces
@@ -249,32 +327,38 @@ impl LlmTraceStore for SqliteLlmTraceStore {
             ",
         )?;
         let rows = stmt.query_map([limit as i64], |row| {
-            let provider_request = serde_json::from_str::<Value>(&row.get::<_, String>(15)?)
+            let provider_request = serde_json::from_str::<Value>(&row.get::<_, String>(21)?)
                 .map_err(|err| {
                     rusqlite::Error::FromSqlConversionFailure(
-                        15,
+                        21,
                         rusqlite::types::Type::Text,
                         Box::new(err),
                     )
                 })?;
             Ok(LlmTraceListItem {
                 id: row.get(0)?,
-                turn_id: row.get(1)?,
-                run_id: row.get(2)?,
-                request_kind: row.get(3)?,
-                step_index: row.get::<_, u32>(4)?,
-                provider: row.get(5)?,
-                protocol: row.get(6)?,
-                model: row.get(7)?,
-                endpoint_path: row.get(8)?,
-                status: LlmTraceStatus::from_str(row.get::<_, String>(9)?.as_str()),
-                stop_reason: row.get(10)?,
-                status_code: row.get::<_, Option<u16>>(11)?,
-                started_at_ms: row.get::<_, u64>(12)?,
-                duration_ms: row.get::<_, Option<u64>>(13)?,
-                total_tokens: row.get::<_, Option<u64>>(14)?,
+                trace_id: row.get(1)?,
+                span_id: row.get(2)?,
+                parent_span_id: row.get(3)?,
+                root_span_id: row.get(4)?,
+                operation_name: row.get(5)?,
+                span_kind: LlmTraceSpanKind::from_str(row.get::<_, String>(6)?.as_str()),
+                turn_id: row.get(7)?,
+                run_id: row.get(8)?,
+                request_kind: row.get(9)?,
+                step_index: row.get::<_, u32>(10)?,
+                provider: row.get(11)?,
+                protocol: row.get(12)?,
+                model: row.get(13)?,
+                endpoint_path: row.get(14)?,
+                status: LlmTraceStatus::from_str(row.get::<_, String>(15)?.as_str()),
+                stop_reason: row.get(16)?,
+                status_code: row.get::<_, Option<u16>>(17)?,
+                started_at_ms: row.get::<_, u64>(18)?,
+                duration_ms: row.get::<_, Option<u64>>(19)?,
+                total_tokens: row.get::<_, Option<u64>>(20)?,
                 user_message: extract_user_message(&provider_request),
-                error: row.get(16)?,
+                error: row.get(22)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(LlmTraceStoreError::from)
@@ -284,11 +368,13 @@ impl LlmTraceStore for SqliteLlmTraceStore {
         let conn = self.conn.lock().expect("lock poisoned");
         let mut stmt = conn.prepare(
             "
-            SELECT id, turn_id, run_id, request_kind, step_index,
-                   provider, protocol, model, base_url, endpoint_path,
-                   streaming, started_at_ms, finished_at_ms, duration_ms, status_code,
-                   status, stop_reason, error, request_summary, provider_request,
-                   response_summary, response_body, input_tokens, output_tokens, total_tokens
+            SELECT id, trace_id, span_id, parent_span_id, root_span_id,
+                   operation_name, span_kind, turn_id, run_id, request_kind,
+                   step_index, provider, protocol, model, base_url,
+                   endpoint_path, streaming, started_at_ms, finished_at_ms, duration_ms,
+                   status_code, status, stop_reason, error, request_summary,
+                   provider_request, response_summary, response_body, input_tokens, output_tokens,
+                   total_tokens, otel_attributes, events
             FROM llm_request_traces
             WHERE id = ?1
             ",
@@ -297,51 +383,73 @@ impl LlmTraceStore for SqliteLlmTraceStore {
         stmt.query_row([id], |row| {
             Ok(LlmTraceRecord {
                 id: row.get(0)?,
-                turn_id: row.get(1)?,
-                run_id: row.get(2)?,
-                request_kind: row.get(3)?,
-                step_index: row.get::<_, u32>(4)?,
-                provider: row.get(5)?,
-                protocol: row.get(6)?,
-                model: row.get(7)?,
-                base_url: row.get(8)?,
-                endpoint_path: row.get(9)?,
-                streaming: row.get::<_, i64>(10)? != 0,
-                started_at_ms: row.get::<_, u64>(11)?,
-                finished_at_ms: row.get::<_, Option<u64>>(12)?,
-                duration_ms: row.get::<_, Option<u64>>(13)?,
-                status_code: row.get::<_, Option<u16>>(14)?,
-                status: LlmTraceStatus::from_str(row.get::<_, String>(15)?.as_str()),
-                stop_reason: row.get(16)?,
-                error: row.get(17)?,
-                request_summary: serde_json::from_str::<Value>(&row.get::<_, String>(18)?)
+                trace_id: row.get(1)?,
+                span_id: row.get(2)?,
+                parent_span_id: row.get(3)?,
+                root_span_id: row.get(4)?,
+                operation_name: row.get(5)?,
+                span_kind: LlmTraceSpanKind::from_str(row.get::<_, String>(6)?.as_str()),
+                turn_id: row.get(7)?,
+                run_id: row.get(8)?,
+                request_kind: row.get(9)?,
+                step_index: row.get::<_, u32>(10)?,
+                provider: row.get(11)?,
+                protocol: row.get(12)?,
+                model: row.get(13)?,
+                base_url: row.get(14)?,
+                endpoint_path: row.get(15)?,
+                streaming: row.get::<_, i64>(16)? != 0,
+                started_at_ms: row.get::<_, u64>(17)?,
+                finished_at_ms: row.get::<_, Option<u64>>(18)?,
+                duration_ms: row.get::<_, Option<u64>>(19)?,
+                status_code: row.get::<_, Option<u16>>(20)?,
+                status: LlmTraceStatus::from_str(row.get::<_, String>(21)?.as_str()),
+                stop_reason: row.get(22)?,
+                error: row.get(23)?,
+                request_summary: serde_json::from_str::<Value>(&row.get::<_, String>(24)?)
                     .map_err(|err| {
                         rusqlite::Error::FromSqlConversionFailure(
-                            18,
+                            24,
                             rusqlite::types::Type::Text,
                             Box::new(err),
                         )
                     })?,
-                provider_request: serde_json::from_str::<Value>(&row.get::<_, String>(19)?)
+                provider_request: serde_json::from_str::<Value>(&row.get::<_, String>(25)?)
                     .map_err(|err| {
                         rusqlite::Error::FromSqlConversionFailure(
-                            19,
+                            25,
                             rusqlite::types::Type::Text,
                             Box::new(err),
                         )
                     })?,
-                response_summary: serde_json::from_str::<Value>(&row.get::<_, String>(20)?)
+                response_summary: serde_json::from_str::<Value>(&row.get::<_, String>(26)?)
                     .map_err(|err| {
                         rusqlite::Error::FromSqlConversionFailure(
-                            20,
+                            26,
                             rusqlite::types::Type::Text,
                             Box::new(err),
                         )
                     })?,
-                response_body: row.get(21)?,
-                input_tokens: row.get::<_, Option<u64>>(22)?,
-                output_tokens: row.get::<_, Option<u64>>(23)?,
-                total_tokens: row.get::<_, Option<u64>>(24)?,
+                response_body: row.get(27)?,
+                input_tokens: row.get::<_, Option<u64>>(28)?,
+                output_tokens: row.get::<_, Option<u64>>(29)?,
+                total_tokens: row.get::<_, Option<u64>>(30)?,
+                otel_attributes: serde_json::from_str::<Value>(&row.get::<_, String>(31)?)
+                    .map_err(|err| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            31,
+                            rusqlite::types::Type::Text,
+                            Box::new(err),
+                        )
+                    })?,
+                events: serde_json::from_str::<Vec<LlmTraceEvent>>(&row.get::<_, String>(32)?)
+                    .map_err(|err| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            32,
+                            rusqlite::types::Type::Text,
+                            Box::new(err),
+                        )
+                    })?,
             })
         })
         .optional()
@@ -365,6 +473,7 @@ impl LlmTraceStore for SqliteLlmTraceStore {
                     SUM(COALESCE(output_tokens, 0)),
                     SUM(COALESCE(total_tokens, 0))
                 FROM llm_request_traces
+                WHERE span_kind = 'CLIENT'
                 ",
             [],
             |row| {
@@ -379,7 +488,7 @@ impl LlmTraceStore for SqliteLlmTraceStore {
         )?;
 
         let mut stmt = conn.prepare(
-            "SELECT duration_ms FROM llm_request_traces WHERE duration_ms IS NOT NULL ORDER BY duration_ms ASC",
+            "SELECT duration_ms FROM llm_request_traces WHERE span_kind = 'CLIENT' AND duration_ms IS NOT NULL ORDER BY duration_ms ASC",
         )?;
         let durations =
             stmt.query_map([], |row| row.get::<_, u64>(0))?.collect::<Result<Vec<_>, _>>()?;
@@ -406,6 +515,25 @@ impl LlmTraceStore for SqliteLlmTraceStore {
             total_tokens,
         })
     }
+}
+
+fn ensure_column(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<(), LlmTraceStoreError> {
+    let pragma = format!("PRAGMA table_info({table})");
+    let mut stmt = conn.prepare(&pragma)?;
+    let existing =
+        stmt.query_map([], |row| row.get::<_, String>(1))?.collect::<Result<Vec<_>, _>>()?;
+    if existing.iter().any(|name| name == column) {
+        return Ok(());
+    }
+
+    let alter = format!("ALTER TABLE {table} ADD COLUMN {column} {definition}");
+    conn.execute(&alter, [])?;
+    Ok(())
 }
 
 fn extract_user_message(value: &Value) -> Option<String> {
@@ -471,13 +599,22 @@ fn extract_text_content(value: &Value) -> Option<String> {
 mod tests {
     use serde_json::json;
 
-    use super::{LlmTraceRecord, LlmTraceStatus, LlmTraceStore, SqliteLlmTraceStore};
+    use super::{
+        LlmTraceEvent, LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus, LlmTraceStore,
+        SqliteLlmTraceStore,
+    };
 
     #[test]
     fn sqlite_store_records_round_trip_and_summary() {
         let store = SqliteLlmTraceStore::in_memory().expect("store should initialize");
         let record = LlmTraceRecord {
             id: "trace-1".into(),
+            trace_id: "trace-group-1".into(),
+            span_id: "trace-1".into(),
+            parent_span_id: Some("root-span-1".into()),
+            root_span_id: "root-span-1".into(),
+            operation_name: "chat".into(),
+            span_kind: LlmTraceSpanKind::Client,
             turn_id: "turn-1".into(),
             run_id: "turn-1".into(),
             request_kind: "completion".into(),
@@ -502,6 +639,12 @@ mod tests {
             input_tokens: Some(12),
             output_tokens: Some(6),
             total_tokens: Some(18),
+            otel_attributes: json!({"gen_ai.operation.name": "chat"}),
+            events: vec![LlmTraceEvent {
+                name: "response.completed".into(),
+                at_ms: 180,
+                attributes: json!({"http.response.status_code": 200}),
+            }],
         };
 
         store.record(&record).expect("record should persist");
@@ -530,6 +673,12 @@ mod tests {
         store
             .record(&LlmTraceRecord {
                 id: "trace-chat".into(),
+                trace_id: "trace-chat-group".into(),
+                span_id: "trace-chat".into(),
+                parent_span_id: Some("trace-chat-root".into()),
+                root_span_id: "trace-chat-root".into(),
+                operation_name: "chat".into(),
+                span_kind: LlmTraceSpanKind::Client,
                 turn_id: "turn-chat".into(),
                 run_id: "turn-chat".into(),
                 request_kind: "completion".into(),
@@ -559,6 +708,8 @@ mod tests {
                 input_tokens: None,
                 output_tokens: None,
                 total_tokens: None,
+                otel_attributes: json!({"gen_ai.operation.name": "chat"}),
+                events: vec![],
             })
             .expect("record should persist");
 
@@ -572,6 +723,12 @@ mod tests {
         store
             .record(&LlmTraceRecord {
                 id: "trace-responses".into(),
+                trace_id: "trace-responses-group".into(),
+                span_id: "trace-responses".into(),
+                parent_span_id: Some("trace-responses-root".into()),
+                root_span_id: "trace-responses-root".into(),
+                operation_name: "chat".into(),
+                span_kind: LlmTraceSpanKind::Client,
                 turn_id: "turn-responses".into(),
                 run_id: "turn-responses".into(),
                 request_kind: "completion".into(),
@@ -601,6 +758,8 @@ mod tests {
                 input_tokens: None,
                 output_tokens: None,
                 total_tokens: None,
+                otel_attributes: json!({"gen_ai.operation.name": "chat"}),
+                events: vec![],
             })
             .expect("record should persist");
 

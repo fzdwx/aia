@@ -2,8 +2,8 @@
 
 ## 当前阶段
 
-- 阶段：Web 界面 ↔ 运行时桥接
-- 当前步骤：在 Web + server 主路径稳定的基础上，继续收口“可作为其他客户端驱动接口”的 server 形态；`apps/agent-server` 已把 `AgentRuntime` 从全局锁中拆出，改为后台 runtime worker，读路径也逐步改成 provider / history / current-turn 快照，Web 端用户消息已改为发送即显示
+- 阶段：核心工作区搭建之后的当前细分步骤：Web 界面 ↔ 运行时桥接收口
+- 当前步骤：在 Web + server 主路径稳定的基础上，继续收口“可作为其他客户端驱动接口”的 server 形态，并把 trace 诊断链路从“LLM 请求日志 + 前端推导 tool 节点”推进到“后端真实 span 持久化 + 前端直接消费真实 span”视角；`apps/agent-server` 已把 `AgentRuntime` 从全局锁中拆出，改为后台 runtime worker，读路径也逐步改成 provider / history / current-turn 快照，Web 端用户消息已改为发送即显示
 
 ## 已完成
 
@@ -59,23 +59,34 @@
 - 完成 trace loop 列表项直接基于 trace payload 提炼并展示本轮用户消息预览，不再依赖 chat store 关联，进入 trace 页面即可先判断这一轮在处理什么，再决定是否展开 step 明细
 - 完成对 `openai-responses` provider 私有续接链路的移除，统一回退为发送完整结构化上下文，规避兼容端在续接路径上的 5xx 失败
 - 完成共享协议层与 trace/UI 对 provider 私有 checkpoint 概念的彻底移除：`Completion` / `CompletionRequest` / `session-tape` / trace API / trace 页面不再暴露或持久化该能力
+- 完成 Web trace 页从“loop 列表 + 详情模态框”为主，收口为更接近 tracing 产品的三栏视图：左侧 recent loops，中间 span timeline，右侧 inspector；同一 agent loop 被解释为 root span，单次 LLM 请求解释为 CLIENT span，runtime tool 生命周期解释为 INTERNAL span
+- 完成 `llm-trace` 在架构文档与 README 中的职责补齐，并明确当前 trace 仍是本地 OTel-shaped 诊断模型，而不是完整 OpenTelemetry / OTLP exporter
+- 完成 `llm-trace` 持久化字段升级：为每条 LLM 请求补上稳定本地 `trace_id` / `span_id` / `parent_span_id` / `root_span_id`、`span_kind`、`operation_name` 与 `otel_attributes`，并补齐 SQLite migration，现有 trace 库无需重建
+- 完成共享 trace context 生成逻辑收口：runtime 请求构造与 context compression 不再各自手写 trace 标识，而是统一生成 loop trace id、root span id 与 request span id
+- 完成 `llm-trace` 本地 event timeline 落盘：记录 request started、首个 reasoning/text delta、模型建议 tool call、response completed/failed，并在 trace 页面 inspector 中展示所选 root/llm/tool 节点的事件时间线
+- 完成 runtime tool span 的后端真实落盘：工具执行不再只是前端基于 turn history 的临时推导节点，而是会继承当前 loop trace/root span 语义，在 `apps/agent-server` 中直接持久化为 INTERNAL span record，并带本地 tool started/completed/failed events
+- 完成 Web trace 页改为优先消费真实 tool span 记录：timeline / inspector 选中工具节点时会直接查看该工具 span 的 request/response/attributes/events，而不是回退查看父 LLM span
 
 ## 正在进行
 
 - 继续推进统一工具规范向外部协议映射与 MCP 接入
 - 收口 runtime worker 留在 `apps/agent-server`、哪些能力适合上移到 `agent-runtime` 的边界
 - 观察内嵌 `brush` 作为 shell 运行时的实际稳定性、命令兼容性与中断语义
+- 继续把 trace 数据模型从“本地 span store + event timeline”推进到更完整的 resources / richer events 模型，但暂不抢在工具协议映射与 MCP 之前做 exporter / collector 集成
 
 ## 下一步
 
 1. 推进 MCP 风格工具协议接入
 2. 把真正传输无关的 runtime 驱动辅助从 `apps/agent-server` 继续抽到共享层
-3. 在工具协议边界进一步收稳后，继续补强 shell 中断 / 长任务处理与更细粒度的工具运行时能力
-4. 桌面壳接入
+3. 在工具协议边界进一步收稳后，把 `llm-trace` 从当前本地 span record + event timeline 继续推进到更完整的 resources / richer events 形态
+4. 继续补强 shell 中断 / 长任务处理与更细粒度的工具运行时能力
+5. 桌面壳接入
 
 ## 为什么当前先做 Web，而不是继续堆终端界面
 
 因为共享运行时、会话模型和工具协议主链已经稳定，继续维护独立终端壳只会增加重复界面成本。当前更合理的方向是让 `apps/web` 直接承接主界面，再由桌面壳复用同一 Web 前端与 Rust 核心；而在主界面主路径已经收口后，下一优先级应回到统一工具规范的外部映射与 MCP 接入，而不是继续提前堆厚更多客户端表层能力。
+
+当前 trace 观测性也遵循同样原则：先把共享语义边界收稳，再谈 exporter 和外部 tracing 平台对接；如果工具协议和运行时事件边界还没完全稳定，就过早绑定某个 tracing 后端，只会让后续协议演进成本更高。
 
 ## 阻塞
 

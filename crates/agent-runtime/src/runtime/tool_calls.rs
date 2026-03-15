@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use agent_core::{
-    AbortSignal, LanguageModel, StreamEvent, ToolCall, ToolExecutionContext, ToolExecutor,
-    ToolOutputDelta, ToolResult,
+    AbortSignal, LanguageModel, LlmTraceRequestContext, StreamEvent, ToolCall,
+    ToolExecutionContext, ToolExecutor, ToolOutputDelta, ToolResult,
 };
 use serde_json::json;
 use session_tape::TapeEntry;
@@ -11,7 +11,11 @@ use crate::{RuntimeEvent, ToolInvocationLifecycle, ToolInvocationOutcome};
 
 use super::{
     AgentRuntime, RuntimeError,
-    helpers::{PreviousToolCall, build_tool_source_entry_ids, now_timestamp_ms, tool_call_signature},
+    helpers::build_tool_trace_context,
+    helpers::{
+        PreviousToolCall, build_tool_source_entry_ids, now_timestamp_ms, tool_call_signature,
+    },
+    tape_tools,
 };
 
 impl<M, T> AgentRuntime<M, T>
@@ -22,6 +26,7 @@ where
     pub(super) fn execute_tool_call(
         &mut self,
         turn_id: &str,
+        parent_trace_context: Option<&LlmTraceRequestContext>,
         assistant_entry_id: Option<u64>,
         tool_call_entry_id: u64,
         call: &ToolCall,
@@ -30,6 +35,8 @@ where
         on_delta: &mut dyn FnMut(StreamEvent),
     ) -> Result<ToolInvocationLifecycle, RuntimeError> {
         let started_at_ms = now_timestamp_ms();
+        let tool_trace_context =
+            parent_trace_context.map(|context| build_tool_trace_context(context, call));
         let available_tool_names = self
             .visible_tools()
             .into_iter()
@@ -45,11 +52,67 @@ where
                 tool_call_entry_id,
                 call,
                 started_at_ms,
+                tool_trace_context.clone(),
                 source_entry_ids,
                 "tool_call_rejected",
                 runtime_error,
                 on_delta,
             )?;
+            seen_tool_calls
+                .insert(call_signature, PreviousToolCall::from_outcome(&lifecycle.outcome));
+            return Ok(lifecycle);
+        }
+
+        // Intercept tape tools — they need direct access to the runtime.
+        if tape_tools::is_tape_tool(&call.tool_name) {
+            on_delta(StreamEvent::ToolCallStarted {
+                invocation_id: call.invocation_id.clone(),
+                tool_name: call.tool_name.clone(),
+                arguments: call.arguments.clone(),
+            });
+
+            let result = self.execute_tape_tool(call)?;
+
+            let tool_result_entry_id =
+                self.append_tape_entry(TapeEntry::tool_result(&result).with_run_id(turn_id))?;
+            source_entry_ids.push(tool_result_entry_id);
+            let tool_result_event_id = self.append_tape_entry(
+                TapeEntry::event(
+                    "tool_result_recorded",
+                    Some(json!({"tool_name": result.tool_name.clone(), "status": "ok"})),
+                )
+                .with_run_id(turn_id)
+                .with_meta(
+                    "source_entry_ids",
+                    json!(build_tool_source_entry_ids(
+                        assistant_entry_id,
+                        tool_call_entry_id,
+                        tool_result_entry_id,
+                    )),
+                ),
+            )?;
+            source_entry_ids.push(tool_result_event_id);
+
+            on_delta(StreamEvent::ToolCallCompleted {
+                invocation_id: call.invocation_id.clone(),
+                tool_name: call.tool_name.clone(),
+                content: result.content.clone(),
+                details: result.details.clone(),
+                failed: false,
+            });
+
+            let outcome = ToolInvocationOutcome::Succeeded { result: result.clone() };
+            self.publish_event(RuntimeEvent::ToolInvocation {
+                call: call.clone(),
+                outcome: outcome.clone(),
+            });
+            let lifecycle = ToolInvocationLifecycle {
+                call: call.clone(),
+                started_at_ms,
+                finished_at_ms: now_timestamp_ms(),
+                trace_context: tool_trace_context,
+                outcome,
+            };
             seen_tool_calls
                 .insert(call_signature, PreviousToolCall::from_outcome(&lifecycle.outcome));
             return Ok(lifecycle);
@@ -86,6 +149,7 @@ where
                         tool_call_entry_id,
                         call,
                         started_at_ms,
+                        tool_trace_context.clone(),
                         source_entry_ids,
                         "tool_result_rejected",
                         runtime_error,
@@ -133,6 +197,7 @@ where
                     call: call.clone(),
                     started_at_ms,
                     finished_at_ms: now_timestamp_ms(),
+                    trace_context: tool_trace_context,
                     outcome,
                 };
                 seen_tool_calls
@@ -146,6 +211,7 @@ where
                     tool_call_entry_id,
                     call,
                     started_at_ms,
+                    tool_trace_context.clone(),
                     source_entry_ids,
                     "tool_call_failed",
                     RuntimeError::tool(error),
@@ -165,6 +231,7 @@ where
         tool_call_entry_id: u64,
         call: &ToolCall,
         started_at_ms: u64,
+        tool_trace_context: Option<crate::ToolTraceContext>,
         source_entry_ids: &mut Vec<u64>,
         event_name: &str,
         runtime_error: RuntimeError,
@@ -208,6 +275,7 @@ where
             call: call.clone(),
             started_at_ms,
             finished_at_ms: now_timestamp_ms(),
+            trace_context: tool_trace_context,
             outcome,
         })
     }

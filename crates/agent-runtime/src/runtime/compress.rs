@@ -1,16 +1,10 @@
-use agent_core::{CompletionRequest, LanguageModel, LlmTraceRequestContext, ToolExecutor};
+use agent_core::{CompletionRequest, LanguageModel, ToolExecutor};
 use serde_json::json;
 
 use crate::RuntimeEvent;
 
-use super::{AgentRuntime, RuntimeError};
+use super::{AgentRuntime, RuntimeError, helpers::build_llm_trace_context};
 
-const SUMMARY_PROMPT: &str = "\
-Summarize the conversation so far into a concise handoff note.\n\
-Include: key decisions, files modified, outstanding tasks, and current state.\n\
-Output plain text only.";
-
-const SUMMARY_MAX_OUTPUT_TOKENS: u32 = 2048;
 const MIN_ENTRIES_FOR_COMPRESSION: usize = 4;
 
 impl<M, T> AgentRuntime<M, T>
@@ -27,36 +21,22 @@ where
         if view.conversation.len() < MIN_ENTRIES_FOR_COMPRESSION {
             return Ok(());
         }
-        let source_entry_ids = view.entries.iter().map(|entry| entry.id).collect::<Vec<_>>();
 
         let request = CompletionRequest {
             model: self.model_identity.clone(),
-            instructions: Some(SUMMARY_PROMPT.to_string()),
+            instructions: Some(agent_prompts::HANDOFF_SUMMARY.to_string()),
             conversation: view.conversation,
-            max_output_tokens: Some(SUMMARY_MAX_OUTPUT_TOKENS),
+            max_output_tokens: Some(agent_prompts::HANDOFF_SUMMARY_MAX_OUTPUT_TOKENS),
             available_tools: Vec::new(),
-            trace_context: turn_id.map(|turn_id| LlmTraceRequestContext {
-                trace_id: format!("{turn_id}-compression-{step_index}"),
-                turn_id: turn_id.to_string(),
-                run_id: turn_id.to_string(),
-                request_kind: "compression".to_string(),
-                step_index,
+            trace_context: turn_id.map(|turn_id| {
+                build_llm_trace_context(turn_id, turn_id, "compression", step_index)
             }),
         };
 
         let completion = self.model.complete(request).map_err(RuntimeError::model)?;
         let summary = completion.plain_text();
 
-        self.record_handoff(
-            "context_compression",
-            json!({
-                "phase": "context_compression",
-                "summary": summary,
-                "next_steps": [],
-                "source_entry_ids": source_entry_ids,
-                "owner": "runtime"
-            }),
-        )?;
+        self.record_handoff("context_compression", json!({ "summary": summary }))?;
 
         self.publish_event(RuntimeEvent::ContextCompressed { summary });
         Ok(())

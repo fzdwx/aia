@@ -15,10 +15,23 @@ pub struct ContextStats {
 pub type RuntimeSubscriberId = u64;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ToolTraceContext {
+    pub trace_id: String,
+    pub span_id: String,
+    pub parent_span_id: String,
+    pub root_span_id: String,
+    pub operation_name: String,
+    pub parent_request_kind: String,
+    pub parent_step_index: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ToolInvocationLifecycle {
     pub call: ToolCall,
     pub started_at_ms: u64,
     pub finished_at_ms: u64,
+    #[serde(default)]
+    pub trace_context: Option<ToolTraceContext>,
     pub outcome: ToolInvocationOutcome,
 }
 

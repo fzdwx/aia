@@ -3,10 +3,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use agent_core::{Message, Role, ToolCall};
+use agent_core::{LlmTraceRequestContext, Message, Role, ToolCall};
 use session_tape::Anchor;
 
-use crate::ToolInvocationOutcome;
+use crate::{ToolInvocationOutcome, ToolTraceContext};
 
 pub(super) fn build_tool_source_entry_ids(
     assistant_entry_id: Option<u64>,
@@ -49,28 +49,59 @@ pub(super) fn now_timestamp_ms() -> u64 {
         as u64
 }
 
-pub(super) fn anchor_state_message(anchor: &Anchor) -> Message {
-    let state = &anchor.state;
-    let phase = state.get("phase").and_then(|v| v.as_str()).unwrap_or(&anchor.name);
-    let summary = state.get("summary").and_then(|v| v.as_str()).unwrap_or("");
-    let next_steps = state
-        .get("next_steps")
-        .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join("、"))
-        .unwrap_or_default();
-    let source_entry_ids = state
-        .get("source_entry_ids")
-        .and_then(|v| v.as_array())
-        .map(|arr| format!("{:?}", arr.iter().filter_map(|v| v.as_u64()).collect::<Vec<_>>()))
-        .unwrap_or_else(|| "[]".into());
-    let owner = state.get("owner").and_then(|v| v.as_str()).unwrap_or("");
-    Message::new(
-        Role::System,
-        format!(
-            "当前阶段: {}\n锚点摘要: {}\n下一步: {}\n来源条目: {}\n所有者: {}",
-            phase, summary, next_steps, source_entry_ids, owner,
-        ),
-    )
+pub(super) fn anchor_state_message(anchor: &Anchor) -> Option<Message> {
+    let summary = anchor
+        .state
+        .get("summary")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())?;
+    Some(Message::new(
+        Role::User,
+        format!("[context summary]\n{summary}"),
+    ))
+}
+
+pub(super) fn build_llm_trace_context(
+    turn_id: &str,
+    run_id: &str,
+    request_kind: &str,
+    step_index: u32,
+) -> LlmTraceRequestContext {
+    let trace_id = format!("aia-trace-{run_id}");
+    let root_span_id = format!("aia-span-{run_id}-root");
+    let span_id = format!("aia-span-{run_id}-{request_kind}-{step_index}");
+    let operation_name = match request_kind {
+        "compression" => "summarize",
+        _ => "chat",
+    }
+    .to_string();
+
+    LlmTraceRequestContext {
+        trace_id,
+        span_id,
+        parent_span_id: Some(root_span_id.clone()),
+        root_span_id,
+        operation_name,
+        turn_id: turn_id.to_string(),
+        run_id: run_id.to_string(),
+        request_kind: request_kind.to_string(),
+        step_index,
+    }
+}
+
+pub(super) fn build_tool_trace_context(
+    parent: &LlmTraceRequestContext,
+    call: &ToolCall,
+) -> ToolTraceContext {
+    ToolTraceContext {
+        trace_id: parent.trace_id.clone(),
+        span_id: format!("aia-span-{}-tool-{}", parent.run_id, call.invocation_id),
+        parent_span_id: parent.span_id.clone(),
+        root_span_id: parent.root_span_id.clone(),
+        operation_name: "execute_tool".to_string(),
+        parent_request_kind: parent.request_kind.clone(),
+        parent_step_index: parent.step_index,
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

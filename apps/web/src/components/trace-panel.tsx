@@ -1,54 +1,40 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
 import {
+  AlertTriangle,
   ArrowLeft,
-  ChevronRight,
-  Database,
+  Bot,
+  Clock3,
+  ExternalLink,
+  Loader2,
   RefreshCw,
-  Workflow,
+  Waypoints,
+  Wrench,
 } from "lucide-react"
 
 import { TraceDetailModal } from "@/components/trace-detail-modal"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Separator } from "@/components/ui/separator"
-import type { TraceListItem } from "@/lib/types"
+import type { TraceEvent, TraceRecord } from "@/lib/types"
+import {
+  buildTraceLoopGroups,
+  type LoopTimelineNode,
+  type TraceLoopGroup,
+} from "@/lib/trace-presentation"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat-store"
 import { useTraceStore } from "@/stores/trace-store"
 
-type LoopGroup = {
-  key: string
-  turnId: string
-  runId: string
-  userMessage: string | null
-  model: string
-  protocol: string
-  endpointPath: string
-  latestStartedAtMs: number
-  totalDurationMs: number
-  totalTokens: number
-  stepCount: number
-  finalStatus: "completed" | "failed" | "partial"
-  traces: TraceListItem[]
-  pathSummary: string
-  latestError: string | null
-}
+type JsonRecord = Record<string, unknown>
+type InspectorTab = "overview" | "content" | "events"
 
 function formatDateTime(value: number) {
-  return new Date(value).toLocaleString("en-US", {
+  return new Date(value).toLocaleString("zh-CN", {
     hour12: false,
     month: "2-digit",
     day: "2-digit",
@@ -58,28 +44,18 @@ function formatDateTime(value: number) {
   })
 }
 
-function MetricCard({
-  label,
-  value,
-  icon,
-}: {
-  label: string
-  value: string
-  icon: React.ReactNode
-}) {
-  return (
-    <Card size="sm" className="gap-2">
-      <CardHeader className="flex flex-row items-center justify-between pb-0">
-        <CardDescription className="text-[11px] tracking-wide uppercase">
-          {label}
-        </CardDescription>
-        <div className="text-muted-foreground">{icon}</div>
-      </CardHeader>
-      <CardContent>
-        <div className="text-lg font-semibold tabular-nums">{value}</div>
-      </CardContent>
-    </Card>
-  )
+function formatDuration(value: number | null | undefined) {
+  if (value == null) return "-"
+  if (value < 1000) return `${value} ms`
+  if (value < 60_000) return `${(value / 1000).toFixed(1)} s`
+
+  const minutes = Math.floor(value / 60_000)
+  const seconds = Math.floor((value % 60_000) / 1000)
+  return `${minutes}m ${seconds}s`
+}
+
+function formatCount(value: number | null | undefined) {
+  return value != null ? value.toLocaleString("en-US") : "-"
 }
 
 function truncate(text: string, max: number) {
@@ -87,81 +63,58 @@ function truncate(text: string, max: number) {
   return `${text.slice(0, max - 1)}...`
 }
 
-function summarizeStopReason(trace: TraceListItem): string | null {
-  if (trace.status === "failed") return "failed"
-  // 只有非 completed 的状态才显示，避免重复
-  if (trace.stop_reason && trace.stop_reason !== "completed") {
-    return trace.stop_reason
+function compactId(value: string, head = 8, tail = 6) {
+  if (value.length <= head + tail + 1) return value
+  return `${value.slice(0, head)}...${value.slice(-tail)}`
+}
+
+function isRecord(value: unknown): value is JsonRecord {
+  return value != null && typeof value === "object" && !Array.isArray(value)
+}
+
+function asRecord(value: unknown): JsonRecord | null {
+  return isRecord(value) ? value : null
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : []
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null
+}
+
+function asEventRecord(value: unknown): Record<string, unknown> | null {
+  return isRecord(value) ? value : null
+}
+
+function extractText(value: unknown): string {
+  if (typeof value === "string") return value
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => extractText(item))
+      .filter(Boolean)
+      .join("\n")
+      .trim()
   }
-  return null
-}
 
-function summarizeLoopStatus(traces: TraceListItem[]) {
-  const sorted = [...traces].sort(
-    (left, right) => left.step_index - right.step_index
-  )
-  const finalTrace = sorted[sorted.length - 1]
-  const hasFailure = sorted.some((trace) => trace.status === "failed")
+  const record = asRecord(value)
+  if (!record) return ""
 
-  if (finalTrace?.status === "failed") return "failed" as const
-  if (hasFailure) return "partial" as const
-  return "completed" as const
-}
-
-function buildLoopGroups(traces: TraceListItem[]): LoopGroup[] {
-  const groups = new Map<string, TraceListItem[]>()
-
-  for (const trace of traces) {
-    const key = `${trace.turn_id}:${trace.run_id}`
-    const items = groups.get(key)
-    if (items) {
-      items.push(trace)
-    } else {
-      groups.set(key, [trace])
-    }
+  for (const key of ["text", "summary_text", "content", "output", "value"]) {
+    const text = extractText(record[key])
+    if (text) return text
   }
 
-  return Array.from(groups.entries())
-    .map(([key, items]) => {
-      const tracesByStep = [...items].sort(
-        (left, right) => left.step_index - right.step_index
-      )
-      const latestTrace = [...items].sort(
-        (left, right) => right.started_at_ms - left.started_at_ms
-      )[0]
-
-      return {
-        key,
-        turnId: latestTrace.turn_id,
-        runId: latestTrace.run_id,
-        userMessage:
-          tracesByStep.find((trace) => trace.user_message)?.user_message ??
-          null,
-        model: latestTrace.model,
-        protocol: latestTrace.protocol,
-        endpointPath: latestTrace.endpoint_path,
-        latestStartedAtMs: latestTrace.started_at_ms,
-        totalDurationMs: tracesByStep.reduce(
-          (sum, trace) => sum + (trace.duration_ms ?? 0),
-          0
-        ),
-        totalTokens: tracesByStep.reduce(
-          (sum, trace) => sum + (trace.total_tokens ?? 0),
-          0
-        ),
-        stepCount: tracesByStep.length,
-        finalStatus: summarizeLoopStatus(tracesByStep),
-        traces: tracesByStep,
-        pathSummary: tracesByStep.map(summarizeStopReason).join(" -> "),
-        latestError:
-          [...tracesByStep].reverse().find((trace) => trace.error)?.error ??
-          null,
-      }
-    })
-    .sort((left, right) => right.latestStartedAtMs - left.latestStartedAtMs)
+  return Object.values(record)
+    .map((item) => extractText(item))
+    .filter(Boolean)
+    .join(" ")
+    .trim()
 }
 
-function loopStatusVariant(status: LoopGroup["finalStatus"]) {
+function loopBadgeVariant(status: TraceLoopGroup["finalStatus"]) {
   switch (status) {
     case "failed":
       return "destructive" as const
@@ -172,268 +125,1549 @@ function loopStatusVariant(status: LoopGroup["finalStatus"]) {
   }
 }
 
-function traceStatusVariant(status: TraceListItem["status"]) {
-  if (status === "failed") return "destructive" as const
-  if (status === "succeeded") return "outline" as const
-  return "secondary" as const
+function findActiveNode(
+  group: TraceLoopGroup | null,
+  selectedNodeId: string | null
+) {
+  if (!group) return null
+  if (selectedNodeId) {
+    const matched = group.timeline.find((node) => node.id === selectedNodeId)
+    if (matched) return matched
+  }
+  return group.timeline[group.timeline.length - 1] ?? null
+}
+
+function collectSystemPrompts(trace: TraceRecord | null) {
+  if (!trace) return []
+
+  const request = asRecord(trace.provider_request)
+  if (!request) return []
+
+  const prompts: string[] = []
+  const instructions = asString(request.instructions)
+  if (instructions) {
+    prompts.push(instructions)
+  }
+
+  const messages = asArray(request.messages)
+  for (const item of messages) {
+    const record = asRecord(item)
+    if (record?.role === "system") {
+      const content = extractText(record.content)
+      if (content) prompts.push(content)
+    }
+  }
+
+  const input = asArray(request.input)
+  for (const item of input) {
+    const record = asRecord(item)
+    if (record?.role === "system") {
+      const content = extractText(record.content)
+      if (content) prompts.push(content)
+    }
+  }
+
+  return prompts
+}
+
+function collectToolNames(trace: TraceRecord | null) {
+  if (!trace) return []
+
+  const requestSummary = asRecord(trace.request_summary)
+  const explicit = asArray(requestSummary?.tool_names).filter(
+    (value): value is string => typeof value === "string"
+  )
+  if (explicit.length > 0) return explicit
+
+  const request = asRecord(trace.provider_request)
+  return asArray(request?.tools)
+    .map((tool) => {
+      const record = asRecord(tool)
+      const fn = asRecord(record?.function)
+      return asString(record?.name) ?? asString(fn?.name)
+    })
+    .filter((value): value is string => Boolean(value))
+}
+
+function collectAssistantPreview(trace: TraceRecord | null) {
+  if (!trace) return null
+
+  const summary = asRecord(trace.response_summary)
+  const assistantText =
+    asString(summary?.assistant_text) || extractText(summary?.assistant_text)
+
+  if (assistantText) return assistantText
+
+  return extractAssistantPreviewFromResponseBody(trace.response_body)
+}
+
+function extractAssistantPreviewFromResponseBody(body: string | null) {
+  if (!body) return null
+
+  const parsedSse = extractAssistantPreviewFromSseBody(body)
+  if (parsedSse) return parsedSse
+
+  const parsedJson = extractAssistantPreviewFromJsonBody(body)
+  if (parsedJson) return parsedJson
+
+  return null
+}
+
+function extractAssistantPreviewFromJsonBody(body: string) {
+  try {
+    const payload = JSON.parse(body)
+    const texts = collectAssistantTextsFromPayload(payload)
+    return texts.length > 0 ? texts.join("\n") : null
+  } catch {
+    return null
+  }
+}
+
+function extractAssistantPreviewFromSseBody(body: string) {
+  const lines = body.split("\n")
+  const outputChunks: string[] = []
+  const completedPayloadTexts: string[] = []
+
+  for (const line of lines) {
+    const data = line.startsWith("data: ") ? line.slice(6) : null
+    if (!data || data === "[DONE]") continue
+
+    try {
+      const event = JSON.parse(data)
+      const type = asString(asRecord(event)?.type)
+
+      if (type === "response.output_text.delta") {
+        const text = extractText(asRecord(event)?.delta)
+        if (text) outputChunks.push(text)
+        continue
+      }
+
+      if (type === "response.output_text.done" && outputChunks.length === 0) {
+        const text = extractText(asRecord(event)?.text)
+        if (text) outputChunks.push(text)
+        continue
+      }
+
+      if (type === "response.completed") {
+        const response = asRecord(event)?.response
+        const texts = collectAssistantTextsFromPayload(response)
+        if (texts.length > 0) {
+          completedPayloadTexts.push(...texts)
+        }
+      }
+    } catch {
+      continue
+    }
+  }
+
+  if (outputChunks.length > 0) {
+    return outputChunks.join("").trim() || null
+  }
+
+  if (completedPayloadTexts.length > 0) {
+    return completedPayloadTexts.join("\n").trim() || null
+  }
+
+  return null
+}
+
+function collectAssistantTextsFromPayload(payload: unknown): string[] {
+  const record = asRecord(payload)
+  if (!record) return []
+
+  const texts: string[] = []
+  const push = (value: unknown) => {
+    const text = extractText(value).trim()
+    if (text && !texts.includes(text)) {
+      texts.push(text)
+    }
+  }
+
+  const choices = asArray(record.choices)
+  for (const choice of choices) {
+    const message = asRecord(asRecord(choice)?.message)
+    if (!message) continue
+    push(message.content)
+  }
+
+  const output = asArray(record.output)
+  for (const item of output) {
+    const outputItem = asRecord(item)
+    if (!outputItem) continue
+    if (asString(outputItem.role) && asString(outputItem.role) !== "assistant") {
+      continue
+    }
+
+    if (asString(outputItem.type) === "message") {
+      push(outputItem.content)
+      continue
+    }
+
+    push(outputItem.content)
+  }
+
+  return texts
+}
+
+function loopWindowMs(group: TraceLoopGroup) {
+  const explicit =
+    group.finishedAtMs != null ? group.finishedAtMs - group.startedAtMs : null
+  return Math.max(1, explicit ?? group.totalDurationMs ?? 1)
+}
+
+function nodeOffsetPercent(node: LoopTimelineNode, group: TraceLoopGroup) {
+  const window = loopWindowMs(group)
+  return Math.max(0, ((node.startedAtMs - group.startedAtMs) / window) * 100)
+}
+
+function nodeWidthPercent(node: LoopTimelineNode, group: TraceLoopGroup) {
+  const window = loopWindowMs(group)
+  const raw = ((Math.max(node.durationMs, 1) || 1) / window) * 100
+  return Math.max(2, Math.min(100, raw))
+}
+
+function relativeOffsetLabel(node: LoopTimelineNode, group: TraceLoopGroup) {
+  const delta = Math.max(0, node.startedAtMs - group.startedAtMs)
+  return `+${formatDuration(delta)}`
+}
+
+function nodeTitle(node: LoopTimelineNode) {
+  switch (node.kind) {
+    case "agent_root":
+      return "invoke_agent"
+    case "llm_span":
+      return node.trace.model
+    case "tool_span":
+      return node.trace.model
+  }
+}
+
+function nodeSubtitle(node: LoopTimelineNode) {
+  switch (node.kind) {
+    case "agent_root":
+      return "root span"
+    case "llm_span":
+      return node.trace.total_tokens != null && node.trace.total_tokens > 0
+        ? `${node.operationName} · ${formatCount(node.trace.total_tokens)} tok`
+        : node.operationName
+    case "tool_span":
+      return node.operationName
+  }
+}
+
+function nodeTone(node: LoopTimelineNode) {
+  if (node.kind === "agent_root") {
+    return {
+      frame: "border-sky-500/20 bg-sky-500/[0.04]",
+      dot: "border-sky-500/35 bg-sky-500/20 text-sky-100",
+      bar: "border-sky-500/35 bg-sky-500/18",
+    }
+  }
+
+  if (node.kind === "tool_span") {
+    return node.status === "error"
+      ? {
+          frame: "border-destructive/25 bg-destructive/[0.04]",
+          dot: "border-destructive/30 bg-destructive/15 text-destructive",
+          bar: "border-destructive/30 bg-destructive/20",
+        }
+      : {
+          frame: "border-amber-500/20 bg-amber-500/[0.04]",
+          dot: "border-amber-500/30 bg-amber-500/15 text-amber-100",
+          bar: "border-amber-500/30 bg-amber-500/20",
+        }
+  }
+
+  return node.status === "error"
+    ? {
+        frame: "border-destructive/25 bg-destructive/[0.04]",
+        dot: "border-destructive/30 bg-destructive/15 text-destructive",
+        bar: "border-destructive/30 bg-destructive/20",
+      }
+    : {
+        frame: "border-border/40 bg-background/80",
+        dot: "border-border/45 bg-muted/35 text-foreground/80",
+        bar: "border-border/40 bg-foreground/[0.08]",
+      }
+}
+
+function summarizeEvent(event: TraceEvent) {
+  const attributes = asEventRecord(event.attributes)
+  switch (event.name) {
+    case "response.first_text_delta":
+    case "response.first_reasoning_delta":
+      return asString(attributes?.preview) ?? null
+    case "response.tool_call_started":
+      return asString(attributes?.tool_name) ?? null
+    case "response.completed":
+      return asString(attributes?.stop_reason) ?? null
+    case "response.failed":
+      return asString(attributes?.error) ?? null
+    default:
+      return null
+  }
+}
+
+function buildRootEvents(group: TraceLoopGroup) {
+  const events: Array<{
+    key: string
+    name: string
+    at_ms: number
+    summary?: string | null
+    attributes?: Record<string, unknown> | null
+  }> = [
+    {
+      key: `${group.key}:root:start`,
+      name: "loop.started",
+      at_ms: group.startedAtMs,
+      summary: group.userMessage ? truncate(group.userMessage, 120) : null,
+      attributes: {
+        turn_id: group.turnId,
+        run_id: group.runId,
+      },
+    },
+  ]
+
+  if (group.finishedAtMs != null) {
+    events.push({
+      key: `${group.key}:root:end`,
+      name: group.finalStatus === "failed" ? "loop.failed" : "loop.completed",
+      at_ms: group.finishedAtMs,
+      summary: `${group.stepCount} llm spans · ${group.toolCount} tool spans`,
+      attributes: {
+        status: group.finalStatus,
+        llm_spans: group.stepCount,
+        tool_spans: group.toolCount,
+        total_tokens: group.totalTokens,
+      },
+    })
+  }
+
+  return events
+}
+
+function buildToolEvents(
+  node: Extract<LoopTimelineNode, { kind: "tool_span" }>
+) {
+  const outcome =
+    node.trace.status === "failed" ? "tool.failed" : "tool.completed"
+
+  return [
+    {
+      key: `${node.id}:start`,
+      name: "tool.started",
+      at_ms: node.startedAtMs,
+      summary: node.trace.model,
+      attributes: {
+        span_id: node.trace.span_id,
+        tool_name: node.trace.model,
+      },
+    },
+    {
+      key: `${node.id}:end`,
+      name: outcome,
+      at_ms: node.finishedAtMs ?? node.startedAtMs,
+      summary: node.trace.error
+        ? truncate(node.trace.error, 120)
+        : (node.trace.stop_reason ?? null),
+      attributes: {
+        span_id: node.trace.span_id,
+        tool_name: node.trace.model,
+        error: node.trace.error,
+      },
+    },
+  ]
+}
+
+function DetailList({
+  items,
+}: {
+  items: Array<{ label: string; value: ReactNode }>
+}) {
+  return (
+    <dl className="divide-y divide-border/25 overflow-hidden rounded-lg border border-border/35 bg-background/70">
+      {items.map((item) => (
+        <div
+          key={item.label}
+          className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1 px-2.5 py-2"
+        >
+          <dt className="text-[10px] font-medium tracking-[0.12em] text-muted-foreground uppercase">
+            {item.label}
+          </dt>
+          <dd className="min-w-0 text-right text-[12px] leading-5 text-foreground">
+            {item.value}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+function SummaryItem({
+  label,
+  value,
+  icon,
+  tone = "default",
+}: {
+  label: string
+  value: string
+  icon: ReactNode
+  tone?: "default" | "warning"
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-xl border px-2.5 py-2",
+        tone === "warning"
+          ? "border-amber-500/25 bg-amber-500/[0.04]"
+          : "border-border/35 bg-background/70"
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] tracking-[0.12em] text-muted-foreground uppercase">
+          {label}
+        </span>
+        <span className="text-muted-foreground">{icon}</span>
+      </div>
+      <p className="mt-1 text-[14px] font-medium text-foreground tabular-nums">
+        {value}
+      </p>
+    </div>
+  )
+}
+
+function Section({
+  title,
+  action,
+  children,
+}: {
+  title: string
+  action?: ReactNode
+  children: ReactNode
+}) {
+  return (
+    <section className="space-y-2.5 rounded-xl border border-border/35 bg-background/70 p-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
+          {title}
+        </h3>
+        {action}
+      </div>
+      {children}
+    </section>
+  )
+}
+
+function TabButton({
+  active,
+  children,
+  onClick,
+}: {
+  active: boolean
+  children: ReactNode
+  onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "rounded-md px-2 py-1 text-[11px] font-medium tracking-[0.08em] uppercase transition-colors",
+        active
+          ? "bg-foreground text-background"
+          : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+function FieldBlock({
+  label,
+  children,
+}: {
+  label: string
+  children: ReactNode
+}) {
+  return (
+    <div className="space-y-1.5">
+      <p className="text-[10px] font-medium tracking-[0.12em] text-muted-foreground uppercase">
+        {label}
+      </p>
+      {children}
+    </div>
+  )
+}
+
+function TextBlock({
+  value,
+  className,
+}: {
+  value: string | null
+  className?: string
+}) {
+  if (!value) {
+    return <p className="text-[12px] text-muted-foreground">-</p>
+  }
+
+  return (
+    <pre
+      className={cn(
+        "overflow-x-auto rounded-lg border border-border/25 bg-muted/20 px-2.5 py-2 text-[12px] leading-5 whitespace-pre-wrap text-foreground",
+        className
+      )}
+    >
+      {value}
+    </pre>
+  )
+}
+
+function formatScalar(value: unknown): string {
+  if (typeof value === "string") return value
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value)
+  }
+  if (value == null) return "-"
+  return JSON.stringify(value)
+}
+
+function StructuredArguments({ value }: { value: unknown }) {
+  const record = asRecord(value)
+
+  if (!record || Object.keys(record).length === 0) {
+    return <p className="text-[12px] text-muted-foreground">No arguments.</p>
+  }
+
+  const scalarEntries = Object.entries(record).filter(([, entry]) => {
+    return (
+      entry == null ||
+      typeof entry === "string" ||
+      typeof entry === "number" ||
+      typeof entry === "boolean"
+    )
+  })
+  const nestedEntries = Object.entries(record).filter(([, entry]) => {
+    return !(
+      entry == null ||
+      typeof entry === "string" ||
+      typeof entry === "number" ||
+      typeof entry === "boolean"
+    )
+  })
+
+  return (
+    <div className="space-y-2">
+      {scalarEntries.length > 0 ? (
+        <DetailList
+          items={scalarEntries.map(([label, entry]) => ({
+            label,
+            value: formatScalar(entry),
+          }))}
+        />
+      ) : null}
+      {nestedEntries.map(([label, entry]) => (
+        <RawJson key={label} title={label} value={entry} />
+      ))}
+    </div>
+  )
+}
+
+function ExpandableTextBlock({
+  value,
+  tone = "default",
+}: {
+  value: string | null
+  tone?: "default" | "danger"
+}) {
+  const [open, setOpen] = useState(false)
+
+  if (!value) {
+    return <p className="text-[12px] text-muted-foreground">-</p>
+  }
+
+  const needsCollapse = value.length > 320 || value.split("\n").length > 10
+
+  return (
+    <div className="space-y-2">
+      <pre
+        className={cn(
+          "overflow-auto rounded-lg border border-border/25 bg-muted/20 px-2.5 py-2 text-[12px] leading-5 whitespace-pre-wrap text-foreground",
+          !open && needsCollapse && "max-h-48",
+          tone === "danger" &&
+            "border-destructive/20 bg-destructive/[0.04] text-destructive"
+        )}
+      >
+        {value}
+      </pre>
+      {needsCollapse ? (
+        <button
+          onClick={() => setOpen((current) => !current)}
+          className="text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+        >
+          {open ? "Collapse" : "Expand"}
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+function RawJson({ title, value }: { title: string; value: unknown }) {
+  return (
+    <Collapsible className="rounded-lg border border-border/35 bg-muted/[0.02]">
+      <CollapsibleTrigger className="flex w-full items-center justify-between px-2.5 py-2 text-left">
+        <span className="text-[12px] font-medium text-foreground">{title}</span>
+        <span className="text-[11px] text-muted-foreground">JSON</span>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="border-t border-border/25 px-2.5 py-2">
+        <pre className="overflow-x-auto rounded-md bg-muted/25 p-3 text-[11px] leading-5 text-foreground">
+          {JSON.stringify(value, null, 2)}
+        </pre>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
+function EventTimeline({
+  events,
+  emptyLabel,
+}: {
+  events: Array<{
+    key: string
+    name: string
+    at_ms: number
+    summary?: string | null
+    attributes?: Record<string, unknown> | null
+  }>
+  emptyLabel: string
+}) {
+  if (events.length === 0) {
+    return <p className="text-[12px] text-muted-foreground">{emptyLabel}</p>
+  }
+
+  return (
+    <div className="relative space-y-1.5 pl-5 before:absolute before:top-2 before:bottom-2 before:left-[7px] before:w-px before:bg-border/25">
+      {events.map((event) => (
+        <Collapsible
+          key={event.key}
+          className="relative rounded-lg border border-border/35 bg-background/80 before:absolute before:top-3 before:-left-[12px] before:size-1.5 before:rounded-full before:bg-foreground/35"
+        >
+          <CollapsibleTrigger className="flex w-full items-start justify-between gap-3 px-2.5 py-2 text-left">
+            <div className="min-w-0 space-y-0.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[12px] font-medium text-foreground">
+                  {event.name}
+                </span>
+                <span className="text-[11px] text-muted-foreground">
+                  {formatDateTime(event.at_ms)}
+                </span>
+              </div>
+              {event.summary ? (
+                <p className="text-[12px] leading-5 text-muted-foreground">
+                  {event.summary}
+                </p>
+              ) : null}
+            </div>
+          </CollapsibleTrigger>
+          {event.attributes && Object.keys(event.attributes).length > 0 ? (
+            <CollapsibleContent className="border-t border-border/25 px-2.5 py-2">
+              <pre className="overflow-x-auto rounded-md bg-muted/25 p-3 text-[11px] leading-5 text-foreground">
+                {JSON.stringify(event.attributes, null, 2)}
+              </pre>
+            </CollapsibleContent>
+          ) : null}
+        </Collapsible>
+      ))}
+    </div>
+  )
+}
+
+function TraceActiveStrip({
+  group,
+}: {
+  group: TraceLoopGroup
+}) {
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-border/40 bg-card">
+      <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.03),transparent_45%)]" />
+      <div className="absolute inset-y-0 right-0 w-1/2 bg-[radial-gradient(circle_at_top_right,rgba(56,189,248,0.14),transparent_55%)]" />
+      <div className="absolute inset-0 bg-[linear-gradient(90deg,transparent_0%,rgba(255,255,255,0.02)_50%,transparent_100%)]" />
+      <div className="relative grid gap-3 px-3 py-3 md:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-serif text-[18px] font-semibold tracking-tight text-foreground">
+              trace
+            </span>
+            <Badge variant={loopBadgeVariant(group.finalStatus)} className="text-[10px]">
+              {group.finalStatus}
+            </Badge>
+            <span className="rounded-md border border-border/35 bg-background/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
+              {compactId(group.key, 12, 8)}
+            </span>
+          </div>
+          <p className="mt-2 max-w-[760px] text-[13px] leading-6 text-foreground/85">
+            {truncate(group.userMessage ?? "User message unavailable.", 180)}
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+            <span>turn {group.turnId}</span>
+            <span className="text-border">/</span>
+            <span>run {compactId(group.runId, 8, 6)}</span>
+            <span className="text-border">/</span>
+            <span>{formatDateTime(group.startedAtMs)}</span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-2 xl:grid-cols-4">
+          <SummaryItem
+            label="window"
+            value={formatDuration(loopWindowMs(group))}
+            icon={<Clock3 className="size-3.5" />}
+          />
+          <SummaryItem
+            label="llm"
+            value={String(group.stepCount)}
+            icon={<Bot className="size-3.5" />}
+          />
+          <SummaryItem
+            label="tools"
+            value={String(group.toolCount)}
+            icon={<Wrench className="size-3.5" />}
+          />
+          <SummaryItem
+            label="flags"
+            value={group.failedToolCount > 0 ? String(group.failedToolCount) : "0"}
+            tone={group.failedToolCount > 0 ? "warning" : "default"}
+            icon={<AlertTriangle className="size-3.5" />}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function RecentLoopRow({
+  group,
+  active,
+  onSelect,
+}: {
+  group: TraceLoopGroup
+  active: boolean
+  onSelect: () => void
+}) {
+  return (
+    <button
+      onClick={onSelect}
+      className={cn(
+        "w-full rounded-xl border px-2.5 py-2 text-left transition-colors",
+        active
+          ? "border-foreground/20 bg-accent/35"
+          : "border-border/30 bg-background/70 hover:bg-accent/20"
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="font-mono text-[11px] text-foreground/90">
+            {compactId(group.key)}
+          </span>
+          <Badge variant={loopBadgeVariant(group.finalStatus)} className="text-[10px]">
+            {group.finalStatus}
+          </Badge>
+        </div>
+        <span className="text-[10px] text-muted-foreground">
+          {formatDateTime(group.latestStartedAtMs)}
+        </span>
+      </div>
+
+      <p className="mt-1.5 text-[12px] leading-5 text-foreground/85">
+        {truncate(group.userMessage ?? "User message unavailable.", 84)}
+      </p>
+
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground/75">
+        <span>{group.turnId}</span>
+        <span>{group.stepCount} llm</span>
+        <span>{group.toolCount} tool</span>
+        <span>{formatDuration(loopWindowMs(group))}</span>
+      </div>
+
+      {group.latestError ? (
+        <p className="mt-1.5 line-clamp-2 text-[11px] leading-5 text-destructive">
+          {group.latestError}
+        </p>
+      ) : null}
+    </button>
+  )
+}
+
+function WaterfallScale({ group }: { group: TraceLoopGroup }) {
+  const window = loopWindowMs(group)
+  const markers = [0, 25, 50, 75, 100]
+  const markerLabels = markers.map((marker) =>
+    formatDuration(Math.round((window * marker) / 100))
+  )
+
+  return (
+    <div className="grid grid-cols-[minmax(180px,240px)_minmax(0,1fr)_72px] items-end gap-3 px-1 pb-2">
+      <div className="text-[10px] tracking-[0.12em] text-muted-foreground uppercase">
+        span
+      </div>
+      <div className="space-y-1">
+        <div className="flex items-center justify-between gap-2 px-0.5 font-mono text-[10px] text-muted-foreground/90">
+          {markerLabels.map((label, index) => (
+            <span
+              key={`${label}-${index}`}
+              className={cn(
+                "shrink-0",
+                index === 0 && "text-left",
+                index > 0 && index < markerLabels.length - 1 && "text-center",
+                index === markerLabels.length - 1 && "text-right"
+              )}
+            >
+              {label}
+            </span>
+          ))}
+        </div>
+        <div className="relative h-3 overflow-hidden rounded-md border border-border/20 bg-background/40">
+          <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-border/30" />
+          {markers.map((marker) => (
+            <div
+              key={marker}
+              className="absolute top-0 bottom-0"
+              style={{ left: `${marker}%` }}
+            >
+              <div className="absolute inset-y-0 w-px bg-border/25" />
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="text-right text-[10px] tracking-[0.12em] text-muted-foreground uppercase">
+        dur
+      </div>
+    </div>
+  )
+}
+
+function WaterfallRow({
+  group,
+  node,
+  selected,
+  loading,
+  onSelect,
+}: {
+  group: TraceLoopGroup
+  node: LoopTimelineNode
+  selected: boolean
+  loading: boolean
+  onSelect: () => void
+}) {
+  const tone = nodeTone(node)
+  const offset = nodeOffsetPercent(node, group)
+  const width = nodeWidthPercent(node, group)
+
+  return (
+    <button
+      onClick={onSelect}
+      className={cn(
+        "w-full rounded-xl border px-2.5 py-2 text-left transition-colors",
+        selected ? "border-foreground/20 bg-accent/35" : tone.frame
+      )}
+    >
+      <div className="grid grid-cols-[minmax(180px,240px)_minmax(0,1fr)_72px] items-center gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span
+              className={cn(
+                "flex size-5 shrink-0 items-center justify-center rounded-full border",
+                tone.dot
+              )}
+            >
+              {node.kind === "agent_root" ? (
+                <Waypoints className="size-3" />
+              ) : node.kind === "llm_span" ? (
+                <Bot className="size-3" />
+              ) : (
+                <Wrench className="size-3" />
+              )}
+            </span>
+            <span className="truncate text-[12px] font-medium text-foreground">
+              {nodeTitle(node)}
+            </span>
+            {node.kind !== "agent_root" &&
+            "status" in node &&
+            node.status === "error" ? (
+              <span className="rounded-sm border border-destructive/30 bg-destructive/[0.08] px-1.5 py-0.5 text-[10px] font-medium uppercase text-destructive">
+                err
+              </span>
+            ) : null}
+            {loading ? (
+              <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+            ) : null}
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 pl-7 text-[11px] text-muted-foreground">
+            <span>{nodeSubtitle(node)}</span>
+            <span>{relativeOffsetLabel(node, group)}</span>
+          </div>
+        </div>
+
+        <div className="relative h-8 overflow-hidden rounded-md border border-border/20 bg-background/35">
+          <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-border/30" />
+          <div className="absolute inset-0 bg-[repeating-linear-gradient(90deg,transparent_0,transparent_calc(25%-1px),rgba(255,255,255,0.06)_calc(25%-1px),rgba(255,255,255,0.06)_25%)]" />
+          <div
+            className={cn(
+              "absolute top-[9px] h-[14px] rounded-sm border",
+              tone.bar
+            )}
+            style={{
+              left: `${offset}%`,
+              width: `${Math.min(100 - offset, width)}%`,
+            }}
+          >
+            <div className="absolute top-1/2 left-1 size-1 -translate-y-1/2 rounded-full bg-foreground/55" />
+          </div>
+        </div>
+
+        <div className="text-right">
+          <div className="font-mono text-[11px] text-foreground">
+            {formatDuration(node.durationMs)}
+          </div>
+          <div className="mt-0.5 text-[10px] text-muted-foreground">
+            {node.kind === "llm_span"
+              ? `${node.toolCount} tool`
+              : node.kind === "tool_span"
+                ? "internal"
+                : "root"}
+          </div>
+        </div>
+      </div>
+    </button>
+  )
+}
+
+function LoopInspector({
+  group,
+  tab,
+}: {
+  group: TraceLoopGroup
+  tab: InspectorTab
+}) {
+  if (tab === "content") {
+    return (
+      <Section title="Conversation">
+        <div className="space-y-3">
+          <FieldBlock label="User message">
+            <TextBlock value={group.userMessage} className="bg-background/80" />
+          </FieldBlock>
+          <FieldBlock label="Assistant reply">
+            <TextBlock
+              value={group.assistantMessage}
+              className="border-sky-500/20 bg-sky-500/[0.05]"
+            />
+          </FieldBlock>
+        </div>
+      </Section>
+    )
+  }
+
+  if (tab === "events") {
+    return (
+      <Section title="Root events">
+        <EventTimeline
+          events={buildRootEvents(group)}
+          emptyLabel="No root events."
+        />
+      </Section>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      <Section title="Root span">
+        <DetailList
+          items={[
+            { label: "status", value: group.finalStatus },
+            { label: "window", value: formatDuration(loopWindowMs(group)) },
+            { label: "started", value: formatDateTime(group.startedAtMs) },
+            { label: "turn", value: group.turnId },
+            { label: "llm spans", value: String(group.stepCount) },
+            { label: "tool spans", value: String(group.toolCount) },
+          ]}
+        />
+      </Section>
+
+      <Collapsible className="rounded-xl border border-border/35 bg-background/70">
+        <CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2.5 text-left">
+          <span className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
+            Trace fields
+          </span>
+          <span className="text-[11px] text-muted-foreground">IDs</span>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="border-t border-border/25 px-3 py-3">
+          <DetailList
+            items={[
+              { label: "trace id", value: group.key },
+              { label: "run id", value: group.runId },
+              { label: "root span", value: group.timeline[0]?.id ?? "-" },
+            ]}
+          />
+        </CollapsibleContent>
+      </Collapsible>
+    </div>
+  )
+}
+
+function LlmInspector({
+  group,
+  node,
+  trace,
+  tab,
+  loading,
+  onOpenPayload,
+}: {
+  group: TraceLoopGroup
+  node: Extract<LoopTimelineNode, { kind: "llm_span" }>
+  trace: TraceRecord | null
+  tab: InspectorTab
+  loading: boolean
+  onOpenPayload: () => void
+}) {
+  const systemPrompts = collectSystemPrompts(trace)
+  const toolNames = collectToolNames(trace)
+  const assistantPreview = collectAssistantPreview(trace)
+
+  if (tab === "content") {
+    return (
+      <div className="space-y-3">
+        <Section
+          title="Prompt frame"
+          action={
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onOpenPayload}
+              disabled={loading}
+            >
+              {loading ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <ExternalLink className="size-3.5" />
+              )}
+              Payload
+            </Button>
+          }
+        >
+          <div className="space-y-3">
+            <FieldBlock label="System prompts">
+              {systemPrompts.length === 0 ? (
+                <p className="text-[12px] text-muted-foreground">-</p>
+              ) : (
+                <div className="space-y-2">
+                  {systemPrompts.map((prompt, index) => (
+                    <TextBlock
+                      key={`${index}-${prompt.slice(0, 24)}`}
+                      value={prompt}
+                      className="border-sky-500/15 bg-sky-500/[0.04]"
+                    />
+                  ))}
+                </div>
+              )}
+            </FieldBlock>
+
+            <FieldBlock label="User message">
+              <TextBlock value={group.userMessage} />
+            </FieldBlock>
+
+            <FieldBlock label="Enabled tools">
+              {toolNames.length === 0 ? (
+                <p className="text-[12px] text-muted-foreground">-</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {toolNames.map((tool) => (
+                    <Badge key={tool} variant="secondary" className="text-[10px]">
+                      {tool}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </FieldBlock>
+          </div>
+        </Section>
+
+        <Section title="Output">
+          <FieldBlock label="Assistant preview">
+            <TextBlock value={assistantPreview} />
+          </FieldBlock>
+          {node.trace.error ? (
+            <FieldBlock label="Error">
+              <TextBlock
+                value={node.trace.error}
+                className="border-destructive/20 bg-destructive/[0.04] text-destructive"
+              />
+            </FieldBlock>
+          ) : null}
+        </Section>
+      </div>
+    )
+  }
+
+  if (tab === "events") {
+    return (
+      <Section title="Span events">
+        <EventTimeline
+          events={(trace?.events ?? []).map((event, index) => ({
+            key: `${event.name}-${event.at_ms}-${index}`,
+            name: event.name,
+            at_ms: event.at_ms,
+            summary: summarizeEvent(event),
+            attributes: event.attributes,
+          }))}
+          emptyLabel="No LLM events captured."
+        />
+      </Section>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      <Section title="Span summary">
+        <DetailList
+          items={[
+            { label: "status", value: node.status },
+            { label: "model", value: node.trace.model },
+            { label: "provider", value: node.trace.provider },
+            { label: "operation", value: node.operationName },
+            { label: "duration", value: formatDuration(node.trace.duration_ms) },
+            {
+              label: "tokens",
+              value: formatCount(node.trace.total_tokens ?? 0),
+            },
+            {
+              label: "http",
+              value:
+                node.trace.status_code != null
+                  ? `HTTP ${node.trace.status_code}`
+                  : "-",
+            },
+            { label: "stop reason", value: node.trace.stop_reason ?? "-" },
+          ]}
+        />
+      </Section>
+
+      {trace ? (
+        <Collapsible className="rounded-xl border border-border/35 bg-background/70">
+          <CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2.5 text-left">
+            <span className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
+              Trace fields
+            </span>
+            <span className="text-[11px] text-muted-foreground">Raw</span>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="space-y-3 border-t border-border/25 px-3 py-3">
+            <DetailList
+              items={[
+                { label: "span name", value: node.name },
+                { label: "span kind", value: node.spanKind },
+                { label: "trace id", value: trace.trace_id },
+                { label: "span id", value: trace.span_id },
+                { label: "parent span", value: trace.parent_span_id ?? "-" },
+                { label: "server.address", value: trace.base_url },
+                { label: "http.route", value: trace.endpoint_path },
+              ]}
+            />
+            <RawJson title="request_summary" value={trace.request_summary} />
+            <RawJson title="response_summary" value={trace.response_summary} />
+            <RawJson title="otel_attributes" value={trace.otel_attributes} />
+          </CollapsibleContent>
+        </Collapsible>
+      ) : null}
+    </div>
+  )
+}
+
+function ToolInspector({
+  node,
+  trace,
+  tab,
+}: {
+  node: Extract<LoopTimelineNode, { kind: "tool_span" }>
+  trace: TraceRecord | null
+  tab: InspectorTab
+}) {
+  const providerRequest = asRecord(trace?.provider_request)
+  const outcome = trace?.response_body ?? node.trace.error ?? null
+
+  if (tab === "content") {
+    return (
+      <div className="space-y-3">
+        <Section title="Arguments">
+          <StructuredArguments
+            value={providerRequest?.arguments ?? providerRequest ?? {}}
+          />
+        </Section>
+
+        <Section title="Outcome">
+          <ExpandableTextBlock
+            value={outcome}
+            tone={node.status === "error" ? "danger" : "default"}
+          />
+        </Section>
+      </div>
+    )
+  }
+
+  if (tab === "events") {
+    return (
+      <Section title="Span events">
+        <EventTimeline
+          events={
+            trace?.events?.length
+              ? trace.events.map((event, index) => ({
+                  key: `${event.name}-${event.at_ms}-${index}`,
+                  name: event.name,
+                  at_ms: event.at_ms,
+                  summary: summarizeEvent(event),
+                  attributes: event.attributes,
+                }))
+              : buildToolEvents(node)
+          }
+          emptyLabel="No tool events."
+        />
+      </Section>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      <Section title="Span summary">
+        <DetailList
+          items={[
+            { label: "tool", value: node.trace.model },
+            { label: "status", value: node.status },
+            { label: "operation", value: node.operationName },
+            { label: "duration", value: formatDuration(node.durationMs) },
+            { label: "started", value: formatDateTime(node.startedAtMs) },
+          ]}
+        />
+      </Section>
+
+      {trace ? (
+        <Collapsible className="rounded-xl border border-border/35 bg-background/70">
+          <CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2.5 text-left">
+            <span className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
+              Trace fields
+            </span>
+            <span className="text-[11px] text-muted-foreground">Raw</span>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="space-y-3 border-t border-border/25 px-3 py-3">
+            <DetailList
+              items={[
+                { label: "span name", value: node.name },
+                { label: "span kind", value: node.spanKind },
+                { label: "trace id", value: trace.trace_id },
+                { label: "span id", value: trace.span_id },
+                { label: "parent span", value: trace.parent_span_id ?? "-" },
+                { label: "provider", value: trace.provider },
+                { label: "endpoint", value: trace.endpoint_path },
+              ]}
+            />
+            <RawJson title="request_summary" value={trace.request_summary} />
+            <RawJson title="response_summary" value={trace.response_summary} />
+            <RawJson title="otel_attributes" value={trace.otel_attributes} />
+          </CollapsibleContent>
+        </Collapsible>
+      ) : null}
+    </div>
+  )
 }
 
 export function TracePanel() {
-  const setView = useChatStore((s) => s.setView)
-  const traces = useTraceStore((s) => s.traces)
-  const selectedTraceId = useTraceStore((s) => s.selectedTraceId)
-  const selectedTrace = useTraceStore((s) => s.selectedTrace)
-  const traceSummary = useTraceStore((s) => s.traceSummary)
-  const traceLoading = useTraceStore((s) => s.traceLoading)
-  const traceError = useTraceStore((s) => s.traceError)
-  const refreshTraces = useTraceStore((s) => s.refreshTraces)
-  const selectTrace = useTraceStore((s) => s.selectTrace)
-  const clearSelection = useTraceStore((s) => s.clearSelection)
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
+  const setView = useChatStore((state) => state.setView)
+  const turns = useChatStore((state) => state.turns)
+  const traces = useTraceStore((state) => state.traces)
+  const selectedTraceId = useTraceStore((state) => state.selectedTraceId)
+  const selectedTrace = useTraceStore((state) => state.selectedTrace)
+  const traceSummary = useTraceStore((state) => state.traceSummary)
+  const traceLoading = useTraceStore((state) => state.traceLoading)
+  const traceError = useTraceStore((state) => state.traceError)
+  const refreshTraces = useTraceStore((state) => state.refreshTraces)
+  const selectTrace = useTraceStore((state) => state.selectTrace)
+
+  const [activeLoopKey, setActiveLoopKey] = useState<string | null>(null)
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const [payloadOpen, setPayloadOpen] = useState(false)
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("overview")
 
   useEffect(() => {
     refreshTraces().catch(() => {})
   }, [refreshTraces])
 
-  const loopGroups = useMemo(() => buildLoopGroups(traces), [traces])
+  const loopGroups = useMemo(
+    () => buildTraceLoopGroups(traces, turns),
+    [traces, turns]
+  )
+
+  const llmSpanCount = traceSummary?.total_requests ?? traces.length
+  const toolSpanCount = loopGroups.reduce(
+    (sum, group) => sum + group.toolCount,
+    0
+  )
+  const partialOrFailedLoops = loopGroups.filter(
+    (group) => group.finalStatus !== "completed"
+  ).length
+
+  const resolvedActiveLoopKey =
+    activeLoopKey && loopGroups.some((group) => group.key === activeLoopKey)
+      ? activeLoopKey
+      : (loopGroups[0]?.key ?? null)
+
+  const activeGroup = useMemo(
+    () =>
+      loopGroups.find((group) => group.key === resolvedActiveLoopKey) ??
+      loopGroups[0] ??
+      null,
+    [loopGroups, resolvedActiveLoopKey]
+  )
+
+  const resolvedSelectedNodeId =
+    selectedNodeId &&
+    activeGroup?.timeline.some((node) => node.id === selectedNodeId)
+      ? selectedNodeId
+      : (activeGroup?.finalSpanId ?? activeGroup?.timeline[0]?.id ?? null)
+
+  const activeNode = useMemo(
+    () => findActiveNode(activeGroup, resolvedSelectedNodeId),
+    [activeGroup, resolvedSelectedNodeId]
+  )
 
   useEffect(() => {
-    setOpenGroups((previous) => {
-      const next = { ...previous }
-      let hasChanges = false
-      for (const group of loopGroups) {
-        if (!(group.key in next)) {
-          next[group.key] = false
-          hasChanges = true
-        }
-      }
-      return hasChanges ? next : previous
-    })
-  }, [loopGroups])
+    setInspectorTab("overview")
+  }, [activeNode?.id])
+
+  useEffect(() => {
+    if (!activeNode || activeNode.kind === "agent_root") return
+    if (selectedTraceId === activeNode.trace.id) return
+    selectTrace(activeNode.trace.id).catch(() => {})
+  }, [activeNode, selectTrace, selectedTraceId])
+
+  const inspectedTrace =
+    activeNode?.kind === "agent_root"
+      ? null
+      : selectedTrace?.id === activeNode?.trace.id
+        ? selectedTrace
+        : null
 
   return (
-    <ScrollArea className="min-h-0 flex-1">
-      <div className="mx-auto max-w-[1180px] px-6 py-8">
-        <div className="mb-8 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setView("chat")}
-              className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-            >
-              <ArrowLeft className="size-4" />
-            </button>
-            <div>
-              <h1 className="text-lg font-semibold">Trace</h1>
-              <p className="text-[13px] text-muted-foreground">
-                Inspect agent loops first, then drill into the individual LLM
-                calls inside each loop.
-              </p>
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="flex items-center justify-between gap-3 border-b border-border/30 px-5 py-3.5">
+        <div className="flex items-start gap-3">
+          <button
+            onClick={() => setView("chat")}
+            className="mt-0.5 flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+          >
+            <ArrowLeft className="size-3.5" />
+          </button>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="font-serif text-[17px] font-semibold tracking-tight">
+                trace
+              </h1>
+              <Badge variant="outline" className="text-[10px]">
+                local
+              </Badge>
             </div>
+            <p className="mt-0.5 text-[12px] text-muted-foreground">
+              waterfall view for agent loops and spans
+            </p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => refreshTraces()}>
-            <RefreshCw className="size-3.5" />
-            Refresh
-          </Button>
         </div>
 
-        <div className="mb-6 grid gap-3 md:grid-cols-4">
-          <MetricCard
-            label="requests"
-            value={String(traceSummary?.total_requests ?? 0)}
-            icon={<Workflow className="size-4" />}
-          />
-          <MetricCard
-            label="failed"
-            value={String(traceSummary?.failed_requests ?? 0)}
-            icon={<Badge variant="destructive">ERR</Badge>}
-          />
-          <MetricCard
-            label="avg latency"
-            value={
-              traceSummary?.avg_duration_ms != null
-                ? `${traceSummary.avg_duration_ms.toFixed(1)} ms`
-                : "-"
-            }
-            icon={<Database className="size-4" />}
-          />
-          <MetricCard
-            label="tokens"
-            value={String(traceSummary?.total_tokens ?? 0)}
-            icon={<span className="text-xs font-medium">TOK</span>}
-          />
-        </div>
+        <Button variant="outline" size="sm" onClick={() => refreshTraces()}>
+          <RefreshCw className="size-3.5" />
+          Refresh
+        </Button>
+      </div>
 
-        {traceError && (
-          <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-[13px] text-destructive">
-            {traceError}
+      <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
+        <div className="mx-auto flex max-w-[1440px] flex-col gap-3">
+          <div className="grid gap-2 md:grid-cols-5">
+            <SummaryItem
+              label="loops"
+              value={String(loopGroups.length)}
+              icon={<Waypoints className="size-3.5" />}
+            />
+            <SummaryItem
+              label="llm spans"
+              value={String(llmSpanCount)}
+              icon={<Bot className="size-3.5" />}
+            />
+            <SummaryItem
+              label="tool spans"
+              value={String(toolSpanCount)}
+              icon={<Wrench className="size-3.5" />}
+            />
+            <SummaryItem
+              label="p95 latency"
+              value={formatDuration(traceSummary?.p95_duration_ms)}
+              icon={<Clock3 className="size-3.5" />}
+            />
+            <SummaryItem
+              label="attention"
+              value={String(partialOrFailedLoops)}
+              tone={partialOrFailedLoops > 0 ? "warning" : "default"}
+              icon={<AlertTriangle className="size-3.5" />}
+            />
           </div>
-        )}
 
-        <div className="grid gap-6">
-          <Card className="min-h-[520px] gap-0">
-            <CardHeader className="pb-3">
-              <CardTitle>Recent loops</CardTitle>
-              <CardDescription>
-                Traces grouped by agent loop. Expand a loop to inspect
-                step-by-step LLM calls, then click a step for the full payload
-                detail modal.
-              </CardDescription>
-            </CardHeader>
-            <Separator className="opacity-40" />
-            <CardContent className="px-0">
-              <div className="space-y-2 px-2">
-                {loopGroups.map((group) => (
-                  <Collapsible
-                    key={group.key}
-                    open={openGroups[group.key] ?? false}
-                    onOpenChange={(open) =>
-                      setOpenGroups((previous) => ({
-                        ...previous,
-                        [group.key]: open,
-                      }))
-                    }
-                    className="rounded-xl border border-border/50 bg-background/80"
-                  >
-                    <CollapsibleTrigger className="w-full text-left">
-                      <div className="rounded-xl px-4 py-4 transition-colors hover:bg-accent/30">
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="min-w-0 space-y-1.5 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <ChevronRight
-                                className={cn(
-                                  "size-4 text-muted-foreground transition-transform",
-                                  openGroups[group.key] && "rotate-90"
-                                )}
-                              />
-                              <span className="text-[13px] font-semibold text-foreground">
-                                Loop {group.turnId}
-                              </span>
-                              {group.turnId !== group.runId ? (
-                                <Badge
-                                  variant="outline"
-                                  className="text-[10px]"
-                                >
-                                  run {group.runId}
-                                </Badge>
-                              ) : null}
-                              <Badge
-                                variant={loopStatusVariant(group.finalStatus)}
-                                className="text-[10px]"
-                              >
-                                {group.finalStatus}
-                              </Badge>
-                              <span className="rounded bg-muted/50 px-1.5 py-0.5 text-[11px] text-muted-foreground/90">
-                                {group.model}
-                              </span>
-                              <span className="text-[11px] text-muted-foreground/60">
-                                {group.endpointPath} · {group.protocol}
-                              </span>
-                              <span className="text-[11px] tabular-nums text-muted-foreground/80">
-                                {group.stepCount} calls · {group.totalDurationMs}ms · {group.totalTokens} tokens
-                              </span>
-                            </div>
-                            {group.userMessage ? (
-                              <p className="max-w-[780px] text-[13px] leading-5 text-foreground/85">
-                                {truncate(group.userMessage, 180)}
-                              </p>
-                            ) : (
-                              <p className="text-[12px] text-muted-foreground">
-                                User message unavailable.
-                              </p>
-                            )}
-                          </div>
-                          <div className="shrink-0 text-[11px] text-muted-foreground/70">
-                            {formatDateTime(group.latestStartedAtMs)}
-                          </div>
-                        </div>
+          {traceError ? (
+            <div className="rounded-lg border border-destructive/25 bg-destructive/[0.05] px-3 py-2.5 text-[12px] text-destructive">
+              {traceError}
+            </div>
+          ) : null}
 
-                        {group.pathSummary ? (
-                          <div className="mt-2 text-[11px] text-muted-foreground/80">
-                            <span className="truncate rounded-full bg-muted/50 px-2 py-0.5">
-                              {group.pathSummary}
-                            </span>
-                          </div>
-                        ) : null}
+          {loopGroups.length === 0 && !traceLoading ? (
+            <Card>
+              <CardContent className="px-6 py-10 text-center text-sm text-muted-foreground">
+                还没有 trace 记录。
+              </CardContent>
+            </Card>
+          ) : null}
 
-                        {group.latestError ? (
-                          <p className="mt-2 line-clamp-2 text-[11px] text-destructive">
-                            {group.latestError}
-                          </p>
-                        ) : null}
-                      </div>
-                    </CollapsibleTrigger>
+          {activeGroup ? <TraceActiveStrip group={activeGroup} /> : null}
 
-                    <CollapsibleContent className="border-t border-border/40 px-3 py-3">
-                      <div className="space-y-2">
-                        {group.traces.map((trace) => (
-                          <button
-                            key={trace.id}
-                            onClick={() => selectTrace(trace.id)}
-                            className={cn(
-                              "w-full rounded-lg border border-border/40 bg-background px-3 py-3 text-left transition-colors hover:bg-accent/30",
-                              selectedTraceId === trace.id && "bg-accent/40"
-                            )}
-                          >
-                            <div className="flex items-center justify-between gap-4">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className="text-[12px] font-medium text-foreground">
-                                  step {trace.step_index}
-                                </span>
-                                <Badge
-                                  variant={traceStatusVariant(trace.status)}
-                                  className="text-[10px]"
-                                >
-                                  {trace.status}
-                                </Badge>
-                                <span className="text-[11px] text-muted-foreground/70">
-                                  {trace.request_kind}
-                                </span>
-                                {trace.stop_reason ? (
-                                  <span className="text-[11px] text-muted-foreground/60">
-                                    {trace.stop_reason}
-                                  </span>
-                                ) : null}
-                                <span className="text-[11px] tabular-nums text-muted-foreground/80">
-                                  {trace.duration_ms ?? "-"}ms · {trace.total_tokens ?? 0} tok
-                                  {trace.status_code != null ? ` · HTTP ${trace.status_code}` : ""}
-                                </span>
-                              </div>
-                              <div className="shrink-0 text-[11px] text-muted-foreground/60">
-                                {formatDateTime(trace.started_at_ms)}
-                              </div>
-                            </div>
-                            {trace.error ? (
-                              <p className="mt-2 line-clamp-2 text-[11px] text-destructive">
-                                {trace.error}
-                              </p>
-                            ) : null}
-                          </button>
+          {loopGroups.length > 0 ? (
+            <div className="grid min-h-[700px] gap-3 xl:grid-cols-[280px_minmax(0,1.15fr)_360px]">
+              <Card className="min-h-0 overflow-hidden border-border/35 bg-background/70">
+                <div className="border-b border-border/25 px-3 py-2.5">
+                  <p className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
+                    Trace list
+                  </p>
+                </div>
+                <div className="min-h-0 space-y-1.5 overflow-auto p-2">
+                  {loopGroups.map((group) => (
+                    <RecentLoopRow
+                      key={group.key}
+                      group={group}
+                      active={group.key === activeGroup?.key}
+                      onSelect={() => {
+                        setActiveLoopKey(group.key)
+                        setSelectedNodeId(group.finalSpanId ?? `${group.key}:root`)
+                      }}
+                    />
+                  ))}
+                </div>
+              </Card>
+
+              <Card className="min-h-0 overflow-hidden border-border/35 bg-background/70">
+                <div className="border-b border-border/25 px-3 py-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
+                      Waterfall
+                    </p>
+                    {activeGroup ? (
+                      <span className="font-mono text-[11px] text-muted-foreground">
+                        {formatDuration(loopWindowMs(activeGroup))}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="min-h-0 overflow-auto p-3">
+                  {activeGroup ? (
+                    <div className="space-y-2">
+                      <WaterfallScale group={activeGroup} />
+                      <div className="space-y-1.5">
+                        {activeGroup.timeline.map((node) => (
+                          <WaterfallRow
+                            key={node.id}
+                            group={activeGroup}
+                            node={node}
+                            selected={node.id === activeNode?.id}
+                            loading={
+                              node.kind !== "agent_root" &&
+                              selectedTraceId === node.trace.id &&
+                              traceLoading
+                            }
+                            onSelect={() => setSelectedNodeId(node.id)}
+                          />
                         ))}
                       </div>
-                    </CollapsibleContent>
-                  </Collapsible>
-                ))}
-                {loopGroups.length === 0 && !traceLoading && (
-                  <p className="px-3 py-6 text-sm text-muted-foreground">
-                    No traces recorded yet.
-                  </p>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+                    </div>
+                  ) : null}
+                </div>
+              </Card>
 
-        <TraceDetailModal
-          open={selectedTraceId != null}
-          trace={selectedTrace}
-          loading={traceLoading}
-          onOpenChange={(open) => {
-            if (!open) {
-              clearSelection()
-            }
-          }}
-        />
+              <Card className="min-h-0 overflow-hidden border-border/35 bg-background/70">
+                <div className="border-b border-border/25 px-3 py-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
+                        Inspector
+                      </p>
+                      {activeNode ? (
+                        <p className="mt-0.5 text-[11px] text-muted-foreground">
+                          {nodeTitle(activeNode)} · {activeNode.kind}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="rounded-lg border border-border/35 bg-muted/20 p-1">
+                      <div className="flex items-center gap-1">
+                        <TabButton
+                          active={inspectorTab === "overview"}
+                          onClick={() => setInspectorTab("overview")}
+                        >
+                          overview
+                        </TabButton>
+                        <TabButton
+                          active={inspectorTab === "content"}
+                          onClick={() => setInspectorTab("content")}
+                        >
+                          content
+                        </TabButton>
+                        <TabButton
+                          active={inspectorTab === "events"}
+                          onClick={() => setInspectorTab("events")}
+                        >
+                          events
+                        </TabButton>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="min-h-0 overflow-auto p-3">
+                  {activeGroup && activeNode ? (
+                    activeNode.kind === "agent_root" ? (
+                      <LoopInspector group={activeGroup} tab={inspectorTab} />
+                    ) : activeNode.kind === "llm_span" ? (
+                      <LlmInspector
+                        group={activeGroup}
+                        node={activeNode}
+                        trace={inspectedTrace}
+                        tab={inspectorTab}
+                        loading={traceLoading && inspectedTrace == null}
+                        onOpenPayload={() => setPayloadOpen(true)}
+                      />
+                    ) : (
+                      <ToolInspector
+                        node={activeNode}
+                        trace={inspectedTrace}
+                        tab={inspectorTab}
+                      />
+                    )
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                      Select a span.
+                    </div>
+                  )}
+                </div>
+              </Card>
+            </div>
+          ) : null}
+        </div>
       </div>
-    </ScrollArea>
+
+      <TraceDetailModal
+        open={payloadOpen && selectedTraceId != null}
+        trace={selectedTrace}
+        loading={traceLoading}
+        onOpenChange={setPayloadOpen}
+      />
+    </div>
   )
 }
