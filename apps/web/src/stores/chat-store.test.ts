@@ -7,6 +7,7 @@ import type { SseEvent } from "@/lib/types"
 type FetchMock = typeof fetch
 
 const initialState = {
+  activeSessionId: "session-1",
   turns: [],
   streamingTurn: null,
   chatState: "idle" as const,
@@ -148,5 +149,46 @@ describe("chat store submitTurn", () => {
       file_path: "/home/like/projects/aia/AGENTS.md",
     })
     assert.equal(typeof state.blocks[0].tool.startedAtMs, "number")
+  })
+
+  test("creates queued tool block from detected event before execution starts", () => {
+    useChatStore.setState({
+      activeSessionId: "session-1",
+      chatState: "active",
+      streamingTurn: {
+        userMessage: "search project",
+        status: "thinking",
+        blocks: [],
+      },
+    })
+
+    const detectedEvent: SseEvent = {
+      type: "stream",
+      data: {
+        session_id: "session-1",
+        kind: "tool_call_detected",
+        invocation_id: "search:1",
+        tool_name: "search",
+        arguments: {
+          query: "runtime worker",
+        },
+      },
+    }
+
+    useChatStore.getState().handleSseEvent(detectedEvent)
+
+    const state = useChatStore.getState().streamingTurn
+    assert.equal(state?.blocks.length, 1)
+    assert.equal(state?.blocks[0]?.type, "tool")
+    if (state?.blocks[0]?.type !== "tool") {
+      throw new Error("expected tool block")
+    }
+    assert.equal(state.blocks[0].tool.invocationId, "search:1")
+    assert.equal(state.blocks[0].tool.toolName, "search")
+    assert.deepEqual(state.blocks[0].tool.arguments, {
+      query: "runtime worker",
+    })
+    assert.equal(state.blocks[0].tool.startedAtMs, undefined)
+    assert.equal(state.blocks[0].tool.completed, false)
   })
 })

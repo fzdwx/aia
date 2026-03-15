@@ -170,6 +170,16 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   handleSseEvent: (event: SseEvent) => {
     const activeId = get().activeSessionId
 
+    function findToolBlockIndex(blocks: StreamingTurn["blocks"], invocationId: string) {
+      for (let i = blocks.length - 1; i >= 0; i -= 1) {
+        const block = blocks[i]
+        if (block?.type === "tool" && block.tool.invocationId === invocationId) {
+          return i
+        }
+      }
+      return -1
+    }
+
     switch (event.type) {
       case "status": {
         // Filter by active session
@@ -236,18 +246,37 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             blocks.push({ type: "text", content: data.text })
           }
           set({ streamingTurn: { ...prev, blocks } })
-        } else if (data.kind === "tool_call_started") {
-          let existingIdx = -1
-          for (let i = blocks.length - 1; i >= 0; i -= 1) {
-            const block = blocks[i]
-            if (
-              block?.type === "tool" &&
-              block.tool.invocationId === data.invocation_id
-            ) {
-              existingIdx = i
-              break
+        } else if (data.kind === "tool_call_detected") {
+          const existingIdx = findToolBlockIndex(blocks, data.invocation_id)
+          if (existingIdx >= 0) {
+            const b = blocks[existingIdx] as Extract<
+              (typeof blocks)[number],
+              { type: "tool" }
+            >
+            blocks[existingIdx] = {
+              ...b,
+              tool: {
+                ...b.tool,
+                toolName: data.tool_name || b.tool.toolName,
+                arguments: normalizeToolArguments(data.arguments),
+              },
             }
+          } else {
+            blocks.push({
+              type: "tool",
+              tool: {
+                invocationId: data.invocation_id,
+                toolName: data.tool_name,
+                arguments: normalizeToolArguments(data.arguments),
+                detectedAtMs: Date.now(),
+                output: "",
+                completed: false,
+              },
+            })
           }
+          set({ streamingTurn: { ...prev, blocks } })
+        } else if (data.kind === "tool_call_started") {
+          const existingIdx = findToolBlockIndex(blocks, data.invocation_id)
           if (existingIdx >= 0) {
             const b = blocks[existingIdx] as Extract<
               (typeof blocks)[number],
@@ -279,17 +308,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           }
           set({ streamingTurn: { ...prev, blocks } })
         } else if (data.kind === "tool_output_delta") {
-          let idx = -1
-          for (let i = blocks.length - 1; i >= 0; i -= 1) {
-            const block = blocks[i]
-            if (
-              block?.type === "tool" &&
-              block.tool.invocationId === data.invocation_id
-            ) {
-              idx = i
-              break
-            }
-          }
+          const idx = findToolBlockIndex(blocks, data.invocation_id)
           if (idx >= 0) {
             const b = blocks[idx] as Extract<
               (typeof blocks)[number],
@@ -320,17 +339,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           }
           set({ streamingTurn: { ...prev, blocks } })
         } else if (data.kind === "tool_call_completed") {
-          let idx = -1
-          for (let i = blocks.length - 1; i >= 0; i -= 1) {
-            const block = blocks[i]
-            if (
-              block?.type === "tool" &&
-              block.tool.invocationId === data.invocation_id
-            ) {
-              idx = i
-              break
-            }
-          }
+          const idx = findToolBlockIndex(blocks, data.invocation_id)
           if (idx >= 0) {
             const b = blocks[idx] as Extract<
               (typeof blocks)[number],
