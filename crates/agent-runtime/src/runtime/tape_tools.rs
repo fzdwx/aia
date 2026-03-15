@@ -83,7 +83,7 @@ struct TapeInfoTool;
 
 impl Tool for TapeInfoTool {
     fn name(&self) -> &str {
-        "tape.info"
+        "tape_info"
     }
 
     fn definition(&self) -> ToolDefinition {
@@ -123,7 +123,7 @@ struct TapeHandoffTool;
 
 impl Tool for TapeHandoffTool {
     fn name(&self) -> &str {
-        "tape.handoff"
+        "tape_handoff"
     }
 
     fn definition(&self) -> ToolDefinition {

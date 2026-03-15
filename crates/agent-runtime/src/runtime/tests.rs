@@ -1252,7 +1252,7 @@ impl LanguageModel for TapeInfoModel {
         self.seen_requests.borrow_mut().push(request.clone());
         if step == 0 {
             Ok(Completion {
-                segments: vec![CompletionSegment::ToolUse(ToolCall::new("tape.info"))],
+                segments: vec![CompletionSegment::ToolUse(ToolCall::new("tape_info"))],
                 stop_reason: CompletionStopReason::ToolUse,
                 usage: None,
                 response_body: None,
@@ -1265,7 +1265,7 @@ impl LanguageModel for TapeInfoModel {
             if saw_info {
                 Ok(Completion::text("已获取上下文统计信息"))
             } else {
-                Err(CoreError::new("未看到 tape.info 结果"))
+                Err(CoreError::new("未看到 tape_info 结果"))
             }
         }
     }
@@ -1290,7 +1290,7 @@ impl LanguageModel for TapeHandoffModel {
         if step == 0 {
             Ok(Completion {
                 segments: vec![CompletionSegment::ToolUse(
-                    ToolCall::new("tape.handoff").with_arguments_value(
+                    ToolCall::new("tape_handoff").with_arguments_value(
                         json!({"summary": "测试摘要：对话进行了多轮交互", "name": "test_anchor"}),
                     ),
                 )],
@@ -1317,7 +1317,7 @@ impl LanguageModel for TapeHandoffModel {
                 if saw_anchor {
                     Ok(Completion::text("已创建锚点"))
                 } else {
-                    Err(CoreError::new("未看到 tape.handoff 结果或 context summary"))
+                    Err(CoreError::new("未看到 tape_handoff 结果或 context summary"))
                 }
             }
         }
@@ -1337,7 +1337,7 @@ fn tape_info_工具返回上下文统计() {
     // Verify the tool result was recorded
     assert!(runtime.tape().entries().iter().any(|entry| {
         entry.as_tool_result().is_some_and(|result| {
-            result.tool_name == "tape.info" && result.content.contains("entries:")
+            result.tool_name == "tape_info" && result.content.contains("entries:")
         })
     }));
 }

@@ -9,7 +9,7 @@ const HANDOFF_SUMMARY_TEMPLATE: &str = include_str!("../prompts/handoff-summary.
 /// placeholders — call [`context_contract`] to render.
 const CONTEXT_CONTRACT_TEMPLATE: &str = include_str!("../prompts/context-contract.md");
 
-/// Recommended threshold for the agent to proactively call tape.handoff.
+/// Recommended threshold for the agent to proactively call tape_handoff.
 pub const AGENT_HANDOFF_THRESHOLD: f64 = 0.80;
 
 /// Threshold at which the runtime auto-compresses context.

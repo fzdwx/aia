@@ -159,7 +159,7 @@ where
 
 /// Drop ToolResult items whose matching ToolCall was truncated by an anchor.
 ///
-/// After a `tape.handoff`, the anchor sits between the tool_call and tool_result entries.
+/// After a `tape_handoff`, the anchor sits between the tool_call and tool_result entries.
 /// The view only includes entries after the anchor, so the tool_call is gone but the
 /// tool_result remains — an "orphan". Sending an orphaned ToolResult to the model without
 /// a preceding ToolCall causes API errors. This function filters them out.

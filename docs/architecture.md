@@ -97,7 +97,7 @@ README 里真正难的是这些能力：
 - crate 内部已继续拆分为运行时主循环、请求构造、工具执行、事件缓冲、错误与测试子模块，避免继续把所有逻辑堆在单个实现文件中
 - `apps/agent-server` 通过运行时条目追加钩子把原始 entries 实时 append 到 `.aia/session.jsonl`
 - `StreamEvent` 中与工具相关的语义继续细分：`ToolCallDetected` 表示模型流里已经产出 tool call 决策，但 runtime 还未真正开始执行；`ToolCallStarted` 才表示工具执行正式启动，避免把“模型建议”与“runtime 执行”混成同一个阶段
-- `tape.info` / `tape.handoff` 不再只是 `execute_tool_call` 里的字符串特判；它们现在通过 `Tool` trait 注册到独立 runtime tool registry，再借助 `ToolExecutionContext` 暴露的 runtime host 能力访问会话统计与 handoff 写入，工具协议层与普通工具保持一致
+- `tape_info` / `tape_handoff` 不再只是 `execute_tool_call` 里的字符串特判；它们现在通过 `Tool` trait 注册到独立 runtime tool registry，再借助 `ToolExecutionContext` 暴露的 runtime host 能力访问会话统计与 handoff 写入，工具协议层与普通工具保持一致
 
 当前内建编码工具契约维持短名集合：`shell`、`read`、`write`、`edit`、`glob`、`grep`。其中 `shell` 是模型可见的稳定工具名，底层执行器可在边缘实现中替换；当前实现使用 `brush` 作为 shell 运行时，而不是把具体 shell 名称泄漏进统一工具协议。
 

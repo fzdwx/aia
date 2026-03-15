@@ -14,9 +14,9 @@
 - 移除所有元数据：`source_entry_ids`、`owner`、`phase`、`next_steps`
 - 无摘要时不注入（返回 `Option<Message>`）
 
-**新增 tape.info / tape.handoff 工具**：
-- `tape.info`：返回上下文统计（entries、anchors、pressure_ratio 等），让 agent 感知上下文用量
-- `tape.handoff`：agent 主动创建 anchor 截断历史，传入 summary 作为最小继承状态
+**新增 tape_info / tape_handoff 工具**：
+- `tape_info`：返回上下文统计（entries、anchors、pressure_ratio 等），让 agent 感知上下文用量
+- `tape_handoff`：agent 主动创建 anchor 截断历史，传入 summary 作为最小继承状态
 - 两个工具由 runtime 拦截执行（需访问 SessionTape），不经过 builtin-tools
 
 **自动压缩（安全回退）保留**：
@@ -26,16 +26,16 @@
 
 **context_contract**：
 - 在 system instructions 中追加 `<context_contract>` 块
-- 提示 agent 使用 tape.info 和 tape.handoff 管理上下文
+- 提示 agent 使用 tape_info 和 tape_handoff 管理上下文
 
 **orphaned tool_result 过滤**：
-- `tape.handoff` 会在 tool_call 和 tool_result 之间创建 anchor
+- `tape_handoff` 会在 tool_call 和 tool_result 之间创建 anchor
 - anchor 之前的 tool_call 被截断，留下孤立的 tool_result
 - `drop_orphaned_tool_results()` 在构建 CompletionRequest 时过滤
 
 ## 参考分析
 
-- **bub**: ForkTapeStore 事务隔离 + context_contract 让 agent 自管理 + tape.info/tape.handoff 工具
+- **bub**: ForkTapeStore 事务隔离 + context_contract 让 agent 自管理 + tape_info/tape_handoff 工具
 - **republic**: TapeQuery 丰富查询（after_anchor/between_anchors/between_dates） + TapeContext 可定制投影
 - **共同模式**: append-only 时间线、anchor 分界点、JSONL 存储
 

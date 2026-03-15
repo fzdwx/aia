@@ -15,7 +15,6 @@ use axum::{
 use tower_http::cors::CorsLayer;
 
 use provider_registry::ProviderRegistry;
-use session_tape::SessionTape;
 
 use model::{ProviderLaunchChoice, build_model_from_selection};
 use session_manager::{ProviderInfoSnapshot, SessionManagerConfig, spawn_session_manager};

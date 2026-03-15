@@ -67,24 +67,29 @@
 - 完成 runtime tool span 的后端真实落盘：工具执行不再只是前端基于 turn history 的临时推导节点，而是会继承当前 loop trace/root span 语义，在 `apps/agent-server` 中直接持久化为 INTERNAL span record，并带本地 tool started/completed/failed events
 - 完成 Web trace 页改为优先消费真实 tool span 记录：timeline / inspector 选中工具节点时会直接查看该工具 span 的 request/response/attributes/events，而不是回退查看父 LLM span
 - 完成流式工具事件语义拆分：模型侧只发 `tool_call_detected` 表示“已经决定要调工具”，runtime 真正开始执行时才发 `tool_call_started`，避免前端把一次工具调用误看成两次 start
-- 完成 `tape.info` / `tape.handoff` 从 runtime 特判式实现收口到 `Tool` trait + runtime tool registry：schema 暴露与调用路径改为真正的工具注册模型，只通过 `ToolExecutionContext` 注入最小 runtime host 能力
+- 完成 `tape_info` / `tape_handoff` 从 runtime 特判式实现收口到 `Tool` trait + runtime tool registry：schema 暴露与调用路径改为真正的工具注册模型，只通过 `ToolExecutionContext` 注入最小 runtime host 能力
 - 完成 trace loop 列表后端分页：`/api/traces` 改为按 loop（`trace_id`）分页返回当前页 span 集合与总 loop 数，Web 端 recent loops 不再在单页内前端切片 12 条，而是直接消费后端页信息
 - 完成真实 token usage 贯通到 turn 主链：provider 返回的 `completion.usage` 现在会进入 `TurnLifecycle`、随 `turn_completed` SSE 与 session history 一起返回，并持久化到 `turn_completed` tape event，Web 聊天视图可直接显示本轮 input/output/total tokens
+- 完成 Web 端 turn 提交请求的 `keepalive` 加固：页面刷新或跳转时，已发出的 `POST /api/turn` 不再容易因为浏览器中断请求而导致本轮根本未进入 server worker
 
 ## 正在进行
 
-- 继续推进统一工具规范向外部协议映射与 MCP 接入
 - 收口 runtime worker 留在 `apps/agent-server`、哪些能力适合上移到 `agent-runtime` 的边界
 - 观察内嵌 `brush` 作为 shell 运行时的实际稳定性、命令兼容性与中断语义
 - 继续把 trace 数据模型从“本地 span store + event timeline”推进到更完整的 resources / richer events 模型，但暂不抢在工具协议映射与 MCP 之前做 exporter / collector 集成
 
 ## 下一步
 
-1. 推进 MCP 风格工具协议接入
-2. 把真正传输无关的 runtime 驱动辅助从 `apps/agent-server` 继续抽到共享层
-3. 在工具协议边界进一步收稳后，把 `llm-trace` 从当前本地 span record + event timeline 继续推进到更完整的 resources / richer events 形态
-4. 继续补强 shell 中断 / 长任务处理与更细粒度的工具运行时能力
-5. 桌面壳接入
+1. 支持完整的异步功能，支持完整的中断功能（停止llm调用，停止tool运行）
+1. runtime 驱动辅助从 `apps/agent-server` 继续抽到共享层
+2. 在工具协议边界进一步收稳后，把 `llm-trace` 从当前本地 span record + event timeline 继续推进到更完整的 resources / richer events 形态
+3. 继续补强 shell 中断 / 长任务处理与更细粒度的工具运行时能力
+4. 桌面壳接入
+
+
+## 暂时不做
+
+1. 继续推进统一工具规范向外部协议映射与 MCP 接入
 
 ## 为什么当前先做 Web，而不是继续堆终端界面
 
