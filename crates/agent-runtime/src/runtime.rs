@@ -39,6 +39,8 @@ pub struct AgentRuntime<M, T> {
     events: Vec<RuntimeEvent>,
     subscribers: BTreeMap<RuntimeSubscriberId, usize>,
     next_subscriber_id: RuntimeSubscriberId,
+    /// Actual input token count from the last LLM completion, used for accurate pressure ratio.
+    last_input_tokens: Option<u64>,
 }
 
 impl<M, T> AgentRuntime<M, T>
@@ -51,6 +53,16 @@ where
     }
 
     pub fn with_tape(model: M, tools: T, model_identity: ModelIdentity, tape: SessionTape) -> Self {
+        let last_input_tokens = tape
+            .entries()
+            .iter()
+            .rev()
+            .find(|e| e.event_name() == Some("turn_completed"))
+            .and_then(|e| e.event_data())
+            .and_then(|data| data.get("usage"))
+            .and_then(|usage| usage.get("input_tokens"))
+            .and_then(|v| v.as_u64());
+
         Self {
             model,
             tools,
@@ -65,6 +77,7 @@ where
             events: Vec::new(),
             subscribers: BTreeMap::new(),
             next_subscriber_id: 1,
+            last_input_tokens,
         }
     }
 

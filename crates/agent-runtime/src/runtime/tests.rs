@@ -1204,8 +1204,8 @@ fn context_stats_返回正确的压力比值() {
     assert_eq!(stats.context_limit, Some(1000));
     assert_eq!(stats.output_limit, Some(500));
     assert!(stats.pressure_ratio.is_some());
-    assert!(stats.pressure_ratio.unwrap() > 0.0);
-    assert!(stats.pressure_ratio.unwrap() < 1.0);
+    // Before any model call, pressure is 0 (no real token data yet).
+    assert_eq!(stats.pressure_ratio.unwrap(), 0.0);
 }
 
 #[test]

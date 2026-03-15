@@ -71,6 +71,7 @@
 - 完成 trace loop 列表后端分页：`/api/traces` 改为按 loop（`trace_id`）分页返回当前页 span 集合与总 loop 数，Web 端 recent loops 不再在单页内前端切片 12 条，而是直接消费后端页信息
 - 完成真实 token usage 贯通到 turn 主链：provider 返回的 `completion.usage` 现在会进入 `TurnLifecycle`、随 `turn_completed` SSE 与 session history 一起返回，并持久化到 `turn_completed` tape event，Web 聊天视图可直接显示本轮 input/output/total tokens
 - 完成 Web 端 turn 提交请求的 `keepalive` 加固：页面刷新或跳转时，已发出的 `POST /api/turn` 不再容易因为浏览器中断请求而导致本轮根本未进入 server worker
+- 完成 provider 注册表加载的旧路径兼容：当 `.aia/providers.json` 缺失时，server 会自动回退读取历史遗留的 `.aia/sessions/providers.json`，避免已有 provider 数据因为路径迁移而在启动后表现为“空配置”
 
 ## 正在进行
 

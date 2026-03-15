@@ -86,7 +86,12 @@ where
             let llm_trace_context = request.trace_context.clone();
             llm_step_index = llm_step_index.saturating_add(1);
             let completion = match self.model.complete_streaming(request, &mut on_delta) {
-                Ok(completion) => completion,
+                Ok(completion) => {
+                    if let Some(usage) = completion.usage.as_ref() {
+                        self.last_input_tokens = Some(usage.input_tokens);
+                    }
+                    completion
+                }
                 Err(error) => {
                     if !already_compressed && is_context_length_error(&error.to_string()) {
                         already_compressed = true;

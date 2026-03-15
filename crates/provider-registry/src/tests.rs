@@ -19,6 +19,52 @@ fn 默认存储路径位于项目隐藏目录() {
 }
 
 #[test]
+fn 新路径缺失时会回退读取旧_sessions_providers_json() {
+    let dir = std::env::temp_dir().join(format!(
+        "aia-provider-registry-legacy-{}",
+        SystemTime::now().duration_since(UNIX_EPOCH).expect("时间有效").as_nanos()
+    ));
+    let registry_path = dir.join(".aia").join("providers.json");
+    let legacy_path = dir.join(".aia").join("sessions").join("providers.json");
+    fs::create_dir_all(legacy_path.parent().expect("legacy parent")).expect("create dir");
+
+    let legacy_contents = serde_json::json!({
+        "providers": [
+            {
+                "name": "legacy",
+                "kind": "OpenAiResponses",
+                "base_url": "http://127.0.0.1:11434/v1",
+                "api_key": "sk-test",
+                "models": [
+                    {
+                        "id": "gpt-test",
+                        "display_name": "Legacy",
+                        "limit": {
+                            "context": 4096,
+                            "output": 2048
+                        },
+                        "default_temperature": null,
+                        "supports_reasoning": false,
+                        "reasoning_effort": null
+                    }
+                ],
+                "active_model": "gpt-test"
+            }
+        ],
+        "active_provider": "legacy"
+    });
+    fs::write(&legacy_path, serde_json::to_string_pretty(&legacy_contents).expect("serialize"))
+        .expect("write legacy registry");
+
+    let registry = ProviderRegistry::load_or_default(&registry_path).expect("load fallback");
+
+    assert_eq!(registry.providers().len(), 1);
+    assert_eq!(registry.active_provider().map(|provider| provider.name.as_str()), Some("legacy"));
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn 可保存并重新载入注册表() {
     let path = temp_file("provider-registry");
     let mut registry = ProviderRegistry::default();

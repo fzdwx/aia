@@ -119,16 +119,12 @@ where
         let entries_since_last_anchor = view.entries.len();
         let total_entries = self.tape.entries().len();
 
-        let available_tools = self.visible_tools();
-        let instructions = self.instructions.as_ref().filter(|text| !text.is_empty()).cloned();
-        let estimated_context_units = Self::approximate_request_units(
-            instructions.as_deref(),
-            &view.conversation,
-            &available_tools,
-        );
-
         let context_limit = self.model_identity.limit.as_ref().and_then(|limit| limit.context);
         let output_limit = self.model_identity.limit.as_ref().and_then(|limit| limit.output);
+
+        // Display: use real token count from last model call, 0 if no call yet.
+        let estimated_context_units =
+            self.last_input_tokens.unwrap_or(0).min(u32::MAX as u64) as u32;
         let pressure_ratio =
             context_limit.map(|limit| estimated_context_units as f64 / limit as f64);
 
@@ -145,15 +141,8 @@ where
 
     pub(super) fn context_pressure_ratio(&self) -> Option<f64> {
         let context_limit = self.model_identity.limit.as_ref().and_then(|limit| limit.context)?;
-        let view = self.tape.default_view();
-        let available_tools = self.visible_tools();
-        let instructions = self.instructions.as_ref().filter(|text| !text.is_empty()).cloned();
-        let estimated = Self::approximate_request_units(
-            instructions.as_deref(),
-            &view.conversation,
-            &available_tools,
-        );
-        Some(estimated as f64 / context_limit as f64)
+        let input_tokens = self.last_input_tokens.unwrap_or(0);
+        Some(input_tokens as f64 / context_limit as f64)
     }
 }
 

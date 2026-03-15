@@ -8,6 +8,11 @@ pub fn default_registry_path() -> std::path::PathBuf {
     std::path::PathBuf::from(".aia/providers.json")
 }
 
+fn legacy_registry_path(path: &Path) -> Option<std::path::PathBuf> {
+    let parent = path.parent()?;
+    Some(parent.join("sessions").join("providers.json"))
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ProviderRegistry {
     providers: Vec<ProviderProfile>,
@@ -17,6 +22,14 @@ pub struct ProviderRegistry {
 impl ProviderRegistry {
     pub fn load_or_default(path: &Path) -> Result<Self, ProviderRegistryError> {
         if !path.exists() {
+            if let Some(legacy_path) = legacy_registry_path(path) {
+                if legacy_path.exists() {
+                    let contents = fs::read_to_string(&legacy_path)
+                        .map_err(|error| ProviderRegistryError::new(error.to_string()))?;
+                    return serde_json::from_str(&contents)
+                        .map_err(|error| ProviderRegistryError::new(error.to_string()));
+                }
+            }
             return Ok(Self::default());
         }
 
