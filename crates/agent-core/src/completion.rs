@@ -180,5 +180,7 @@ pub struct CompletionRequest {
     pub available_tools: Vec<ToolDefinition>,
     #[serde(default)]
     pub prompt_cache: Option<PromptCacheConfig>,
+    #[serde(default)]
+    pub user_agent: Option<String>,
     pub trace_context: Option<LlmTraceRequestContext>,
 }
