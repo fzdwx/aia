@@ -39,6 +39,7 @@ where
             conversation: view.conversation,
             max_output_tokens: Some(summary_max_tokens),
             available_tools: Vec::new(),
+            prompt_cache: None,
             trace_context: turn_id.map(|turn_id| {
                 build_llm_trace_context(turn_id, turn_id, "compression", step_index)
             }),

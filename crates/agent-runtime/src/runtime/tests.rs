@@ -88,7 +88,12 @@ impl LanguageModel for UsageModel {
         Ok(Completion {
             segments: vec![CompletionSegment::Text("带 usage 的回答".into())],
             stop_reason: CompletionStopReason::Stop,
-            usage: Some(CompletionUsage { input_tokens: 21, output_tokens: 9, total_tokens: 30 }),
+            usage: Some(CompletionUsage {
+                input_tokens: 21,
+                output_tokens: 9,
+                total_tokens: 30,
+                cached_tokens: 0,
+            }),
             response_body: None,
             http_status_code: None,
         })
@@ -966,7 +971,12 @@ fn 成功轮会保留模型返回的真实_usage() {
 
     assert_eq!(
         output.completion.usage,
-        Some(CompletionUsage { input_tokens: 21, output_tokens: 9, total_tokens: 30 })
+        Some(CompletionUsage {
+            input_tokens: 21,
+            output_tokens: 9,
+            total_tokens: 30,
+            cached_tokens: 0,
+        })
     );
     assert!(events.iter().any(|event| matches!(
         event,
@@ -976,6 +986,7 @@ fn 成功轮会保留模型返回的真实_usage() {
                     input_tokens: 21,
                     output_tokens: 9,
                     total_tokens: 30,
+                    ..
                 }),
                 ..
             }
@@ -992,7 +1003,12 @@ fn 成功轮会保留模型返回的真实_usage() {
             .event_data()
             .and_then(|value| value.get("usage"))
             .and_then(|value| serde_json::from_value::<CompletionUsage>(value.clone()).ok()),
-        Some(CompletionUsage { input_tokens: 21, output_tokens: 9, total_tokens: 30 })
+        Some(CompletionUsage {
+            input_tokens: 21,
+            output_tokens: 9,
+            total_tokens: 30,
+            cached_tokens: 0,
+        })
     );
 }
 
@@ -1454,9 +1470,7 @@ fn runtime_tool_bridge_创建锚点后后续请求会过滤孤立_tool_result() 
     let tool_result_index = entries
         .iter()
         .position(|entry| {
-            entry
-                .as_tool_result()
-                .is_some_and(|result| result.tool_name == "tape_handoff")
+            entry.as_tool_result().is_some_and(|result| result.tool_name == "tape_handoff")
         })
         .expect("应记录 runtime tool 结果");
     let anchor_index = entries

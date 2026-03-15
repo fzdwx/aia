@@ -156,7 +156,8 @@ where
             },
         ) {
             Ok(result) => {
-                if result.invocation_id != call.invocation_id || result.tool_name != call.tool_name {
+                if result.invocation_id != call.invocation_id || result.tool_name != call.tool_name
+                {
                     let runtime_error = RuntimeError::tool_result_mismatch(call, &result);
                     let lifecycle = self.record_failed_tool_call(
                         turn_id,

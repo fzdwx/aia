@@ -34,6 +34,7 @@ where
             conversation,
             max_output_tokens,
             available_tools,
+            prompt_cache: self.prompt_cache.clone(),
             trace_context: Some(build_llm_trace_context(
                 turn_id,
                 turn_id,
@@ -43,7 +44,9 @@ where
         }
     }
 
-    fn default_request_parts(&self) -> (Option<String>, Vec<ConversationItem>, Vec<ToolDefinition>) {
+    fn default_request_parts(
+        &self,
+    ) -> (Option<String>, Vec<ConversationItem>, Vec<ToolDefinition>) {
         let view = self.tape.default_view();
         let mut conversation = Vec::new();
         if let Some(anchor) = view.origin_anchor.as_ref() {
@@ -60,9 +63,13 @@ where
 
     fn current_context_units(&self) -> u32 {
         let (instructions, conversation, available_tools) = self.default_request_parts();
-        let estimated_units =
-            Self::approximate_request_units(instructions.as_deref(), &conversation, &available_tools);
-        let Some(last_input_tokens) = self.last_input_tokens.map(|value| value.min(u32::MAX as u64) as u32)
+        let estimated_units = Self::approximate_request_units(
+            instructions.as_deref(),
+            &conversation,
+            &available_tools,
+        );
+        let Some(last_input_tokens) =
+            self.last_input_tokens.map(|value| value.min(u32::MAX as u64) as u32)
         else {
             return estimated_units;
         };

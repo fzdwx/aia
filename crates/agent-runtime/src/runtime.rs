@@ -13,7 +13,7 @@ mod turn;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use agent_core::{LanguageModel, ModelIdentity, ToolDefinition, ToolExecutor};
+use agent_core::{LanguageModel, ModelIdentity, PromptCacheConfig, ToolDefinition, ToolExecutor};
 use session_tape::{Handoff, SessionTape, SessionTapeError, TapeEntry};
 
 use crate::{RuntimeEvent, RuntimeSubscriberId};
@@ -39,6 +39,7 @@ pub struct AgentRuntime<M, T> {
     events: Vec<RuntimeEvent>,
     subscribers: BTreeMap<RuntimeSubscriberId, usize>,
     next_subscriber_id: RuntimeSubscriberId,
+    prompt_cache: Option<PromptCacheConfig>,
     /// Actual input token count from the last LLM completion, used for accurate pressure ratio.
     last_input_tokens: Option<u64>,
 }
@@ -77,6 +78,7 @@ where
             events: Vec::new(),
             subscribers: BTreeMap::new(),
             next_subscriber_id: 1,
+            prompt_cache: None,
             last_input_tokens,
         }
     }
@@ -107,6 +109,15 @@ where
     ) -> Self {
         self.tape_entry_listener = Some(Arc::new(listener));
         self
+    }
+
+    pub fn with_prompt_cache(mut self, prompt_cache: PromptCacheConfig) -> Self {
+        self.prompt_cache = Some(prompt_cache);
+        self
+    }
+
+    pub fn set_prompt_cache(&mut self, prompt_cache: Option<PromptCacheConfig>) {
+        self.prompt_cache = prompt_cache;
     }
 
     pub fn disable_tool(&mut self, tool_name: impl Into<String>) {
