@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
+import { getToolDisplayName } from "@/lib/tool-display"
 import type { TraceRecord } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -587,12 +588,15 @@ function MessageListSection({
             const preview = extractContent(record)
             const toolName =
               asString(record.name) ?? asString(asRecord(record.function)?.name)
+            const displayToolName = toolName
+              ? getToolDisplayName(toolName)
+              : null
             const toolCalls = asArray(record.tool_calls)
             const callId =
               asString(record.call_id) ?? asString(record.tool_call_id)
             const detailText = [
-              toolName ? `tool ${toolName}` : null,
-              callId ? `call ${callId}` : null,
+              displayToolName ? `tool ${displayToolName}` : null,
+              !displayToolName && callId ? `call ${callId}` : null,
               toolCalls.length > 0
                 ? `${toolCalls.length} tool call${toolCalls.length === 1 ? "" : "s"}`
                 : null,

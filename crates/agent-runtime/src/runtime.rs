@@ -146,9 +146,15 @@ where
         &mut self,
         name: impl Into<String>,
         state: serde_json::Value,
+        source: &str,
     ) -> Result<Handoff, RuntimeError> {
         let previous_len = self.tape.entries().len();
         let handoff = self.tape.handoff(name, state);
+        self.tape.set_entry_meta(
+            handoff.anchor.entry_id,
+            "source",
+            serde_json::Value::String(source.to_string()),
+        );
         self.persist_tape_entries_from(previous_len)?;
         Ok(handoff)
     }

@@ -73,6 +73,11 @@ pub enum StreamEvent {
     TextDelta {
         text: String,
     },
+    ToolCallDetected {
+        invocation_id: String,
+        tool_name: String,
+        arguments: serde_json::Value,
+    },
     ToolCallStarted {
         invocation_id: String,
         tool_name: String,

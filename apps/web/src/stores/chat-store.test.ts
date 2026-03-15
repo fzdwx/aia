@@ -106,4 +106,42 @@ describe("chat store submitTurn", () => {
 
     assert.equal(useChatStore.getState().error, null)
   })
+
+  test("creates tool block from started event with full arguments", () => {
+    useChatStore.setState({
+      chatState: "active",
+      streamingTurn: {
+        userMessage: "read AGENTS",
+        status: "thinking",
+        blocks: [],
+      },
+    })
+
+    const startedEvent: SseEvent = {
+      type: "stream",
+      data: {
+        kind: "tool_call_started",
+        invocation_id: "functions.read:27",
+        tool_name: "functions.read",
+        arguments: {
+          file_path: "/home/like/projects/aia/AGENTS.md",
+        },
+      },
+    }
+
+    useChatStore.getState().handleSseEvent(startedEvent)
+
+    const state = useChatStore.getState().streamingTurn
+    assert.equal(state?.blocks.length, 1)
+    assert.equal(state?.blocks[0]?.type, "tool")
+    if (state?.blocks[0]?.type !== "tool") {
+      throw new Error("expected tool block")
+    }
+    assert.equal(state.blocks[0].tool.invocationId, "functions.read:27")
+    assert.equal(state.blocks[0].tool.toolName, "functions.read")
+    assert.deepEqual(state.blocks[0].tool.arguments, {
+      file_path: "/home/like/projects/aia/AGENTS.md",
+    })
+    assert.equal(typeof state.blocks[0].tool.startedAtMs, "number")
+  })
 })

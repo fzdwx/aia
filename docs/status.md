@@ -66,6 +66,7 @@
 - 完成 `llm-trace` 本地 event timeline 落盘：记录 request started、首个 reasoning/text delta、模型建议 tool call、response completed/failed，并在 trace 页面 inspector 中展示所选 root/llm/tool 节点的事件时间线
 - 完成 runtime tool span 的后端真实落盘：工具执行不再只是前端基于 turn history 的临时推导节点，而是会继承当前 loop trace/root span 语义，在 `apps/agent-server` 中直接持久化为 INTERNAL span record，并带本地 tool started/completed/failed events
 - 完成 Web trace 页改为优先消费真实 tool span 记录：timeline / inspector 选中工具节点时会直接查看该工具 span 的 request/response/attributes/events，而不是回退查看父 LLM span
+- 完成流式工具事件语义拆分：模型侧只发 `tool_call_detected` 表示“已经决定要调工具”，runtime 真正开始执行时才发 `tool_call_started`，避免前端把一次工具调用误看成两次 start
 
 ## 正在进行
 

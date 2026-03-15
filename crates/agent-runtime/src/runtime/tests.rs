@@ -626,10 +626,7 @@ fn 默认上下文会从最新锚点之后重建() {
     let mut runtime = AgentRuntime::new(StubModel, StubTools, identity);
 
     runtime.handle_turn("第一轮").expect("第一轮成功");
-    let _ = runtime.handoff(
-        "handoff",
-        json!({"summary": "切到实现阶段"}),
-    );
+    let _ = runtime.handoff("handoff", json!({"summary": "切到实现阶段"}));
     runtime.handle_turn("第二轮").expect("第二轮成功");
 
     let default_messages = runtime.tape().default_messages();
@@ -649,10 +646,7 @@ fn 锚点状态会注入后续请求上下文() {
     let mut runtime = AgentRuntime::new(model, StubTools, identity);
 
     runtime.handle_turn("第一轮").expect("第一轮成功");
-    let _ = runtime.handoff(
-        "handoff",
-        json!({"summary": "切到实现阶段"}),
-    );
+    let _ = runtime.handoff("handoff", json!({"summary": "切到实现阶段"}));
     runtime.handle_turn("第二轮").expect("第二轮成功");
 
     let requests = runtime.model.seen_requests.borrow();
@@ -1062,11 +1056,8 @@ fn 压缩锚点仅保留摘要字段() {
         .into_iter()
         .find(|anchor| anchor.name == "context_compression")
         .expect("应创建压缩锚点");
-    let summary = anchor
-        .state
-        .get("summary")
-        .and_then(|value| value.as_str())
-        .expect("压缩锚点应包含摘要");
+    let summary =
+        anchor.state.get("summary").and_then(|value| value.as_str()).expect("压缩锚点应包含摘要");
 
     assert!(summary.contains("摘要"));
     // No legacy metadata fields
@@ -1210,8 +1201,7 @@ impl LanguageModel for TapeInfoModel {
             })
         } else {
             let saw_info = request.conversation.iter().any(|item| {
-                item.as_tool_result()
-                    .is_some_and(|result| result.content.contains("entries:"))
+                item.as_tool_result().is_some_and(|result| result.content.contains("entries:"))
             });
             if saw_info {
                 Ok(Completion::text("已获取上下文统计信息"))
@@ -1255,8 +1245,7 @@ impl LanguageModel for TapeHandoffModel {
             // The tool_result becomes orphaned and is filtered out.
             // Instead, we should see the context summary injected from the anchor.
             let saw_summary = request.conversation.iter().any(|item| {
-                item.as_message()
-                    .is_some_and(|msg| msg.content.contains("[context summary]"))
+                item.as_message().is_some_and(|msg| msg.content.contains("[context summary]"))
             });
             if saw_summary {
                 Ok(Completion::text("已创建锚点"))
@@ -1288,9 +1277,9 @@ fn tape_info_工具返回上下文统计() {
     assert_eq!(output.assistant_text, "已获取上下文统计信息");
     // Verify the tool result was recorded
     assert!(runtime.tape().entries().iter().any(|entry| {
-        entry
-            .as_tool_result()
-            .is_some_and(|result| result.tool_name == "tape.info" && result.content.contains("entries:"))
+        entry.as_tool_result().is_some_and(|result| {
+            result.tool_name == "tape.info" && result.content.contains("entries:")
+        })
     }));
 }
 
@@ -1309,12 +1298,8 @@ fn tape_handoff_工具创建锚点() {
     // An anchor named "test_anchor" should exist
     assert!(runtime.tape().anchors().iter().any(|a| a.name == "test_anchor"));
     // The anchor state should contain the summary
-    let anchor = runtime
-        .tape()
-        .anchors()
-        .into_iter()
-        .find(|a| a.name == "test_anchor")
-        .expect("应创建锚点");
+    let anchor =
+        runtime.tape().anchors().into_iter().find(|a| a.name == "test_anchor").expect("应创建锚点");
     assert_eq!(
         anchor.state.get("summary").and_then(|v| v.as_str()),
         Some("测试摘要：对话进行了多轮交互")
@@ -1346,13 +1331,17 @@ fn 孤立的_tool_result_会被过滤() {
 
     assert_eq!(filtered.len(), 3);
     // The orphan (invocation_id = "orphan-id") should be gone
-    assert!(filtered.iter().all(|item| {
-        item.as_tool_result().map_or(true, |r| r.invocation_id != "orphan-id")
-    }));
+    assert!(
+        filtered
+            .iter()
+            .all(|item| { item.as_tool_result().map_or(true, |r| r.invocation_id != "orphan-id") })
+    );
     // The matching result should remain
-    assert!(filtered.iter().any(|item| {
-        item.as_tool_result().is_some_and(|r| r.invocation_id == "call-1")
-    }));
+    assert!(
+        filtered
+            .iter()
+            .any(|item| { item.as_tool_result().is_some_and(|r| r.invocation_id == "call-1") })
+    );
 }
 
 #[test]

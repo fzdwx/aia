@@ -7,12 +7,28 @@ export function normalizeToolArguments(
   return args
 }
 
+function normalizeToolName(toolName: string | undefined): string | undefined {
+  if (!toolName) return undefined
+  const lower = toolName.toLowerCase()
+  const segments = lower.split(".")
+  return segments[segments.length - 1]
+}
+
+export function getToolDisplayName(toolName: string | undefined): string {
+  return normalizeToolName(toolName) ?? (toolName?.trim() || "tool")
+}
+
 function stringArg(
   args: Record<string, unknown>,
-  key: string
+  ...keys: string[]
 ): string | undefined {
-  const value = args[key]
-  return typeof value === "string" && value.length > 0 ? value : undefined
+  for (const key of keys) {
+    const value = args[key]
+    if (typeof value === "string" && value.length > 0) {
+      return value
+    }
+  }
+  return undefined
 }
 
 export function getToolDisplayPath(
@@ -22,28 +38,29 @@ export function getToolDisplayPath(
 ): string {
   if (details) {
     if (typeof details.file_path === "string") return details.file_path
+    if (typeof details.path === "string") return details.path
     if (typeof details.pattern === "string") return details.pattern
     if (typeof details.command === "string") return details.command
   }
 
   const normalizedArgs = normalizeToolArguments(args)
-  const normalizedToolName = toolName?.toLowerCase()
+  const normalizedToolName = normalizeToolName(toolName)
 
   if (normalizedToolName === "glob") {
-    return stringArg(normalizedArgs, "pattern") ?? stringArg(normalizedArgs, "path") ?? ""
+    return stringArg(normalizedArgs, "pattern", "path", "file_path") ?? ""
   }
   if (normalizedToolName === "grep") {
-    return stringArg(normalizedArgs, "pattern") ?? stringArg(normalizedArgs, "path") ?? ""
+    return stringArg(normalizedArgs, "pattern", "path", "file_path") ?? ""
   }
   if (normalizedToolName === "shell") {
-    return stringArg(normalizedArgs, "command") ?? ""
+    return stringArg(normalizedArgs, "command", "cmd") ?? ""
   }
   if (
     normalizedToolName === "read" ||
     normalizedToolName === "write" ||
     normalizedToolName === "edit"
   ) {
-    return stringArg(normalizedArgs, "path") ?? ""
+    return stringArg(normalizedArgs, "path", "file_path") ?? ""
   }
 
   const firstStr = Object.values(normalizedArgs).find(

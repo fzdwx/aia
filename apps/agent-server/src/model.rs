@@ -108,9 +108,9 @@ impl TraceEventCollector {
                     });
                 }
             }
-            StreamEvent::ToolCallStarted { invocation_id, tool_name, arguments } => {
+            StreamEvent::ToolCallDetected { invocation_id, tool_name, arguments } => {
                 self.events.push(LlmTraceEvent {
-                    name: "response.tool_call_started".to_string(),
+                    name: "response.tool_call_detected".to_string(),
                     at_ms,
                     attributes: json!({
                         "invocation_id": invocation_id,
@@ -126,7 +126,8 @@ impl TraceEventCollector {
                     attributes: Value::Null,
                 });
             }
-            StreamEvent::ToolOutputDelta { .. }
+            StreamEvent::ToolCallStarted { .. }
+            | StreamEvent::ToolOutputDelta { .. }
             | StreamEvent::ToolCallCompleted { .. }
             | StreamEvent::Log { .. } => {}
         }

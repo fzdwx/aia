@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { Check, X as XIcon } from "lucide-react"
 import { MarkdownContent } from "@/components/markdown-content"
 import { Shimmer } from "@/components/ai-elements/shimmer"
-import { getToolDisplayPath } from "@/lib/tool-display"
+import { getToolDisplayName, getToolDisplayPath } from "@/lib/tool-display"
 import { useChatStore } from "@/stores/chat-store"
 import type {
   StreamingToolOutput,
@@ -131,7 +131,7 @@ function fromStreamingTool(tool: StreamingToolOutput): ToolRowItem {
     id: tool.invocationId,
     toolName: tool.toolName,
     arguments: tool.arguments,
-    startedAtMs: tool.startedAtMs,
+    startedAtMs: tool.startedAtMs ?? tool.detectedAtMs,
     finishedAtMs: tool.finishedAtMs,
     succeeded: !tool.failed,
     outputContent: tool.resultContent ?? tool.output,
@@ -160,6 +160,13 @@ function formatScalar(value: unknown): string {
   }
   if (value == null) return "-"
   return JSON.stringify(value)
+}
+
+function getStreamingToolTarget(tool: StreamingToolOutput): string {
+  const target = getToolDisplayPath(tool.toolName, undefined, tool.arguments)
+  if (target) return target
+  if (tool.startedAtMs) return "running"
+  return "preparing"
 }
 
 function StructuredArguments({
@@ -323,7 +330,7 @@ function ToolRow({ item }: { item: ToolRowItem }) {
         className="grid w-full grid-cols-[minmax(56px,max-content)_1fr_auto] items-center gap-x-2 py-0.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
       >
         <span className="truncate text-left font-medium text-muted-foreground/70">
-          {item.toolName}
+          {getToolDisplayName(item.toolName)}
         </span>
         <span className="truncate text-left">{displayPath}</span>
         <div className="flex items-center gap-2">
@@ -464,19 +471,17 @@ function StreamingToolGroup({
               >
                 {tool.toolName && (
                   <span className="truncate text-left font-medium">
-                    {tool.toolName}
+                    {getToolDisplayName(tool.toolName)}
                   </span>
                 )}
                 <span className="truncate text-left">
-                  {getToolDisplayPath(
-                    tool.toolName,
-                    undefined,
-                    tool.arguments
-                  ) || tool.invocationId}
+                  {getStreamingToolTarget(tool)}
                 </span>
                 <span className="shrink-0 text-muted-foreground/50">
-                  {formatDurationMs(tool.startedAtMs, tool.finishedAtMs) ??
-                    "0 ms"}
+                  {tool.startedAtMs
+                    ? formatDurationMs(tool.startedAtMs, tool.finishedAtMs) ??
+                      "0 ms"
+                    : "queued"}
                 </span>
               </div>
             ))}

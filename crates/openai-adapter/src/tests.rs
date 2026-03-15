@@ -855,7 +855,7 @@ fn 聊天补全流式调用可逐段收到文本与工具() {
             StreamEvent::ThinkingDelta { text: "先分析".into() },
             StreamEvent::TextDelta { text: "答".into() },
             StreamEvent::TextDelta { text: "案".into() },
-            StreamEvent::ToolCallStarted {
+            StreamEvent::ToolCallDetected {
                 invocation_id: "call_1".into(),
                 tool_name: "search_code".into(),
                 arguments: Value::default(),

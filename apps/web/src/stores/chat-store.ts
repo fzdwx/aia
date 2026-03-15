@@ -44,7 +44,8 @@ function currentTurnToStreamingTurn(
               invocationId: block.tool.invocation_id,
               toolName: block.tool.tool_name,
               arguments: normalizeToolArguments(block.tool.arguments),
-              startedAtMs: block.tool.started_at_ms,
+              detectedAtMs: block.tool.detected_at_ms,
+              startedAtMs: block.tool.started_at_ms ?? undefined,
               finishedAtMs: block.tool.finished_at_ms ?? undefined,
               output: block.tool.output,
               completed: block.tool.completed,
@@ -212,37 +213,35 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             }
           }
           if (existingIdx >= 0) {
-            // Duplicate — merge arguments (adapter sends early with null args,
-            // execute_tool_call sends again with full args)
-            if (data.arguments != null) {
-              const b = blocks[existingIdx] as Extract<
-                (typeof blocks)[number],
-                { type: "tool" }
-              >
-              blocks[existingIdx] = {
-                ...b,
-                tool: {
-                  ...b.tool,
-                  toolName: data.tool_name || b.tool.toolName,
-                  arguments: normalizeToolArguments(data.arguments),
-                },
-              }
-              set({ streamingTurn: { ...prev, blocks } })
+            const b = blocks[existingIdx] as Extract<
+              (typeof blocks)[number],
+              { type: "tool" }
+            >
+            blocks[existingIdx] = {
+              ...b,
+              tool: {
+                ...b.tool,
+                toolName: data.tool_name || b.tool.toolName,
+                arguments: normalizeToolArguments(data.arguments),
+                startedAtMs: b.tool.startedAtMs ?? Date.now(),
+              },
             }
           } else {
+            const startedAtMs = Date.now()
             blocks.push({
               type: "tool",
               tool: {
                 invocationId: data.invocation_id,
                 toolName: data.tool_name,
                 arguments: normalizeToolArguments(data.arguments),
-                startedAtMs: Date.now(),
+                detectedAtMs: startedAtMs,
+                startedAtMs,
                 output: "",
                 completed: false,
               },
             })
-            set({ streamingTurn: { ...prev, blocks } })
           }
+          set({ streamingTurn: { ...prev, blocks } })
         } else if (data.kind === "tool_output_delta") {
           let idx = -1
           for (let i = blocks.length - 1; i >= 0; i -= 1) {
@@ -262,16 +261,22 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             >
             blocks[idx] = {
               ...b,
-              tool: { ...b.tool, output: b.tool.output + data.text },
+              tool: {
+                ...b.tool,
+                startedAtMs: b.tool.startedAtMs ?? Date.now(),
+                output: b.tool.output + data.text,
+              },
             }
           } else {
+            const startedAtMs = Date.now()
             blocks.push({
               type: "tool",
               tool: {
                 invocationId: data.invocation_id,
                 toolName: "",
                 arguments: {},
-                startedAtMs: Date.now(),
+                detectedAtMs: startedAtMs,
+                startedAtMs,
                 output: data.text,
                 completed: false,
               },

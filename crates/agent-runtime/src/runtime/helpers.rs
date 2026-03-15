@@ -50,15 +50,8 @@ pub(super) fn now_timestamp_ms() -> u64 {
 }
 
 pub(super) fn anchor_state_message(anchor: &Anchor) -> Option<Message> {
-    let summary = anchor
-        .state
-        .get("summary")
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())?;
-    Some(Message::new(
-        Role::User,
-        format!("[context summary]\n{summary}"),
-    ))
+    let summary = anchor.state.get("summary").and_then(|v| v.as_str()).filter(|s| !s.is_empty())?;
+    Some(Message::new(Role::User, format!("[context summary]\n{summary}")))
 }
 
 pub(super) fn build_llm_trace_context(

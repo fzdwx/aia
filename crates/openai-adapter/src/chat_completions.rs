@@ -307,7 +307,7 @@ impl LanguageModel for OpenAiChatCompletionsModel {
                             });
                             let arguments =
                                 parse_tool_arguments(&state.arguments).unwrap_or_default();
-                            sink(StreamEvent::ToolCallStarted {
+                            sink(StreamEvent::ToolCallDetected {
                                 invocation_id,
                                 tool_name: name.to_string(),
                                 arguments,

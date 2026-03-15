@@ -47,7 +47,7 @@ where
         let completion = self.model.complete(request).map_err(RuntimeError::model)?;
         let summary = completion.plain_text();
 
-        self.record_handoff("context_compression", json!({ "summary": summary }))?;
+        self.record_handoff("context_compression", json!({ "summary": summary }), "system")?;
 
         self.publish_event(RuntimeEvent::ContextCompressed { summary });
         Ok(())

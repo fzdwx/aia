@@ -1,9 +1,4 @@
-use std::{
-    fs,
-    fs::OpenOptions,
-    io::Write,
-    path::Path,
-};
+use std::{fs, fs::OpenOptions, io::Write, path::Path};
 
 use agent_core::{ConversationItem, Message};
 use serde_json::Value;
@@ -144,6 +139,14 @@ impl SessionTape {
 
     pub fn entries(&self) -> &[TapeEntry] {
         &self.entries
+    }
+
+    pub fn set_entry_meta(&mut self, entry_id: u64, key: &str, value: Value) {
+        if let Some(entry) = self.entries.iter_mut().rev().find(|e| e.id == entry_id) {
+            if let Value::Object(ref mut map) = entry.meta {
+                map.insert(key.to_string(), value);
+            }
+        }
     }
 
     pub fn anchors(&self) -> Vec<Anchor> {

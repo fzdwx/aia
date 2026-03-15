@@ -17,10 +17,7 @@ pub const AUTO_COMPRESSION_THRESHOLD: f64 = 0.95;
 
 /// Render the handoff summary prompt with the given token budget.
 pub fn handoff_summary(token_budget: u32) -> String {
-    render(
-        HANDOFF_SUMMARY_TEMPLATE,
-        &[("token_budget", &token_budget.to_string())],
-    )
+    render(HANDOFF_SUMMARY_TEMPLATE, &[("token_budget", &token_budget.to_string())])
 }
 
 /// Render the context contract block with the given thresholds.
@@ -42,10 +39,7 @@ fn render(template: &str, vars: &[(&str, &str)]) -> String {
     for (key, value) in vars {
         result = result.replace(&format!("{{{{{key}}}}}"), value);
     }
-    debug_assert!(
-        !result.contains("{{"),
-        "unresolved placeholder in rendered template: {result}"
-    );
+    debug_assert!(!result.contains("{{"), "unresolved placeholder in rendered template: {result}");
     result
 }
 
@@ -75,7 +69,8 @@ mod tests {
 
     #[test]
     fn render_replaces_all_placeholders() {
-        let result = render("Hello {{name}}, you are {{age}}.", &[("name", "Alice"), ("age", "30")]);
+        let result =
+            render("Hello {{name}}, you are {{age}}.", &[("name", "Alice"), ("age", "30")]);
         assert_eq!(result, "Hello Alice, you are 30.");
     }
 

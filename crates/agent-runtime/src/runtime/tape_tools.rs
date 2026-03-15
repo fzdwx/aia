@@ -62,7 +62,7 @@ where
                     .and_then(|v| v.as_str())
                     .unwrap_or("handoff")
                     .to_string();
-                self.record_handoff(&name, json!({ "summary": summary }))?;
+                self.record_handoff(&name, json!({ "summary": summary }), "ai")?;
                 format!("anchor added: {name}")
             }
             _ => return Err(RuntimeError::tool_unavailable(call.tool_name.clone())),

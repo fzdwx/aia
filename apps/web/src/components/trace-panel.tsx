@@ -14,7 +14,6 @@ import {
 import { TraceDetailModal } from "@/components/trace-detail-modal"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
 import {
   Collapsible,
   CollapsibleContent,
@@ -26,6 +25,7 @@ import {
   type LoopTimelineNode,
   type TraceLoopGroup,
 } from "@/lib/trace-presentation"
+import { getToolDisplayName, getToolDisplayPath } from "@/lib/tool-display"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat-store"
 import { useTraceStore } from "@/stores/trace-store"
@@ -338,7 +338,7 @@ function nodeTitle(node: LoopTimelineNode) {
     case "llm_span":
       return node.trace.model
     case "tool_span":
-      return node.trace.model
+      return getToolDisplayName(node.trace.model)
   }
 }
 
@@ -351,7 +351,9 @@ function nodeSubtitle(node: LoopTimelineNode) {
         ? `${node.operationName} · ${formatCount(node.trace.total_tokens)} tok`
         : node.operationName
     case "tool_span":
-      return node.operationName
+      return node.trace.endpoint_path.startsWith("/tools/")
+        ? node.operationName
+        : `${node.operationName} · ${node.trace.endpoint_path}`
   }
 }
 
@@ -397,6 +399,7 @@ function summarizeEvent(event: TraceEvent) {
     case "response.first_text_delta":
     case "response.first_reasoning_delta":
       return asString(attributes?.preview) ?? null
+    case "response.tool_call_detected":
     case "response.tool_call_started":
       return asString(attributes?.tool_name) ?? null
     case "response.completed":
@@ -460,7 +463,7 @@ function buildToolEvents(
       summary: node.trace.model,
       attributes: {
         span_id: node.trace.span_id,
-        tool_name: node.trace.model,
+        tool_name: getToolDisplayName(node.trace.model),
       },
     },
     {
@@ -472,7 +475,7 @@ function buildToolEvents(
         : (node.trace.stop_reason ?? null),
       attributes: {
         span_id: node.trace.span_id,
-        tool_name: node.trace.model,
+        tool_name: getToolDisplayName(node.trace.model),
         error: node.trace.error,
       },
     },
@@ -508,19 +511,24 @@ function SummaryItem({
   value,
   icon,
   tone = "default",
+  bare = false,
 }: {
   label: string
   value: string
   icon: ReactNode
   tone?: "default" | "warning"
+  bare?: boolean
 }) {
   return (
     <div
       className={cn(
-        "rounded-xl border px-2.5 py-2",
-        tone === "warning"
-          ? "border-amber-500/25 bg-amber-500/[0.04]"
-          : "border-border/35 bg-background/70"
+        "px-2.5 py-2",
+        !bare && "rounded-xl border",
+        !bare &&
+          (tone === "warning"
+            ? "border-amber-500/25 bg-amber-500/[0.04]"
+            : "border-border/35 bg-background/70"),
+        bare && tone === "warning" && "bg-amber-500/[0.04]"
       )}
     >
       <div className="flex items-center justify-between gap-2">
@@ -571,7 +579,7 @@ function TabButton({
     <button
       onClick={onClick}
       className={cn(
-        "rounded-md px-2 py-1 text-[11px] font-medium tracking-[0.08em] uppercase transition-colors",
+        "rounded-md px-2 py-1 text-[11px] font-medium tracking-[0.08em] uppercase transition-all active:scale-[0.96]",
         active
           ? "bg-foreground text-background"
           : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
@@ -629,6 +637,12 @@ function formatScalar(value: unknown): string {
   }
   if (value == null) return "-"
   return JSON.stringify(value)
+}
+
+function filterToolArgumentsForInspector(value: unknown): Record<string, unknown> {
+  const record = asRecord(value)
+  if (!record) return {}
+  return record
 }
 
 function StructuredArguments({ value }: { value: unknown }) {
@@ -787,14 +801,11 @@ function TraceActiveStrip({
   group: TraceLoopGroup
 }) {
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-border/40 bg-card">
-      <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.03),transparent_45%)]" />
-      <div className="absolute inset-y-0 right-0 w-1/2 bg-[radial-gradient(circle_at_top_right,rgba(56,189,248,0.14),transparent_55%)]" />
-      <div className="absolute inset-0 bg-[linear-gradient(90deg,transparent_0%,rgba(255,255,255,0.02)_50%,transparent_100%)]" />
-      <div className="relative grid gap-3 px-3 py-3 md:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
+    <div className="overflow-hidden rounded-2xl border border-border/40 border-t-2 border-t-foreground/8 bg-card">
+      <div className="grid gap-3 px-3 py-3 md:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-serif text-[18px] font-semibold tracking-tight text-foreground">
+            <span className="text-lg font-semibold tracking-tight text-foreground">
               trace
             </span>
             <Badge variant={loopBadgeVariant(group.finalStatus)} className="text-[10px]">
@@ -857,7 +868,7 @@ function RecentLoopRow({
     <button
       onClick={onSelect}
       className={cn(
-        "w-full rounded-xl border px-2.5 py-2 text-left transition-colors",
+        "w-full rounded-xl border px-2.5 py-2 text-left transition-all active:scale-[0.98]",
         active
           ? "border-foreground/20 bg-accent/35"
           : "border-border/30 bg-background/70 hover:bg-accent/20"
@@ -966,7 +977,7 @@ function WaterfallRow({
     <button
       onClick={onSelect}
       className={cn(
-        "w-full rounded-xl border px-2.5 py-2 text-left transition-colors",
+        "w-full rounded-xl border px-2.5 py-2 text-left transition-all active:scale-[0.99]",
         selected ? "border-foreground/20 bg-accent/35" : tone.frame
       )}
     >
@@ -1009,7 +1020,6 @@ function WaterfallRow({
 
         <div className="relative h-8 overflow-hidden rounded-md border border-border/20 bg-background/35">
           <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-border/30" />
-          <div className="absolute inset-0 bg-[repeating-linear-gradient(90deg,transparent_0,transparent_calc(25%-1px),rgba(255,255,255,0.06)_calc(25%-1px),rgba(255,255,255,0.06)_25%)]" />
           <div
             className={cn(
               "absolute top-[9px] h-[14px] rounded-sm border",
@@ -1290,16 +1300,21 @@ function ToolInspector({
   tab: InspectorTab
 }) {
   const providerRequest = asRecord(trace?.provider_request)
+  const toolName = getToolDisplayName(node.trace.model)
+  const argumentValue = filterToolArgumentsForInspector(
+    providerRequest?.arguments ?? providerRequest ?? {}
+  )
+  const hasExtraArguments = Object.keys(argumentValue).length > 0
   const outcome = trace?.response_body ?? node.trace.error ?? null
 
   if (tab === "content") {
     return (
       <div className="space-y-3">
-        <Section title="Arguments">
-          <StructuredArguments
-            value={providerRequest?.arguments ?? providerRequest ?? {}}
-          />
-        </Section>
+        {hasExtraArguments ? (
+          <Section title="Arguments">
+            <StructuredArguments value={argumentValue} />
+          </Section>
+        ) : null}
 
         <Section title="Outcome">
           <ExpandableTextBlock
@@ -1337,7 +1352,7 @@ function ToolInspector({
       <Section title="Span summary">
         <DetailList
           items={[
-            { label: "tool", value: node.trace.model },
+            { label: "tool", value: toolName },
             { label: "status", value: node.status },
             { label: "operation", value: node.operationName },
             { label: "duration", value: formatDuration(node.durationMs) },
@@ -1464,7 +1479,7 @@ export function TracePanel() {
           </button>
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="font-serif text-[17px] font-semibold tracking-tight">
+              <h1 className="text-base font-semibold tracking-tight">
                 trace
               </h1>
               <Badge variant="outline" className="text-[10px]">
@@ -1485,28 +1500,33 @@ export function TracePanel() {
 
       <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
         <div className="mx-auto flex max-w-[1440px] flex-col gap-3">
-          <div className="grid gap-2 md:grid-cols-5">
+          <div className="grid grid-cols-5 divide-x divide-border/25 overflow-hidden rounded-xl border border-border/35 bg-background/70">
             <SummaryItem
+              bare
               label="loops"
               value={String(loopGroups.length)}
               icon={<Waypoints className="size-3.5" />}
             />
             <SummaryItem
+              bare
               label="llm spans"
               value={String(llmSpanCount)}
               icon={<Bot className="size-3.5" />}
             />
             <SummaryItem
+              bare
               label="tool spans"
               value={String(toolSpanCount)}
               icon={<Wrench className="size-3.5" />}
             />
             <SummaryItem
+              bare
               label="p95 latency"
               value={formatDuration(traceSummary?.p95_duration_ms)}
               icon={<Clock3 className="size-3.5" />}
             />
             <SummaryItem
+              bare
               label="attention"
               value={String(partialOrFailedLoops)}
               tone={partialOrFailedLoops > 0 ? "warning" : "default"}
@@ -1521,18 +1541,20 @@ export function TracePanel() {
           ) : null}
 
           {loopGroups.length === 0 && !traceLoading ? (
-            <Card>
-              <CardContent className="px-6 py-10 text-center text-sm text-muted-foreground">
-                还没有 trace 记录。
-              </CardContent>
-            </Card>
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <Waypoints className="size-10 text-muted-foreground/30" />
+              <p className="mt-4 text-sm font-medium text-foreground/70">No traces yet</p>
+              <p className="mt-1 text-[13px] text-muted-foreground">
+                Start a conversation to see agent loops and LLM spans here.
+              </p>
+            </div>
           ) : null}
 
           {activeGroup ? <TraceActiveStrip group={activeGroup} /> : null}
 
           {loopGroups.length > 0 ? (
-            <div className="grid min-h-[700px] gap-3 xl:grid-cols-[280px_minmax(0,1.15fr)_360px]">
-              <Card className="min-h-0 overflow-hidden border-border/35 bg-background/70">
+            <div className="grid min-h-[700px] overflow-hidden rounded-xl border border-border/30 xl:grid-cols-[280px_minmax(0,1.15fr)_360px]">
+              <div className="min-h-0 overflow-hidden">
                 <div className="border-b border-border/25 px-3 py-2.5">
                   <p className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
                     Trace list
@@ -1551,9 +1573,9 @@ export function TracePanel() {
                     />
                   ))}
                 </div>
-              </Card>
+              </div>
 
-              <Card className="min-h-0 overflow-hidden border-border/35 bg-background/70">
+              <div className="min-h-0 overflow-hidden border-l border-border/25">
                 <div className="border-b border-border/25 px-3 py-2.5">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
@@ -1590,9 +1612,9 @@ export function TracePanel() {
                     </div>
                   ) : null}
                 </div>
-              </Card>
+              </div>
 
-              <Card className="min-h-0 overflow-hidden border-border/35 bg-background/70">
+              <div className="min-h-0 overflow-hidden border-l border-border/25">
                 <div className="border-b border-border/25 px-3 py-2.5">
                   <div className="flex items-center justify-between gap-2">
                     <div>
@@ -1656,7 +1678,7 @@ export function TracePanel() {
                     </div>
                   )}
                 </div>
-              </Card>
+              </div>
             </div>
           ) : null}
         </div>

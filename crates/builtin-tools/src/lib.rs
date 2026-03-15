@@ -19,10 +19,7 @@ pub fn should_skip_directory(entry: &DirEntry) -> bool {
         return false;
     }
 
-    matches!(
-        entry.file_name().to_str(),
-        Some(".git" | "node_modules" | "target")
-    )
+    matches!(entry.file_name().to_str(), Some(".git" | "node_modules" | "target"))
 }
 
 use agent_core::ToolRegistry;

@@ -23,7 +23,8 @@ pub struct CurrentToolOutput {
     pub invocation_id: String,
     pub tool_name: String,
     pub arguments: serde_json::Value,
-    pub started_at_ms: u64,
+    pub detected_at_ms: u64,
+    pub started_at_ms: Option<u64>,
     pub finished_at_ms: Option<u64>,
     pub output: String,
     pub completed: bool,
@@ -395,6 +396,7 @@ fn run_turn(owner: &mut RuntimeOwnerState, prompt: String) {
         let new_status = match &event {
             StreamEvent::ThinkingDelta { .. } => CurrentStatus::Thinking,
             StreamEvent::TextDelta { .. } => CurrentStatus::Generating,
+            StreamEvent::ToolCallDetected { .. } => current_status.clone(),
             StreamEvent::ToolCallStarted { .. } => CurrentStatus::Working,
             StreamEvent::ToolOutputDelta { .. } => CurrentStatus::Working,
             _ => current_status.clone(),
@@ -630,6 +632,7 @@ fn update_current_turn_from_stream(
             Some(CurrentTurnBlock::Text { content }) => content.push_str(text),
             _ => snapshot.blocks.push(CurrentTurnBlock::Text { content: text.clone() }),
         },
+        StreamEvent::ToolCallDetected { .. } => {}
         StreamEvent::ToolCallStarted { invocation_id, tool_name, arguments } => {
             if let Some(CurrentTurnBlock::Tool { tool }) =
                 snapshot.blocks.iter_mut().rev().find(|block| {
@@ -642,13 +645,16 @@ fn update_current_turn_from_stream(
             {
                 tool.tool_name = tool_name.clone();
                 tool.arguments = object_value(arguments);
+                tool.started_at_ms = Some(tool.started_at_ms.unwrap_or_else(now_timestamp_ms));
             } else {
+                let started_at_ms = now_timestamp_ms();
                 snapshot.blocks.push(CurrentTurnBlock::Tool {
                     tool: CurrentToolOutput {
                         invocation_id: invocation_id.clone(),
                         tool_name: tool_name.clone(),
                         arguments: object_value(arguments),
-                        started_at_ms: now_timestamp_ms(),
+                        detected_at_ms: started_at_ms,
+                        started_at_ms: Some(started_at_ms),
                         finished_at_ms: None,
                         output: String::new(),
                         completed: false,
@@ -671,12 +677,14 @@ fn update_current_turn_from_stream(
             {
                 tool.output.push_str(text);
             } else {
+                let started_at_ms = now_timestamp_ms();
                 snapshot.blocks.push(CurrentTurnBlock::Tool {
                     tool: CurrentToolOutput {
                         invocation_id: invocation_id.clone(),
                         tool_name: String::new(),
                         arguments: json!({}),
-                        started_at_ms: now_timestamp_ms(),
+                        detected_at_ms: started_at_ms,
+                        started_at_ms: Some(started_at_ms),
                         finished_at_ms: None,
                         output: text.clone(),
                         completed: false,
@@ -930,7 +938,8 @@ impl TurnHistoryBuilder {
                                 invocation_id: invocation.call.invocation_id,
                                 tool_name: invocation.call.tool_name,
                                 arguments: object_value(&invocation.call.arguments),
-                                started_at_ms: invocation.started_at_ms,
+                                detected_at_ms: invocation.started_at_ms,
+                                started_at_ms: Some(invocation.started_at_ms),
                                 finished_at_ms: Some(invocation.finished_at_ms),
                                 output: String::new(),
                                 completed: true,
