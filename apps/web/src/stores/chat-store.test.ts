@@ -16,6 +16,7 @@ const initialState = {
   error: null,
   view: "chat" as const,
   contextPressure: null,
+  lastCompression: null,
   _pendingPrompt: null,
 }
 
@@ -187,6 +188,26 @@ describe("chat store submitTurn", () => {
         { type: "text", content: "部分回答" },
       ],
     })
+  })
+
+  test("stores context compression notice for active session", () => {
+    useChatStore.setState({
+      activeSessionId: "session-1",
+      lastCompression: null,
+    })
+
+    const compressionEvent: SseEvent = {
+      type: "context_compressed",
+      data: {
+        session_id: "session-1",
+        summary: "摘要：已压缩旧历史，保留当前任务目标。",
+      },
+    }
+
+    useChatStore.getState().handleSseEvent(compressionEvent)
+
+    const state = useChatStore.getState()
+    assert.deepEqual(state.lastCompression, compressionEvent.data)
   })
 
   test("turn_completed with cancelled outcome replaces streaming turn with preserved history", () => {

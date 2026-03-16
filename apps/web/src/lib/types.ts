@@ -116,6 +116,11 @@ export type SessionListItem = {
   model: string
 }
 
+export type ContextCompressionNotice = {
+  session_id: string
+  summary: string
+}
+
 // SSE event types from the global /api/events stream — all carry session_id
 export type SseEvent =
   | { type: "stream"; data: StreamEvent & { session_id: string } }
@@ -124,10 +129,7 @@ export type SseEvent =
       type: "turn_completed"
       data: TurnLifecycle & { session_id: string }
     }
-  | {
-      type: "context_compressed"
-      data: { session_id: string; summary: string }
-    }
+  | { type: "context_compressed"; data: ContextCompressionNotice }
   | { type: "error"; data: { session_id: string; message: string } }
   | {
       type: "session_created"

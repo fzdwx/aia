@@ -133,6 +133,7 @@ async fn main() {
         .route("/api/session/current-turn", get(routes::get_current_turn))
         .route("/api/session/info", get(routes::get_session_info))
         .route("/api/session/handoff", post(routes::create_handoff))
+        .route("/api/session/auto-compress", post(routes::auto_compress_session))
         .route("/api/events", get(routes::events))
         .route("/api/turn", post(routes::submit_turn))
         .route("/api/turn/cancel", post(routes::cancel_turn))

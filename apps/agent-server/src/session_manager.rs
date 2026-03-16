@@ -87,6 +87,10 @@ enum SessionCommand {
         summary: String,
         reply: oneshot::Sender<Result<u64, RuntimeWorkerError>>,
     },
+    AutoCompressSession {
+        session_id: SessionId,
+        reply: oneshot::Sender<Result<bool, RuntimeWorkerError>>,
+    },
     CreateProvider {
         input: CreateProviderInput,
         reply: oneshot::Sender<Result<(), RuntimeWorkerError>>,
@@ -199,6 +203,18 @@ impl SessionManagerHandle {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.tx
             .send(SessionCommand::CreateHandoff { session_id, name, summary, reply: reply_tx })
+            .await
+            .map_err(|_| RuntimeWorkerError::unavailable())?;
+        reply_rx.await.map_err(|_| RuntimeWorkerError::unavailable())?
+    }
+
+    pub async fn auto_compress_session(
+        &self,
+        session_id: String,
+    ) -> Result<bool, RuntimeWorkerError> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.tx
+            .send(SessionCommand::AutoCompressSession { session_id, reply: reply_tx })
             .await
             .map_err(|_| RuntimeWorkerError::unavailable())?;
         reply_rx.await.map_err(|_| RuntimeWorkerError::unavailable())?
@@ -333,6 +349,10 @@ async fn session_manager_loop(
                     }
                     SessionCommand::CreateHandoff { session_id, name, summary, reply } => {
                         let result = handle_create_handoff(&mut slots, &session_id, name, summary);
+                        let _ = reply.send(result);
+                    }
+                    SessionCommand::AutoCompressSession { session_id, reply } => {
+                        let result = handle_auto_compress_session(&mut slots, &config, &session_id);
                         let _ = reply.send(result);
                     }
                     SessionCommand::CreateProvider { input, reply } => {
@@ -712,6 +732,35 @@ fn handle_create_handoff(
         .save_jsonl(&slot.session_path)
         .map_err(|e| RuntimeWorkerError::internal(format!("session save failed: {e}")))?;
     Ok(handoff.anchor.entry_id)
+}
+
+fn handle_auto_compress_session(
+    slots: &mut HashMap<SessionId, SessionSlot>,
+    config: &SessionManagerConfig,
+    session_id: &str,
+) -> Result<bool, RuntimeWorkerError> {
+    let slot = slots
+        .get_mut(session_id)
+        .ok_or_else(|| RuntimeWorkerError::not_found(format!("session not found: {session_id}")))?;
+    let runtime = slot
+        .runtime
+        .as_mut()
+        .ok_or_else(|| RuntimeWorkerError::bad_request("session is currently running a turn"))?;
+
+    let compressed = runtime.auto_compress_now().map_err(|error| {
+        RuntimeWorkerError::internal(format!("auto compress failed: {error}"))
+    })?;
+    runtime
+        .tape()
+        .save_jsonl(&slot.session_path)
+        .map_err(|e| RuntimeWorkerError::internal(format!("session save failed: {e}")))?;
+
+    if compressed {
+        let events = runtime.collect_events(slot.subscriber).unwrap_or_default();
+        let _ = broadcast_runtime_events_with_session(events, &config.broadcast_tx, session_id);
+    }
+
+    Ok(compressed)
 }
 
 fn handle_create_provider(

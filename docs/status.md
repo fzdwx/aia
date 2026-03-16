@@ -70,6 +70,9 @@
 - 完成 `tape_info` / `tape_handoff` 从 runtime 特判式实现收口到 `Tool` trait + runtime tool registry：schema 暴露与调用路径改为真正的工具注册模型，只通过 `ToolExecutionContext` 注入最小 runtime host 能力
 - 完成 trace loop 列表后端分页：`/api/traces` 改为按 loop（`trace_id`）分页返回当前页 span 集合与总 loop 数，Web 端 recent loops 不再在单页内前端切片 12 条，而是直接消费后端页信息
 - 完成真实 token usage 贯通到 turn 主链：provider 返回的 `completion.usage` 现在会进入 `TurnLifecycle`、随 `turn_completed` SSE 与 session history 一起返回，并持久化到 `turn_completed` tape event，Web 聊天视图可直接显示本轮 input/output/total tokens
+- 完成自动上下文压缩触发修正：runtime 现在不仅会在下一轮开始前依据上一轮真实 `input_tokens` 预判压缩，也会在当前轮成功结束并拿到新的真实 usage 后立即补做一次压缩；同时修复“provider 本轮未返回 usage 时沿用旧 token 统计”导致的误判，避免跨轮错误触发或漏触发压缩
+- 完成上下文压缩可观测性补齐：`tape_info` 现在返回结构化 JSON 内容并附带 tool result details，前端会显式消费 `context_compressed` SSE 并展示最近一次压缩摘要，同时继续刷新 session context pressure
+- 完成提交前的后端自动压缩收口：`POST /api/turn` 现在会先读取 session context stats，并在压力达到自动压缩阈值时先通过 session manager 触发 idle auto-compress，再真正启动本轮 turn；runtime 内部预压缩顺序也已调整为“先压缩旧上下文，再追加新用户消息”
 - 完成 Web 端 turn 提交请求的 `keepalive` 加固：页面刷新或跳转时，已发出的 `POST /api/turn` 不再容易因为浏览器中断请求而导致本轮根本未进入 server worker
 - 完成 provider 注册表加载的旧路径兼容：当 `.aia/providers.json` 缺失时，server 会自动回退读取历史遗留的 `.aia/sessions/providers.json`，避免已有 provider 数据因为路径迁移而在启动后表现为“空配置”
 - 完成完整的 stop/cancel 基线：server 暴露 `POST /api/turn/cancel`，session manager 能中断运行中 turn，runtime 把取消信号传到工具执行上下文，Web 输入区提供 stop 按钮并显示 cancelled 状态

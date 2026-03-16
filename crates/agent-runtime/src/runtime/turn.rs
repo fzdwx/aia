@@ -125,39 +125,25 @@ where
         let abort_signal = control.abort_signal();
         let turn_id = next_turn_id();
         let started_at_ms = now_timestamp_ms();
-        let user_message = Message::new(Role::User, user_input.into());
-        let user_entry_id =
-            self.append_tape_entry(TapeEntry::message(&user_message).with_run_id(&turn_id))?;
-        let mut buffers = TurnBuffers::new(user_entry_id);
-        self.publish_event(RuntimeEvent::UserMessage { content: user_message.content.clone() });
+        let user_input = user_input.into();
 
         let mut llm_step_index = 0_u32;
 
         if abort_signal.is_aborted() {
-            let runtime_error = RuntimeError::cancelled();
-            self.record_turn_failure(
-                TurnFailureContext {
-                    turn_id: &turn_id,
-                    started_at_ms,
-                    user_message: &user_message.content,
-                    source_entry_ids: &mut buffers.source_entry_ids,
-                    blocks: &buffers.blocks,
-                    assistant_message: buffers.last_assistant_text.clone(),
-                    aggregated_thinking: buffers.aggregated_thinking.as_str(),
-                    tool_invocations: &buffers.tool_invocations,
-                },
-                runtime_error.clone(),
-            )?;
-            return Err(runtime_error);
+            return Err(RuntimeError::cancelled());
         }
 
-        // Pre-turn context pressure check (based on last real token count)
-        if let Some(ratio) = self.context_pressure_ratio()
-            && ratio >= self.context_pressure_threshold
-        {
-            let _ = self.compress_context(Some(&turn_id), llm_step_index);
-            llm_step_index = llm_step_index.saturating_add(1);
+        self.maybe_auto_compress_current_context(&turn_id, &mut llm_step_index);
+
+        if abort_signal.is_aborted() {
+            return Err(RuntimeError::cancelled());
         }
+
+        let user_message = Message::new(Role::User, user_input);
+        let user_entry_id =
+            self.append_tape_entry(TapeEntry::message(&user_message).with_run_id(&turn_id))?;
+        let mut buffers = TurnBuffers::new(user_entry_id);
+        self.publish_event(RuntimeEvent::UserMessage { content: user_message.content.clone() });
 
         let mut already_compressed = false;
 
@@ -192,9 +178,7 @@ where
                 },
             ) {
                 Ok(completion) => {
-                    if let Some(usage) = completion.usage.as_ref() {
-                        self.last_input_tokens = Some(usage.input_tokens);
-                    }
+                    self.last_input_tokens = completion.usage.as_ref().map(|usage| usage.input_tokens);
                     completion
                 }
                 Err(error) => {
@@ -347,7 +331,7 @@ where
 
                     let thinking = buffers.thinking();
                     self.finish_success_turn(TurnSuccessContext {
-                        turn_id,
+                        turn_id: turn_id.clone(),
                         started_at_ms,
                         source_entry_ids: buffers.source_entry_ids,
                         user_message: user_message.content,
@@ -359,6 +343,7 @@ where
                             usage: completion.usage.clone(),
                         },
                     })?;
+                    self.maybe_auto_compress_current_context(&turn_id, &mut llm_step_index);
 
                     return Ok(TurnOutput {
                         assistant_text,
@@ -367,6 +352,15 @@ where
                     });
                 }
             }
+        }
+    }
+
+    fn maybe_auto_compress_current_context(&mut self, turn_id: &str, step_index: &mut u32) {
+        if let Some(ratio) = self.context_pressure_ratio()
+            && ratio >= self.context_pressure_threshold
+            && self.compress_context(Some(turn_id), *step_index).is_ok()
+        {
+            *step_index = step_index.saturating_add(1);
         }
     }
 

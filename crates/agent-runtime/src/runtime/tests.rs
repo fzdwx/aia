@@ -1314,6 +1314,68 @@ fn 上下文未超阈值时不触发压缩() {
     assert!(runtime.tape().anchors().iter().all(|a| a.name != "context_compression"));
 }
 
+struct CompressionInspectionModel {
+    seen_requests: RefCell<Vec<CompletionRequest>>,
+}
+
+impl CompressionInspectionModel {
+    fn new() -> Self {
+        Self { seen_requests: RefCell::new(Vec::new()) }
+    }
+}
+
+impl LanguageModel for CompressionInspectionModel {
+    type Error = CoreError;
+
+    fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+        self.seen_requests.borrow_mut().push(request.clone());
+        if request.instructions.as_ref().is_some_and(|i| i.contains("handoff summary")) {
+            let combined = request
+                .conversation
+                .iter()
+                .filter_map(|item| item.as_message().map(|message| message.content.clone()))
+                .collect::<Vec<_>>()
+                .join("\n");
+            return Ok(Completion::text(format!("压缩检查：{combined}")));
+        }
+        Ok(Completion::text("正常回答"))
+    }
+}
+
+#[test]
+fn 预压缩发生在新用户消息写入之前() {
+    let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced)
+        .with_limit(Some(agent_core::ModelLimit { context: Some(32), output: Some(16) }));
+    let model = CompressionInspectionModel::new();
+    let mut tape = SessionTape::new();
+    tape.append(Message::new(Role::User, "旧历史用户消息一"));
+    tape.append(Message::new(Role::Assistant, "旧历史助手消息一"));
+    tape.append(Message::new(Role::User, "旧历史用户消息二"));
+    tape.append(Message::new(Role::Assistant, "旧历史助手消息二"));
+    tape.append_entry(session_tape::TapeEntry::event(
+        "turn_completed",
+        Some(json!({"status": "ok", "usage": {"input_tokens": 28, "output_tokens": 4, "total_tokens": 32}})),
+    ));
+
+    let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape)
+        .with_context_pressure_threshold(0.50);
+
+    let _ = runtime.handle_turn("这是新消息").expect("应成功完成");
+
+    let anchor = runtime
+        .tape()
+        .anchors()
+        .into_iter()
+        .find(|anchor| anchor.name == "context_compression")
+        .expect("应创建压缩锚点");
+    let summary =
+        anchor.state.get("summary").and_then(|value| value.as_str()).expect("压缩锚点应包含摘要");
+
+    assert!(summary.contains("旧历史用户消息一"));
+    assert!(summary.contains("旧历史助手消息二"));
+    assert!(!summary.contains("这是新消息"));
+}
+
 #[test]
 fn 上下文超阈值时触发压缩生成锚点() {
     let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced)
@@ -1562,6 +1624,30 @@ fn 压缩事件会被发布到事件流() {
     )));
 }
 
+#[test]
+fn 成功轮完成后若真实_usage_超阈值会立刻自动压缩() {
+    let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced)
+        .with_limit(Some(agent_core::ModelLimit { context: Some(100), output: Some(32) }));
+    let mut tape = SessionTape::new();
+    tape.append(Message::new(Role::User, "历史消息一"));
+    tape.append(Message::new(Role::Assistant, "历史回答一"));
+    tape.append(Message::new(Role::User, "历史消息二"));
+    tape.append(Message::new(Role::Assistant, "历史回答二"));
+    let mut runtime = AgentRuntime::with_tape(UsageModel, StubTools, identity, tape)
+        .with_context_pressure_threshold(0.20);
+    let subscriber = runtime.subscribe();
+
+    let _ = runtime.handle_turn("统计并在结束后触发压缩").expect("应成功完成");
+    let events = runtime.collect_events(subscriber).expect("读取事件成功");
+
+    assert!(runtime.tape().anchors().iter().any(|a| a.name == "context_compression"));
+    assert!(events.iter().any(|event| matches!(event, RuntimeEvent::ContextCompressed { .. })));
+    let stats = runtime.context_stats();
+    assert_eq!(stats.anchor_count, 1);
+    assert_eq!(stats.last_input_tokens, None);
+    assert_eq!(stats.pressure_ratio, None);
+}
+
 // --- Tape tools tests ---
 
 struct TapeInfoModel {
@@ -1590,7 +1676,10 @@ impl LanguageModel for TapeInfoModel {
             })
         } else {
             let saw_info = request.conversation.iter().any(|item| {
-                item.as_tool_result().is_some_and(|result| result.content.contains("entries:"))
+                item.as_tool_result().is_some_and(|result| {
+                    result.content.contains("\"entries\"")
+                        && result.content.contains("\"pressure_ratio\"")
+                })
             });
             if saw_info {
                 Ok(Completion::text("已获取上下文统计信息"))
@@ -1599,6 +1688,52 @@ impl LanguageModel for TapeInfoModel {
             }
         }
     }
+}
+
+#[test]
+fn tape_info_结果包含结构化_details() {
+    let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced)
+        .with_limit(Some(agent_core::ModelLimit { context: Some(1000), output: Some(500) }));
+    let mut tape = SessionTape::new();
+    tape.append(Message::new(Role::User, "测试消息"));
+    tape.append_entry(session_tape::TapeEntry::event(
+        "turn_completed",
+        Some(json!({
+            "status": "ok",
+            "usage": {
+                "input_tokens": 320,
+                "output_tokens": 8,
+                "total_tokens": 328,
+                "cached_tokens": 0
+            }
+        })),
+    ));
+    let mut runtime = AgentRuntime::with_tape(TapeInfoModel::new(), StubTools, identity, tape);
+
+    let _ = runtime.handle_turn("读取 tape info").expect("应成功完成");
+
+    let tool_result = runtime
+        .tape()
+        .entries()
+        .iter()
+        .find_map(|entry| entry.as_tool_result())
+        .expect("应记录 tape_info 工具结果");
+    let details = tool_result.details.as_ref().expect("应包含结构化 details");
+
+    assert_eq!(details.get("entries").and_then(|value| value.as_u64()), Some(4));
+    assert_eq!(details.get("anchors").and_then(|value| value.as_u64()), Some(0));
+    assert_eq!(
+        details.get("entries_since_last_anchor").and_then(|value| value.as_u64()),
+        Some(4)
+    );
+    assert_eq!(
+        details.get("last_input_tokens").and_then(|value| value.as_u64()),
+        None
+    );
+    assert_eq!(details.get("context_limit").and_then(|value| value.as_u64()), Some(1000));
+    assert_eq!(details.get("output_limit").and_then(|value| value.as_u64()), Some(500));
+    assert!(tool_result.content.contains("\"entries\""));
+    assert!(tool_result.content.contains("\"pressure_ratio\""));
 }
 
 struct TapeHandoffModel {
@@ -1667,7 +1802,7 @@ fn tape_info_工具返回上下文统计() {
     // Verify the tool result was recorded
     assert!(runtime.tape().entries().iter().any(|entry| {
         entry.as_tool_result().is_some_and(|result| {
-            result.tool_name == "tape_info" && result.content.contains("entries:")
+            result.tool_name == "tape_info" && result.content.contains("\"entries\"")
         })
     }));
 }

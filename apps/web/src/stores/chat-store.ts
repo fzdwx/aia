@@ -19,6 +19,7 @@ import { normalizeToolArguments } from "@/lib/tool-display"
 import type {
   AppView,
   ChatState,
+  ContextCompressionNotice,
   CurrentTurnSnapshot,
   ModelConfig,
   ProviderInfo,
@@ -78,6 +79,7 @@ type ChatStore = {
   error: string | null
   view: AppView
   contextPressure: number | null
+  lastCompression: ContextCompressionNotice | null
 
   // Internal ref for pending prompt
   _pendingPrompt: string | null
@@ -130,6 +132,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   error: null,
   view: "chat",
   contextPressure: null,
+  lastCompression: null,
   _pendingPrompt: null,
 
   _refreshProviderInfo: async () => {
@@ -156,6 +159,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                   ? currentTurnToStreamingTurn(currentTurn)
                   : null,
                 chatState: currentTurn ? "active" : "idle",
+                lastCompression: null,
               })
             )
             .catch(() => {})
@@ -372,6 +376,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           streamingTurn: null,
           chatState: "idle" as const,
           error: null,
+          lastCompression: null,
         }))
         fetchSessionInfo(activeId ?? undefined)
           .then((info) => set({ contextPressure: info.pressure_ratio }))
@@ -380,6 +385,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       }
       case "context_compressed": {
         if (event.data.session_id !== activeId) break
+        set({ lastCompression: event.data })
         fetchSessionInfo(activeId ?? undefined)
           .then((info) => set({ contextPressure: info.pressure_ratio }))
           .catch(() => {})
@@ -448,16 +454,17 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const sessionId = get().activeSessionId
     if (!sessionId) return
 
-    set({
-      error: null,
-      _pendingPrompt: prompt,
-      chatState: "active",
-      streamingTurn: {
-        userMessage: prompt,
-        status: "waiting",
-        blocks: [],
-      },
-    })
+        set({
+          error: null,
+          _pendingPrompt: prompt,
+          chatState: "active",
+          lastCompression: null,
+          streamingTurn: {
+            userMessage: prompt,
+            status: "waiting",
+            blocks: [],
+          },
+        })
     apiSubmitTurn(prompt, sessionId).catch((err: unknown) => {
       set({
         error: err instanceof Error ? err.message : "Network error",
@@ -548,6 +555,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       chatState: "idle",
       error: null,
       contextPressure: null,
+      lastCompression: null,
     })
 
     try {
@@ -588,6 +596,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           turns: [],
           streamingTurn: null,
           chatState: "idle",
+          lastCompression: null,
         })
       }
     }

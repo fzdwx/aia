@@ -725,10 +725,22 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
   )
 }
 
+function CompressionNotice({ summary }: { summary: string }) {
+  return (
+    <div className="mb-4 rounded-lg border border-border/30 bg-muted/25 px-3 py-2 text-[12px] text-muted-foreground">
+      <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/60">
+        Context compressed
+      </div>
+      <p className="line-clamp-3 whitespace-pre-wrap">{summary}</p>
+    </div>
+  )
+}
+
 export function ChatMessages() {
   const turns = useChatStore((s) => s.turns)
   const streamingTurn = useChatStore((s) => s.streamingTurn)
   const error = useChatStore((s) => s.error)
+  const lastCompression = useChatStore((s) => s.lastCompression)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -759,6 +771,9 @@ export function ChatMessages() {
         {turns.map((turn) => (
           <TurnView key={turn.turn_id} turn={turn} />
         ))}
+        {lastCompression && !streamingTurn && (
+          <CompressionNotice summary={lastCompression.summary} />
+        )}
         {streamingTurn && <StreamingView streaming={streamingTurn} />}
         {error && (
           <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-[13px] text-destructive">

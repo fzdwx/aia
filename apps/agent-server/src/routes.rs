@@ -41,6 +41,11 @@ pub struct HandoffRequest {
 }
 
 #[derive(Deserialize)]
+pub struct AutoCompressRequest {
+    pub session_id: Option<String>,
+}
+
+#[derive(Deserialize)]
 pub struct SessionQuery {
     pub session_id: Option<String>,
 }
@@ -459,6 +464,22 @@ pub async fn create_handoff(
     }
 }
 
+pub async fn auto_compress_session(
+    State(state): State<SharedState>,
+    Json(body): Json<AutoCompressRequest>,
+) -> impl IntoResponse {
+    let Some(session_id) = resolve_session_id(&state, body.session_id) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "no session available" })),
+        );
+    };
+    match state.session_manager.auto_compress_session(session_id).await {
+        Ok(compressed) => (StatusCode::OK, Json(serde_json::json!({ "compressed": compressed }))),
+        Err(error) => runtime_worker_error_response(error),
+    }
+}
+
 pub async fn get_history(
     State(state): State<SharedState>,
     Query(query): Query<SessionQuery>,
@@ -512,6 +533,18 @@ pub async fn submit_turn(
             Json(serde_json::json!({ "error": "no session available" })),
         );
     };
+
+    match state.session_manager.get_session_info(session_id.clone()).await {
+        Ok(stats) => {
+            if stats.pressure_ratio.is_some_and(|ratio| ratio >= agent_prompts::AUTO_COMPRESSION_THRESHOLD)
+                && let Err(error) = state.session_manager.auto_compress_session(session_id.clone()).await
+            {
+                return runtime_worker_error_response(error);
+            }
+        }
+        Err(error) => return runtime_worker_error_response(error),
+    }
+
     let _ = state
         .broadcast_tx
         .send(SsePayload::Status { session_id: session_id.clone(), status: TurnStatus::Waiting });

@@ -4,6 +4,7 @@ use agent_core::{
     CoreError, LanguageModel, RuntimeToolContext, RuntimeToolContextStats, Tool, ToolCall,
     ToolDefinition, ToolExecutionContext, ToolExecutor, ToolOutputDelta, ToolRegistry, ToolResult,
 };
+use serde_json::json;
 
 use super::AgentRuntime;
 
@@ -90,21 +91,18 @@ impl Tool for TapeInfoTool {
             .as_ref()
             .ok_or_else(|| CoreError::new("runtime tool context unavailable"))?;
         let stats = runtime.context_stats();
-        let content = format!(
-            "entries: {}\n\
-             anchors: {}\n\
-             entries_since_last_anchor: {}\n\
-             last_input_tokens: {}\n\
-             context_limit: {}\n\
-             pressure_ratio: {:.2}",
-            stats.total_entries,
-            stats.anchor_count,
-            stats.entries_since_last_anchor,
-            stats.last_input_tokens.map_or("unknown".to_string(), |value| value.to_string()),
-            stats.context_limit.map_or("unknown".to_string(), |value| value.to_string()),
-            stats.pressure_ratio.unwrap_or(0.0),
-        );
-        Ok(ToolResult::from_call(tool_call, content))
+        let details = json!({
+            "entries": stats.total_entries,
+            "anchors": stats.anchor_count,
+            "entries_since_last_anchor": stats.entries_since_last_anchor,
+            "last_input_tokens": stats.last_input_tokens,
+            "context_limit": stats.context_limit,
+            "output_limit": stats.output_limit,
+            "pressure_ratio": stats.pressure_ratio,
+        });
+        let content = serde_json::to_string_pretty(&details)
+            .map_err(|error| CoreError::new(format!("failed to serialize tape_info: {error}")))?;
+        Ok(ToolResult::from_call(tool_call, content).with_details(details))
     }
 }
 

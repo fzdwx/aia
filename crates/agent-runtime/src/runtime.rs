@@ -152,6 +152,12 @@ where
         self.tape.handoff(name, state)
     }
 
+    pub fn auto_compress_now(&mut self) -> Result<bool, RuntimeError> {
+        let before_anchor_count = self.tape.anchors().len();
+        self.compress_context(None, 0)?;
+        Ok(self.tape.anchors().len() > before_anchor_count)
+    }
+
     pub fn tape(&self) -> &SessionTape {
         &self.tape
     }
