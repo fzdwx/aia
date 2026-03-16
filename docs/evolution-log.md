@@ -1,5 +1,16 @@
 # 演进日志
 
+## 2026-03-17 Session 3
+
+**诊断**：上一轮的轻量窗口化已经减轻了长历史重渲染，但仍依赖固定高度估算，遇到工具输出/Markdown 高度波动较大时 spacer 误差会累积；同时用户希望切换 session 时直接回到最新消息，而不是恢复旧的中段滚动位置。
+**决策**：继续优化消息列表主路径：把窗口化升级为动态高度测量版，并把 session 切换滚动策略明确改成“切换即到底部、同 session 分页仍保留当前位置”；这样更符合聊天产品直觉，也能减少估算版窗口化的跳动误差。
+**变更**：
+- `apps/web/src/components/chat-messages.tsx`：新增基于 `ResizeObserver` 的 turn 高度测量与动态窗口化计算，减少长历史中高波动消息的 spacer 误差；session 切换时统一滚到最新消息底部，不再恢复旧 session 的中段 scrollTop。
+- `docs/status.md`、`docs/architecture.md`：同步记录聊天列表第二轮滚动/窗口化收口。
+**验证**：`bun test`（`apps/web`）通过；`bun run typecheck`（`apps/web`）通过；`cargo check` 通过。
+**提交**：`19bab40` `perf: improve measured chat virtualization`
+**下次方向**：继续观察动态测量窗口化在极长工具输出、折叠/展开 details、Markdown 图片等高度频繁变化场景下的稳定性；必要时再把“测量缓存 + 锚定可视首项”的算法继续做细。
+
 ## 2026-03-17 Session 2
 
 **诊断**：session 快照缓存能显著减少切换闪烁，但如果无限保留所有访问过的 session，会把消息历史长期常驻内存；同时聊天列表在长历史场景下仍会整体重渲染，切换/分页时滚动位置也过于激进，经常被拖回底部。

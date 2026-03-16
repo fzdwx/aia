@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react"
+import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react"
 import { Check, X as XIcon } from "lucide-react"
 import { MarkdownContent } from "@/components/markdown-content"
 import { Shimmer } from "@/components/ai-elements/shimmer"
@@ -745,37 +745,110 @@ function CompressionNotice({ summary }: { summary: string }) {
   )
 }
 
-const TURN_ROW_ESTIMATE_PX = 280
+type VirtualizedTurns = {
+  visibleTurns: TurnLifecycle[]
+  topSpacerHeight: number
+  bottomSpacerHeight: number
+  startIndex: number
+}
+
 const VIRTUALIZATION_OVERSCAN = 4
 const VIRTUALIZATION_MIN_TURNS = 40
+const DEFAULT_TURN_ROW_HEIGHT = 280
 
-function useWindowedTurns(turns: TurnLifecycle[], containerHeight: number, scrollTop: number) {
+function buildMeasuredWindow(
+  turns: TurnLifecycle[],
+  containerHeight: number,
+  scrollTop: number,
+  measuredHeights: Record<string, number>
+): VirtualizedTurns {
   if (turns.length < VIRTUALIZATION_MIN_TURNS || containerHeight <= 0) {
     return {
       visibleTurns: turns,
       topSpacerHeight: 0,
       bottomSpacerHeight: 0,
+      startIndex: 0,
     }
   }
 
-  const estimatedVisibleCount = Math.max(
-    1,
-    Math.ceil(containerHeight / TURN_ROW_ESTIMATE_PX)
-  )
-  const startIndex = Math.max(
-    0,
-    Math.floor(scrollTop / TURN_ROW_ESTIMATE_PX) - VIRTUALIZATION_OVERSCAN
-  )
-  const endIndex = Math.min(
-    turns.length,
-    startIndex + estimatedVisibleCount + VIRTUALIZATION_OVERSCAN * 2
+  const heights = turns.map(
+    (turn) => measuredHeights[turn.turn_id] ?? DEFAULT_TURN_ROW_HEIGHT
   )
 
-  return {
-    visibleTurns: turns.slice(startIndex, endIndex),
-    topSpacerHeight: startIndex * TURN_ROW_ESTIMATE_PX,
-    bottomSpacerHeight: Math.max(0, (turns.length - endIndex) * TURN_ROW_ESTIMATE_PX),
+  let accumulatedHeight = 0
+  let startIndex = 0
+  while (
+    startIndex < heights.length &&
+    accumulatedHeight + heights[startIndex]! < scrollTop
+  ) {
+    accumulatedHeight += heights[startIndex]!
+    startIndex += 1
   }
+
+  let endIndex = startIndex
+  let visibleHeight = 0
+  while (endIndex < heights.length && visibleHeight < containerHeight) {
+    visibleHeight += heights[endIndex]!
+    endIndex += 1
+  }
+
+  startIndex = Math.max(0, startIndex - VIRTUALIZATION_OVERSCAN)
+  endIndex = Math.min(turns.length, endIndex + VIRTUALIZATION_OVERSCAN)
+
+  const topSpacerHeight = heights
+    .slice(0, startIndex)
+    .reduce((sum, height) => sum + height, 0)
+  const visibleTurns = turns.slice(startIndex, endIndex)
+  const bottomSpacerHeight = heights
+    .slice(endIndex)
+    .reduce((sum, height) => sum + height, 0)
+
+  return {
+    visibleTurns,
+    topSpacerHeight,
+    bottomSpacerHeight,
+    startIndex,
+  }
+}
+
+function useMeasuredWindowedTurns(
+  turns: TurnLifecycle[],
+  containerHeight: number,
+  scrollTop: number,
+  measuredHeights: Record<string, number>,
+  version: number
+): VirtualizedTurns {
+  void version
+  return buildMeasuredWindow(turns, containerHeight, scrollTop, measuredHeights)
+}
+
+function TurnMeasurement({
+  turnId,
+  onHeightChange,
+  children,
+}: {
+  turnId: string
+  onHeightChange: (turnId: string, height: number) => void
+  children: ReactNode
+}) {
+  const wrapperRef = useRef<HTMLDivElement>(null)
+
+  useLayoutEffect(() => {
+    const element = wrapperRef.current
+    if (!element) return
+
+    const report = () => onHeightChange(turnId, element.offsetHeight)
+    report()
+
+    const resizeObserver = new ResizeObserver(() => {
+      report()
+    })
+    resizeObserver.observe(element)
+
+    return () => resizeObserver.disconnect()
+  }, [onHeightChange, turnId])
+
+  return <div ref={wrapperRef}>{children}</div>
 }
 
 function SessionHydratingIndicator() {
@@ -808,14 +881,29 @@ export function ChatMessages() {
   const restoreSessionScrollRef = useRef(false)
   const skipNextAutoScrollRef = useRef(false)
   const scrollPositionsRef = useRef<Record<string, number>>({})
+  const measuredTurnHeightsRef = useRef<Record<string, number>>({})
   const [scrollTop, setScrollTop] = useState(0)
   const [containerHeight, setContainerHeight] = useState(0)
+  const [heightVersion, setHeightVersion] = useState(0)
 
-  const { visibleTurns, topSpacerHeight, bottomSpacerHeight } = useWindowedTurns(
-    turns,
-    containerHeight,
-    scrollTop
-  )
+  const { visibleTurns, topSpacerHeight, bottomSpacerHeight } =
+    useMeasuredWindowedTurns(
+      turns,
+      containerHeight,
+      scrollTop,
+      measuredTurnHeightsRef.current,
+      heightVersion
+    )
+
+  const handleTurnHeightChange = (turnId: string, height: number) => {
+    if (measuredTurnHeightsRef.current[turnId] === height) return
+    measuredTurnHeightsRef.current = {
+      ...measuredTurnHeightsRef.current,
+      [turnId]: height,
+    }
+    setHeightVersion((value) => value + 1)
+  }
+
 
   useEffect(() => {
     const container = containerRef.current
@@ -849,7 +937,7 @@ export function ChatMessages() {
     const previousSessionId = previousSessionIdRef.current
     if (previousSessionId && previousSessionId !== activeSessionId) {
       restoreSessionScrollRef.current = true
-      shouldStickToBottomRef.current = false
+      shouldStickToBottomRef.current = true
     }
   }, [activeSessionId])
 
@@ -858,19 +946,14 @@ export function ChatMessages() {
     if (!container) return
 
     if (restoreSessionScrollRef.current) {
-      const restoredScrollTop = activeSessionId
-        ? scrollPositionsRef.current[activeSessionId]
-        : undefined
-
       requestAnimationFrame(() => {
         const nextContainer = containerRef.current
         if (!nextContainer) return
-        if (typeof restoredScrollTop === "number") {
-          nextContainer.scrollTop = restoredScrollTop
-        } else {
-          bottomRef.current?.scrollIntoView({ behavior: "auto" })
-        }
+        bottomRef.current?.scrollIntoView({ behavior: "auto" })
         setScrollTop(nextContainer.scrollTop)
+        if (activeSessionId) {
+          scrollPositionsRef.current[activeSessionId] = nextContainer.scrollTop
+        }
         restoreSessionScrollRef.current = false
       })
       previousSessionIdRef.current = activeSessionId
@@ -974,7 +1057,13 @@ export function ChatMessages() {
         >
           {topSpacerHeight > 0 && <div style={{ height: topSpacerHeight }} />}
           {visibleTurns.map((turn) => (
-            <MemoizedTurnView key={turn.turn_id} turn={turn} />
+            <TurnMeasurement
+              key={turn.turn_id}
+              turnId={turn.turn_id}
+              onHeightChange={handleTurnHeightChange}
+            >
+              <MemoizedTurnView turn={turn} />
+            </TurnMeasurement>
           ))}
           {bottomSpacerHeight > 0 && <div style={{ height: bottomSpacerHeight }} />}
           {lastCompression && !streamingTurn && (

@@ -151,6 +151,7 @@ README 里真正难的是这些能力：
 - 以前端全局 store 管理 SSE 连接、流式状态累积与 provider / session 状态刷新
 - session 切换采用按 session 的本地 snapshot 缓存：切换时先显示已有快照并后台水合 history/current turn，减少消息区清空造成的闪烁与布局跳动
 - 聊天消息区已做首轮渲染减载：turn 视图按引用 memo，长历史启用轻量窗口化渲染，并按 session 维持独立滚动位置，避免分页加载或切换会话时频繁强制跳到底部
+- 聊天消息区窗口化已进一步升级为动态高度测量版；session 切换时明确回到底部看最新消息，而同一 session 内的历史分页仍保持当前阅读位置稳定
 - 已覆盖 provider 管理、session 列表、历史消息、当前 turn 恢复、stop/cancel、trace 诊断视图
 - 使用独立 Web 子目录规则，具体开发规范由 `docs/frontend-web-guidelines.md` 与 `apps/web/AGENTS.md` 约束
 
