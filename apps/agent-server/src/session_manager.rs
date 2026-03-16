@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use agent_core::{
     ModelIdentity, PromptCacheConfig, PromptCacheRetention as RuntimePromptCacheRetention,
@@ -254,6 +254,20 @@ pub fn spawn_session_manager(config: SessionManagerConfig) -> SessionManagerHand
     SessionManagerHandle { tx }
 }
 
+fn read_lock<T>(lock: &RwLock<T>) -> RwLockReadGuard<'_, T> {
+    match lock.read() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
+fn write_lock<T>(lock: &RwLock<T>) -> RwLockWriteGuard<'_, T> {
+    match lock.write() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
 async fn session_manager_loop(
     mut rx: mpsc::Receiver<SessionCommand>,
     mut config: SessionManagerConfig,
@@ -497,7 +511,7 @@ fn handle_submit_turn(
     let _ = config.store.update_session(session_id, None, None);
 
     // Initialize current turn snapshot
-    *slot.current_turn.write().expect("lock poisoned") = Some(CurrentTurnSnapshot {
+    *write_lock(&slot.current_turn) = Some(CurrentTurnSnapshot {
         started_at_ms: now_timestamp_ms(),
         user_message: prompt.clone(),
         status: TurnStatus::Waiting,
@@ -549,22 +563,22 @@ fn handle_submit_turn(
                 let turn = broadcast_runtime_events_with_session(events, &broadcast_tx, &sid);
                 if let Some(turn) = turn {
                     persist_tool_trace_spans(&turn, trace_store.as_ref());
-                    history_snapshot.write().expect("lock poisoned").push(turn.clone());
+                    write_lock(&history_snapshot).push(turn.clone());
                     let _ = broadcast_tx
                         .send(SsePayload::TurnCompleted { session_id: sid.clone(), turn });
                 }
-                *current_turn_snapshot.write().expect("lock poisoned") = None;
+                *write_lock(&current_turn_snapshot) = None;
             }
             Err(error) => {
                 let events = runtime.collect_events(subscriber).unwrap_or_default();
                 let turn = broadcast_runtime_events_with_session(events, &broadcast_tx, &sid);
                 if let Some(turn) = turn {
                     persist_tool_trace_spans(&turn, trace_store.as_ref());
-                    history_snapshot.write().expect("lock poisoned").push(turn.clone());
+                    write_lock(&history_snapshot).push(turn.clone());
                     let _ = broadcast_tx
                         .send(SsePayload::TurnCompleted { session_id: sid.clone(), turn });
                 }
-                *current_turn_snapshot.write().expect("lock poisoned") = None;
+                *write_lock(&current_turn_snapshot) = None;
                 let _ = broadcast_tx.send(SsePayload::Error {
                     session_id: sid.clone(),
                     message: error.to_string(),
@@ -586,7 +600,7 @@ fn handle_get_history(
     let slot = slots
         .get(session_id)
         .ok_or_else(|| RuntimeWorkerError::not_found(format!("session not found: {session_id}")))?;
-    Ok(slot.history.read().expect("lock poisoned").clone())
+    Ok(read_lock(&slot.history).clone())
 }
 
 fn handle_get_current_turn(
@@ -596,7 +610,7 @@ fn handle_get_current_turn(
     let slot = slots
         .get(session_id)
         .ok_or_else(|| RuntimeWorkerError::not_found(format!("session not found: {session_id}")))?;
-    Ok(slot.current_turn.read().expect("lock poisoned").clone())
+    Ok(read_lock(&slot.current_turn).clone())
 }
 
 fn handle_get_session_info(
@@ -762,8 +776,8 @@ fn sync_all_runtimes_to_registry(
     }
 
     config.registry = candidate_registry;
-    *config.provider_registry_snapshot.write().expect("lock poisoned") = config.registry.clone();
-    *config.provider_info_snapshot.write().expect("lock poisoned") = info.clone();
+    *write_lock(&config.provider_registry_snapshot) = config.registry.clone();
+    *write_lock(&config.provider_info_snapshot) = info.clone();
 
     Ok(info)
 }
@@ -853,7 +867,7 @@ fn update_current_turn_status(
     snapshot: &Arc<RwLock<Option<CurrentTurnSnapshot>>>,
     status: TurnStatus,
 ) {
-    if let Some(current) = snapshot.write().expect("lock poisoned").as_mut() {
+    if let Some(current) = write_lock(snapshot).as_mut() {
         current.status = status;
     }
 }
@@ -862,7 +876,7 @@ fn update_current_turn_from_stream(
     snapshot: &Arc<RwLock<Option<CurrentTurnSnapshot>>>,
     event: &StreamEvent,
 ) {
-    let mut guard = snapshot.write().expect("lock poisoned");
+    let mut guard = write_lock(snapshot);
     let Some(snap) = guard.as_mut() else { return };
 
     match event {
@@ -1071,3 +1085,56 @@ impl CurrentStatusInner {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::sync::{Arc, RwLock};
+
+    use crate::sse::TurnStatus;
+
+    use super::{CurrentTurnSnapshot, read_lock, update_current_turn_status, write_lock};
+
+    fn poison_lock<T>(lock: &RwLock<T>) {
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            let _guard = lock.write().expect("test should acquire write lock before poisoning");
+            panic!("poison test lock");
+        }));
+    }
+
+    #[test]
+    fn recovered_read_lock_returns_inner_value_after_poison() {
+        let lock = RwLock::new(vec![1, 2, 3]);
+        poison_lock(&lock);
+
+        let guard = read_lock(&lock);
+        assert_eq!(&*guard, &[1, 2, 3]);
+    }
+
+    #[test]
+    fn recovered_write_lock_allows_mutation_after_poison() {
+        let lock = RwLock::new(vec![1, 2, 3]);
+        poison_lock(&lock);
+
+        write_lock(&lock).push(4);
+        assert_eq!(&*read_lock(&lock), &[1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn update_current_turn_status_recovers_from_poisoned_snapshot_lock() {
+        let snapshot = Arc::new(RwLock::new(Some(CurrentTurnSnapshot {
+            started_at_ms: 1,
+            user_message: "hello".into(),
+            status: TurnStatus::Waiting,
+            blocks: Vec::new(),
+        })));
+        poison_lock(&snapshot);
+
+        update_current_turn_status(&snapshot, TurnStatus::Generating);
+
+        let guard = read_lock(&snapshot);
+        let current = guard.as_ref().expect("snapshot should still exist");
+        assert_eq!(current.status, TurnStatus::Generating);
+    }
+}
+

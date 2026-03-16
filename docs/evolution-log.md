@@ -49,18 +49,14 @@
 **提交**：`760d2bb` `refactor: remove unsafe runtime tool bridge`
 **下次方向**：优先继续把统一取消/中断机制上推到 runtime 工具执行层，或补一轮 workspace lint 配置收口，确保 `unsafe_code`/clippy 约束被各 crate 真正继承。
 
-## 2026-03-16 Session 1
+## 2026-03-16 Session 2
 
-**诊断**：workspace 虽然 `cargo check`/`cargo test` 已绿，但 `cargo clippy --workspace --all-targets -- -D warnings` 仍失败，说明 lint 约束并未真正收口，运行时与服务端也存在可顺手简化的结构问题。
-**决策**：先完成一次 workspace lint 收口；这是低风险、高杠杆的可靠性整理，既能让质量门禁可执行，也顺手把 `agent-runtime` 的 turn/tool 参数传递和块级事件载荷收瘦。
+**诊断**：`apps/agent-server` 的 session manager 在运行态路径里对多个 `RwLock` 使用 `expect("lock poisoned")`，一旦后台任务曾在持锁期间 panic，后续读取 history/current turn 或写入 provider/session 快照时会把中毒继续升级成 server panic。
+**决策**：先把 session manager 的锁访问改为显式恢复 poisoned lock，并补回归测试；这是比继续做能力扩展更高优先级的可靠性修复，而且改动局部、验证直接。
 **变更**：
-- `crates/agent-core/src/completion.rs`、`crates/agent-core/src/tooling.rs`：改用可 derive 的 `Default` 并收口嵌套条件判断。
-- `crates/provider-registry/src/model.rs`、`crates/provider-registry/src/registry.rs`：收口旧格式兼容与旧路径回退逻辑的 clippy 违例。
-- `crates/session-tape/src/compat.rs`、`crates/session-tape/src/tape.rs`、`crates/session-tape/src/tests.rs`：修正持久化解码/元数据写入的嵌套判断与测试里的多余借用。
-- `crates/openai-adapter/src/chat_completions.rs`、`crates/openai-adapter/src/responses.rs`：收口 streaming 解析中的嵌套条件判断。
-- `crates/agent-runtime/src/runtime/{turn,finalize,tool_calls,request,tests}.rs`、`crates/agent-runtime/src/types.rs`：把 turn 成功/失败与 tool 执行参数收敛为上下文结构，修正 `map_or` 警告，并将 `TurnBlock::ToolInvocation` 改为 `Box<ToolInvocationLifecycle>` 以减小枚举载荷。
-- `apps/agent-server/src/runtime_worker.rs`、`apps/agent-server/src/session_manager.rs`、`apps/agent-server/src/model.rs`：适配 boxed tool block、收口删除 session 的 guard 逻辑，并移除未使用的测试辅助构造器。
-- `docs/evolution-log.md`：追加本次演进记录。
-**验证**：`cargo clippy --workspace --all-targets -- -D warnings` 通过；`cargo check` 通过；`cargo test` 通过。
-**提交**：当前 HEAD `refactor: make workspace clippy clean`
-**下次方向**：优先把 clippy/lint 校验接入日常默认验证路径，或继续推进统一工具取消/中断机制上推到 runtime 工具执行层。
+- `apps/agent-server/src/session_manager.rs`：新增统一的 poisoned `RwLock` 读写恢复辅助函数，替换运行态路径中的 `expect("lock poisoned")`；让 current turn/history/provider snapshot 更新在锁中毒后仍能继续服务。
+- `apps/agent-server/src/session_manager.rs`：新增 3 个回归测试，验证 read/write helper 以及 `update_current_turn_status` 都能在 poisoned lock 下恢复工作。
+- `docs/evolution-log.md`：追加本次演进记录并补充提交信息。
+**验证**：`cargo check` 通过；`cargo test` 通过；新增 3 个 poisoned-lock 回归测试。
+**提交**：`5b19d5a` `fix: recover poisoned session manager locks`
+**下次方向**：继续清理 server/runtime 主路径中的其他 panic-on-poison 或 stop/cancel 缺口，优先把长轮次中断语义真正贯穿到 runtime/tool 执行层。
