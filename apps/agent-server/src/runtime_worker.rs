@@ -292,8 +292,13 @@ impl TurnHistoryBuilder {
                 .and_then(|value| value.as_str())
                 .unwrap_or("turn failed")
                 .to_string();
+            let cancelled = message.contains("已取消");
             self.failure_message = Some(message.clone());
-            self.blocks.push(agent_runtime::TurnBlock::Failure { message });
+            self.blocks.push(if cancelled {
+                agent_runtime::TurnBlock::Cancelled { message }
+            } else {
+                agent_runtime::TurnBlock::Failure { message }
+            });
             self.completed = true;
             return;
         }
@@ -406,7 +411,8 @@ impl TurnHistoryBuilder {
                             },
                         })
                     }
-                    agent_runtime::TurnBlock::Failure { .. } => None,
+                    agent_runtime::TurnBlock::Failure { .. }
+                    | agent_runtime::TurnBlock::Cancelled { .. } => None,
                 })
                 .collect(),
         })
@@ -509,6 +515,32 @@ mod tests {
             current.blocks,
             vec![CurrentTurnBlock::Thinking { content: "先分析".to_string() }]
         );
+    }
+
+    #[test]
+    fn rebuild_turn_history_from_tape_marks_cancelled_blocks_explicitly() {
+        let mut tape = SessionTape::new();
+        let turn_id = "turn-cancelled";
+        tape.append_entry(
+            TapeEntry::message(&Message::new(Role::User, "处理中")).with_run_id(turn_id),
+        );
+        tape.append_entry(TapeEntry::thinking("先分析").with_run_id(turn_id));
+        tape.append_entry(
+            TapeEntry::message(&Message::new(Role::Assistant, "部分回答")).with_run_id(turn_id),
+        );
+        tape.append_entry(
+            TapeEntry::event("turn_failed", Some(serde_json::json!({ "message": "本轮已取消" })))
+                .with_run_id(turn_id),
+        );
+
+        let turns = rebuild_session_snapshots_from_tape(&tape).history;
+
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].outcome, TurnOutcome::Cancelled);
+        assert!(turns[0].blocks.iter().any(|block| matches!(
+            block,
+            agent_runtime::TurnBlock::Cancelled { message } if message == "本轮已取消"
+        )));
     }
 
     #[test]

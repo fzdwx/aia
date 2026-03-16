@@ -532,6 +532,12 @@ function BlockRenderer({ block }: { block: TurnBlock }) {
           {block.message}
         </div>
       )
+    case "cancelled":
+      return (
+        <div className="mb-3 rounded-lg border border-border/40 bg-muted/40 px-3 py-2 text-[13px] text-muted-foreground">
+          {block.message}
+        </div>
+      )
     case "tool_invocation":
       return null
   }

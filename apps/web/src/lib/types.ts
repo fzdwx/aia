@@ -82,6 +82,7 @@ export type TurnBlock =
   | { kind: "assistant"; content: string }
   | { kind: "tool_invocation"; invocation: ToolInvocationLifecycle }
   | { kind: "failure"; message: string }
+  | { kind: "cancelled"; message: string }
 
 export type TurnOutcome = "succeeded" | "failed" | "cancelled"
 

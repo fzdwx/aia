@@ -60,7 +60,11 @@ where
         context.source_entry_ids.push(failure_event_id);
         self.publish_event(crate::RuntimeEvent::TurnFailed { message: runtime_error.to_string() });
         let mut lifecycle_blocks = context.blocks.to_vec();
-        lifecycle_blocks.push(TurnBlock::Failure { message: runtime_error.to_string() });
+        lifecycle_blocks.push(if runtime_error.is_cancelled() {
+            TurnBlock::Cancelled { message: runtime_error.to_string() }
+        } else {
+            TurnBlock::Failure { message: runtime_error.to_string() }
+        });
         self.publish_turn_lifecycle(TurnLifecycle {
             turn_id: context.turn_id.to_string(),
             started_at_ms: context.started_at_ms,

@@ -133,5 +133,18 @@
 - `apps/web/src/stores/chat-store.test.ts`：新增 2 条回归测试，验证取消错误后仍展示 partial content，以及 cancelled `turn_completed` 会把保留内容正常写入历史。
 - `docs/evolution-log.md`：追加本次演进记录。
 **验证**：`cargo check` 通过；`cargo test` 通过；尝试执行 `apps/web` 测试脚本但当前工程未定义 `npm test`。
-**提交**：待提交
+**提交**：`29ea22e` `fix: preserve partial content on cancelled turns`
 **下次方向**：继续补前端测试命令/基线，让 Web store 回归测试能纳入标准验证链路；随后再回到 provider / shell 的真实取消覆盖率诊断。
+
+## 2026-03-16 Session 9
+
+**诊断**：虽然取消轮次的共享结果已经有 `TurnOutcome::Cancelled`，但块级协议仍把取消结束表示成 `{ "kind": "failure", "message": "本轮已取消" }`，导致前端只能按失败样式渲染，语义仍然混淆。
+**决策**：把取消从 failure block 中彻底拆出来，新增独立 `TurnBlock::Cancelled`，并同步收口 runtime 发布、server 历史重建与 Web 渲染；这样 cancelled 不再伪装成 failed。
+**变更**：
+- `crates/agent-runtime/src/types.rs`、`crates/agent-runtime/src/runtime/finalize.rs`、`crates/agent-runtime/src/runtime/tests.rs`：新增 `TurnBlock::Cancelled`，runtime 在取消时发布 cancelled block 而不是 failure block，并补回归断言。
+- `apps/agent-server/src/runtime_worker.rs`：历史/快照重建时把取消型 `turn_failed` 事件映射为 `TurnBlock::Cancelled`，并新增回归测试验证 tape 重建后的块语义。
+- `apps/web/src/lib/types.ts`、`apps/web/src/components/chat-messages.tsx`：前端类型与渲染支持 `cancelled` block，取消消息改用中性样式而非 destructive 失败样式。
+- `docs/status.md`、`docs/architecture.md`：更新取消块级语义已经独立化的说明。
+**验证**：`cargo check` 通过；`cargo test` 通过；新增 runtime/server 取消块语义回归测试。
+**提交**：待提交
+**下次方向**：继续补 Web 测试入口，把前端取消态与 cancelled block 渲染回归纳入标准验证；随后再回到 provider / shell 取消覆盖率诊断。

@@ -512,6 +512,10 @@ fn 取消轮次会标记为_cancelled_outcome() {
         })
         .expect("应发布 turn lifecycle");
     assert_eq!(lifecycle.outcome, TurnOutcome::Cancelled);
+    assert!(lifecycle.blocks.iter().any(|block| matches!(
+        block,
+        crate::TurnBlock::Cancelled { message } if message.contains("已取消")
+    )));
 }
 
 #[test]

@@ -98,6 +98,7 @@ pub enum TurnBlock {
     Assistant { content: String },
     ToolInvocation { invocation: Box<ToolInvocationLifecycle> },
     Failure { message: String },
+    Cancelled { message: String },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
