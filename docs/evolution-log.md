@@ -1,5 +1,18 @@
 # 演进日志
 
+## 2026-03-17 Session 2
+
+**诊断**：session 快照缓存能显著减少切换闪烁，但如果无限保留所有访问过的 session，会把消息历史长期常驻内存；同时聊天列表在长历史场景下仍会整体重渲染，切换/分页时滚动位置也过于激进，经常被拖回底部。
+**决策**：继续沿着前端流畅度主线收口：把 session 快照缓存改为有上限的受控缓存，并同时落一版不引新依赖的消息列表 memo + 轻量窗口化 + 按 session 恢复滚动位置；这是兼顾性能、资源和 UX 的一组同向修复。
+**变更**：
+- `apps/web/src/stores/chat-store.ts`：为 session snapshot 缓存增加上限与按已知 session 裁剪，避免无界常驻内存；补齐 status/stream/error/cancel 等路径对活跃 session 快照的同步更新。
+- `apps/web/src/components/chat-messages.tsx`：为历史 turn / streaming turn 增加 `memo`，引入基于估算高度的轻量窗口化渲染；切换 session 时恢复各自滚动位置，历史分页加载时不再触发自动滚到底部。
+- `apps/web/src/stores/chat-store.test.ts`：补回 session 切换缓存测试，并新增历史分页前插不会丢失既有 turns 的回归测试。
+- `docs/status.md`、`docs/architecture.md`：记录 Web 聊天列表首轮渲染减载与滚动策略收口。
+**验证**：`bun test`（`apps/web`）通过；`bun run typecheck`（`apps/web`）通过；`cargo check` 通过。
+**提交**：`2403c52` `perf: reduce web chat rerenders and scroll jumps`
+**下次方向**：继续把窗口化从“估算高度版”推进到更准确的动态测量，尤其优化工具输出高度波动较大时的 spacer 误差，并评估是否需要把 session 列表本身也做分页/虚拟化。
+
 ## 2026-03-17 Session 1
 
 **诊断**：Web 切换 session 时会先清空消息区再等待 history/current-turn 水合完成，造成明显白屏闪烁；同时 store 里 `sessionHydrating`/`turnsHydrating` 命名不一致，加载态没有真正接到 UI。

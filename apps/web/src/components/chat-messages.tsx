@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { memo, useEffect, useRef, useState } from "react"
 import { Check, X as XIcon } from "lucide-react"
 import { MarkdownContent } from "@/components/markdown-content"
 import { Shimmer } from "@/components/ai-elements/shimmer"
@@ -725,6 +725,15 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
   )
 }
 
+const MemoizedTurnView = memo(
+  TurnView,
+  (prevProps, nextProps) => prevProps.turn === nextProps.turn
+)
+const MemoizedStreamingView = memo(
+  StreamingView,
+  (prevProps, nextProps) => prevProps.streaming === nextProps.streaming
+)
+
 function CompressionNotice({ summary }: { summary: string }) {
   return (
     <div className="mb-4 rounded-lg border border-border/30 bg-muted/25 px-3 py-2 text-[12px] text-muted-foreground">
@@ -734,6 +743,39 @@ function CompressionNotice({ summary }: { summary: string }) {
       <p className="line-clamp-3 whitespace-pre-wrap">{summary}</p>
     </div>
   )
+}
+
+const TURN_ROW_ESTIMATE_PX = 280
+const VIRTUALIZATION_OVERSCAN = 4
+const VIRTUALIZATION_MIN_TURNS = 40
+
+function useWindowedTurns(turns: TurnLifecycle[], containerHeight: number, scrollTop: number) {
+  if (turns.length < VIRTUALIZATION_MIN_TURNS || containerHeight <= 0) {
+    return {
+      visibleTurns: turns,
+      topSpacerHeight: 0,
+      bottomSpacerHeight: 0,
+    }
+  }
+
+  const estimatedVisibleCount = Math.max(
+    1,
+    Math.ceil(containerHeight / TURN_ROW_ESTIMATE_PX)
+  )
+  const startIndex = Math.max(
+    0,
+    Math.floor(scrollTop / TURN_ROW_ESTIMATE_PX) - VIRTUALIZATION_OVERSCAN
+  )
+  const endIndex = Math.min(
+    turns.length,
+    startIndex + estimatedVisibleCount + VIRTUALIZATION_OVERSCAN * 2
+  )
+
+  return {
+    visibleTurns: turns.slice(startIndex, endIndex),
+    topSpacerHeight: startIndex * TURN_ROW_ESTIMATE_PX,
+    bottomSpacerHeight: Math.max(0, (turns.length - endIndex) * TURN_ROW_ESTIMATE_PX),
+  }
 }
 
 function SessionHydratingIndicator() {
@@ -763,6 +805,17 @@ export function ChatMessages() {
   const previousTurnCountRef = useRef(0)
   const previousStreamingBlockCountRef = useRef(0)
   const shouldStickToBottomRef = useRef(true)
+  const restoreSessionScrollRef = useRef(false)
+  const skipNextAutoScrollRef = useRef(false)
+  const scrollPositionsRef = useRef<Record<string, number>>({})
+  const [scrollTop, setScrollTop] = useState(0)
+  const [containerHeight, setContainerHeight] = useState(0)
+
+  const { visibleTurns, topSpacerHeight, bottomSpacerHeight } = useWindowedTurns(
+    turns,
+    containerHeight,
+    scrollTop
+  )
 
   useEffect(() => {
     const container = containerRef.current
@@ -772,21 +825,68 @@ export function ChatMessages() {
       const distanceFromBottom =
         container.scrollHeight - container.scrollTop - container.clientHeight
       shouldStickToBottomRef.current = distanceFromBottom < 120
+      setScrollTop(container.scrollTop)
+      if (activeSessionId) {
+        scrollPositionsRef.current[activeSessionId] = container.scrollTop
+      }
     }
 
+    const resizeObserver = new ResizeObserver(() => {
+      setContainerHeight(container.clientHeight)
+    })
+
+    setContainerHeight(container.clientHeight)
     handleScroll()
     container.addEventListener("scroll", handleScroll)
-    return () => container.removeEventListener("scroll", handleScroll)
-  }, [])
-
-  useEffect(() => {
-    const previousSessionId = previousSessionIdRef.current
-    if (previousSessionId && previousSessionId !== activeSessionId) {
-      shouldStickToBottomRef.current = true
+    resizeObserver.observe(container)
+    return () => {
+      container.removeEventListener("scroll", handleScroll)
+      resizeObserver.disconnect()
     }
   }, [activeSessionId])
 
   useEffect(() => {
+    const previousSessionId = previousSessionIdRef.current
+    if (previousSessionId && previousSessionId !== activeSessionId) {
+      restoreSessionScrollRef.current = true
+      shouldStickToBottomRef.current = false
+    }
+  }, [activeSessionId])
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    if (restoreSessionScrollRef.current) {
+      const restoredScrollTop = activeSessionId
+        ? scrollPositionsRef.current[activeSessionId]
+        : undefined
+
+      requestAnimationFrame(() => {
+        const nextContainer = containerRef.current
+        if (!nextContainer) return
+        if (typeof restoredScrollTop === "number") {
+          nextContainer.scrollTop = restoredScrollTop
+        } else {
+          bottomRef.current?.scrollIntoView({ behavior: "auto" })
+        }
+        setScrollTop(nextContainer.scrollTop)
+        restoreSessionScrollRef.current = false
+      })
+      previousSessionIdRef.current = activeSessionId
+      previousTurnCountRef.current = turns.length
+      previousStreamingBlockCountRef.current = streamingTurn?.blocks.length ?? 0
+      return
+    }
+
+    if (skipNextAutoScrollRef.current) {
+      skipNextAutoScrollRef.current = false
+      previousSessionIdRef.current = activeSessionId
+      previousTurnCountRef.current = turns.length
+      previousStreamingBlockCountRef.current = streamingTurn?.blocks.length ?? 0
+      return
+    }
+
     const currentStreamingBlockCount = streamingTurn?.blocks.length ?? 0
     const sessionChanged = previousSessionIdRef.current !== activeSessionId
     const hydratedManyTurns = turns.length > previousTurnCountRef.current + 1
@@ -821,12 +921,17 @@ export function ChatMessages() {
   async function handleLoadOlderTurns() {
     const container = containerRef.current
     const previousScrollHeight = container?.scrollHeight ?? 0
+    skipNextAutoScrollRef.current = true
     await loadOlderTurns()
     requestAnimationFrame(() => {
       const nextContainer = containerRef.current
       if (!nextContainer) return
       const nextScrollHeight = nextContainer.scrollHeight
       nextContainer.scrollTop += nextScrollHeight - previousScrollHeight
+      setScrollTop(nextContainer.scrollTop)
+      if (activeSessionId) {
+        scrollPositionsRef.current[activeSessionId] = nextContainer.scrollTop
+      }
     })
   }
 
@@ -867,13 +972,15 @@ export function ChatMessages() {
           className={sessionHydrating ? "transition-opacity duration-150 ease-out opacity-80" : "transition-opacity duration-150 ease-out opacity-100"}
           aria-busy={sessionHydrating}
         >
-          {turns.map((turn) => (
-            <TurnView key={turn.turn_id} turn={turn} />
+          {topSpacerHeight > 0 && <div style={{ height: topSpacerHeight }} />}
+          {visibleTurns.map((turn) => (
+            <MemoizedTurnView key={turn.turn_id} turn={turn} />
           ))}
+          {bottomSpacerHeight > 0 && <div style={{ height: bottomSpacerHeight }} />}
           {lastCompression && !streamingTurn && (
             <CompressionNotice summary={lastCompression.summary} />
           )}
-          {streamingTurn && <StreamingView streaming={streamingTurn} />}
+          {streamingTurn && <MemoizedStreamingView streaming={streamingTurn} />}
           {error && (
             <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-[13px] text-destructive">
               {error}

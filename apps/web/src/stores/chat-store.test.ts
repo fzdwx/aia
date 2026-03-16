@@ -442,4 +442,103 @@ describe("chat store submitTurn", () => {
 
     globalThis.fetch = originalFetchImpl
   })
+
+  test("loadOlderTurns prepends history without dropping existing turns", async () => {
+    const originalFetchImpl = globalThis.fetch
+
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString()
+      if (url.includes("/api/session/history")) {
+        return new Response(
+          JSON.stringify({
+            turns: [
+              {
+                turn_id: "turn-older",
+                started_at_ms: 1,
+                finished_at_ms: 2,
+                source_entry_ids: [1],
+                user_message: "older question",
+                blocks: [{ kind: "assistant", content: "older answer" }],
+                assistant_message: "older answer",
+                thinking: null,
+                tool_invocations: [],
+                usage: null,
+                failure_message: null,
+                outcome: "succeeded",
+              },
+            ],
+            has_more: false,
+            next_before_turn_id: null,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }) as FetchMock
+
+    useChatStore.setState({
+      activeSessionId: "session-1",
+      historyNextBeforeTurnId: "turn-current",
+      historyHasMore: true,
+      turns: [
+        {
+          turn_id: "turn-current",
+          started_at_ms: 11,
+          finished_at_ms: 12,
+          source_entry_ids: [2],
+          user_message: "current question",
+          blocks: [{ kind: "assistant", content: "current answer" }],
+          assistant_message: "current answer",
+          thinking: null,
+          tool_invocations: [],
+          usage: null,
+          failure_message: null,
+          outcome: "succeeded",
+        },
+      ],
+      _sessionSnapshots: {
+        "session-1": {
+          turns: [
+            {
+              turn_id: "turn-current",
+              started_at_ms: 11,
+              finished_at_ms: 12,
+              source_entry_ids: [2],
+              user_message: "current question",
+              blocks: [{ kind: "assistant", content: "current answer" }],
+              assistant_message: "current answer",
+              thinking: null,
+              tool_invocations: [],
+              usage: null,
+              failure_message: null,
+              outcome: "succeeded",
+            },
+          ],
+          historyHasMore: true,
+          historyNextBeforeTurnId: "turn-current",
+          streamingTurn: null,
+          chatState: "idle",
+          contextPressure: null,
+          lastCompression: null,
+        },
+      },
+    })
+
+    await useChatStore.getState().loadOlderTurns()
+
+    const state = useChatStore.getState()
+    assert.deepEqual(
+      state.turns.map((turn) => turn.turn_id),
+      ["turn-older", "turn-current"]
+    )
+    assert.deepEqual(
+      state._sessionSnapshots["session-1"]?.turns.map((turn) => turn.turn_id),
+      ["turn-older", "turn-current"]
+    )
+
+    globalThis.fetch = originalFetchImpl
+  })
 })

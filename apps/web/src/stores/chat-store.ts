@@ -32,6 +32,7 @@ import type {
 } from "@/lib/types"
 
 const SESSION_HISTORY_PAGE_SIZE = 5
+const MAX_CACHED_SESSION_SNAPSHOTS = 24
 
 type SessionSnapshot = {
   turns: TurnLifecycle[]
@@ -118,13 +119,40 @@ function applySessionSnapshot(
 function upsertSessionSnapshot(
   snapshots: Record<string, SessionSnapshot>,
   sessionId: string | null,
-  snapshot: SessionSnapshot
+  snapshot: SessionSnapshot,
+  sessionOrder?: SessionListItem[]
 ): Record<string, SessionSnapshot> {
   if (!sessionId) return snapshots
-  return {
+
+  const nextSnapshots = {
     ...snapshots,
     [sessionId]: snapshot,
   }
+
+  if (!sessionOrder || sessionOrder.length <= MAX_CACHED_SESSION_SNAPSHOTS) {
+    return nextSnapshots
+  }
+
+  const allowedIds = new Set(
+    sessionOrder
+      .slice(Math.max(0, sessionOrder.length - MAX_CACHED_SESSION_SNAPSHOTS))
+      .map((session) => session.id)
+  )
+  allowedIds.add(sessionId)
+
+  return Object.fromEntries(
+    Object.entries(nextSnapshots).filter(([id]) => allowedIds.has(id))
+  )
+}
+
+function trimSessionSnapshotsToKnownSessions(
+  snapshots: Record<string, SessionSnapshot>,
+  sessions: SessionListItem[]
+): Record<string, SessionSnapshot> {
+  const allowedIds = new Set(sessions.map((session) => session.id))
+  return Object.fromEntries(
+    Object.entries(snapshots).filter(([id]) => allowedIds.has(id))
+  )
 }
 
 type ChatStore = {
@@ -200,7 +228,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
           chatState: state.chatState,
           contextPressure: state.contextPressure,
           lastCompression: state.lastCompression,
-        }
+        },
+        state.sessions
       ),
     }))
 
@@ -217,7 +246,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
             _sessionSnapshots: upsertSessionSnapshot(
               state._sessionSnapshots,
               id,
-              snapshot
+              snapshot,
+              state.sessions
             ),
           }
         })
@@ -249,7 +279,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
         _sessionSnapshots: upsertSessionSnapshot(
           state._sessionSnapshots,
           id,
-          hydratedSnapshot
+          hydratedSnapshot,
+          state.sessions
         ),
       }))
     } catch {
@@ -315,6 +346,28 @@ export const useChatStore = create<ChatStore>((set, get) => {
         return -1
       }
 
+      function setStreamingTurnForActiveSession(
+        updater: (streamingTurn: StreamingTurn) => StreamingTurn | null
+      ) {
+        set((state) => {
+          if (!activeId || !state.streamingTurn) return state
+          const nextStreamingTurn = updater(state.streamingTurn)
+          if (!nextStreamingTurn) return state
+          return {
+            streamingTurn: nextStreamingTurn,
+            _sessionSnapshots: upsertSessionSnapshot(
+              state._sessionSnapshots,
+              activeId,
+              {
+                ...(state._sessionSnapshots[activeId] ?? EMPTY_SESSION_SNAPSHOT),
+                streamingTurn: nextStreamingTurn,
+              },
+              state.sessions
+            ),
+          }
+        })
+      }
+
       switch (event.type) {
         case "status": {
           if (event.data.session_id !== activeId) break
@@ -323,27 +376,70 @@ export const useChatStore = create<ChatStore>((set, get) => {
           if (status === "waiting") {
             const prev = get().streamingTurn
             if (prev) {
-              set({
-                _pendingPrompt: null,
-                chatState: "active",
-                streamingTurn: { ...prev, status: "waiting" },
+              set((state) => {
+                const nextStreamingTurn = { ...prev, status: "waiting" as const }
+                return {
+                  _pendingPrompt: null,
+                  chatState: "active",
+                  streamingTurn: nextStreamingTurn,
+                  _sessionSnapshots: upsertSessionSnapshot(
+                    state._sessionSnapshots,
+                    activeId,
+                    {
+                      ...(state._sessionSnapshots[activeId ?? ""] ??
+                        EMPTY_SESSION_SNAPSHOT),
+                      streamingTurn: nextStreamingTurn,
+                      chatState: "active",
+                    },
+                    state.sessions
+                  ),
+                }
               })
             } else {
               const prompt = get()._pendingPrompt ?? ""
-              set({
-                _pendingPrompt: null,
-                chatState: "active",
-                streamingTurn: {
+              set((state) => {
+                const nextStreamingTurn: StreamingTurn = {
                   userMessage: prompt,
                   status: "waiting",
                   blocks: [],
-                },
+                }
+                return {
+                  _pendingPrompt: null,
+                  chatState: "active",
+                  streamingTurn: nextStreamingTurn,
+                  _sessionSnapshots: upsertSessionSnapshot(
+                    state._sessionSnapshots,
+                    activeId,
+                    {
+                      ...(state._sessionSnapshots[activeId ?? ""] ??
+                        EMPTY_SESSION_SNAPSHOT),
+                      streamingTurn: nextStreamingTurn,
+                      chatState: "active",
+                    },
+                    state.sessions
+                  ),
+                }
               })
             }
           } else {
             const prev = get().streamingTurn
             if (prev) {
-              set({ streamingTurn: { ...prev, status } })
+              set((state) => {
+                const nextStreamingTurn = { ...prev, status }
+                return {
+                  streamingTurn: nextStreamingTurn,
+                  _sessionSnapshots: upsertSessionSnapshot(
+                    state._sessionSnapshots,
+                    activeId,
+                    {
+                      ...(state._sessionSnapshots[activeId ?? ""] ??
+                        EMPTY_SESSION_SNAPSHOT),
+                      streamingTurn: nextStreamingTurn,
+                    },
+                    state.sessions
+                  ),
+                }
+              })
             }
           }
           break
@@ -367,7 +463,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
             } else {
               blocks.push({ type: "thinking", content: data.text })
             }
-            set({ streamingTurn: { ...prev, blocks } })
+            setStreamingTurnForActiveSession((current) => ({
+              ...current,
+              blocks,
+            }))
           } else if (data.kind === "text_delta") {
             const last = blocks[blocks.length - 1]
             if (last && last.type === "text") {
@@ -378,7 +477,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
             } else {
               blocks.push({ type: "text", content: data.text })
             }
-            set({ streamingTurn: { ...prev, blocks } })
+            setStreamingTurnForActiveSession((current) => ({
+              ...current,
+              blocks,
+            }))
           } else if (data.kind === "tool_call_detected") {
             const existingIdx = findToolBlockIndex(blocks, data.invocation_id)
             if (existingIdx >= 0) {
@@ -407,7 +509,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
                 },
               })
             }
-            set({ streamingTurn: { ...prev, blocks } })
+            setStreamingTurnForActiveSession((current) => ({
+              ...current,
+              blocks,
+            }))
           } else if (data.kind === "tool_call_started") {
             const existingIdx = findToolBlockIndex(blocks, data.invocation_id)
             if (existingIdx >= 0) {
@@ -439,7 +544,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
                 },
               })
             }
-            set({ streamingTurn: { ...prev, blocks } })
+            setStreamingTurnForActiveSession((current) => ({
+              ...current,
+              blocks,
+            }))
           } else if (data.kind === "tool_output_delta") {
             const idx = findToolBlockIndex(blocks, data.invocation_id)
             if (idx >= 0) {
@@ -470,7 +578,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
                 },
               })
             }
-            set({ streamingTurn: { ...prev, blocks } })
+            setStreamingTurnForActiveSession((current) => ({
+              ...current,
+              blocks,
+            }))
           } else if (data.kind === "tool_call_completed") {
             const idx = findToolBlockIndex(blocks, data.invocation_id)
             if (idx >= 0) {
@@ -489,7 +600,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
                   failed: data.failed,
                 },
               }
-              set({ streamingTurn: { ...prev, blocks } })
+              setStreamingTurnForActiveSession((current) => ({
+                ...current,
+                blocks,
+              }))
             }
           }
           break
@@ -517,7 +631,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
               _sessionSnapshots: upsertSessionSnapshot(
                 state._sessionSnapshots,
                 activeId,
-                snapshot
+                snapshot,
+                state.sessions
               ),
             }
           })
@@ -536,7 +651,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
                     {
                       ...snapshot,
                       contextPressure: info.pressure_ratio,
-                    }
+                    },
+                    state.sessions
                   ),
                 }
               })
@@ -552,10 +668,15 @@ export const useChatStore = create<ChatStore>((set, get) => {
               lastCompression: event.data,
               _sessionSnapshots:
                 activeId && snapshot
-                  ? upsertSessionSnapshot(state._sessionSnapshots, activeId, {
-                      ...snapshot,
-                      lastCompression: event.data,
-                    })
+                  ? upsertSessionSnapshot(
+                      state._sessionSnapshots,
+                      activeId,
+                      {
+                        ...snapshot,
+                        lastCompression: event.data,
+                      },
+                      state.sessions
+                    )
                   : state._sessionSnapshots,
             }
           })
@@ -574,7 +695,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
                     {
                       ...snapshot,
                       contextPressure: info.pressure_ratio,
-                    }
+                    },
+                    state.sessions
                   ),
                 }
               })
@@ -606,11 +728,16 @@ export const useChatStore = create<ChatStore>((set, get) => {
                 error: null,
                 _sessionSnapshots:
                   activeId && snapshot
-                    ? upsertSessionSnapshot(state._sessionSnapshots, activeId, {
-                        ...snapshot,
-                        streamingTurn: nextStreamingTurn,
-                        chatState: "idle",
-                      })
+                    ? upsertSessionSnapshot(
+                        state._sessionSnapshots,
+                        activeId,
+                        {
+                          ...snapshot,
+                          streamingTurn: nextStreamingTurn,
+                          chatState: "idle",
+                        },
+                        state.sessions
+                      )
                     : state._sessionSnapshots,
               }
             })
@@ -624,11 +751,16 @@ export const useChatStore = create<ChatStore>((set, get) => {
               chatState: "idle",
               _sessionSnapshots:
                 activeId && snapshot
-                  ? upsertSessionSnapshot(state._sessionSnapshots, activeId, {
-                      ...snapshot,
-                      streamingTurn: null,
-                      chatState: "idle",
-                    })
+                  ? upsertSessionSnapshot(
+                      state._sessionSnapshots,
+                      activeId,
+                      {
+                        ...snapshot,
+                        streamingTurn: null,
+                        chatState: "idle",
+                      },
+                      state.sessions
+                    )
                   : state._sessionSnapshots,
             }
           })
@@ -647,11 +779,16 @@ export const useChatStore = create<ChatStore>((set, get) => {
               error: null,
               _sessionSnapshots:
                 activeId && snapshot
-                  ? upsertSessionSnapshot(state._sessionSnapshots, activeId, {
-                      ...snapshot,
-                      streamingTurn: nextStreamingTurn,
-                      chatState: "idle",
-                    })
+                  ? upsertSessionSnapshot(
+                      state._sessionSnapshots,
+                      activeId,
+                      {
+                        ...snapshot,
+                        streamingTurn: nextStreamingTurn,
+                        chatState: "idle",
+                      },
+                      state.sessions
+                    )
                   : state._sessionSnapshots,
             }
           })
@@ -665,11 +802,19 @@ export const useChatStore = create<ChatStore>((set, get) => {
           const deletedId = event.data.session_id
           set((state) => {
             const sessions = state.sessions.filter((s) => s.id !== deletedId)
+            const nextSnapshots = trimSessionSnapshotsToKnownSessions(
+              state._sessionSnapshots,
+              sessions
+            )
             if (state.activeSessionId === deletedId) {
               const newActive = sessions[0]?.id ?? null
-              return { sessions, activeSessionId: newActive }
+              return {
+                sessions,
+                activeSessionId: newActive,
+                _sessionSnapshots: nextSnapshots,
+              }
             }
-            return { sessions }
+            return { sessions, _sessionSnapshots: nextSnapshots }
           })
           break
         }
@@ -702,7 +847,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
               streamingTurn: nextStreamingTurn,
               chatState: "active",
               lastCompression: null,
-            }
+            },
+            state.sessions
           ),
         }
       })
@@ -719,7 +865,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
               ...(state._sessionSnapshots[sessionId] ?? EMPTY_SESSION_SNAPSHOT),
               streamingTurn: null,
               chatState: "idle",
-            }
+            },
+            state.sessions
           ),
         }))
       })
@@ -749,7 +896,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
                 ...(state._sessionSnapshots[sessionId] ?? EMPTY_SESSION_SNAPSHOT),
                 streamingTurn: nextStreamingTurn,
                 chatState: "idle",
-              }
+              },
+              state.sessions
             ),
           }
         })
@@ -798,13 +946,23 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
     fetchSessions: async () => {
       const sessions = await apiFetchSessions()
-      set({ sessions })
+      set((state) => ({
+        sessions,
+        _sessionSnapshots: trimSessionSnapshotsToKnownSessions(
+          state._sessionSnapshots,
+          sessions
+        ),
+      }))
     },
 
     createSession: async () => {
       const session = await apiCreateSession()
       set((state) => ({
         sessions: [...state.sessions, session],
+        _sessionSnapshots: trimSessionSnapshotsToKnownSessions(
+          state._sessionSnapshots,
+          [...state.sessions, session]
+        ),
       }))
       await get().switchSession(session.id)
     },
@@ -843,7 +1001,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
                 turns,
                 historyHasMore: historyPage.has_more,
                 historyNextBeforeTurnId: historyPage.next_before_turn_id,
-              }
+              },
+              state.sessions
             ),
           }
         })
