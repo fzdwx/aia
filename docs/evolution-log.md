@@ -97,3 +97,17 @@
 **验证**：`cargo check` 通过；`cargo test` 通过；`docs/todo.md` 的本地文档引用重新有效。
 **提交**：`0606ea8` `docs: restore generative ui design article`
 **下次方向**：优先把文档中的最小 `UiWidget` 协议草案落到共享类型，并从 `tape_info` 或 `grep` 开始试做 tool-driven widget。
+
+## 2026-03-16 Session 6
+
+**诊断**：现有 cancel 虽已打通 server→runtime→tool context，但 OpenAI 流式读取和 embedded shell 长任务仍可能继续阻塞，且前后端仍主要靠 `failure_message` 文本猜测“这是不是取消”。
+**决策**：先把取消继续下推到真实流式模型读取与 shell 作业层，并新增共享 `TurnLifecycle.outcome` 字段统一表达 succeeded/failed/cancelled；这是当前 stop/cancel 路线上最小且最有杠杆的可靠性补强。
+**变更**：
+- `crates/agent-core/src/traits.rs`、`crates/openai-adapter/src/error.rs`、`crates/openai-adapter/src/responses.rs`、`crates/openai-adapter/src/chat_completions.rs`：为 `LanguageModel` 新增 abort-aware 流式入口与取消错误识别；OpenAI Responses / Chat Completions 在 SSE 读取循环中主动检查取消信号并返回结构化 cancelled error。
+- `crates/builtin-tools/src/shell.rs`：为 embedded brush shell 增加控制通道，取消时向当前 job 发送 `TERM` 并尽快返回，不再只靠工具层轮询后等待长命令自然结束。
+- `crates/agent-runtime/src/types.rs`、`crates/agent-runtime/src/runtime/turn.rs`、`crates/agent-runtime/src/runtime/finalize.rs`、`crates/agent-runtime/src/runtime/tests.rs`：新增共享 `TurnOutcome`，让 runtime 在 provider cancelled error / 本地取消路径下统一发布 `outcome = cancelled` 的轮次结果。
+- `apps/agent-server/src/model.rs`、`apps/agent-server/src/runtime_worker.rs`、`apps/agent-server/src/sse.rs`、`apps/web/src/lib/types.ts`、`apps/web/src/components/chat-messages.tsx`：把取消结果继续映射到 server / Web 共享协议，历史重建和 UI 元信息改为优先消费 `outcome`，不再依赖 `failure_message` 猜测取消状态。
+- `docs/status.md`、`docs/architecture.md`：更新 stop/cancel 当前覆盖范围与剩余观察点说明。
+**验证**：`cargo check` 通过；`cargo test` 通过；新增 OpenAI adapter 取消与 server model 取消识别测试，并补 shell/runtime 取消回归验证。
+**提交**：`dbd0828` `feat: propagate cancellation into streaming model and shell`
+**下次方向**：继续验证不同 OpenAI 兼容上游与复杂 shell pipeline 的实际中断覆盖率，必要时再把“读流中断”继续下推到更底层的 HTTP 连接级取消或 provider 超时/中止控制。
