@@ -174,7 +174,32 @@ pub(crate) fn rebuild_session_snapshots_from_tape(tape: &SessionTape) -> Session
 
 fn parse_legacy_turn_record(entry: &session_tape::TapeEntry) -> Option<TurnLifecycle> {
     let data = entry.event_data()?.clone();
-    serde_json::from_value(data).ok()
+    match serde_json::from_value(data) {
+        Ok(turn) => Some(turn),
+        Err(error) => {
+            eprintln!(
+                "legacy turn_record decode failed for entry {}: {error}",
+                entry.id
+            );
+            None
+        }
+    }
+}
+
+fn decode_completion_usage(
+    entry: &session_tape::TapeEntry,
+    usage: &serde_json::Value,
+) -> Option<CompletionUsage> {
+    match serde_json::from_value(usage.clone()) {
+        Ok(usage) => Some(usage),
+        Err(error) => {
+            eprintln!(
+                "turn_completed usage decode failed for entry {}: {error}",
+                entry.id
+            );
+            None
+        }
+    }
 }
 
 fn parse_iso8601_utc_seconds(input: &str) -> Option<u64> {
@@ -307,7 +332,7 @@ impl TurnHistoryBuilder {
             self.usage = entry
                 .event_data()
                 .and_then(|value| value.get("usage"))
-                .and_then(|value| serde_json::from_value(value.clone()).ok());
+                .and_then(|value| decode_completion_usage(entry, value));
             self.completed = true;
         }
     }
@@ -493,6 +518,41 @@ mod tests {
                 cached_tokens: 0,
             })
         );
+    }
+
+    #[test]
+    fn rebuild_turn_history_from_tape_ignores_invalid_usage_payload_without_dropping_turn() {
+        let mut tape = SessionTape::new();
+        let turn_id = "turn-bad-usage";
+        tape.append_entry(
+            TapeEntry::message(&Message::new(Role::User, "统计 token")).with_run_id(turn_id),
+        );
+        tape.append_entry(
+            TapeEntry::message(&Message::new(Role::Assistant, "本次调用已完成"))
+                .with_run_id(turn_id),
+        );
+        tape.append_entry(
+            TapeEntry::event(
+                "turn_completed",
+                Some(serde_json::json!({
+                    "status": "ok",
+                    "usage": {
+                        "input_tokens": "bad",
+                        "output_tokens": 9,
+                        "total_tokens": 30,
+                        "cached_tokens": 0
+                    }
+                })),
+            )
+            .with_run_id(turn_id),
+        );
+
+        let turns = rebuild_session_snapshots_from_tape(&tape).history;
+
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].turn_id, turn_id);
+        assert_eq!(turns[0].usage, None);
+        assert_eq!(turns[0].outcome, TurnOutcome::Succeeded);
     }
 
     #[test]

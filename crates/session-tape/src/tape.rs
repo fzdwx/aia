@@ -79,14 +79,13 @@ impl SessionTape {
     }
 
     pub fn latest_provider_binding(&self) -> Option<SessionProviderBinding> {
-        self.entries
+        let entry = self
+            .entries
             .iter()
             .rev()
-            .filter(|entry| entry.kind == "event")
-            .filter(|entry| entry.event_name() == Some("provider_binding"))
-            .find_map(|entry| {
-                entry.event_data().and_then(|data| serde_json::from_value(data.clone()).ok())
-            })
+            .find(|entry| entry.kind == "event" && entry.event_name() == Some("provider_binding"))?;
+        let data = entry.event_data()?;
+        serde_json::from_value(data.clone()).ok()
     }
 
     pub fn handoff(&mut self, name: impl Into<String>, state: Value) -> Handoff {

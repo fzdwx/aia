@@ -47,6 +47,23 @@ fn provider_binding_event_uses_explicit_error_payload_on_serialize_failure() {
 }
 
 #[test]
+fn malformed_latest_provider_binding_does_not_fall_back_to_stale_older_binding() {
+    let mut tape = SessionTape::new();
+    tape.bind_provider(SessionProviderBinding::Provider {
+        name: "older".into(),
+        model: "gpt-4.1-mini".into(),
+        base_url: "https://api.openai.com/v1".into(),
+        protocol: "openai-responses".into(),
+    });
+    tape.append_entry(TapeEntry::event(
+        "provider_binding",
+        Some(serde_json::json!({ "broken": true })),
+    ));
+
+    assert_eq!(tape.latest_provider_binding(), None);
+}
+
+#[test]
 fn 默认会话路径位于项目隐藏目录() {
     assert_eq!(default_session_path(), aia_config::default_session_tape_path());
 }

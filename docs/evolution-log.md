@@ -161,17 +161,17 @@
 **提交**：待提交
 **下次方向**：继续补 Web 测试入口，并让前端取消态回归真正纳入标准验证链路；之后再回到 provider / shell 的真实取消覆盖率诊断。
 
-## 2026-03-16 Session 25
+## 2026-03-16 Session 27
 
-**诊断**：server/session-tape 主路径里还残留两个低可见度降级点：`handle_create_session` 读取 `provider_info_snapshot` 时在锁中毒下会静默回退空 model；`SessionTape::bind_provider` 在 provider binding 序列化失败时会写入空对象，丢掉明确错误信息。
-**决策**：继续沿用现有显式恢复/显式错误策略，分别复用 poisoned-lock helper 与统一序列化 fallback helper，让 provider 相关元数据在异常情况下仍保留可观测语义。
+**诊断**：`apps/agent-server/src/runtime_worker.rs` 在历史重建时仍会用 `serde_json::from_value(...).ok()` 静默吞掉两类损坏数据：旧版 `turn_record` 事件，以及 `turn_completed.usage` 的无效 payload。这样虽然不会崩，但也没有任何可观测诊断。
+**决策**：保持现有“尽量继续重建历史”的策略不变，但把这两处 `.ok()` 改成显式 decode helper，在忽略坏数据时输出最小明确的 stderr 诊断；这样既不扩大接口面，也补上可观测性。
 **变更**：
-- `apps/agent-server/src/session_manager.rs`：`handle_create_session` 改为通过已有 `read_lock` 读取 `provider_info_snapshot`，不再用 `read().map(...).unwrap_or_default()` 在锁中毒时默默写入空 model。
-- `crates/session-tape/src/tape.rs`：`bind_provider` 改为复用 `serialize_payload("provider_binding", ...)`，让 provider binding 序列化失败时落盘显式错误 JSON，而不是空对象。
-- `crates/session-tape/src/tests.rs`：新增 1 条回归测试，验证 provider binding 事件在序列化失败时会保留明确错误 payload。
-- `docs/status.md`：同步记录本次 provider 元数据可靠性收口。
-**验证**：`cargo test -p session-tape provider_binding_event_uses_explicit_error_payload_on_serialize_failure -- --nocapture` 通过；`cargo test -p agent-server resolve_session_id_ -- --nocapture` 通过；`cargo check -p session-tape -p agent-server` 通过。
+- `apps/agent-server/src/runtime_worker.rs`：`parse_legacy_turn_record` 改为显式 `match` 解码并在失败时输出 `legacy turn_record decode failed ...`。
+- `apps/agent-server/src/runtime_worker.rs`：新增 `decode_completion_usage` helper，`turn_completed.usage` 解码失败时输出 `turn_completed usage decode failed ...`，同时仍保留轮次主体重建。
+- `apps/agent-server/src/runtime_worker.rs`：新增 1 条回归测试，验证无效 `usage` payload 不会导致整个 turn 丢失，只会把 `usage` 保持为 `None`。
+- `docs/status.md`：同步记录本次 runtime worker 解码告警收口。
+**验证**：`cargo test -p agent-server rebuild_turn_history_from_tape_ignores_invalid_usage_payload_without_dropping_turn -- --nocapture` 通过；`cargo test -p agent-server rebuild_turn_history_from_tape_restores_legacy_turn_record -- --nocapture` 通过；`cargo check -p agent-server` 通过。
 **提交**：待提交
-**下次方向**：继续检查 `runtime_worker` 的 `serde_json::from_value(...).ok()` 与 `session-tape` 的 `latest_provider_binding()` 解码失败路径，评估是否需要补结构化诊断而不是简单忽略旧/坏事件。
+**下次方向**：继续看 `runtime_worker` 里的 `parse_iso8601_utc_seconds(...).unwrap_or(0)` 与 tool-call 重建时的默认占位 `ToolCall::new(...)`，评估哪些该继续保留容错、哪些值得补最小诊断。
 
 

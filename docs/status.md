@@ -75,7 +75,7 @@
 - 完成 `aia-config` 内部模块化：拆为 `paths`、`server`、`identifiers` 三类共享配置模块，`lib.rs` 保持薄 façade
 - 完成 `provider-registry`、`session-tape`、`apps/agent-server`、`agent-runtime` 对共享配置默认值与 helper 的首轮接入
 - 完成 `apps/agent-server` 启动路径错误收口：provider 注册表、SQLite store、sessions 目录、默认 session、模型构建、端口绑定与 server serve 失败不再 `expect` panic
-- 完成 provider snapshot 与 provider binding 序列化的显式收口：session 创建读取当前 provider model 时不再在锁中毒后静默回退空字符串，`session-tape` 的 provider binding 落盘也不再在序列化失败时写入空对象
+- 完成 `runtime_worker` 历史重建解码告警收口：legacy `turn_record` 与 `turn_completed.usage` 损坏时不再无声忽略，而会输出明确诊断并尽量保留其余可重建轮次数据
 - 完成 `agent-core` / `agent-runtime` 时间辅助函数收口：tool invocation id、turn id 与时间戳生成在系统时钟回拨到 `UNIX_EPOCH` 之前时不再 panic
 - 完成 `builtin-tools` shell 测试稳定性修正：stdout delta 断言不再假设嵌入式 shell 只会回传单个输出块
 - 完成 `apps/web` 工具链切换到 Vite+ 工作流，并引入子目录级 `apps/web/AGENTS.md` 约束

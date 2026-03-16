@@ -745,9 +745,9 @@ export function ChatMessages() {
   const error = useChatStore((s) => s.error)
   const lastCompression = useChatStore((s) => s.lastCompression)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
-  const turnsHydrating = useChatStore((s) => s.turnsHydrating)
   const containerRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const [sessionTransitionKey, setSessionTransitionKey] = useState(0)
   const previousSessionIdRef = useRef<string | null>(null)
   const previousTurnCountRef = useRef(0)
   const previousStreamingBlockCountRef = useRef(0)
@@ -767,6 +767,12 @@ export function ChatMessages() {
     container.addEventListener("scroll", handleScroll)
     return () => container.removeEventListener("scroll", handleScroll)
   }, [])
+
+  useEffect(() => {
+    if (previousSessionIdRef.current && previousSessionIdRef.current !== activeSessionId) {
+      setSessionTransitionKey((value) => value + 1)
+    }
+  }, [activeSessionId])
 
   useEffect(() => {
     const currentStreamingBlockCount = streamingTurn?.blocks.length ?? 0
@@ -832,7 +838,10 @@ export function ChatMessages() {
 
   return (
     <div ref={containerRef} className="relative flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-[720px] px-6 py-8">
+      <div
+        key={`${activeSessionId ?? "empty"}-${sessionTransitionKey}`}
+        className="mx-auto max-w-[720px] animate-[session-switch-in_160ms_ease-out_both] px-6 py-8"
+      >
         {historyHasMore && (
           <div className="mb-6 flex justify-center">
             <button
