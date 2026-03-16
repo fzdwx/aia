@@ -1,5 +1,19 @@
 # 演进日志
 
+## 2026-03-17 Session 1
+
+**诊断**：Web 切换 session 时会先清空消息区再等待 history/current-turn 水合完成，造成明显白屏闪烁；同时 store 里 `sessionHydrating`/`turnsHydrating` 命名不一致，加载态没有真正接到 UI。
+**决策**：先在前端 store 引入按 session 的本地快照缓存，并把切换态改成“保留上一帧内容 + 轻量 loading 提示”；这是改善 session 切换流畅度和 UX 的最小高杠杆改动，不需要改后端协议。
+**变更**：
+- `apps/web/src/stores/chat-store.ts`：新增 session snapshot 缓存、统一 `sessionHydrating` 状态，并在 hydrate / turn 完成 / cancel / 分页等路径同步维护快照，切换 session 时优先展示缓存内容而不是先清空。
+- `apps/web/src/components/chat-messages.tsx`：移除切换 session 时依赖 key 的整块重挂载动画，改为稳定容器 + 顶部 loading 指示，水合期间只轻微降低内容透明度，减少布局跳动和白屏感。
+- `apps/web/src/components/sidebar.tsx`：为当前正在切换的 session 增加 loading 文案并禁用重复点击/删除，降低误触与不确定感。
+- `apps/web/src/stores/chat-store.test.ts`：新增 session 切换缓存显示与 snapshot 更新回归测试。
+- `docs/status.md`、`docs/architecture.md`：补充 Web session 切换流畅度收口说明。
+**验证**：`bun test`（`apps/web`）通过；`bun run typecheck`（`apps/web`）通过；`cargo check` 通过。
+**提交**：`c3ec108` `fix: smooth session switching in web chat`
+**下次方向**：继续收口前端长列表渲染和滚动策略，优先评估消息区是否需要更细粒度 memo / virtualization，进一步减少超长 session 下的重渲染抖动。
+
 ## 2026-03-15 Session 1
 
 **诊断**：`builtin-tools` 的 `read`/`write`/`edit` 关键文件工具缺少边界测试，二进制文件、较大文件窗口读取和唯一替换失败等路径的可靠性验证不足。

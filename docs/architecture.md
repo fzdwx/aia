@@ -149,6 +149,7 @@ README 里真正难的是这些能力：
 - 通过全局 SSE（`EventSource` → `GET /api/events`）消费结构化事件流
 - 消息提交通过 `POST /api/turn` fire-and-forget，响应通过 SSE 返回
 - 以前端全局 store 管理 SSE 连接、流式状态累积与 provider / session 状态刷新
+- session 切换采用按 session 的本地 snapshot 缓存：切换时先显示已有快照并后台水合 history/current turn，减少消息区清空造成的闪烁与布局跳动
 - 已覆盖 provider 管理、session 列表、历史消息、当前 turn 恢复、stop/cancel、trace 诊断视图
 - 使用独立 Web 子目录规则，具体开发规范由 `docs/frontend-web-guidelines.md` 与 `apps/web/AGENTS.md` 约束
 

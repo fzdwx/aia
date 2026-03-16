@@ -8,6 +8,7 @@ type FetchMock = typeof fetch
 
 const initialState = {
   activeSessionId: "session-1",
+  sessionHydrating: false,
   turns: [],
   historyHasMore: false,
   historyNextBeforeTurnId: null,
@@ -21,6 +22,7 @@ const initialState = {
   contextPressure: null,
   lastCompression: null,
   _pendingPrompt: null,
+  _sessionSnapshots: {},
 }
 
 describe("chat store submitTurn", () => {
@@ -226,6 +228,24 @@ describe("chat store submitTurn", () => {
       },
       turns: [],
       error: null,
+      _sessionSnapshots: {
+        "session-1": {
+          turns: [],
+          historyHasMore: false,
+          historyNextBeforeTurnId: null,
+          streamingTurn: {
+            userMessage: "hello world",
+            status: "cancelled",
+            blocks: [
+              { type: "thinking", content: "先分析" },
+              { type: "text", content: "部分回答" },
+            ],
+          },
+          chatState: "idle",
+          contextPressure: null,
+          lastCompression: null,
+        },
+      },
     })
 
     const completedEvent: SseEvent = {
@@ -259,5 +279,167 @@ describe("chat store submitTurn", () => {
     assert.equal(state.turns.length, 1)
     assert.equal(state.turns[0]?.outcome, "cancelled")
     assert.equal(state.turns[0]?.assistant_message, "部分回答")
+    assert.equal(state._sessionSnapshots["session-1"]?.turns.length, 1)
+    assert.equal(state._sessionSnapshots["session-1"]?.streamingTurn, null)
+  })
+
+  test("switchSession keeps cached snapshot visible while hydrating next session", async () => {
+    const originalFetchImpl = globalThis.fetch
+    let resolveHistory: ((value: Response) => void) | null = null
+    let resolveCurrentTurn: ((value: Response) => void) | null = null
+
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString()
+      if (url.includes("/api/session/info")) {
+        return new Response(
+          JSON.stringify({
+            total_entries: 0,
+            anchor_count: 0,
+            entries_since_last_anchor: 0,
+            last_input_tokens: null,
+            context_limit: null,
+            output_limit: null,
+            pressure_ratio: 0.25,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
+      }
+      if (url.includes("/api/session/history")) {
+        return await new Promise<Response>((resolve) => {
+          resolveHistory = resolve
+        })
+      }
+      if (url.includes("/api/session/current-turn")) {
+        return await new Promise<Response>((resolve) => {
+          resolveCurrentTurn = resolve
+        })
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }) as FetchMock
+
+    useChatStore.setState({
+      activeSessionId: "session-1",
+      sessionHydrating: false,
+      turns: [
+        {
+          turn_id: "turn-1",
+          started_at_ms: 1,
+          finished_at_ms: 2,
+          source_entry_ids: [1],
+          user_message: "old session question",
+          blocks: [{ kind: "assistant", content: "old session answer" }],
+          assistant_message: "old session answer",
+          thinking: null,
+          tool_invocations: [],
+          usage: null,
+          failure_message: null,
+          outcome: "succeeded",
+        },
+      ],
+      _sessionSnapshots: {
+        "session-1": {
+          turns: [
+            {
+              turn_id: "turn-1",
+              started_at_ms: 1,
+              finished_at_ms: 2,
+              source_entry_ids: [1],
+              user_message: "old session question",
+              blocks: [{ kind: "assistant", content: "old session answer" }],
+              assistant_message: "old session answer",
+              thinking: null,
+              tool_invocations: [],
+              usage: null,
+              failure_message: null,
+              outcome: "succeeded",
+            },
+          ],
+          historyHasMore: false,
+          historyNextBeforeTurnId: null,
+          streamingTurn: null,
+          chatState: "idle",
+          contextPressure: null,
+          lastCompression: null,
+        },
+        "session-2": {
+          turns: [
+            {
+              turn_id: "turn-2-cached",
+              started_at_ms: 10,
+              finished_at_ms: 20,
+              source_entry_ids: [2],
+              user_message: "cached question",
+              blocks: [{ kind: "assistant", content: "cached answer" }],
+              assistant_message: "cached answer",
+              thinking: null,
+              tool_invocations: [],
+              usage: null,
+              failure_message: null,
+              outcome: "succeeded",
+            },
+          ],
+          historyHasMore: false,
+          historyNextBeforeTurnId: null,
+          streamingTurn: null,
+          chatState: "idle",
+          contextPressure: 0.1,
+          lastCompression: null,
+        },
+      },
+    })
+
+    const switchPromise = useChatStore.getState().switchSession("session-2")
+
+    const duringHydration = useChatStore.getState()
+    assert.equal(duringHydration.activeSessionId, "session-2")
+    assert.equal(duringHydration.sessionHydrating, true)
+    assert.equal(duringHydration.turns[0]?.turn_id, "turn-2-cached")
+
+    resolveHistory?.(
+      new Response(
+        JSON.stringify({
+          turns: [
+            {
+              turn_id: "turn-2-live",
+              started_at_ms: 11,
+              finished_at_ms: 21,
+              source_entry_ids: [3],
+              user_message: "live question",
+              blocks: [{ kind: "assistant", content: "live answer" }],
+              assistant_message: "live answer",
+              thinking: null,
+              tool_invocations: [],
+              usage: null,
+              failure_message: null,
+              outcome: "succeeded",
+            },
+          ],
+          has_more: false,
+          next_before_turn_id: null,
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      )
+    )
+    resolveCurrentTurn?.(
+      new Response("null", {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    )
+
+    await switchPromise
+
+    const hydrated = useChatStore.getState()
+    assert.equal(hydrated.sessionHydrating, false)
+    assert.equal(hydrated.turns[0]?.turn_id, "turn-2-live")
+    assert.equal(hydrated._sessionSnapshots["session-1"]?.turns[0]?.turn_id, "turn-1")
+
+    globalThis.fetch = originalFetchImpl
   })
 })

@@ -736,8 +736,20 @@ function CompressionNotice({ summary }: { summary: string }) {
   )
 }
 
+function SessionHydratingIndicator() {
+  return (
+    <div className="pointer-events-none sticky top-0 z-10 mb-3">
+      <div className="mx-auto flex w-fit items-center gap-2 rounded-full border border-border/40 bg-background/90 px-3 py-1.5 text-[12px] text-muted-foreground shadow-sm backdrop-blur-sm">
+        <span className="size-1.5 animate-pulse rounded-full bg-foreground/40" />
+        <span>Loading session…</span>
+      </div>
+    </div>
+  )
+}
+
 export function ChatMessages() {
   const turns = useChatStore((s) => s.turns)
+  const sessionHydrating = useChatStore((s) => s.sessionHydrating)
   const historyHasMore = useChatStore((s) => s.historyHasMore)
   const historyLoadingMore = useChatStore((s) => s.historyLoadingMore)
   const loadOlderTurns = useChatStore((s) => s.loadOlderTurns)
@@ -747,7 +759,6 @@ export function ChatMessages() {
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const containerRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
-  const [sessionTransitionKey, setSessionTransitionKey] = useState(0)
   const previousSessionIdRef = useRef<string | null>(null)
   const previousTurnCountRef = useRef(0)
   const previousStreamingBlockCountRef = useRef(0)
@@ -769,8 +780,9 @@ export function ChatMessages() {
   }, [])
 
   useEffect(() => {
-    if (previousSessionIdRef.current && previousSessionIdRef.current !== activeSessionId) {
-      setSessionTransitionKey((value) => value + 1)
+    const previousSessionId = previousSessionIdRef.current
+    if (previousSessionId && previousSessionId !== activeSessionId) {
+      shouldStickToBottomRef.current = true
     }
   }, [activeSessionId])
 
@@ -838,33 +850,36 @@ export function ChatMessages() {
 
   return (
     <div ref={containerRef} className="relative flex-1 overflow-y-auto">
-      <div
-        key={`${activeSessionId ?? "empty"}-${sessionTransitionKey}`}
-        className="mx-auto max-w-[720px] animate-[session-switch-in_160ms_ease-out_both] px-6 py-8"
-      >
+      <div className="mx-auto max-w-[720px] px-6 py-8">
+        {sessionHydrating && <SessionHydratingIndicator />}
         {historyHasMore && (
           <div className="mb-6 flex justify-center">
             <button
               onClick={() => void handleLoadOlderTurns()}
-              disabled={historyLoadingMore}
+              disabled={historyLoadingMore || sessionHydrating}
               className="rounded-full border border-border/40 px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground disabled:cursor-default disabled:opacity-50"
             >
               {historyLoadingMore ? "Loading…" : "Load older messages"}
             </button>
           </div>
         )}
-        {turns.map((turn) => (
-          <TurnView key={turn.turn_id} turn={turn} />
-        ))}
-        {lastCompression && !streamingTurn && (
-          <CompressionNotice summary={lastCompression.summary} />
-        )}
-        {streamingTurn && <StreamingView streaming={streamingTurn} />}
-        {error && (
-          <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-[13px] text-destructive">
-            {error}
-          </div>
-        )}
+        <div
+          className={sessionHydrating ? "transition-opacity duration-150 ease-out opacity-80" : "transition-opacity duration-150 ease-out opacity-100"}
+          aria-busy={sessionHydrating}
+        >
+          {turns.map((turn) => (
+            <TurnView key={turn.turn_id} turn={turn} />
+          ))}
+          {lastCompression && !streamingTurn && (
+            <CompressionNotice summary={lastCompression.summary} />
+          )}
+          {streamingTurn && <StreamingView streaming={streamingTurn} />}
+          {error && (
+            <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-[13px] text-destructive">
+              {error}
+            </div>
+          )}
+        </div>
         <div ref={bottomRef} />
       </div>
       {streamingTurn && (

@@ -9,6 +9,7 @@ export function Sidebar() {
   const setView = useChatStore((s) => s.setView)
   const sessions = useChatStore((s) => s.sessions)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
+  const sessionHydrating = useChatStore((s) => s.sessionHydrating)
   const createSession = useChatStore((s) => s.createSession)
   const switchSession = useChatStore((s) => s.switchSession)
   const deleteSession = useChatStore((s) => s.deleteSession)
@@ -37,36 +38,50 @@ export function Sidebar() {
 
       {/* Session list */}
       <div className="flex-1 overflow-y-auto px-2 pt-1 pb-2">
-        {sessions.map((session) => (
-          <div
-            key={session.id}
-            className={cn(
-              "group flex w-full items-center rounded-lg px-2.5 py-[7px] text-[13px] transition-colors duration-150",
-              session.id === activeSessionId
-                ? "bg-accent/50 text-foreground/80"
-                : "text-muted-foreground hover:bg-accent/30 hover:text-foreground/80"
-            )}
-          >
-            <button
-              className="min-w-0 flex-1 truncate text-left"
-              onClick={() => switchSession(session.id)}
-            >
-              {session.id === activeSessionId && (
-                <span className="mr-1.5 inline-block size-1.5 rounded-full bg-foreground/50" />
+        {sessions.map((session) => {
+          const isActive = session.id === activeSessionId
+          const isSwitchingTo = isActive && sessionHydrating
+
+          return (
+            <div
+              key={session.id}
+              className={cn(
+                "group flex w-full items-center rounded-lg px-2.5 py-[7px] text-[13px] transition-colors duration-150",
+                isActive
+                  ? "bg-accent/50 text-foreground/80"
+                  : "text-muted-foreground hover:bg-accent/30 hover:text-foreground/80"
               )}
-              {session.title || session.id}
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                deleteSession(session.id)
-              }}
-              className="ml-1 hidden shrink-0 rounded p-0.5 text-muted-foreground/50 hover:text-foreground/80 group-hover:block"
             >
-              <X className="size-3" />
-            </button>
-          </div>
-        ))}
+              <button
+                className="min-w-0 flex-1 truncate text-left disabled:cursor-default"
+                onClick={() => void switchSession(session.id)}
+                disabled={isSwitchingTo}
+                aria-current={isActive ? "page" : undefined}
+                aria-busy={isSwitchingTo}
+              >
+                {isActive && (
+                  <span className="mr-1.5 inline-block size-1.5 rounded-full bg-foreground/50" />
+                )}
+                {session.title || session.id}
+                {isSwitchingTo && (
+                  <span className="ml-2 text-[11px] text-muted-foreground/70">
+                    Loading…
+                  </span>
+                )}
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  void deleteSession(session.id)
+                }}
+                disabled={isSwitchingTo}
+                className="ml-1 hidden shrink-0 rounded p-0.5 text-muted-foreground/50 hover:text-foreground/80 disabled:opacity-30 group-hover:block"
+              >
+                <X className="size-3" />
+              </button>
+            </div>
+          )
+        })}
       </div>
 
       <Separator className="opacity-30" />

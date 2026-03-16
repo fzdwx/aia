@@ -66,6 +66,7 @@
 - 完成自动上下文压缩触发修正与 `context_compressed` 可观测性补齐
 - 完成提交前的后端自动压缩收口：高压力下会先 idle auto-compress 再启动 turn
 - 完成 Web 历史消息体验优化：切换 session / 水合历史时直接跳到底部，历史按页加载
+- 完成 Web session 切换流畅度收口：store 维护按 session 的本地快照缓存，切换时保留上一帧内容并显示轻量 loading 提示，不再先清空消息区造成闪烁
 - 完成 Web 端 turn 提交请求的 `keepalive` 加固
 - 完成 provider 注册表加载的旧路径兼容：当 `.aia/providers.json` 缺失时，自动回退读取 `.aia/sessions/providers.json`
 - 完成完整的 stop/cancel 基线：server 暴露 `POST /api/turn/cancel`，session manager 能中断运行中 turn，runtime 把取消信号传到工具执行上下文，Web 输入区提供 stop 按钮并显示 cancelled 状态

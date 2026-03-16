@@ -33,6 +33,26 @@ import type {
 
 const SESSION_HISTORY_PAGE_SIZE = 5
 
+type SessionSnapshot = {
+  turns: TurnLifecycle[]
+  historyHasMore: boolean
+  historyNextBeforeTurnId: string | null
+  streamingTurn: StreamingTurn | null
+  chatState: ChatState
+  contextPressure: number | null
+  lastCompression: ContextCompressionNotice | null
+}
+
+const EMPTY_SESSION_SNAPSHOT: SessionSnapshot = {
+  turns: [],
+  historyHasMore: false,
+  historyNextBeforeTurnId: null,
+  streamingTurn: null,
+  chatState: "idle",
+  contextPressure: null,
+  lastCompression: null,
+}
+
 function currentTurnToStreamingTurn(
   current: CurrentTurnSnapshot
 ): StreamingTurn {
@@ -67,6 +87,46 @@ function currentTurnToStreamingTurn(
   }
 }
 
+function applySessionSnapshot(
+  snapshot: SessionSnapshot,
+  sessionHydrating: boolean
+): Pick<
+  ChatStore,
+  | "sessionHydrating"
+  | "turns"
+  | "historyHasMore"
+  | "historyNextBeforeTurnId"
+  | "streamingTurn"
+  | "chatState"
+  | "contextPressure"
+  | "lastCompression"
+  | "error"
+> {
+  return {
+    sessionHydrating,
+    turns: snapshot.turns,
+    historyHasMore: snapshot.historyHasMore,
+    historyNextBeforeTurnId: snapshot.historyNextBeforeTurnId,
+    streamingTurn: snapshot.streamingTurn,
+    chatState: snapshot.chatState,
+    contextPressure: snapshot.contextPressure,
+    lastCompression: snapshot.lastCompression,
+    error: null,
+  }
+}
+
+function upsertSessionSnapshot(
+  snapshots: Record<string, SessionSnapshot>,
+  sessionId: string | null,
+  snapshot: SessionSnapshot
+): Record<string, SessionSnapshot> {
+  if (!sessionId) return snapshots
+  return {
+    ...snapshots,
+    [sessionId]: snapshot,
+  }
+}
+
 type ChatStore = {
   sessions: SessionListItem[]
   activeSessionId: string | null
@@ -84,6 +144,7 @@ type ChatStore = {
   contextPressure: number | null
   lastCompression: ContextCompressionNotice | null
   _pendingPrompt: string | null
+  _sessionSnapshots: Record<string, SessionSnapshot>
   _refreshProviderInfo: () => Promise<void>
   initialize: () => void
   handleSseEvent: (event: SseEvent) => void
@@ -123,25 +184,43 @@ let latestSessionLoadId = 0
 export const useChatStore = create<ChatStore>((set, get) => {
   async function hydrateSession(id: string) {
     const loadId = ++latestSessionLoadId
+    const cachedSnapshot = get()._sessionSnapshots[id] ?? EMPTY_SESSION_SNAPSHOT
 
-    set({
+    set((state) => ({
       activeSessionId: id,
-      turnsHydrating: true,
-      turns: [],
-      historyHasMore: false,
-      historyNextBeforeTurnId: null,
-      historyLoadingMore: false,
-      streamingTurn: null,
-      chatState: "idle",
-      error: null,
-      contextPressure: null,
-      lastCompression: null,
-    })
+      ...applySessionSnapshot(cachedSnapshot, true),
+      _sessionSnapshots: upsertSessionSnapshot(
+        state._sessionSnapshots,
+        state.activeSessionId,
+        {
+          turns: state.turns,
+          historyHasMore: state.historyHasMore,
+          historyNextBeforeTurnId: state.historyNextBeforeTurnId,
+          streamingTurn: state.streamingTurn,
+          chatState: state.chatState,
+          contextPressure: state.contextPressure,
+          lastCompression: state.lastCompression,
+        }
+      ),
+    }))
 
     fetchSessionInfo(id)
       .then((info) => {
         if (loadId !== latestSessionLoadId) return
-        set({ contextPressure: info.pressure_ratio })
+        set((state) => {
+          const snapshot = {
+            ...(state._sessionSnapshots[id] ?? cachedSnapshot),
+            contextPressure: info.pressure_ratio,
+          }
+          return {
+            contextPressure: info.pressure_ratio,
+            _sessionSnapshots: upsertSessionSnapshot(
+              state._sessionSnapshots,
+              id,
+              snapshot
+            ),
+          }
+        })
       })
       .catch(() => {})
 
@@ -155,26 +234,36 @@ export const useChatStore = create<ChatStore>((set, get) => {
         return
       }
 
-      set({
+      const hydratedSnapshot: SessionSnapshot = {
         turns: historyPage.turns,
         historyHasMore: historyPage.has_more,
         historyNextBeforeTurnId: historyPage.next_before_turn_id,
         streamingTurn: currentTurn ? currentTurnToStreamingTurn(currentTurn) : null,
         chatState: currentTurn ? "active" : "idle",
-        turnsHydrating: false,
-      })
+        contextPressure: get().contextPressure,
+        lastCompression: null,
+      }
+
+      set((state) => ({
+        ...applySessionSnapshot(hydratedSnapshot, false),
+        _sessionSnapshots: upsertSessionSnapshot(
+          state._sessionSnapshots,
+          id,
+          hydratedSnapshot
+        ),
+      }))
     } catch {
       if (loadId !== latestSessionLoadId) {
         return
       }
-      set({ turnsHydrating: false })
+      set({ sessionHydrating: false })
     }
   }
 
   return {
     sessions: [],
     activeSessionId: null,
-    turnsHydrating: false,
+    sessionHydrating: false,
     turns: [],
     historyHasMore: false,
     historyNextBeforeTurnId: null,
@@ -188,6 +277,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     contextPressure: null,
     lastCompression: null,
     _pendingPrompt: null,
+    _sessionSnapshots: {},
 
     _refreshProviderInfo: async () => {
       const provider = await fetchProviders()
@@ -407,23 +497,88 @@ export const useChatStore = create<ChatStore>((set, get) => {
         case "turn_completed": {
           if (event.data.session_id !== activeId) break
 
-          set((state) => ({
-            turns: [...state.turns, event.data],
-            streamingTurn: null,
-            chatState: "idle" as const,
-            error: null,
-            lastCompression: null,
-          }))
+          set((state) => {
+            const turns = [...state.turns, event.data]
+            const snapshot: SessionSnapshot = {
+              turns,
+              historyHasMore: state.historyHasMore,
+              historyNextBeforeTurnId: state.historyNextBeforeTurnId,
+              streamingTurn: null,
+              chatState: "idle",
+              contextPressure: state.contextPressure,
+              lastCompression: null,
+            }
+            return {
+              turns,
+              streamingTurn: null,
+              chatState: "idle" as const,
+              error: null,
+              lastCompression: null,
+              _sessionSnapshots: upsertSessionSnapshot(
+                state._sessionSnapshots,
+                activeId,
+                snapshot
+              ),
+            }
+          })
           fetchSessionInfo(activeId ?? undefined)
-            .then((info) => set({ contextPressure: info.pressure_ratio }))
+            .then((info) =>
+              set((state) => {
+                const snapshot = state._sessionSnapshots[activeId ?? ""]
+                if (!activeId || !snapshot) {
+                  return { contextPressure: info.pressure_ratio }
+                }
+                return {
+                  contextPressure: info.pressure_ratio,
+                  _sessionSnapshots: upsertSessionSnapshot(
+                    state._sessionSnapshots,
+                    activeId,
+                    {
+                      ...snapshot,
+                      contextPressure: info.pressure_ratio,
+                    }
+                  ),
+                }
+              })
+            )
             .catch(() => {})
           break
         }
         case "context_compressed": {
           if (event.data.session_id !== activeId) break
-          set({ lastCompression: event.data })
+          set((state) => {
+            const snapshot = state._sessionSnapshots[activeId ?? ""]
+            return {
+              lastCompression: event.data,
+              _sessionSnapshots:
+                activeId && snapshot
+                  ? upsertSessionSnapshot(state._sessionSnapshots, activeId, {
+                      ...snapshot,
+                      lastCompression: event.data,
+                    })
+                  : state._sessionSnapshots,
+            }
+          })
           fetchSessionInfo(activeId ?? undefined)
-            .then((info) => set({ contextPressure: info.pressure_ratio }))
+            .then((info) =>
+              set((state) => {
+                const snapshot = state._sessionSnapshots[activeId ?? ""]
+                if (!activeId || !snapshot) {
+                  return { contextPressure: info.pressure_ratio }
+                }
+                return {
+                  contextPressure: info.pressure_ratio,
+                  _sessionSnapshots: upsertSessionSnapshot(
+                    state._sessionSnapshots,
+                    activeId,
+                    {
+                      ...snapshot,
+                      contextPressure: info.pressure_ratio,
+                    }
+                  ),
+                }
+              })
+            )
             .catch(() => {})
           break
         }
@@ -439,17 +594,43 @@ export const useChatStore = create<ChatStore>((set, get) => {
           const streamingTurn = get().streamingTurn
           const isCancelledError = event.data.message.includes("已取消")
           if (streamingTurn && isCancelledError) {
-            set({
-              streamingTurn: { ...streamingTurn, status: "cancelled" },
-              chatState: "idle",
-              error: null,
+            set((state) => {
+              const nextStreamingTurn = {
+                ...streamingTurn,
+                status: "cancelled" as const,
+              }
+              const snapshot = state._sessionSnapshots[activeId ?? ""]
+              return {
+                streamingTurn: nextStreamingTurn,
+                chatState: "idle",
+                error: null,
+                _sessionSnapshots:
+                  activeId && snapshot
+                    ? upsertSessionSnapshot(state._sessionSnapshots, activeId, {
+                        ...snapshot,
+                        streamingTurn: nextStreamingTurn,
+                        chatState: "idle",
+                      })
+                    : state._sessionSnapshots,
+              }
             })
             break
           }
-          set({
-            error: event.data.message,
-            streamingTurn: null,
-            chatState: "idle",
+          set((state) => {
+            const snapshot = state._sessionSnapshots[activeId ?? ""]
+            return {
+              error: event.data.message,
+              streamingTurn: null,
+              chatState: "idle",
+              _sessionSnapshots:
+                activeId && snapshot
+                  ? upsertSessionSnapshot(state._sessionSnapshots, activeId, {
+                      ...snapshot,
+                      streamingTurn: null,
+                      chatState: "idle",
+                    })
+                  : state._sessionSnapshots,
+            }
           })
           break
         }
@@ -457,10 +638,22 @@ export const useChatStore = create<ChatStore>((set, get) => {
           if (event.data.session_id !== activeId) break
           const prev = get().streamingTurn
           if (!prev) break
-          set({
-            streamingTurn: { ...prev, status: "cancelled" },
-            chatState: "idle",
-            error: null,
+          set((state) => {
+            const nextStreamingTurn = { ...prev, status: "cancelled" as const }
+            const snapshot = state._sessionSnapshots[activeId ?? ""]
+            return {
+              streamingTurn: nextStreamingTurn,
+              chatState: "idle",
+              error: null,
+              _sessionSnapshots:
+                activeId && snapshot
+                  ? upsertSessionSnapshot(state._sessionSnapshots, activeId, {
+                      ...snapshot,
+                      streamingTurn: nextStreamingTurn,
+                      chatState: "idle",
+                    })
+                  : state._sessionSnapshots,
+            }
           })
           break
         }
@@ -488,24 +681,47 @@ export const useChatStore = create<ChatStore>((set, get) => {
       const sessionId = get().activeSessionId
       if (!sessionId) return
 
-      set({
-        error: null,
-        _pendingPrompt: prompt,
-        chatState: "active",
-        lastCompression: null,
-        streamingTurn: {
+      set((state) => {
+        const nextStreamingTurn: StreamingTurn = {
           userMessage: prompt,
           status: "waiting",
           blocks: [],
-        },
+        }
+        const snapshot = state._sessionSnapshots[sessionId] ?? EMPTY_SESSION_SNAPSHOT
+        return {
+          error: null,
+          _pendingPrompt: prompt,
+          chatState: "active",
+          lastCompression: null,
+          streamingTurn: nextStreamingTurn,
+          _sessionSnapshots: upsertSessionSnapshot(
+            state._sessionSnapshots,
+            sessionId,
+            {
+              ...snapshot,
+              streamingTurn: nextStreamingTurn,
+              chatState: "active",
+              lastCompression: null,
+            }
+          ),
+        }
       })
       apiSubmitTurn(prompt, sessionId).catch((err: unknown) => {
-        set({
+        set((state) => ({
           error: err instanceof Error ? err.message : "Network error",
           _pendingPrompt: null,
           streamingTurn: null,
           chatState: "idle",
-        })
+          _sessionSnapshots: upsertSessionSnapshot(
+            state._sessionSnapshots,
+            sessionId,
+            {
+              ...(state._sessionSnapshots[sessionId] ?? EMPTY_SESSION_SNAPSHOT),
+              streamingTurn: null,
+              chatState: "idle",
+            }
+          ),
+        }))
       })
     },
 
@@ -517,10 +733,25 @@ export const useChatStore = create<ChatStore>((set, get) => {
       try {
         const cancelled = await apiCancelTurn(sessionId)
         if (!cancelled) return
-        set({
-          streamingTurn: { ...streamingTurn, status: "cancelled" },
-          chatState: "idle",
-          error: null,
+        set((state) => {
+          const nextStreamingTurn = {
+            ...streamingTurn,
+            status: "cancelled" as const,
+          }
+          return {
+            streamingTurn: nextStreamingTurn,
+            chatState: "idle",
+            error: null,
+            _sessionSnapshots: upsertSessionSnapshot(
+              state._sessionSnapshots,
+              sessionId,
+              {
+                ...(state._sessionSnapshots[sessionId] ?? EMPTY_SESSION_SNAPSHOT),
+                streamingTurn: nextStreamingTurn,
+                chatState: "idle",
+              }
+            ),
+          }
         })
       } catch (err) {
         set({
@@ -597,12 +828,25 @@ export const useChatStore = create<ChatStore>((set, get) => {
           beforeTurnId,
           limit: SESSION_HISTORY_PAGE_SIZE,
         })
-        set((state) => ({
-          turns: [...historyPage.turns, ...state.turns],
-          historyHasMore: historyPage.has_more,
-          historyNextBeforeTurnId: historyPage.next_before_turn_id,
-          historyLoadingMore: false,
-        }))
+        set((state) => {
+          const turns = [...historyPage.turns, ...state.turns]
+          return {
+            turns,
+            historyHasMore: historyPage.has_more,
+            historyNextBeforeTurnId: historyPage.next_before_turn_id,
+            historyLoadingMore: false,
+            _sessionSnapshots: upsertSessionSnapshot(
+              state._sessionSnapshots,
+              sessionId,
+              {
+                ...(state._sessionSnapshots[sessionId] ?? EMPTY_SESSION_SNAPSHOT),
+                turns,
+                historyHasMore: historyPage.has_more,
+                historyNextBeforeTurnId: historyPage.next_before_turn_id,
+              }
+            ),
+          }
+        })
       } catch {
         set({ historyLoadingMore: false })
       }
@@ -612,7 +856,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
       await apiDeleteSession(id)
       const state = get()
       const remaining = state.sessions.filter((s) => s.id !== id)
-      set({ sessions: remaining })
+      const nextSnapshots = { ...state._sessionSnapshots }
+      delete nextSnapshots[id]
+      set({ sessions: remaining, _sessionSnapshots: nextSnapshots })
 
       if (state.activeSessionId === id) {
         const next = remaining[0]
@@ -629,6 +875,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             streamingTurn: null,
             chatState: "idle",
             lastCompression: null,
+            contextPressure: null,
           })
         }
       }
