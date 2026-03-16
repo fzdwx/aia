@@ -885,6 +885,27 @@ fn 未设置自定义指令时不会自动注入预算提示词() {
 }
 
 #[test]
+fn 运行时会把全局_request_timeout_映射到请求() {
+    let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced);
+    let model = BudgetRecordingModel::new();
+    let mut runtime = AgentRuntime::new(model, StubTools, identity).with_request_timeout(
+        agent_core::RequestTimeoutConfig {
+            read_timeout_ms: Some(90_000),
+        },
+    );
+
+    let _ = runtime.handle_turn("检查超时配置").expect("应成功完成");
+
+    let requests = runtime.model.seen_requests.borrow();
+    assert_eq!(
+        requests[0].timeout,
+        Some(agent_core::RequestTimeoutConfig {
+            read_timeout_ms: Some(90_000),
+        })
+    );
+}
+
+#[test]
 fn 运行时会把模型输出上限映射为本次请求预算() {
     let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced)
         .with_limit(Some(agent_core::ModelLimit { context: Some(200_000), output: Some(131_072) }));

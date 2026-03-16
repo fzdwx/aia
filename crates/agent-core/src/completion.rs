@@ -106,6 +106,12 @@ pub struct PromptCacheConfig {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RequestTimeoutConfig {
+    #[serde(default)]
+    pub read_timeout_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Completion {
     pub segments: Vec<CompletionSegment>,
     #[serde(default)]
@@ -177,5 +183,7 @@ pub struct CompletionRequest {
     pub prompt_cache: Option<PromptCacheConfig>,
     #[serde(default)]
     pub user_agent: Option<String>,
+    #[serde(default)]
+    pub timeout: Option<RequestTimeoutConfig>,
     pub trace_context: Option<LlmTraceRequestContext>,
 }

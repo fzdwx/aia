@@ -4,7 +4,7 @@ use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use agent_core::{
     ModelIdentity, PromptCacheConfig, PromptCacheRetention as RuntimePromptCacheRetention,
-    StreamEvent, ToolRegistry,
+    RequestTimeoutConfig, StreamEvent, ToolRegistry,
 };
 use agent_runtime::{AgentRuntime, ContextStats, RuntimeEvent, RuntimeSubscriberId, TurnLifecycle};
 use agent_store::{AiaStore, LlmTraceStore, SessionRecord, generate_session_id, iso8601_now};
@@ -17,6 +17,8 @@ use crate::{
     model::{ProviderLaunchChoice, ServerModel, build_model_from_selection},
     sse::{SsePayload, TurnStatus},
 };
+
+const AGENT_SERVER_DEFAULT_REQUEST_TIMEOUT_MS: u64 = 300_000;
 
 // Re-export types that routes and tests still need
 use crate::runtime_worker::rebuild_session_snapshots_from_tape;
@@ -403,6 +405,7 @@ fn create_slot_for_session(
     let session_append_path = session_path.clone();
     let workspace_root = config.workspace_root.clone();
 
+    let request_timeout = runtime_request_timeout();
     let mut runtime = AgentRuntime::with_tape(model, build_tool_registry(), identity, tape)
         .with_instructions(format!(
             "你是 aia 的助手。给出清晰、结构化的答案。\n\n{}",
@@ -416,7 +419,8 @@ fn create_slot_for_session(
         .with_tape_entry_listener(move |entry| {
             SessionTape::append_jsonl_entry(&session_append_path, entry)
         })
-        .with_max_tool_calls_per_turn(100000);
+        .with_max_tool_calls_per_turn(100000)
+        .with_request_timeout(request_timeout);
     if let Some(prompt_cache) = prompt_cache {
         runtime = runtime.with_prompt_cache(prompt_cache);
     }
@@ -433,6 +437,12 @@ fn create_slot_for_session(
         running_turn: None,
         status: SlotStatus::Idle,
     })
+}
+
+fn runtime_request_timeout() -> RequestTimeoutConfig {
+    RequestTimeoutConfig {
+        read_timeout_ms: Some(AGENT_SERVER_DEFAULT_REQUEST_TIMEOUT_MS),
+    }
 }
 
 fn choose_provider_for_tape(

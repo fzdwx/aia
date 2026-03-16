@@ -1,4 +1,7 @@
-use std::io::{self, BufRead};
+use std::{
+    io::{self, BufRead},
+    time::Duration,
+};
 
 use agent_core::{
     AbortSignal, Completion, CompletionRequest, CompletionSegment, CompletionStopReason,
@@ -77,6 +80,15 @@ impl OpenAiResponsesModel {
             return request;
         };
         request.header(USER_AGENT, value)
+    }
+
+    fn http_client(&self, request: &CompletionRequest) -> Result<Client, OpenAiAdapterError> {
+        let mut builder = Client::builder();
+        if let Some(timeout_ms) = request.timeout.as_ref().and_then(|timeout| timeout.read_timeout_ms)
+        {
+            builder = builder.timeout(Duration::from_millis(timeout_ms));
+        }
+        builder.build().map_err(|error| OpenAiAdapterError::new(error.to_string()))
     }
 
     fn map_stop_reason(
@@ -229,9 +241,10 @@ impl LanguageModel for OpenAiResponsesModel {
             )));
         }
 
+        let client = self.http_client(&request)?;
         let response = self
             .apply_user_agent(
-                Client::new()
+                client
                     .post(self.endpoint_url())
                     .bearer_auth(&self.config.api_key)
                     .json(&self.build_request_body(&request)),
@@ -265,9 +278,10 @@ impl LanguageModel for OpenAiResponsesModel {
             )));
         }
 
+        let client = self.http_client(&request)?;
         let response = self
             .apply_user_agent(
-                Client::new()
+                client
                     .post(self.endpoint_url())
                     .bearer_auth(&self.config.api_key)
                     .json(&self.build_streaming_request_body(&request)),

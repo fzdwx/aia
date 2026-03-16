@@ -32,6 +32,7 @@ fn sample_request() -> CompletionRequest {
         )],
         prompt_cache: None,
         user_agent: None,
+        timeout: None,
         trace_context: None,
     }
 }

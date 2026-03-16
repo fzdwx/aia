@@ -14,7 +14,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use agent_core::{
-    AbortSignal, LanguageModel, ModelIdentity, PromptCacheConfig, ToolDefinition, ToolExecutor,
+    AbortSignal, LanguageModel, ModelIdentity, PromptCacheConfig, RequestTimeoutConfig,
+    ToolDefinition, ToolExecutor,
 };
 use session_tape::{Handoff, SessionTape, SessionTapeError, TapeEntry};
 
@@ -43,6 +44,7 @@ pub struct AgentRuntime<M, T> {
     subscribers: BTreeMap<RuntimeSubscriberId, usize>,
     next_subscriber_id: RuntimeSubscriberId,
     prompt_cache: Option<PromptCacheConfig>,
+    request_timeout: Option<RequestTimeoutConfig>,
     /// Actual input token count from the last LLM completion, used for accurate pressure ratio.
     last_input_tokens: Option<u64>,
 }
@@ -83,6 +85,7 @@ where
             subscribers: BTreeMap::new(),
             next_subscriber_id: 1,
             prompt_cache: None,
+            request_timeout: None,
             last_input_tokens,
         }
     }
@@ -127,6 +130,15 @@ where
 
     pub fn set_prompt_cache(&mut self, prompt_cache: Option<PromptCacheConfig>) {
         self.prompt_cache = prompt_cache;
+    }
+
+    pub fn with_request_timeout(mut self, timeout: RequestTimeoutConfig) -> Self {
+        self.request_timeout = Some(timeout);
+        self
+    }
+
+    pub fn set_request_timeout(&mut self, timeout: Option<RequestTimeoutConfig>) {
+        self.request_timeout = timeout;
     }
 
     pub fn disable_tool(&mut self, tool_name: impl Into<String>) {

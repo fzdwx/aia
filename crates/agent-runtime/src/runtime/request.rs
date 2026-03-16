@@ -36,6 +36,7 @@ where
             available_tools,
             prompt_cache: self.prompt_cache.clone(),
             user_agent: self.user_agent.clone(),
+            timeout: self.request_timeout.clone(),
             trace_context: Some(build_llm_trace_context(
                 turn_id,
                 turn_id,

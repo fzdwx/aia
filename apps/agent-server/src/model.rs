@@ -713,6 +713,7 @@ mod tests {
                     available_tools: vec![],
                     prompt_cache: None,
                     user_agent: Some("aia-test/1.0".into()),
+                    timeout: None,
                     trace_context: None,
                 },
                 &abort,
@@ -779,6 +780,7 @@ mod tests {
                     available_tools: vec![],
                     prompt_cache: None,
                     user_agent: Some("aia-test/1.0".into()),
+                    timeout: None,
                     trace_context: Some(agent_core::LlmTraceRequestContext {
                         trace_id: "aia-trace-turn-1".into(),
                         span_id: "trace-1".into(),
@@ -869,6 +871,7 @@ mod tests {
                 available_tools: vec![],
                 prompt_cache: None,
                 user_agent: Some("aia-test/1.0".into()),
+                timeout: None,
                 trace_context: Some(agent_core::LlmTraceRequestContext {
                     trace_id: "aia-trace-turn-1".into(),
                     span_id: "trace-502".into(),
