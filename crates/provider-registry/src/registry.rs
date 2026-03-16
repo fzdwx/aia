@@ -1,16 +1,17 @@
 use std::{fs, path::Path};
 
+use aia_config::PROVIDERS_FILE_NAME;
 use serde::{Deserialize, Serialize};
 
 use crate::{ProviderProfile, error::ProviderRegistryError};
 
 pub fn default_registry_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(".aia/providers.json")
+    aia_config::default_registry_path()
 }
 
 fn legacy_registry_path(path: &Path) -> Option<std::path::PathBuf> {
     let parent = path.parent()?;
-    Some(parent.join("sessions").join("providers.json"))
+    Some(parent.join("sessions").join(PROVIDERS_FILE_NAME))
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

@@ -23,6 +23,7 @@ just a normal, aia agent.
 
 this repository now starts with a library-first rust workspace:
 
+- `crates/aia-config`: shared application defaults for workspace-local paths, server defaults, and common identifiers
 - `crates/agent-core`: core domain types for models, tools, and portable tool specs
 - `crates/session-tape`: append-only tape with flat entries (`{id, kind, payload, meta, date}` aligned with republic/bub), lightweight anchors, handoff events, query slicing, fork/merge, and jsonl replay snapshots
 - `crates/agent-runtime`: minimal runtime that composes models, tools, and session state

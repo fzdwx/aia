@@ -161,14 +161,16 @@
 **提交**：待提交
 **下次方向**：继续补 Web 测试入口，并让前端取消态回归真正纳入标准验证链路；之后再回到 provider / shell 的真实取消覆盖率诊断。
 
-## 2026-03-16 Session 16
+## 2026-03-16 Session 17
 
-**诊断**：full-suite 执行时 `builtin-tools` 的 `embedded_brush_runtime_executes_shell_command` 偶发失败，因为测试断言假设嵌入式 shell stdout 只会以单个 delta 到达；在线程调度或 pipe 分块不同步时，这会把等价正确输出误判为失败。
-**决策**：先把 shell 测试断言改为校验拼接后的 stdout/stderr 内容，而不是单块数量；这是低风险但高杠杆的稳定性修复，能直接减少回归链路中的偶发红灯。
+**诊断**：工作区里已有一半完成的 `aia-config` 共享配置 refactor，`agent-server` / `provider-registry` / `session-tape` / `agent-runtime` 已开始引用新 crate，但 `aia-config` 自身的 `lib.rs` 仍和子模块重复定义同一批路径/标识/默认值，且这批改动还未被正式收口记录。
+**决策**：先把这条已在途的高价值共享配置收口完成：让 `aia-config` 成为真正的单一配置源，并验证所有已接入 Rust crate；这是遵循“close before you open”的最小闭环。
 **变更**：
-- `crates/builtin-tools/src/shell.rs`：调整 `embedded_brush_runtime_executes_shell_command` 测试，按流类型拼接全部 delta 后断言 stdout/stderr 内容，不再假设只有一个 stdout chunk。
-- `docs/status.md`、`docs/architecture.md`：同步记录 shell 测试基线已从“单 delta 假设”收口到“最终流内容正确”。
-**验证**：`cargo test -p builtin-tools shell::tests::embedded_brush_runtime_executes_shell_command -- --exact` 通过；`cargo test -p builtin-tools` 通过；尝试执行全量 `cargo check` / `cargo test`，但被现有未提交的 `aia_config` 接线改动阻塞（`crates/agent-runtime/src/runtime/helpers.rs` 当前引用了未接入的 `aia_config` crate）。
+- `crates/aia-config/src/lib.rs`：改为薄 façade，统一 `pub use` `paths` / `identifiers` / `server` 子模块，移除重复定义并保留集中测试。
+- `crates/aia-config/src/paths.rs`、`crates/aia-config/src/identifiers.rs`、`crates/aia-config/src/server.rs`：作为共享配置的真实实现来源，承载 `.aia` 路径、默认 session/server 常量、trace/span/prompt-cache 标识与 user agent helper。
+- `crates/agent-runtime/src/runtime/helpers.rs`、`crates/provider-registry/src/registry.rs`、`crates/session-tape/src/tape.rs`、`apps/agent-server/src/main.rs`、`apps/agent-server/src/model.rs`、`apps/agent-server/src/session_manager.rs`、`apps/agent-server/src/sse.rs`：继续复用 `aia-config` 的共享默认值与标识 helper，收口分散常量。
+- `README.md`、`docs/status.md`、`docs/architecture.md`：同步记录 `aia-config` 已覆盖的共享配置边界。
+**验证**：`cargo test -p aia-config -p agent-runtime -p provider-registry -p session-tape -p agent-server` 通过；`cargo check -p aia-config -p agent-runtime -p provider-registry -p session-tape -p agent-server` 通过。
 **提交**：待提交
-**下次方向**：先收口当前工作区里未完成的 `aia_config` 接线改动，再继续清理剩余生产路径中的 panic helpers，优先关注 `builtin-tools` shell 执行线程错误边界与其他非测试 `expect`。
+**下次方向**：继续收口这批共享配置接入的剩余表层影响，优先清理未提交的 Web/tooling 变更与 Rust 侧仍分散的默认值常量。
 

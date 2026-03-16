@@ -60,9 +60,9 @@ pub(super) fn build_llm_trace_context(
     request_kind: &str,
     step_index: u32,
 ) -> LlmTraceRequestContext {
-    let trace_id = format!("aia-trace-{run_id}");
-    let root_span_id = format!("aia-span-{run_id}-root");
-    let span_id = format!("aia-span-{run_id}-{request_kind}-{step_index}");
+    let trace_id = aia_config::build_trace_id(run_id);
+    let root_span_id = aia_config::build_root_span_id(run_id);
+    let span_id = aia_config::build_request_span_id(run_id, request_kind, step_index);
     let operation_name = match request_kind {
         "compression" => "summarize",
         _ => "chat",
@@ -88,7 +88,7 @@ pub(super) fn build_tool_trace_context(
 ) -> ToolTraceContext {
     ToolTraceContext {
         trace_id: parent.trace_id.clone(),
-        span_id: format!("aia-span-{}-tool-{}", parent.run_id, call.invocation_id),
+        span_id: aia_config::build_tool_span_id(&parent.run_id, &call.invocation_id),
         parent_span_id: parent.span_id.clone(),
         root_span_id: parent.root_span_id.clone(),
         operation_name: "execute_tool".to_string(),

@@ -19,7 +19,7 @@ fn temp_file(name: &str) -> PathBuf {
 
 #[test]
 fn 默认会话路径位于项目隐藏目录() {
-    assert_eq!(default_session_path(), PathBuf::from(".aia/session.jsonl"));
+    assert_eq!(default_session_path(), aia_config::default_session_tape_path());
 }
 
 #[test]

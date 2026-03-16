@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+aia-config = { path = "../../crates/aia-config" }
 agent-core = { path = "../../crates/agent-core" }
 agent-prompts = { path = "../../crates/agent-prompts" }
 agent-runtime = { path = "../../crates/agent-runtime" }

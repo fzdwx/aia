@@ -10,7 +10,7 @@ use crate::{
 };
 
 pub fn default_session_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(".aia/session.jsonl")
+    aia_config::default_session_tape_path()
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

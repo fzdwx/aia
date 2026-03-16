@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+aia-config = { path = "../aia-config" }
 agent-core = { path = "../agent-core" }
 agent-prompts = { path = "../agent-prompts" }
 session-tape = { path = "../session-tape" }

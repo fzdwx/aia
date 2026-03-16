@@ -43,7 +43,7 @@ README 里真正难的是这些能力：
 
 - `.aia/` 目录及其下 `providers.json`、`session.jsonl`、`store.sqlite3`、`sessions/` 等默认路径
 - server 默认 bind 地址、默认 base url、事件缓冲大小、请求超时等应用壳通用默认值
-- 默认 session 标题与统一 user agent 组装辅助
+- 默认 session 标题、trace / span / prompt-cache 稳定前缀与统一 user agent 组装辅助
 - 只承载共享配置，不承载 provider 业务、运行时编排或协议映射
 
 ### `agent-core`

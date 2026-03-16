@@ -5,7 +5,7 @@ mod session_manager;
 mod sse;
 mod state;
 
-use std::{fmt, path::PathBuf, sync::{Arc, RwLock}};
+use std::{fmt, sync::{Arc, RwLock}};
 
 use agent_store::{AiaStore, SessionRecord, generate_session_id, iso8601_now};
 use axum::{
@@ -20,25 +20,8 @@ use model::{ProviderLaunchChoice, build_model_from_selection};
 use session_manager::{ProviderInfoSnapshot, SessionManagerConfig, spawn_session_manager};
 use state::AppState;
 
-fn default_aia_store_path() -> PathBuf {
-    provider_registry::default_registry_path()
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."))
-        .join("store.sqlite3")
-}
-
-fn default_sessions_dir() -> PathBuf {
-    provider_registry::default_registry_path()
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."))
-        .join("sessions")
-}
-
 fn build_server_user_agent() -> String {
-    let os = std::env::consts::OS;
-    let arch = std::env::consts::ARCH;
-    let version = env!("CARGO_PKG_VERSION");
-    format!("aia-{os}-{arch}/{version}")
+    aia_config::build_user_agent(aia_config::APP_NAME, env!("CARGO_PKG_VERSION"))
 }
 
 #[derive(Debug)]
@@ -71,8 +54,8 @@ async fn main() {
 
 async fn run() -> Result<(), ServerInitError> {
     let registry_path = provider_registry::default_registry_path();
-    let aia_store_path = default_aia_store_path();
-    let sessions_dir = default_sessions_dir();
+    let aia_store_path = aia_config::store_path_from_registry_path(&registry_path);
+    let sessions_dir = aia_config::sessions_dir_from_registry_path(&registry_path);
     let workspace_root = std::env::current_dir()
         .map_err(|error| ServerInitError::new("workspace 根目录获取", error.to_string()))?;
 
@@ -96,7 +79,7 @@ async fn run() -> Result<(), ServerInitError> {
             .unwrap_or_default();
         let record = SessionRecord {
             id: session_id,
-            title: "New session".to_string(),
+            title: aia_config::DEFAULT_SESSION_TITLE.to_string(),
             created_at: now.clone(),
             updated_at: now,
             model: model_name,
@@ -115,7 +98,7 @@ async fn run() -> Result<(), ServerInitError> {
     let (identity, _model) = build_model_from_selection(selection, Some(store.clone()))
         .map_err(|error| ServerInitError::new("模型构建", error.to_string()))?;
 
-    let (broadcast_tx, _) = tokio::sync::broadcast::channel(512);
+    let (broadcast_tx, _) = tokio::sync::broadcast::channel(aia_config::DEFAULT_SERVER_EVENT_BUFFER);
     let provider_registry_snapshot = Arc::new(RwLock::new(registry.clone()));
     let provider_info_snapshot =
         Arc::new(RwLock::new(ProviderInfoSnapshot::from_identity(&identity)));
@@ -164,10 +147,10 @@ async fn run() -> Result<(), ServerInitError> {
         .layer(CorsLayer::permissive())
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3434")
+    let listener = tokio::net::TcpListener::bind(aia_config::DEFAULT_SERVER_BIND_ADDR)
         .await
         .map_err(|error| ServerInitError::new("端口 3434 绑定", error.to_string()))?;
-    println!("agent-server listening on http://localhost:3434");
+    println!("agent-server listening on {}", aia_config::DEFAULT_SERVER_BASE_URL);
 
     axum::serve(listener, app)
         .await

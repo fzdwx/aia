@@ -15,7 +15,7 @@ fn temp_file(name: &str) -> PathBuf {
 
 #[test]
 fn 默认存储路径位于项目隐藏目录() {
-    assert_eq!(default_registry_path(), PathBuf::from(".aia/providers.json"));
+    assert_eq!(default_registry_path(), aia_config::default_registry_path());
 }
 
 #[test]

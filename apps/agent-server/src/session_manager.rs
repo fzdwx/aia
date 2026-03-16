@@ -18,8 +18,6 @@ use crate::{
     sse::{SsePayload, TurnStatus},
 };
 
-const AGENT_SERVER_DEFAULT_REQUEST_TIMEOUT_MS: u64 = 300_000;
-
 // Re-export types that routes and tests still need
 use crate::runtime_worker::rebuild_session_snapshots_from_tape;
 pub use crate::runtime_worker::{
@@ -441,7 +439,7 @@ fn create_slot_for_session(
 
 fn runtime_request_timeout() -> RequestTimeoutConfig {
     RequestTimeoutConfig {
-        read_timeout_ms: Some(AGENT_SERVER_DEFAULT_REQUEST_TIMEOUT_MS),
+        read_timeout_ms: Some(aia_config::DEFAULT_SERVER_REQUEST_TIMEOUT_MS),
     }
 }
 
@@ -479,7 +477,7 @@ fn handle_create_session(
 ) -> Result<SessionRecord, RuntimeWorkerError> {
     let session_id = generate_session_id();
     let now = iso8601_now();
-    let title = title.unwrap_or_else(|| "New session".to_string());
+    let title = title.unwrap_or_else(|| aia_config::DEFAULT_SESSION_TITLE.to_string());
 
     let model_name =
         config.provider_info_snapshot.read().map(|info| info.model.clone()).unwrap_or_default();
@@ -944,7 +942,7 @@ fn prompt_cache_for_selection(
     };
     let model = profile.active_model_config()?;
     Some(PromptCacheConfig {
-        key: Some(format!("aia:{}:{}:session:{session_id}", profile.name, model.id)),
+        key: Some(aia_config::build_prompt_cache_key(&profile.name, &model.id, session_id)),
         retention: Some(RuntimePromptCacheRetention::OneDay),
     })
 }

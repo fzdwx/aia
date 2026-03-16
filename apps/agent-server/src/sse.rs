@@ -172,9 +172,11 @@ mod tests {
 
     #[test]
     fn session_created_payload_can_convert_to_event() {
-        let event =
-            SsePayload::SessionCreated { session_id: "s1".into(), title: "New session".into() }
-                .into_axum_event();
+        let event = SsePayload::SessionCreated {
+            session_id: "s1".into(),
+            title: aia_config::DEFAULT_SESSION_TITLE.into(),
+        }
+        .into_axum_event();
         assert!(event.is_ok());
     }
 

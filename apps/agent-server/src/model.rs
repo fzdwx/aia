@@ -173,14 +173,14 @@ impl TraceEventCollector {
 
         if let Some(first_reasoning_at_ms) = self.first_reasoning_at_ms {
             attributes.insert(
-                "aia.first_reasoning_delta_ms".into(),
+                aia_config::TRACE_ATTR_FIRST_REASONING_DELTA_MS.into(),
                 json!(first_reasoning_at_ms.saturating_sub(self.started_at_ms)),
             );
         }
 
         if let Some(first_text_at_ms) = self.first_text_at_ms {
             attributes.insert(
-                "aia.first_text_delta_ms".into(),
+                aia_config::TRACE_ATTR_FIRST_TEXT_DELTA_MS.into(),
                 json!(first_text_at_ms.saturating_sub(self.started_at_ms)),
             );
         }

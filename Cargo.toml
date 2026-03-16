@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "apps/agent-server",
+  "crates/aia-config",
   "crates/agent-core",
   "crates/agent-prompts",
   "crates/agent-runtime",

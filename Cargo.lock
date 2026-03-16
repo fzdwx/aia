@@ -26,6 +26,7 @@ version = "0.1.0"
 dependencies = [
  "agent-core",
  "agent-prompts",
+ "aia-config",
  "serde",
  "serde_json",
  "session-tape",
@@ -39,6 +40,7 @@ dependencies = [
  "agent-prompts",
  "agent-runtime",
  "agent-store",
+ "aia-config",
  "axum",
  "builtin-tools",
  "openai-adapter",
@@ -80,6 +82,10 @@ checksum = "ddd31a130427c27518df266943a5308ed92d4b226cc639f5a8f1002816174301"
 dependencies = [
  "memchr",
 ]
+
+[[package]]
+name = "aia-config"
+version = "0.1.0"
 
 [[package]]
 name = "allocator-api2"
@@ -1850,6 +1856,7 @@ dependencies = [
 name = "provider-registry"
 version = "0.1.0"
 dependencies = [
+ "aia-config",
  "serde",
  "serde_json",
 ]
@@ -2247,6 +2254,7 @@ name = "session-tape"
 version = "0.1.0"
 dependencies = [
  "agent-core",
+ "aia-config",
  "serde",
  "serde_json",
 ]
