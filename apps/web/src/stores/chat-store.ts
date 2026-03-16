@@ -394,6 +394,16 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         ) {
           break
         }
+        const streamingTurn = get().streamingTurn
+        const isCancelledError = event.data.message.includes("已取消")
+        if (streamingTurn && isCancelledError) {
+          set({
+            streamingTurn: { ...streamingTurn, status: "cancelled" },
+            chatState: "idle",
+            error: null,
+          })
+          break
+        }
         set({
           error: event.data.message,
           streamingTurn: null,

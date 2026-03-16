@@ -92,6 +92,7 @@ describe("chat store submitTurn", () => {
           tool_invocations: [],
           usage: null,
           failure_message: "模型执行失败：请求失败：502 Bad Gateway",
+          outcome: "failed",
         },
       ],
       streamingTurn: null,
@@ -151,44 +152,88 @@ describe("chat store submitTurn", () => {
     assert.equal(typeof state.blocks[0].tool.startedAtMs, "number")
   })
 
-  test("creates queued tool block from detected event before execution starts", () => {
+  test("keeps partial streaming content visible after cancelled error", () => {
     useChatStore.setState({
-      activeSessionId: "session-1",
       chatState: "active",
       streamingTurn: {
-        userMessage: "search project",
-        status: "thinking",
-        blocks: [],
+        userMessage: "hello world",
+        status: "generating",
+        blocks: [
+          { type: "thinking", content: "先分析" },
+          { type: "text", content: "部分回答" },
+        ],
       },
+      error: null,
     })
 
-    const detectedEvent: SseEvent = {
-      type: "stream",
+    const errorEvent: SseEvent = {
+      type: "error",
       data: {
         session_id: "session-1",
-        kind: "tool_call_detected",
-        invocation_id: "search:1",
-        tool_name: "search",
-        arguments: {
-          query: "runtime worker",
-        },
+        message: "本轮已取消",
       },
     }
 
-    useChatStore.getState().handleSseEvent(detectedEvent)
+    useChatStore.getState().handleSseEvent(errorEvent)
 
-    const state = useChatStore.getState().streamingTurn
-    assert.equal(state?.blocks.length, 1)
-    assert.equal(state?.blocks[0]?.type, "tool")
-    if (state?.blocks[0]?.type !== "tool") {
-      throw new Error("expected tool block")
-    }
-    assert.equal(state.blocks[0].tool.invocationId, "search:1")
-    assert.equal(state.blocks[0].tool.toolName, "search")
-    assert.deepEqual(state.blocks[0].tool.arguments, {
-      query: "runtime worker",
+    const state = useChatStore.getState()
+    assert.equal(state.chatState, "idle")
+    assert.equal(state.error, null)
+    assert.deepEqual(state.streamingTurn, {
+      userMessage: "hello world",
+      status: "cancelled",
+      blocks: [
+        { type: "thinking", content: "先分析" },
+        { type: "text", content: "部分回答" },
+      ],
     })
-    assert.equal(state.blocks[0].tool.startedAtMs, undefined)
-    assert.equal(state.blocks[0].tool.completed, false)
+  })
+
+  test("turn_completed with cancelled outcome replaces streaming turn with preserved history", () => {
+    useChatStore.setState({
+      chatState: "active",
+      streamingTurn: {
+        userMessage: "hello world",
+        status: "cancelled",
+        blocks: [
+          { type: "thinking", content: "先分析" },
+          { type: "text", content: "部分回答" },
+        ],
+      },
+      turns: [],
+      error: null,
+    })
+
+    const completedEvent: SseEvent = {
+      type: "turn_completed",
+      data: {
+        session_id: "session-1",
+        turn_id: "turn-cancelled-1",
+        started_at_ms: 1,
+        finished_at_ms: 2,
+        source_entry_ids: [1, 2, 3],
+        user_message: "hello world",
+        blocks: [
+          { kind: "thinking", content: "先分析" },
+          { kind: "assistant", content: "部分回答" },
+          { kind: "failure", message: "本轮已取消" },
+        ],
+        assistant_message: "部分回答",
+        thinking: "先分析",
+        tool_invocations: [],
+        usage: null,
+        failure_message: "本轮已取消",
+        outcome: "cancelled",
+      },
+    }
+
+    useChatStore.getState().handleSseEvent(completedEvent)
+
+    const state = useChatStore.getState()
+    assert.equal(state.chatState, "idle")
+    assert.equal(state.streamingTurn, null)
+    assert.equal(state.turns.length, 1)
+    assert.equal(state.turns[0]?.outcome, "cancelled")
+    assert.equal(state.turns[0]?.assistant_message, "部分回答")
   })
 })

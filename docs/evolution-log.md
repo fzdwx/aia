@@ -121,5 +121,17 @@
 - `apps/agent-server/src/model.rs`：补上取消识别回归测试的 `#[test]` 标记，确保该路径真正被测试执行。
 - `docs/status.md`、`docs/architecture.md`：补充说明 server 侧已把 cancelled SSE 发射点收口到单一路径，避免重复事件。
 **验证**：`cargo check` 通过；`cargo test` 通过；`agent-server` 取消快照测试通过。
-**提交**：待提交
+**提交**：`f963b18` `fix: dedupe cancelled SSE emission`
 **下次方向**：继续观察 stop/cancel 在真实上游和复杂 shell 任务下的覆盖率；如果 provider 侧仍有阻塞窗口，再评估更底层的 transport 取消方案。
+
+## 2026-03-16 Session 8
+
+**诊断**：当前取消轮次虽然已能在共享 `TurnLifecycle` 中保留取消前的 thinking / assistant / tool 内容，但 Web store 在收到 cancelled error 时会直接结束当前流式轮次，导致用户更容易只看到“本轮已取消”，而不是已经生成的部分内容。
+**决策**：先修正前端 store 的取消态处理：取消只改变当前轮状态，不清空已生成块；等随后收到 `turn_completed(outcome=cancelled)` 再把完整内容落入历史。这是局部、低风险且直接提升长轮次取消体验的收口。
+**变更**：
+- `apps/web/src/stores/chat-store.ts`：将 cancelled error 视为状态迁移而不是流式内容清空，保留取消前已生成的 blocks。
+- `apps/web/src/stores/chat-store.test.ts`：新增 2 条回归测试，验证取消错误后仍展示 partial content，以及 cancelled `turn_completed` 会把保留内容正常写入历史。
+- `docs/evolution-log.md`：追加本次演进记录。
+**验证**：`cargo check` 通过；`cargo test` 通过；尝试执行 `apps/web` 测试脚本但当前工程未定义 `npm test`。
+**提交**：待提交
+**下次方向**：继续补前端测试命令/基线，让 Web store 回归测试能纳入标准验证链路；随后再回到 provider / shell 的真实取消覆盖率诊断。
