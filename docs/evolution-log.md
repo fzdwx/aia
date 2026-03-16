@@ -49,6 +49,18 @@
 **提交**：`760d2bb` `refactor: remove unsafe runtime tool bridge`
 **下次方向**：优先继续把统一取消/中断机制上推到 runtime 工具执行层，或补一轮 workspace lint 配置收口，确保 `unsafe_code`/clippy 约束被各 crate 真正继承。
 
+## 2026-03-16 Session 3
+
+**诊断**：仓库里对“生成式 UI”只有 `docs/todo.md` 中的一条外链提醒，缺少结合 `aia` 当前 runtime / SSE / trace / tape 架构的本地设计说明，后续实现容易直接滑向前端私有协议或模型生成任意代码。
+**决策**：先补一份项目内的 `generative-ui-article.md` 设计文章，把生成式 UI 的分层、边界、渐进落地路线和与现有架构的衔接方式说清楚；这是低风险但高杠杆的架构收口。
+**变更**：
+- `docs/generative-ui-article.md`：新增生成式 UI 设计文章，定义 `aia` 语境下的 generative UI、推荐的协议分层、安全边界、与 trace/tape 的关系，以及从 tool-driven widget 到 assistant-declared widget 的迭代路线。
+- `docs/todo.md`：将原先单一外链替换为“本地设计文章 + 外部参考”，让后续实现有仓库内可追溯起点。
+- `docs/evolution-log.md`：追加本次演进记录并补充提交信息。
+**验证**：`cargo check` 通过；`cargo test` 通过；文档文件已纳入工作区。
+**提交**：`8a63d37` `docs: add generative ui design article`
+**下次方向**：按文档中的最小路线，优先在共享层引入最小 `UiWidget` 协议草案，并从 `tape_info`/`grep` 这类结构化结果开始试做 tool-driven widget。
+
 ## 2026-03-16 Session 2
 
 **诊断**：`apps/agent-server` 的 session manager 在运行态路径里对多个 `RwLock` 使用 `expect("lock poisoned")`，一旦后台任务曾在持锁期间 panic，后续读取 history/current turn 或写入 provider/session 快照时会把中毒继续升级成 server panic。

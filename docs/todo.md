@@ -88,4 +88,6 @@
 
 # 生成式 UI（Generative UI）Widget 系统
 
-https://github.com/op7418/CodePilot/blob/85a07daa93dbc91015259f88cee64f7cc54d090e/docs/handover/generative-ui.md?plain=1#L103
+- 本地设计文章：`docs/generative-ui-article.md`
+- 外部参考：
+  - https://github.com/op7418/CodePilot/blob/85a07daa93dbc91015259f88cee64f7cc54d090e/docs/handover/generative-ui.md?plain=1#L103
