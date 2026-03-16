@@ -169,6 +169,6 @@
 - `apps/agent-server/src/session_manager.rs`：`handle_get_session_info` 在 `slot.runtime` 缺失时改为从 session tape 载入并返回基于 tape 的基础 `ContextStats`（entries / anchors / entries_since_last_anchor），不再直接报错。
 - `apps/agent-server/src/session_manager.rs`：新增 1 条回归测试，验证运行中 turn 场景下会回退到 tape 统计并返回有效 session info。
 **验证**：`cargo test -p agent-server` 通过；`cargo check -p agent-server` 通过；随后执行全量 `cargo check` 与 `cargo test`。
-**提交**：待提交
+**提交**：`f719d31` `fix: fall back to tape for session info`
 **下次方向**：继续清理 server 查询路径在“runtime 暂不可借用”时的剩余硬失败点，优先评估 handoff / auto-compress / current session metadata 是否也需要类似降级视角。
 
