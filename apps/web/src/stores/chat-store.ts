@@ -36,9 +36,7 @@ const INITIAL_SESSION_HISTORY_PAGE_SIZE = 1
 const MAX_CACHED_SESSION_SNAPSHOTS = 24
 
 type SessionSnapshot = {
-  turns: TurnLifecycle[]
-  historyHasMore: boolean
-  historyNextBeforeTurnId: string | null
+  latestTurn: TurnLifecycle | null
   streamingTurn: StreamingTurn | null
   chatState: ChatState
   contextPressure: number | null
@@ -46,27 +44,31 @@ type SessionSnapshot = {
 }
 
 const EMPTY_SESSION_SNAPSHOT: SessionSnapshot = {
-  turns: [],
-  historyHasMore: false,
-  historyNextBeforeTurnId: null,
+  latestTurn: null,
   streamingTurn: null,
   chatState: "idle",
   contextPressure: null,
   lastCompression: null,
 }
 
-function latestTurns(turns: TurnLifecycle[], count = 1): TurnLifecycle[] {
-  if (count <= 0 || turns.length === 0) return []
-  return turns.slice(Math.max(0, turns.length - count))
+function latestTurn(turns: TurnLifecycle[]): TurnLifecycle | null {
+  return turns.length > 0 ? turns[turns.length - 1] ?? null : null
 }
 
-function snapshotWithLatestTurns(
-  snapshot: SessionSnapshot,
-  count = 1
-): SessionSnapshot {
+function snapshotFromState(state: Pick<
+  ChatStore,
+  | "turns"
+  | "streamingTurn"
+  | "chatState"
+  | "contextPressure"
+  | "lastCompression"
+>): SessionSnapshot {
   return {
-    ...snapshot,
-    turns: latestTurns(snapshot.turns, count),
+    latestTurn: latestTurn(state.turns),
+    streamingTurn: state.streamingTurn,
+    chatState: state.chatState,
+    contextPressure: state.contextPressure,
+    lastCompression: state.lastCompression,
   }
 }
 
@@ -121,9 +123,9 @@ function applySessionSnapshot(
 > {
   return {
     sessionHydrating,
-    turns: snapshot.turns,
-    historyHasMore: snapshot.historyHasMore,
-    historyNextBeforeTurnId: snapshot.historyNextBeforeTurnId,
+    turns: snapshot.latestTurn ? [snapshot.latestTurn] : [],
+    historyHasMore: false,
+    historyNextBeforeTurnId: null,
     streamingTurn: snapshot.streamingTurn,
     chatState: snapshot.chatState,
     contextPressure: snapshot.contextPressure,
@@ -238,22 +240,11 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
     set((state) => ({
       activeSessionId: id,
-      ...applySessionSnapshot(snapshotWithLatestTurns(cachedSnapshot), true),
+      ...applySessionSnapshot(cachedSnapshot, true),
       _sessionSnapshots: upsertSessionSnapshot(
         state._sessionSnapshots,
         state.activeSessionId,
-        snapshotWithLatestTurns(
-          {
-            turns: state.turns,
-            historyHasMore: state.historyHasMore,
-            historyNextBeforeTurnId: state.historyNextBeforeTurnId,
-            streamingTurn: state.streamingTurn,
-            chatState: state.chatState,
-            contextPressure: state.contextPressure,
-            lastCompression: state.lastCompression,
-          },
-          1
-        ),
+        snapshotFromState(state),
         state.sessions
       ),
     }))
@@ -290,9 +281,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
       }
 
       const hydratedSnapshot: SessionSnapshot = {
-        turns: historyPage.turns,
-        historyHasMore: historyPage.has_more,
-        historyNextBeforeTurnId: historyPage.next_before_turn_id,
+        latestTurn: latestTurn(historyPage.turns),
         streamingTurn: currentTurn ? currentTurnToStreamingTurn(currentTurn) : null,
         chatState: currentTurn ? "active" : "idle",
         contextPressure: get().contextPressure,
@@ -323,9 +312,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
               return
             }
             const nextSnapshot: SessionSnapshot = {
-              turns: fullHistoryPage.turns,
-              historyHasMore: fullHistoryPage.has_more,
-              historyNextBeforeTurnId: fullHistoryPage.next_before_turn_id,
+              latestTurn: latestTurn(fullHistoryPage.turns),
               streamingTurn: get().streamingTurn,
               chatState: get().chatState,
               contextPressure: get().contextPressure,
@@ -676,9 +663,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           set((state) => {
             const turns = [...state.turns, event.data]
             const snapshot: SessionSnapshot = {
-              turns,
-              historyHasMore: state.historyHasMore,
-              historyNextBeforeTurnId: state.historyNextBeforeTurnId,
+              latestTurn: event.data,
               streamingTurn: null,
               chatState: "idle",
               contextPressure: state.contextPressure,
@@ -895,6 +880,14 @@ export const useChatStore = create<ChatStore>((set, get) => {
           blocks: [],
         }
         const snapshot = state._sessionSnapshots[sessionId] ?? EMPTY_SESSION_SNAPSHOT
+        const nextState = {
+          ...state,
+          error: null,
+          _pendingPrompt: prompt,
+          chatState: "active" as const,
+          lastCompression: null,
+          streamingTurn: nextStreamingTurn,
+        }
         return {
           error: null,
           _pendingPrompt: prompt,
@@ -905,32 +898,35 @@ export const useChatStore = create<ChatStore>((set, get) => {
             state._sessionSnapshots,
             sessionId,
             {
-              ...snapshot,
-              streamingTurn: nextStreamingTurn,
-              chatState: "active",
-              lastCompression: null,
+              ...snapshotFromState(nextState),
+              latestTurn: snapshot.latestTurn,
             },
             state.sessions
           ),
         }
       })
       apiSubmitTurn(prompt, sessionId).catch((err: unknown) => {
-        set((state) => ({
-          error: err instanceof Error ? err.message : "Network error",
-          _pendingPrompt: null,
-          streamingTurn: null,
-          chatState: "idle",
-          _sessionSnapshots: upsertSessionSnapshot(
-            state._sessionSnapshots,
-            sessionId,
-            {
-              ...(state._sessionSnapshots[sessionId] ?? EMPTY_SESSION_SNAPSHOT),
-              streamingTurn: null,
-              chatState: "idle",
-            },
-            state.sessions
-          ),
-        }))
+        set((state) => {
+          const nextState = {
+            ...state,
+            error: err instanceof Error ? err.message : "Network error",
+            _pendingPrompt: null,
+            streamingTurn: null,
+            chatState: "idle" as const,
+          }
+          return {
+            error: err instanceof Error ? err.message : "Network error",
+            _pendingPrompt: null,
+            streamingTurn: null,
+            chatState: "idle",
+            _sessionSnapshots: upsertSessionSnapshot(
+              state._sessionSnapshots,
+              sessionId,
+              snapshotFromState(nextState),
+              state.sessions
+            ),
+          }
+        })
       })
     },
 
@@ -947,6 +943,12 @@ export const useChatStore = create<ChatStore>((set, get) => {
             ...streamingTurn,
             status: "cancelled" as const,
           }
+          const nextState = {
+            ...state,
+            streamingTurn: nextStreamingTurn,
+            chatState: "idle" as const,
+            error: null,
+          }
           return {
             streamingTurn: nextStreamingTurn,
             chatState: "idle",
@@ -954,11 +956,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             _sessionSnapshots: upsertSessionSnapshot(
               state._sessionSnapshots,
               sessionId,
-              {
-                ...(state._sessionSnapshots[sessionId] ?? EMPTY_SESSION_SNAPSHOT),
-                streamingTurn: nextStreamingTurn,
-                chatState: "idle",
-              },
+              snapshotFromState(nextState),
               state.sessions
             ),
           }
@@ -1060,9 +1058,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
               sessionId,
               {
                 ...(state._sessionSnapshots[sessionId] ?? EMPTY_SESSION_SNAPSHOT),
-                turns,
-                historyHasMore: historyPage.has_more,
-                historyNextBeforeTurnId: historyPage.next_before_turn_id,
+                latestTurn: latestTurn(turns),
               },
               state.sessions
             ),

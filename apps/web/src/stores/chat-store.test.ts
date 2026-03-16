@@ -230,9 +230,7 @@ describe("chat store submitTurn", () => {
       error: null,
       _sessionSnapshots: {
         "session-1": {
-          turns: [],
-          historyHasMore: false,
-          historyNextBeforeTurnId: null,
+          latestTurn: null,
           streamingTurn: {
             userMessage: "hello world",
             status: "cancelled",
@@ -279,7 +277,7 @@ describe("chat store submitTurn", () => {
     assert.equal(state.turns.length, 1)
     assert.equal(state.turns[0]?.outcome, "cancelled")
     assert.equal(state.turns[0]?.assistant_message, "部分回答")
-    assert.equal(state._sessionSnapshots["session-1"]?.turns.length, 1)
+    assert.equal(state._sessionSnapshots["session-1"]?.latestTurn?.turn_id, "turn-cancelled-1")
     assert.equal(state._sessionSnapshots["session-1"]?.streamingTurn, null)
   })
 
@@ -366,9 +364,8 @@ describe("chat store submitTurn", () => {
     const switchPromise = useChatStore.getState().switchSession("session-2")
 
     const duringHydration = useChatStore.getState()
-    assert.equal(duringHydration._sessionSnapshots["session-1"]?.turns.length, 1)
     assert.equal(
-      duringHydration._sessionSnapshots["session-1"]?.turns[0]?.turn_id,
+      duringHydration._sessionSnapshots["session-1"]?.latestTurn?.turn_id,
       "turn-1-latest"
     )
 
@@ -406,7 +403,6 @@ describe("chat store submitTurn", () => {
     const firstHydrated = useChatStore.getState()
     assert.equal(firstHydrated.turns.length, 1)
     assert.equal(firstHydrated.turns[0]?.turn_id, "turn-2-latest")
-    assert.equal(firstHydrated.historyHasMore, true)
 
     resolveFullHistory?.(
       new Response(
@@ -520,48 +516,40 @@ describe("chat store submitTurn", () => {
       ],
       _sessionSnapshots: {
         "session-1": {
-          turns: [
-            {
-              turn_id: "turn-1",
-              started_at_ms: 1,
-              finished_at_ms: 2,
-              source_entry_ids: [1],
-              user_message: "old session question",
-              blocks: [{ kind: "assistant", content: "old session answer" }],
-              assistant_message: "old session answer",
-              thinking: null,
-              tool_invocations: [],
-              usage: null,
-              failure_message: null,
-              outcome: "succeeded",
-            },
-          ],
-          historyHasMore: false,
-          historyNextBeforeTurnId: null,
+          latestTurn: {
+            turn_id: "turn-1",
+            started_at_ms: 1,
+            finished_at_ms: 2,
+            source_entry_ids: [1],
+            user_message: "old session question",
+            blocks: [{ kind: "assistant", content: "old session answer" }],
+            assistant_message: "old session answer",
+            thinking: null,
+            tool_invocations: [],
+            usage: null,
+            failure_message: null,
+            outcome: "succeeded",
+          },
           streamingTurn: null,
           chatState: "idle",
           contextPressure: null,
           lastCompression: null,
         },
         "session-2": {
-          turns: [
-            {
-              turn_id: "turn-2-cached",
-              started_at_ms: 10,
-              finished_at_ms: 20,
-              source_entry_ids: [2],
-              user_message: "cached question",
-              blocks: [{ kind: "assistant", content: "cached answer" }],
-              assistant_message: "cached answer",
-              thinking: null,
-              tool_invocations: [],
-              usage: null,
-              failure_message: null,
-              outcome: "succeeded",
-            },
-          ],
-          historyHasMore: false,
-          historyNextBeforeTurnId: null,
+          latestTurn: {
+            turn_id: "turn-2-cached",
+            started_at_ms: 10,
+            finished_at_ms: 20,
+            source_entry_ids: [2],
+            user_message: "cached question",
+            blocks: [{ kind: "assistant", content: "cached answer" }],
+            assistant_message: "cached answer",
+            thinking: null,
+            tool_invocations: [],
+            usage: null,
+            failure_message: null,
+            outcome: "succeeded",
+          },
           streamingTurn: null,
           chatState: "idle",
           contextPressure: 0.1,
@@ -576,6 +564,7 @@ describe("chat store submitTurn", () => {
     assert.equal(duringHydration.activeSessionId, "session-2")
     assert.equal(duringHydration.sessionHydrating, true)
     assert.equal(duringHydration.turns[0]?.turn_id, "turn-2-cached")
+    assert.equal(duringHydration.turns.length, 1)
 
     resolveHistory?.(
       new Response(
@@ -617,7 +606,7 @@ describe("chat store submitTurn", () => {
     const hydrated = useChatStore.getState()
     assert.equal(hydrated.sessionHydrating, false)
     assert.equal(hydrated.turns[0]?.turn_id, "turn-2-live")
-    assert.equal(hydrated._sessionSnapshots["session-1"]?.turns[0]?.turn_id, "turn-1")
+    assert.equal(hydrated._sessionSnapshots["session-1"]?.latestTurn?.turn_id, "turn-1")
 
     globalThis.fetch = originalFetchImpl
   })
@@ -680,24 +669,20 @@ describe("chat store submitTurn", () => {
       ],
       _sessionSnapshots: {
         "session-1": {
-          turns: [
-            {
-              turn_id: "turn-current",
-              started_at_ms: 11,
-              finished_at_ms: 12,
-              source_entry_ids: [2],
-              user_message: "current question",
-              blocks: [{ kind: "assistant", content: "current answer" }],
-              assistant_message: "current answer",
-              thinking: null,
-              tool_invocations: [],
-              usage: null,
-              failure_message: null,
-              outcome: "succeeded",
-            },
-          ],
-          historyHasMore: true,
-          historyNextBeforeTurnId: "turn-current",
+          latestTurn: {
+            turn_id: "turn-current",
+            started_at_ms: 11,
+            finished_at_ms: 12,
+            source_entry_ids: [2],
+            user_message: "current question",
+            blocks: [{ kind: "assistant", content: "current answer" }],
+            assistant_message: "current answer",
+            thinking: null,
+            tool_invocations: [],
+            usage: null,
+            failure_message: null,
+            outcome: "succeeded",
+          },
           streamingTurn: null,
           chatState: "idle",
           contextPressure: null,
@@ -713,9 +698,9 @@ describe("chat store submitTurn", () => {
       state.turns.map((turn) => turn.turn_id),
       ["turn-older", "turn-current"]
     )
-    assert.deepEqual(
-      state._sessionSnapshots["session-1"]?.turns.map((turn) => turn.turn_id),
-      ["turn-older", "turn-current"]
+    assert.equal(
+      state._sessionSnapshots["session-1"]?.latestTurn?.turn_id,
+      "turn-current"
     )
 
     globalThis.fetch = originalFetchImpl

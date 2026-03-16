@@ -1,5 +1,17 @@
 # 演进日志
 
+## 2026-03-17 Session 6
+
+**诊断**：即使 session 切换已经改成“最后一个 turn 先显示、其余历史后台补”，`_sessionSnapshots` 仍然沿用近似完整历史页的结构语义，容易让前端缓存再次偷偷变重，也让“快照到底是 UI 热缓存还是历史副本”边界不够清晰。
+**决策**：把 `_sessionSnapshots` 正式瘦身为最小 UI snapshot：只保留最后一个 turn 与必要的 streaming/UI 元信息；完整历史继续只由接口返回、只存在当前活跃 session 状态中。这样能长期守住内存边界，也让快照职责更明确。
+**变更**：
+- `apps/web/src/stores/chat-store.ts`：将 `SessionSnapshot` 重构为最小 UI snapshot（`latestTurn` + `streamingTurn` + UI 元信息），移除快照里的历史页字段；同步更新 hydrate、turn 完成、分页、提交与取消路径，避免再把完整历史写回快照。
+- `apps/web/src/stores/chat-store.test.ts`：调整相关断言与测试数据，验证瘦身后的快照仍能支持切换、补页与取消等主路径。
+- `docs/status.md`、`docs/architecture.md`：补充 session 快照瘦身说明。
+**验证**：`bun test`（`apps/web`）通过；`bun run typecheck`（`apps/web`）通过；`cargo check` 受仓库内现有 `agent-core` 未解析的 `ToolOutputSink` / `tokio` 编译错误阻塞，与本次前端改动无关。
+**提交**：`048ec42` `refactor: shrink web session snapshots`
+**下次方向**：如果继续沿这个方向走，优先把后台补历史页进一步改成 idle/可取消增量任务；同时可以考虑把 session 快照里的 `latestTurn` 也进一步退化成更轻的 message preview，进一步压低缓存体积。
+
 ## 2026-03-17 Session 5
 
 **诊断**：session 切换时的延迟主要不在网络，而在切换前同步保存旧快照和切入新会话时一次性处理整页历史；即便接口本身不慢，主线程也会先被大数组复制和状态收口卡住一小段时间。
