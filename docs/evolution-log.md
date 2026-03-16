@@ -161,16 +161,14 @@
 **提交**：待提交
 **下次方向**：继续补 Web 测试入口，并让前端取消态回归真正纳入标准验证链路；之后再回到 provider / shell 的真实取消覆盖率诊断。
 
-## 2026-03-16 Session 18
+## 2026-03-16 Session 19
 
-**诊断**：工作区当前只剩一组未提交的文档改动，目标是把 README / requirements / architecture / Web README 重新对齐到现在的真实仓库形态；但现有 `docs/architecture.md` diff 中混入了文本损坏字符和过时 crate 叙事，若直接提交会让文档本身变成新的错误源。
-**决策**：先把这组文档改动收口并修正损坏文本，统一对齐到当前 `aia-config` / `agent-store` / `apps/web` / `apps/agent-server` 的真实边界；这是遵循“close before you open”的最小高价值收尾。
+**诊断**：`apps/agent-server` 的 SSE payload 序列化仍在 `unwrap_or_default()` 失败时静默退化为空字符串；一旦某个事件 payload 无法序列化，客户端会收到语义损坏的空事件，而不是可诊断的错误载荷。
+**决策**：先把 SSE payload 序列化收口为显式错误 JSON 回退，并补回归测试；这是比继续扩展功能更高优先级的可靠性修复，而且改动局部、影响直接。
 **变更**：
-- `README.md`：把项目概览收口为当前实际工作区形态，补上 `aia-config`、`agent-store`、Web-first shell、当前 trace / cancellation / prompt caching 行为与文档入口说明。
-- `apps/web/README.md`：更新 Web 子项目说明，改为当前真实能力、Vite+ 工作流与前端约束，而不是旧骨架期描述。
-- `docs/requirements.md`：同步当前主交互形态、server 作为控制面、stop/cancel 与本地 trace 关系，并整理“已完成 / 不做 / 下一阶段优先事项”。
-- `docs/architecture.md`：修正损坏文本与过时的 `llm-trace` 叙事，统一说明 `aia-config`、`agent-store`、Web / server / runtime 的现有边界与下一阶段承接能力。
-**验证**：`cargo check` 通过；`cargo test` 通过；文档内容已与当前工作区结构对齐。
+- `apps/agent-server/src/sse.rs`：新增 `serialize_sse_data` helper，将 SSE payload 序列化失败统一回退为结构化 `{ "error": ... }` JSON，而不是空字符串；所有 stream/status/turn/session 事件都改为复用该 helper。
+- `apps/agent-server/src/sse.rs`：新增 1 条回归测试，验证序列化失败时会回退为可解析的错误 payload。
+**验证**：`cargo test -p agent-server` 通过；`cargo check -p agent-server` 通过；随后执行全量 `cargo check` 与 `cargo test`。
 **提交**：待提交
-**下次方向**：回到代码层面，优先评估 `apps/web` 当前未提交的工具链迁移改动是否值得收口；若不继续 Web 工具链路线，则转而清理下一批非测试 panic/脆弱测试边界。
+**下次方向**：继续清理 server 主路径里剩余“静默降级”边界，优先评估 SSE / trace / routes 中是否还存在把可报告错误悄悄吞掉的 fallback 行为。
 

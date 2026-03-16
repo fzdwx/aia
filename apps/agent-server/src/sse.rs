@@ -2,6 +2,7 @@ use agent_core::StreamEvent;
 use agent_runtime::TurnLifecycle;
 use axum::response::sse::Event;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -73,49 +74,45 @@ struct TurnCancelledData {
     session_id: String,
 }
 
+fn serialize_sse_data<T: Serialize>(event_name: &str, payload: &T) -> String {
+    serde_json::to_string(payload).unwrap_or_else(|error| {
+        json!({
+            "error": format!("failed to serialize SSE payload for {event_name}: {error}")
+        })
+        .to_string()
+    })
+}
+
 impl SsePayload {
     pub fn into_axum_event(self) -> Result<Event, std::convert::Infallible> {
         match self {
-            Self::Stream { session_id, event } => {
-                let data =
-                    serde_json::to_string(&StreamData { session_id, event }).unwrap_or_default();
-                Ok(Event::default().event("stream").data(data))
-            }
-            Self::Status { session_id, status } => {
-                let data =
-                    serde_json::to_string(&StatusData { session_id, status }).unwrap_or_default();
-                Ok(Event::default().event("status").data(data))
-            }
-            Self::TurnCompleted { session_id, turn } => {
-                let data = serde_json::to_string(&TurnCompletedData { session_id, turn })
-                    .unwrap_or_default();
-                Ok(Event::default().event("turn_completed").data(data))
-            }
-            Self::ContextCompressed { session_id, summary } => {
-                let data = serde_json::to_string(&ContextCompressedData { session_id, summary })
-                    .unwrap_or_default();
-                Ok(Event::default().event("context_compressed").data(data))
-            }
-            Self::Error { session_id, message } => {
-                let data =
-                    serde_json::to_string(&ErrorData { session_id, message }).unwrap_or_default();
-                Ok(Event::default().event("error").data(data))
-            }
-            Self::SessionCreated { session_id, title } => {
-                let data = serde_json::to_string(&SessionCreatedData { session_id, title })
-                    .unwrap_or_default();
-                Ok(Event::default().event("session_created").data(data))
-            }
-            Self::SessionDeleted { session_id } => {
-                let data =
-                    serde_json::to_string(&SessionDeletedData { session_id }).unwrap_or_default();
-                Ok(Event::default().event("session_deleted").data(data))
-            }
-            Self::TurnCancelled { session_id } => {
-                let data =
-                    serde_json::to_string(&TurnCancelledData { session_id }).unwrap_or_default();
-                Ok(Event::default().event("turn_cancelled").data(data))
-            }
+            Self::Stream { session_id, event } => Ok(Event::default()
+                .event("stream")
+                .data(serialize_sse_data("stream", &StreamData { session_id, event }))),
+            Self::Status { session_id, status } => Ok(Event::default()
+                .event("status")
+                .data(serialize_sse_data("status", &StatusData { session_id, status }))),
+            Self::TurnCompleted { session_id, turn } => Ok(Event::default().event("turn_completed").data(
+                serialize_sse_data("turn_completed", &TurnCompletedData { session_id, turn }),
+            )),
+            Self::ContextCompressed { session_id, summary } => Ok(Event::default()
+                .event("context_compressed")
+                .data(serialize_sse_data(
+                    "context_compressed",
+                    &ContextCompressedData { session_id, summary },
+                ))),
+            Self::Error { session_id, message } => Ok(Event::default()
+                .event("error")
+                .data(serialize_sse_data("error", &ErrorData { session_id, message }))),
+            Self::SessionCreated { session_id, title } => Ok(Event::default().event("session_created").data(
+                serialize_sse_data("session_created", &SessionCreatedData { session_id, title }),
+            )),
+            Self::SessionDeleted { session_id } => Ok(Event::default()
+                .event("session_deleted")
+                .data(serialize_sse_data("session_deleted", &SessionDeletedData { session_id }))),
+            Self::TurnCancelled { session_id } => Ok(Event::default()
+                .event("turn_cancelled")
+                .data(serialize_sse_data("turn_cancelled", &TurnCancelledData { session_id }))),
         }
     }
 }
@@ -125,7 +122,29 @@ mod tests {
     use agent_core::StreamEvent;
     use agent_runtime::{TurnLifecycle, TurnOutcome};
 
-    use super::{SsePayload, TurnStatus};
+    use super::{SsePayload, TurnStatus, serialize_sse_data};
+
+    struct FailingPayload;
+
+    impl serde::Serialize for FailingPayload {
+        fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            Err(serde::ser::Error::custom("boom"))
+        }
+    }
+
+    #[test]
+    fn serialize_sse_data_falls_back_to_error_payload() {
+        let json = serialize_sse_data("test_event", &FailingPayload);
+        let value: serde_json::Value = serde_json::from_str(&json).expect("fallback json should parse");
+
+        assert_eq!(
+            value["error"],
+            "failed to serialize SSE payload for test_event: boom"
+        );
+    }
 
     #[test]
     fn status_payload_can_convert_to_event() {
