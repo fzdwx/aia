@@ -8,6 +8,7 @@ use crate::{
     TapeEntry, TapeQuery, anchor_from_entry, decode_persisted_line, project_conversation_item,
     project_message,
 };
+use crate::entry::serialize_payload;
 
 pub fn default_session_path() -> std::path::PathBuf {
     aia_config::default_session_tape_path()
@@ -73,7 +74,7 @@ impl SessionTape {
     pub fn bind_provider(&mut self, provider_binding: SessionProviderBinding) -> u64 {
         self.append_entry(TapeEntry::event(
             "provider_binding",
-            Some(serde_json::to_value(&provider_binding).unwrap_or_default()),
+            Some(serialize_payload("provider_binding", &provider_binding)),
         ))
     }
 

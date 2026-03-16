@@ -265,6 +265,12 @@ impl SessionManagerHandle {
             .map_err(|_| RuntimeWorkerError::unavailable())?;
         reply_rx.await.map_err(|_| RuntimeWorkerError::unavailable())?
     }
+
+    #[cfg(test)]
+    pub(crate) fn test_handle() -> Self {
+        let (tx, _rx) = mpsc::channel(1);
+        Self { tx }
+    }
 }
 
 pub struct SessionManagerConfig {
@@ -470,6 +476,15 @@ fn choose_provider_for_tape(
         .unwrap_or(ProviderLaunchChoice::Bootstrap)
 }
 
+fn collect_runtime_events(
+    runtime: &mut AgentRuntime<ServerModel, ToolRegistry>,
+    subscriber: RuntimeSubscriberId,
+) -> Result<Vec<RuntimeEvent>, RuntimeWorkerError> {
+    runtime
+        .collect_events(subscriber)
+        .map_err(|error| RuntimeWorkerError::internal(format!("runtime event collection failed: {error}")))
+}
+
 fn handle_create_session(
     slots: &mut HashMap<SessionId, SessionSlot>,
     config: &SessionManagerConfig,
@@ -479,8 +494,7 @@ fn handle_create_session(
     let now = iso8601_now();
     let title = title.unwrap_or_else(|| aia_config::DEFAULT_SESSION_TITLE.to_string());
 
-    let model_name =
-        config.provider_info_snapshot.read().map(|info| info.model.clone()).unwrap_or_default();
+    let model_name = read_lock(&config.provider_info_snapshot).model.clone();
 
     let record = SessionRecord {
         id: session_id.clone(),
@@ -610,26 +624,43 @@ fn handle_submit_turn(
         });
 
         match result {
-            Ok(_) => {
-                let events = runtime.collect_events(subscriber).unwrap_or_default();
-                let turn = broadcast_runtime_events_with_session(events, &broadcast_tx, &sid);
-                if let Some(turn) = turn {
-                    persist_tool_trace_spans(&turn, trace_store.as_ref());
-                    write_lock(&history_snapshot).push(turn.clone());
-                    let _ = broadcast_tx
-                        .send(SsePayload::TurnCompleted { session_id: sid.clone(), turn });
+            Ok(_) => match collect_runtime_events(&mut runtime, subscriber) {
+                Ok(events) => {
+                    let turn = broadcast_runtime_events_with_session(events, &broadcast_tx, &sid);
+                    if let Some(turn) = turn {
+                        persist_tool_trace_spans(&turn, trace_store.as_ref());
+                        write_lock(&history_snapshot).push(turn.clone());
+                        let _ = broadcast_tx
+                            .send(SsePayload::TurnCompleted { session_id: sid.clone(), turn });
+                    }
+                    *write_lock(&current_turn_snapshot) = None;
                 }
-                *write_lock(&current_turn_snapshot) = None;
-            }
+                Err(error) => {
+                    *write_lock(&current_turn_snapshot) = None;
+                    let _ = broadcast_tx.send(SsePayload::Error {
+                        session_id: sid.clone(),
+                        message: error.message.clone(),
+                    });
+                }
+            },
             Err(error) => {
                 let was_cancelled = error.is_cancelled();
-                let events = runtime.collect_events(subscriber).unwrap_or_default();
-                let turn = broadcast_runtime_events_with_session(events, &broadcast_tx, &sid);
-                if let Some(turn) = turn {
-                    persist_tool_trace_spans(&turn, trace_store.as_ref());
-                    write_lock(&history_snapshot).push(turn.clone());
-                    let _ = broadcast_tx
-                        .send(SsePayload::TurnCompleted { session_id: sid.clone(), turn });
+                match collect_runtime_events(&mut runtime, subscriber) {
+                    Ok(events) => {
+                        let turn = broadcast_runtime_events_with_session(events, &broadcast_tx, &sid);
+                        if let Some(turn) = turn {
+                            persist_tool_trace_spans(&turn, trace_store.as_ref());
+                            write_lock(&history_snapshot).push(turn.clone());
+                            let _ = broadcast_tx
+                                .send(SsePayload::TurnCompleted { session_id: sid.clone(), turn });
+                        }
+                    }
+                    Err(collection_error) => {
+                        let _ = broadcast_tx.send(SsePayload::Error {
+                            session_id: sid.clone(),
+                            message: collection_error.message.clone(),
+                        });
+                    }
                 }
                 if was_cancelled {
                     update_current_turn_status(&current_turn_snapshot, TurnStatus::Cancelled);
@@ -637,8 +668,7 @@ fn handle_submit_turn(
                         session_id: sid.clone(),
                         status: TurnStatus::Cancelled,
                     });
-                    let _ =
-                        broadcast_tx.send(SsePayload::TurnCancelled { session_id: sid.clone() });
+                    let _ = broadcast_tx.send(SsePayload::TurnCancelled { session_id: sid.clone() });
                 }
                 *write_lock(&current_turn_snapshot) = None;
                 let _ = broadcast_tx.send(SsePayload::Error {
@@ -777,7 +807,7 @@ fn handle_auto_compress_session(
         .map_err(|e| RuntimeWorkerError::internal(format!("session save failed: {e}")))?;
 
     if compressed {
-        let events = runtime.collect_events(slot.subscriber).unwrap_or_default();
+        let events = collect_runtime_events(runtime, slot.subscriber)?;
         let _ = broadcast_runtime_events_with_session(events, &config.broadcast_tx, session_id);
     }
 
@@ -1229,8 +1259,8 @@ mod tests {
     use crate::sse::TurnStatus;
 
     use super::{
-        CurrentTurnSnapshot, handle_cancel_turn, handle_get_session_info, read_lock,
-        update_current_turn_status, write_lock,
+        CurrentTurnSnapshot, collect_runtime_events, handle_cancel_turn, handle_get_session_info,
+        read_lock, update_current_turn_status, write_lock,
     };
 
     fn poison_lock<T>(lock: &RwLock<T>) {
@@ -1295,6 +1325,30 @@ mod tests {
         assert_eq!(stats.pressure_ratio, None);
 
         let _ = std::fs::remove_file(session_path);
+    }
+
+    #[test]
+    fn collect_runtime_events_reports_missing_subscriber() {
+        let path = temp_session_path("missing-subscriber");
+        let store = Arc::new(agent_store::AiaStore::new(":memory:").expect("memory store"));
+        let (identity, model) = super::build_model_from_selection(
+            super::ProviderLaunchChoice::Bootstrap,
+            Some(store),
+        )
+        .expect("bootstrap model");
+        let mut runtime = agent_runtime::AgentRuntime::new(
+            model,
+            builtin_tools::build_tool_registry(),
+            identity,
+        );
+
+        let error = collect_runtime_events(&mut runtime, 999).expect_err("missing subscriber should fail");
+
+        assert_eq!(error.status, axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(error.message.contains("runtime event collection failed"));
+        assert!(error.message.contains("订阅者不存在"));
+
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

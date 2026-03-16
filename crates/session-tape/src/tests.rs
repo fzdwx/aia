@@ -36,6 +36,17 @@ fn serialize_payload_falls_back_to_explicit_error_json() {
 }
 
 #[test]
+fn provider_binding_event_uses_explicit_error_payload_on_serialize_failure() {
+    let entry = TapeEntry::event(
+        "provider_binding",
+        Some(serialize_payload("provider_binding", &FailingSerialize)),
+    );
+
+    assert_eq!(entry.event_name(), Some("provider_binding"));
+    assert_eq!(entry.event_data().and_then(|value| value.get("error")).and_then(|value| value.as_str()), Some("failed to serialize provider_binding: boom"));
+}
+
+#[test]
 fn 默认会话路径位于项目隐藏目录() {
     assert_eq!(default_session_path(), aia_config::default_session_tape_path());
 }

@@ -161,14 +161,17 @@
 **提交**：待提交
 **下次方向**：继续补 Web 测试入口，并让前端取消态回归真正纳入标准验证链路；之后再回到 provider / shell 的真实取消覆盖率诊断。
 
-## 2026-03-16 Session 22
+## 2026-03-16 Session 25
 
-**诊断**：`apps/agent-server` 的 `GET /api/session/info` 在 session 正在运行 turn、slot 暂时不持有 runtime 时会直接报 `session is currently running a turn`，导致前端在最需要恢复上下文压力信息的时刻反而拿不到任何 session info。
-**决策**：先把 session info 查询改成在 runtime 不可借用时回退到 session tape 视角，并补回归测试；这是局部、低风险且直接改善长轮次/恢复期可用性的可靠性修复。
+**诊断**：server/session-tape 主路径里还残留两个低可见度降级点：`handle_create_session` 读取 `provider_info_snapshot` 时在锁中毒下会静默回退空 model；`SessionTape::bind_provider` 在 provider binding 序列化失败时会写入空对象，丢掉明确错误信息。
+**决策**：继续沿用现有显式恢复/显式错误策略，分别复用 poisoned-lock helper 与统一序列化 fallback helper，让 provider 相关元数据在异常情况下仍保留可观测语义。
 **变更**：
-- `apps/agent-server/src/session_manager.rs`：`handle_get_session_info` 在 `slot.runtime` 缺失时改为从 session tape 载入并返回基于 tape 的基础 `ContextStats`（entries / anchors / entries_since_last_anchor），不再直接报错。
-- `apps/agent-server/src/session_manager.rs`：新增 1 条回归测试，验证运行中 turn 场景下会回退到 tape 统计并返回有效 session info。
-**验证**：`cargo test -p agent-server` 通过；`cargo check -p agent-server` 通过；随后执行全量 `cargo check` 与 `cargo test`。
-**提交**：`f719d31` `fix: fall back to tape for session info`
-**下次方向**：继续清理 server 查询路径在“runtime 暂不可借用”时的剩余硬失败点，优先评估 handoff / auto-compress / current session metadata 是否也需要类似降级视角。
+- `apps/agent-server/src/session_manager.rs`：`handle_create_session` 改为通过已有 `read_lock` 读取 `provider_info_snapshot`，不再用 `read().map(...).unwrap_or_default()` 在锁中毒时默默写入空 model。
+- `crates/session-tape/src/tape.rs`：`bind_provider` 改为复用 `serialize_payload("provider_binding", ...)`，让 provider binding 序列化失败时落盘显式错误 JSON，而不是空对象。
+- `crates/session-tape/src/tests.rs`：新增 1 条回归测试，验证 provider binding 事件在序列化失败时会保留明确错误 payload。
+- `docs/status.md`：同步记录本次 provider 元数据可靠性收口。
+**验证**：`cargo test -p session-tape provider_binding_event_uses_explicit_error_payload_on_serialize_failure -- --nocapture` 通过；`cargo test -p agent-server resolve_session_id_ -- --nocapture` 通过；`cargo check -p session-tape -p agent-server` 通过。
+**提交**：待提交
+**下次方向**：继续检查 `runtime_worker` 的 `serde_json::from_value(...).ok()` 与 `session-tape` 的 `latest_provider_binding()` 解码失败路径，评估是否需要补结构化诊断而不是简单忽略旧/坏事件。
+
 

@@ -31,6 +31,8 @@ import type {
   TurnStatus,
 } from "@/lib/types"
 
+const SESSION_HISTORY_PAGE_SIZE = 5
+
 function currentTurnToStreamingTurn(
   current: CurrentTurnSnapshot
 ): StreamingTurn {
@@ -145,7 +147,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
     try {
       const [historyPage, currentTurn] = await Promise.all([
-        fetchHistory({ sessionId: id, limit: 10 }),
+        fetchHistory({ sessionId: id, limit: SESSION_HISTORY_PAGE_SIZE }),
         fetchCurrentTurn(id),
       ])
 
@@ -593,7 +595,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         const historyPage = await fetchHistory({
           sessionId,
           beforeTurnId,
-          limit: 10,
+          limit: SESSION_HISTORY_PAGE_SIZE,
         })
         set((state) => ({
           turns: [...historyPage.turns, ...state.turns],

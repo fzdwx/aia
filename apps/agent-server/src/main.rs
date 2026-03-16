@@ -70,7 +70,10 @@ async fn run() -> Result<(), ServerInitError> {
     std::fs::create_dir_all(&sessions_dir)
         .map_err(|error| ServerInitError::new("sessions 目录创建", error.to_string()))?;
 
-    if store.list_sessions().map(|sessions| sessions.is_empty()).unwrap_or(true) {
+    let sessions = store
+        .list_sessions()
+        .map_err(|error| ServerInitError::new("session 列表加载", error.to_string()))?;
+    if sessions.is_empty() {
         let session_id = generate_session_id();
         let now = iso8601_now();
         let model_name = registry

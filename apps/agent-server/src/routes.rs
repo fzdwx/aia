@@ -193,16 +193,25 @@ fn json_response<T: Serialize>(
     }
 }
 
+fn session_resolution_error_response(
+    error: RuntimeWorkerError,
+) -> (StatusCode, Json<serde_json::Value>) {
+    runtime_worker_error_response(error)
+}
+
 /// Resolve session_id: use provided, or fall back to first session from DB
 fn resolve_session_id(
     state: &crate::state::AppState,
     session_id: Option<String>,
-) -> Option<String> {
+) -> Result<Option<String>, RuntimeWorkerError> {
     if let Some(id) = session_id {
-        return Some(id);
+        return Ok(Some(id));
     }
-    // Fall back to first session
-    state.store.list_sessions().ok().and_then(|sessions| sessions.first().map(|s| s.id.clone()))
+    state
+        .store
+        .list_sessions()
+        .map(|sessions| sessions.first().map(|s| s.id.clone()))
+        .map_err(|error| RuntimeWorkerError::internal(format!("session lookup failed: {error}")))
 }
 
 // ── Session management ─────────────────────────────────────────
@@ -441,11 +450,15 @@ pub async fn get_session_info(
     State(state): State<SharedState>,
     Query(query): Query<SessionQuery>,
 ) -> impl IntoResponse {
-    let Some(session_id) = resolve_session_id(&state, query.session_id) else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "no session available" })),
-        );
+    let session_id = match resolve_session_id(&state, query.session_id) {
+        Ok(Some(session_id)) => session_id,
+        Ok(None) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": "no session available" })),
+            );
+        }
+        Err(error) => return session_resolution_error_response(error),
     };
     match state.session_manager.get_session_info(session_id).await {
         Ok(stats) => json_response(StatusCode::OK, stats),
@@ -457,11 +470,15 @@ pub async fn create_handoff(
     State(state): State<SharedState>,
     Json(body): Json<HandoffRequest>,
 ) -> impl IntoResponse {
-    let Some(session_id) = resolve_session_id(&state, body.session_id) else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "no session available" })),
-        );
+    let session_id = match resolve_session_id(&state, body.session_id) {
+        Ok(Some(session_id)) => session_id,
+        Ok(None) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": "no session available" })),
+            );
+        }
+        Err(error) => return session_resolution_error_response(error),
     };
     match state.session_manager.create_handoff(session_id, body.name, body.summary).await {
         Ok(anchor_entry_id) => {
@@ -475,11 +492,15 @@ pub async fn auto_compress_session(
     State(state): State<SharedState>,
     Json(body): Json<AutoCompressRequest>,
 ) -> impl IntoResponse {
-    let Some(session_id) = resolve_session_id(&state, body.session_id) else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "no session available" })),
-        );
+    let session_id = match resolve_session_id(&state, body.session_id) {
+        Ok(Some(session_id)) => session_id,
+        Ok(None) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": "no session available" })),
+            );
+        }
+        Err(error) => return session_resolution_error_response(error),
     };
     match state.session_manager.auto_compress_session(session_id).await {
         Ok(compressed) => (StatusCode::OK, Json(serde_json::json!({ "compressed": compressed }))),
@@ -491,12 +512,14 @@ pub async fn get_history(
     State(state): State<SharedState>,
     Query(query): Query<SessionQuery>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let Some(session_id) = resolve_session_id(&state, query.session_id) else {
-        return json_response(StatusCode::OK, Vec::<()>::new());
+    let session_id = match resolve_session_id(&state, query.session_id) {
+        Ok(Some(session_id)) => session_id,
+        Ok(None) => return json_response(StatusCode::OK, Vec::<()>::new()),
+        Err(error) => return session_resolution_error_response(error),
     };
     match state.session_manager.get_history(session_id).await {
         Ok(turns) => {
-            let limit = query.limit.unwrap_or(50).clamp(1, 200);
+            let limit = query.limit.unwrap_or(5).clamp(1, 200);
             let end_exclusive = query
                 .before_turn_id
                 .as_ref()
@@ -521,8 +544,10 @@ pub async fn get_current_turn(
     State(state): State<SharedState>,
     Query(query): Query<SessionQuery>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let Some(session_id) = resolve_session_id(&state, query.session_id) else {
-        return json_response(StatusCode::OK, Option::<()>::None);
+    let session_id = match resolve_session_id(&state, query.session_id) {
+        Ok(Some(session_id)) => session_id,
+        Ok(None) => return json_response(StatusCode::OK, Option::<()>::None),
+        Err(error) => return session_resolution_error_response(error),
     };
     match state.session_manager.get_current_turn(session_id).await {
         Ok(current) => json_response(StatusCode::OK, current),
@@ -547,11 +572,15 @@ pub async fn submit_turn(
     State(state): State<SharedState>,
     Json(body): Json<TurnRequest>,
 ) -> impl IntoResponse {
-    let Some(session_id) = resolve_session_id(&state, body.session_id) else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "no session available" })),
-        );
+    let session_id = match resolve_session_id(&state, body.session_id) {
+        Ok(Some(session_id)) => session_id,
+        Ok(None) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": "no session available" })),
+            );
+        }
+        Err(error) => return session_resolution_error_response(error),
     };
 
     match state.session_manager.get_session_info(session_id.clone()).await {
@@ -579,11 +608,15 @@ pub async fn cancel_turn(
     State(state): State<SharedState>,
     Json(body): Json<CancelTurnRequest>,
 ) -> impl IntoResponse {
-    let Some(session_id) = resolve_session_id(&state, body.session_id) else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "no session available" })),
-        );
+    let session_id = match resolve_session_id(&state, body.session_id) {
+        Ok(Some(session_id)) => session_id,
+        Ok(None) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": "no session available" })),
+            );
+        }
+        Err(error) => return session_resolution_error_response(error),
     };
 
     match state.session_manager.cancel_turn(session_id).await {
@@ -596,8 +629,29 @@ pub async fn cancel_turn(
 mod tests {
     use axum::http::StatusCode;
 
-    use super::{CancelTurnRequest, ModelConfigDto, ModelLimitDto, json_response};
-    use provider_registry::{ModelConfig, ModelLimit};
+    use super::{
+        CancelTurnRequest, ModelConfigDto, ModelLimitDto, json_response, resolve_session_id,
+    };
+    use crate::{
+        session_manager::{ProviderInfoSnapshot, SessionManagerHandle},
+        state::AppState,
+    };
+    use provider_registry::{ModelConfig, ModelLimit, ProviderRegistry};
+    use std::sync::{Arc, RwLock};
+
+    fn test_state() -> Arc<AppState> {
+        Arc::new(AppState {
+            session_manager: SessionManagerHandle::test_handle(),
+            broadcast_tx: tokio::sync::broadcast::channel(8).0,
+            provider_registry_snapshot: Arc::new(RwLock::new(ProviderRegistry::default())),
+            provider_info_snapshot: Arc::new(RwLock::new(ProviderInfoSnapshot {
+                name: "bootstrap".into(),
+                model: "bootstrap".into(),
+                connected: true,
+            })),
+            store: Arc::new(agent_store::AiaStore::in_memory().expect("memory store")),
+        })
+    }
 
     #[test]
     fn model_config_dto_round_trip_preserves_limit() {
@@ -623,6 +677,45 @@ mod tests {
 
         assert_eq!(status, StatusCode::CREATED);
         assert_eq!(body.0, serde_json::json!({ "ok": true }));
+    }
+
+    #[test]
+    fn resolve_session_id_prefers_explicit_id() {
+        let state = test_state();
+
+        let resolved = resolve_session_id(&state, Some("session-explicit".into()))
+            .expect("explicit session id should resolve");
+
+        assert_eq!(resolved.as_deref(), Some("session-explicit"));
+    }
+
+    #[test]
+    fn resolve_session_id_falls_back_to_first_stored_session() {
+        let state = test_state();
+        state
+            .store
+            .create_session(&agent_store::SessionRecord {
+                id: "session-1".into(),
+                title: "First".into(),
+                created_at: "2026-03-16T00:00:00Z".into(),
+                updated_at: "2026-03-16T00:00:00Z".into(),
+                model: "bootstrap".into(),
+            })
+            .expect("first session should save");
+        state
+            .store
+            .create_session(&agent_store::SessionRecord {
+                id: "session-2".into(),
+                title: "Second".into(),
+                created_at: "2026-03-16T00:00:01Z".into(),
+                updated_at: "2026-03-16T00:00:01Z".into(),
+                model: "bootstrap".into(),
+            })
+            .expect("second session should save");
+
+        let resolved = resolve_session_id(&state, None).expect("fallback session lookup should succeed");
+
+        assert_eq!(resolved.as_deref(), Some("session-1"));
     }
 
     #[test]
