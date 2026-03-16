@@ -170,6 +170,6 @@
 - `crates/session-tape/src/compat.rs`：legacy message / provider binding / tool call / tool result 转换改为复用同一显式错误 payload helper，避免旧格式兼容路径也静默降级。
 - `crates/session-tape/src/tests.rs`：新增 1 条回归测试，验证 payload 序列化失败时会写出明确错误 JSON。
 **验证**：`cargo test -p session-tape` 通过；`cargo check -p session-tape` 通过；随后执行全量 `cargo check` 与 `cargo test`。
-**提交**：待提交
+**提交**：`9901e13` `fix: preserve tape serialization errors`
 **下次方向**：继续清理持久化与事件链路中的 silent fallback，优先关注 `session-tape` / server 侧其余 `unwrap_or_default()` 是否仍会把真实错误伪装成空数据。
 
