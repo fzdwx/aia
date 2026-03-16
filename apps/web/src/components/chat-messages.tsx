@@ -745,6 +745,7 @@ export function ChatMessages() {
   const error = useChatStore((s) => s.error)
   const lastCompression = useChatStore((s) => s.lastCompression)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
+  const turnsHydrating = useChatStore((s) => s.turnsHydrating)
   const containerRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const previousSessionIdRef = useRef<string | null>(null)

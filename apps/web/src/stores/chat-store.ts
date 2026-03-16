@@ -66,11 +66,9 @@ function currentTurnToStreamingTurn(
 }
 
 type ChatStore = {
-  // Session management
   sessions: SessionListItem[]
   activeSessionId: string | null
-
-  // Per-session state
+  sessionHydrating: boolean
   turns: TurnLifecycle[]
   historyHasMore: boolean
   historyNextBeforeTurnId: string | null
@@ -83,13 +81,8 @@ type ChatStore = {
   view: AppView
   contextPressure: number | null
   lastCompression: ContextCompressionNotice | null
-
-  // Internal ref for pending prompt
   _pendingPrompt: string | null
-
   _refreshProviderInfo: () => Promise<void>
-
-  // Actions
   initialize: () => void
   handleSseEvent: (event: SseEvent) => void
   submitTurn: (prompt: string) => void
@@ -116,8 +109,6 @@ type ChatStore = {
     }
   ) => Promise<void>
   deleteProvider: (name: string) => Promise<void>
-
-  // Session actions
   fetchSessions: () => Promise<void>
   createSession: () => Promise<void>
   switchSession: (id: string) => Promise<void>
@@ -125,443 +116,15 @@ type ChatStore = {
   deleteSession: (id: string) => Promise<void>
 }
 
-export const useChatStore = create<ChatStore>((set, get) => ({
-  sessions: [],
-  activeSessionId: null,
-  turns: [],
-  historyHasMore: false,
-  historyNextBeforeTurnId: null,
-  historyLoadingMore: false,
-  streamingTurn: null,
-  chatState: "idle",
-  provider: null,
-  providerList: [],
-  error: null,
-  view: "chat",
-  contextPressure: null,
-  lastCompression: null,
-  _pendingPrompt: null,
+let latestSessionLoadId = 0
 
-  _refreshProviderInfo: async () => {
-    const provider = await fetchProviders()
-    set({ provider })
-  },
+export const useChatStore = create<ChatStore>((set, get) => {
+  async function hydrateSession(id: string) {
+    const loadId = ++latestSessionLoadId
 
-  initialize: () => {
-    get()
-      ._refreshProviderInfo()
-      .catch(() => {})
-
-    // Load sessions first, then load data for the first session
-    apiFetchSessions()
-      .then((sessions) => {
-        const activeId = sessions[0]?.id ?? null
-        set({ sessions, activeSessionId: activeId })
-        if (activeId) {
-          Promise.all([
-            fetchHistory({ sessionId: activeId, limit: 10 }),
-            fetchCurrentTurn(activeId),
-          ])
-            .then(([historyPage, currentTurn]) =>
-              set({
-                turns: historyPage.turns,
-                historyHasMore: historyPage.has_more,
-                historyNextBeforeTurnId: historyPage.next_before_turn_id,
-                streamingTurn: currentTurn
-                  ? currentTurnToStreamingTurn(currentTurn)
-                  : null,
-                chatState: currentTurn ? "active" : "idle",
-                lastCompression: null,
-              })
-            )
-            .catch(() => {})
-          fetchSessionInfo(activeId)
-            .then((info) => set({ contextPressure: info.pressure_ratio }))
-            .catch(() => {})
-        }
-      })
-      .catch(() => {})
-
-    get().refreshProviders()
-  },
-
-  handleSseEvent: (event: SseEvent) => {
-    const activeId = get().activeSessionId
-
-    function findToolBlockIndex(blocks: StreamingTurn["blocks"], invocationId: string) {
-      for (let i = blocks.length - 1; i >= 0; i -= 1) {
-        const block = blocks[i]
-        if (block?.type === "tool" && block.tool.invocationId === invocationId) {
-          return i
-        }
-      }
-      return -1
-    }
-
-    switch (event.type) {
-      case "status": {
-        // Filter by active session
-        if (event.data.session_id !== activeId) break
-
-        const status = event.data.status as TurnStatus
-        if (status === "waiting") {
-          const prev = get().streamingTurn
-          if (prev) {
-            set({
-              _pendingPrompt: null,
-              chatState: "active",
-              streamingTurn: { ...prev, status: "waiting" },
-            })
-          } else {
-            const prompt = get()._pendingPrompt ?? ""
-            set({
-              _pendingPrompt: null,
-              chatState: "active",
-              streamingTurn: {
-                userMessage: prompt,
-                status: "waiting",
-                blocks: [],
-              },
-            })
-          }
-        } else {
-          const prev = get().streamingTurn
-          if (prev) {
-            set({ streamingTurn: { ...prev, status } })
-          }
-        }
-        break
-      }
-      case "stream": {
-        // Filter by active session
-        if (event.data.session_id !== activeId) break
-
-        const data = event.data
-        const prev = get().streamingTurn
-        if (!prev) break
-
-        const blocks = [...prev.blocks]
-
-        if (data.kind === "thinking_delta") {
-          const last = blocks[blocks.length - 1]
-          if (last && last.type === "thinking") {
-            blocks[blocks.length - 1] = {
-              ...last,
-              content: last.content + data.text,
-            }
-          } else {
-            blocks.push({ type: "thinking", content: data.text })
-          }
-          set({ streamingTurn: { ...prev, blocks } })
-        } else if (data.kind === "text_delta") {
-          const last = blocks[blocks.length - 1]
-          if (last && last.type === "text") {
-            blocks[blocks.length - 1] = {
-              ...last,
-              content: last.content + data.text,
-            }
-          } else {
-            blocks.push({ type: "text", content: data.text })
-          }
-          set({ streamingTurn: { ...prev, blocks } })
-        } else if (data.kind === "tool_call_detected") {
-          const existingIdx = findToolBlockIndex(blocks, data.invocation_id)
-          if (existingIdx >= 0) {
-            const b = blocks[existingIdx] as Extract<
-              (typeof blocks)[number],
-              { type: "tool" }
-            >
-            blocks[existingIdx] = {
-              ...b,
-              tool: {
-                ...b.tool,
-                toolName: data.tool_name || b.tool.toolName,
-                arguments: normalizeToolArguments(data.arguments),
-              },
-            }
-          } else {
-            blocks.push({
-              type: "tool",
-              tool: {
-                invocationId: data.invocation_id,
-                toolName: data.tool_name,
-                arguments: normalizeToolArguments(data.arguments),
-                detectedAtMs: Date.now(),
-                output: "",
-                completed: false,
-              },
-            })
-          }
-          set({ streamingTurn: { ...prev, blocks } })
-        } else if (data.kind === "tool_call_started") {
-          const existingIdx = findToolBlockIndex(blocks, data.invocation_id)
-          if (existingIdx >= 0) {
-            const b = blocks[existingIdx] as Extract<
-              (typeof blocks)[number],
-              { type: "tool" }
-            >
-            blocks[existingIdx] = {
-              ...b,
-              tool: {
-                ...b.tool,
-                toolName: data.tool_name || b.tool.toolName,
-                arguments: normalizeToolArguments(data.arguments),
-                startedAtMs: b.tool.startedAtMs ?? Date.now(),
-              },
-            }
-          } else {
-            const startedAtMs = Date.now()
-            blocks.push({
-              type: "tool",
-              tool: {
-                invocationId: data.invocation_id,
-                toolName: data.tool_name,
-                arguments: normalizeToolArguments(data.arguments),
-                detectedAtMs: startedAtMs,
-                startedAtMs,
-                output: "",
-                completed: false,
-              },
-            })
-          }
-          set({ streamingTurn: { ...prev, blocks } })
-        } else if (data.kind === "tool_output_delta") {
-          const idx = findToolBlockIndex(blocks, data.invocation_id)
-          if (idx >= 0) {
-            const b = blocks[idx] as Extract<
-              (typeof blocks)[number],
-              { type: "tool" }
-            >
-            blocks[idx] = {
-              ...b,
-              tool: {
-                ...b.tool,
-                startedAtMs: b.tool.startedAtMs ?? Date.now(),
-                output: b.tool.output + data.text,
-              },
-            }
-          } else {
-            const startedAtMs = Date.now()
-            blocks.push({
-              type: "tool",
-              tool: {
-                invocationId: data.invocation_id,
-                toolName: "",
-                arguments: {},
-                detectedAtMs: startedAtMs,
-                startedAtMs,
-                output: data.text,
-                completed: false,
-              },
-            })
-          }
-          set({ streamingTurn: { ...prev, blocks } })
-        } else if (data.kind === "tool_call_completed") {
-          const idx = findToolBlockIndex(blocks, data.invocation_id)
-          if (idx >= 0) {
-            const b = blocks[idx] as Extract<
-              (typeof blocks)[number],
-              { type: "tool" }
-            >
-            blocks[idx] = {
-              ...b,
-              tool: {
-                ...b.tool,
-                finishedAtMs: Date.now(),
-                completed: true,
-                resultContent: data.content,
-                resultDetails: data.details,
-                failed: data.failed,
-              },
-            }
-            set({ streamingTurn: { ...prev, blocks } })
-          }
-        }
-        break
-      }
-      case "turn_completed": {
-        // Filter by active session
-        if (event.data.session_id !== activeId) break
-
-        set((state) => ({
-          turns: [...state.turns, event.data],
-          streamingTurn: null,
-          chatState: "idle" as const,
-          error: null,
-          lastCompression: null,
-        }))
-        fetchSessionInfo(activeId ?? undefined)
-          .then((info) => set({ contextPressure: info.pressure_ratio }))
-          .catch(() => {})
-        break
-      }
-      case "context_compressed": {
-        if (event.data.session_id !== activeId) break
-        set({ lastCompression: event.data })
-        fetchSessionInfo(activeId ?? undefined)
-          .then((info) => set({ contextPressure: info.pressure_ratio }))
-          .catch(() => {})
-        break
-      }
-      case "error": {
-        if (event.data.session_id !== activeId) break
-        const latestTurn = get().turns[get().turns.length - 1]
-        if (
-          !get().streamingTurn &&
-          latestTurn?.failure_message === event.data.message
-        ) {
-          break
-        }
-        const streamingTurn = get().streamingTurn
-        const isCancelledError = event.data.message.includes("已取消")
-        if (streamingTurn && isCancelledError) {
-          set({
-            streamingTurn: { ...streamingTurn, status: "cancelled" },
-            chatState: "idle",
-            error: null,
-          })
-          break
-        }
-        set({
-          error: event.data.message,
-          streamingTurn: null,
-          chatState: "idle",
-        })
-        break
-      }
-      case "turn_cancelled": {
-        if (event.data.session_id !== activeId) break
-        const prev = get().streamingTurn
-        if (!prev) break
-        set({
-          streamingTurn: { ...prev, status: "cancelled" },
-          chatState: "idle",
-          error: null,
-        })
-        break
-      }
-      case "session_created": {
-        // Add to session list
-        get().fetchSessions()
-        break
-      }
-      case "session_deleted": {
-        const deletedId = event.data.session_id
-        set((state) => {
-          const sessions = state.sessions.filter((s) => s.id !== deletedId)
-          // If the deleted session was active, switch to first available
-          if (state.activeSessionId === deletedId) {
-            const newActive = sessions[0]?.id ?? null
-            return { sessions, activeSessionId: newActive }
-          }
-          return { sessions }
-        })
-        break
-      }
-    }
-  },
-
-  submitTurn: (prompt: string) => {
-    if (get().chatState === "active") return
-    const sessionId = get().activeSessionId
-    if (!sessionId) return
-
-        set({
-          error: null,
-          _pendingPrompt: prompt,
-          chatState: "active",
-          lastCompression: null,
-          streamingTurn: {
-            userMessage: prompt,
-            status: "waiting",
-            blocks: [],
-          },
-        })
-    apiSubmitTurn(prompt, sessionId).catch((err: unknown) => {
-      set({
-        error: err instanceof Error ? err.message : "Network error",
-        _pendingPrompt: null,
-        streamingTurn: null,
-        chatState: "idle",
-      })
-    })
-  },
-
-  cancelTurn: async () => {
-    const sessionId = get().activeSessionId
-    const streamingTurn = get().streamingTurn
-    if (!sessionId || !streamingTurn) return
-
-    try {
-      const cancelled = await apiCancelTurn(sessionId)
-      if (!cancelled) return
-      set({
-        streamingTurn: { ...streamingTurn, status: "cancelled" },
-        chatState: "idle",
-        error: null,
-      })
-    } catch (err) {
-      set({
-        error: err instanceof Error ? err.message : "Cancel failed",
-      })
-    }
-  },
-
-  switchModel: (providerName: string, modelId?: string) => {
-    apiSwitchProvider(providerName, modelId)
-      .then((info) => {
-        set({ provider: info })
-        get().refreshProviders()
-      })
-      .catch((err: unknown) => {
-        set({
-          error: err instanceof Error ? err.message : "Switch failed",
-        })
-      })
-  },
-
-  refreshProviders: () => {
-    Promise.all([apiListProviders(), fetchProviders()])
-      .then(([providerList, provider]) => set({ providerList, provider }))
-      .catch(() => {})
-  },
-
-  setView: (view: AppView) => set({ view }),
-
-  createProvider: async (body) => {
-    await apiCreateProvider(body)
-    get().refreshProviders()
-  },
-
-  updateProvider: async (name, body) => {
-    await apiUpdateProvider(name, body)
-    get().refreshProviders()
-  },
-
-  deleteProvider: async (name) => {
-    await apiDeleteProvider(name)
-    get().refreshProviders()
-  },
-
-  // ── Session actions ────────────────────────────────────────
-
-  fetchSessions: async () => {
-    const sessions = await apiFetchSessions()
-    set({ sessions })
-  },
-
-  createSession: async () => {
-    const session = await apiCreateSession()
-    set((state) => ({
-      sessions: [...state.sessions, session],
-    }))
-    // Auto-switch to the new session
-    await get().switchSession(session.id)
-  },
-
-  switchSession: async (id: string) => {
     set({
       activeSessionId: id,
+      turnsHydrating: true,
       turns: [],
       historyHasMore: false,
       historyNextBeforeTurnId: null,
@@ -573,75 +136,500 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       lastCompression: null,
     })
 
+    fetchSessionInfo(id)
+      .then((info) => {
+        if (loadId !== latestSessionLoadId) return
+        set({ contextPressure: info.pressure_ratio })
+      })
+      .catch(() => {})
+
     try {
       const [historyPage, currentTurn] = await Promise.all([
         fetchHistory({ sessionId: id, limit: 10 }),
         fetchCurrentTurn(id),
       ])
+
+      if (loadId !== latestSessionLoadId) {
+        return
+      }
+
       set({
         turns: historyPage.turns,
         historyHasMore: historyPage.has_more,
         historyNextBeforeTurnId: historyPage.next_before_turn_id,
-        streamingTurn: currentTurn
-          ? currentTurnToStreamingTurn(currentTurn)
-          : null,
+        streamingTurn: currentTurn ? currentTurnToStreamingTurn(currentTurn) : null,
         chatState: currentTurn ? "active" : "idle",
+        turnsHydrating: false,
       })
     } catch {
-      // ignore
+      if (loadId !== latestSessionLoadId) {
+        return
+      }
+      set({ turnsHydrating: false })
     }
+  }
 
-    fetchSessionInfo(id)
-      .then((info) => set({ contextPressure: info.pressure_ratio }))
-      .catch(() => {})
-  },
+  return {
+    sessions: [],
+    activeSessionId: null,
+    turnsHydrating: false,
+    turns: [],
+    historyHasMore: false,
+    historyNextBeforeTurnId: null,
+    historyLoadingMore: false,
+    streamingTurn: null,
+    chatState: "idle",
+    provider: null,
+    providerList: [],
+    error: null,
+    view: "chat",
+    contextPressure: null,
+    lastCompression: null,
+    _pendingPrompt: null,
 
-  loadOlderTurns: async () => {
-    const sessionId = get().activeSessionId
-    const beforeTurnId = get().historyNextBeforeTurnId
-    if (!sessionId || !beforeTurnId || get().historyLoadingMore) return
+    _refreshProviderInfo: async () => {
+      const provider = await fetchProviders()
+      set({ provider })
+    },
 
-    set({ historyLoadingMore: true })
-    try {
-      const historyPage = await fetchHistory({
-        sessionId,
-        beforeTurnId,
-        limit: 10,
+    initialize: () => {
+      get()
+        ._refreshProviderInfo()
+        .catch(() => {})
+
+      apiFetchSessions()
+        .then((sessions) => {
+          const activeId = sessions[0]?.id ?? null
+          set({ sessions, activeSessionId: activeId })
+          if (activeId) {
+            void hydrateSession(activeId)
+          }
+        })
+        .catch(() => {})
+
+      get().refreshProviders()
+    },
+
+    handleSseEvent: (event: SseEvent) => {
+      const activeId = get().activeSessionId
+
+      function findToolBlockIndex(blocks: StreamingTurn["blocks"], invocationId: string) {
+        for (let i = blocks.length - 1; i >= 0; i -= 1) {
+          const block = blocks[i]
+          if (block?.type === "tool" && block.tool.invocationId === invocationId) {
+            return i
+          }
+        }
+        return -1
+      }
+
+      switch (event.type) {
+        case "status": {
+          if (event.data.session_id !== activeId) break
+
+          const status = event.data.status as TurnStatus
+          if (status === "waiting") {
+            const prev = get().streamingTurn
+            if (prev) {
+              set({
+                _pendingPrompt: null,
+                chatState: "active",
+                streamingTurn: { ...prev, status: "waiting" },
+              })
+            } else {
+              const prompt = get()._pendingPrompt ?? ""
+              set({
+                _pendingPrompt: null,
+                chatState: "active",
+                streamingTurn: {
+                  userMessage: prompt,
+                  status: "waiting",
+                  blocks: [],
+                },
+              })
+            }
+          } else {
+            const prev = get().streamingTurn
+            if (prev) {
+              set({ streamingTurn: { ...prev, status } })
+            }
+          }
+          break
+        }
+        case "stream": {
+          if (event.data.session_id !== activeId) break
+
+          const data = event.data
+          const prev = get().streamingTurn
+          if (!prev) break
+
+          const blocks = [...prev.blocks]
+
+          if (data.kind === "thinking_delta") {
+            const last = blocks[blocks.length - 1]
+            if (last && last.type === "thinking") {
+              blocks[blocks.length - 1] = {
+                ...last,
+                content: last.content + data.text,
+              }
+            } else {
+              blocks.push({ type: "thinking", content: data.text })
+            }
+            set({ streamingTurn: { ...prev, blocks } })
+          } else if (data.kind === "text_delta") {
+            const last = blocks[blocks.length - 1]
+            if (last && last.type === "text") {
+              blocks[blocks.length - 1] = {
+                ...last,
+                content: last.content + data.text,
+              }
+            } else {
+              blocks.push({ type: "text", content: data.text })
+            }
+            set({ streamingTurn: { ...prev, blocks } })
+          } else if (data.kind === "tool_call_detected") {
+            const existingIdx = findToolBlockIndex(blocks, data.invocation_id)
+            if (existingIdx >= 0) {
+              const b = blocks[existingIdx] as Extract<
+                (typeof blocks)[number],
+                { type: "tool" }
+              >
+              blocks[existingIdx] = {
+                ...b,
+                tool: {
+                  ...b.tool,
+                  toolName: data.tool_name || b.tool.toolName,
+                  arguments: normalizeToolArguments(data.arguments),
+                },
+              }
+            } else {
+              blocks.push({
+                type: "tool",
+                tool: {
+                  invocationId: data.invocation_id,
+                  toolName: data.tool_name,
+                  arguments: normalizeToolArguments(data.arguments),
+                  detectedAtMs: Date.now(),
+                  output: "",
+                  completed: false,
+                },
+              })
+            }
+            set({ streamingTurn: { ...prev, blocks } })
+          } else if (data.kind === "tool_call_started") {
+            const existingIdx = findToolBlockIndex(blocks, data.invocation_id)
+            if (existingIdx >= 0) {
+              const b = blocks[existingIdx] as Extract<
+                (typeof blocks)[number],
+                { type: "tool" }
+              >
+              blocks[existingIdx] = {
+                ...b,
+                tool: {
+                  ...b.tool,
+                  toolName: data.tool_name || b.tool.toolName,
+                  arguments: normalizeToolArguments(data.arguments),
+                  startedAtMs: b.tool.startedAtMs ?? Date.now(),
+                },
+              }
+            } else {
+              const startedAtMs = Date.now()
+              blocks.push({
+                type: "tool",
+                tool: {
+                  invocationId: data.invocation_id,
+                  toolName: data.tool_name,
+                  arguments: normalizeToolArguments(data.arguments),
+                  detectedAtMs: startedAtMs,
+                  startedAtMs,
+                  output: "",
+                  completed: false,
+                },
+              })
+            }
+            set({ streamingTurn: { ...prev, blocks } })
+          } else if (data.kind === "tool_output_delta") {
+            const idx = findToolBlockIndex(blocks, data.invocation_id)
+            if (idx >= 0) {
+              const b = blocks[idx] as Extract<
+                (typeof blocks)[number],
+                { type: "tool" }
+              >
+              blocks[idx] = {
+                ...b,
+                tool: {
+                  ...b.tool,
+                  startedAtMs: b.tool.startedAtMs ?? Date.now(),
+                  output: b.tool.output + data.text,
+                },
+              }
+            } else {
+              const startedAtMs = Date.now()
+              blocks.push({
+                type: "tool",
+                tool: {
+                  invocationId: data.invocation_id,
+                  toolName: "",
+                  arguments: {},
+                  detectedAtMs: startedAtMs,
+                  startedAtMs,
+                  output: data.text,
+                  completed: false,
+                },
+              })
+            }
+            set({ streamingTurn: { ...prev, blocks } })
+          } else if (data.kind === "tool_call_completed") {
+            const idx = findToolBlockIndex(blocks, data.invocation_id)
+            if (idx >= 0) {
+              const b = blocks[idx] as Extract<
+                (typeof blocks)[number],
+                { type: "tool" }
+              >
+              blocks[idx] = {
+                ...b,
+                tool: {
+                  ...b.tool,
+                  finishedAtMs: Date.now(),
+                  completed: true,
+                  resultContent: data.content,
+                  resultDetails: data.details,
+                  failed: data.failed,
+                },
+              }
+              set({ streamingTurn: { ...prev, blocks } })
+            }
+          }
+          break
+        }
+        case "turn_completed": {
+          if (event.data.session_id !== activeId) break
+
+          set((state) => ({
+            turns: [...state.turns, event.data],
+            streamingTurn: null,
+            chatState: "idle" as const,
+            error: null,
+            lastCompression: null,
+          }))
+          fetchSessionInfo(activeId ?? undefined)
+            .then((info) => set({ contextPressure: info.pressure_ratio }))
+            .catch(() => {})
+          break
+        }
+        case "context_compressed": {
+          if (event.data.session_id !== activeId) break
+          set({ lastCompression: event.data })
+          fetchSessionInfo(activeId ?? undefined)
+            .then((info) => set({ contextPressure: info.pressure_ratio }))
+            .catch(() => {})
+          break
+        }
+        case "error": {
+          if (event.data.session_id !== activeId) break
+          const latestTurn = get().turns[get().turns.length - 1]
+          if (
+            !get().streamingTurn &&
+            latestTurn?.failure_message === event.data.message
+          ) {
+            break
+          }
+          const streamingTurn = get().streamingTurn
+          const isCancelledError = event.data.message.includes("已取消")
+          if (streamingTurn && isCancelledError) {
+            set({
+              streamingTurn: { ...streamingTurn, status: "cancelled" },
+              chatState: "idle",
+              error: null,
+            })
+            break
+          }
+          set({
+            error: event.data.message,
+            streamingTurn: null,
+            chatState: "idle",
+          })
+          break
+        }
+        case "turn_cancelled": {
+          if (event.data.session_id !== activeId) break
+          const prev = get().streamingTurn
+          if (!prev) break
+          set({
+            streamingTurn: { ...prev, status: "cancelled" },
+            chatState: "idle",
+            error: null,
+          })
+          break
+        }
+        case "session_created": {
+          get().fetchSessions()
+          break
+        }
+        case "session_deleted": {
+          const deletedId = event.data.session_id
+          set((state) => {
+            const sessions = state.sessions.filter((s) => s.id !== deletedId)
+            if (state.activeSessionId === deletedId) {
+              const newActive = sessions[0]?.id ?? null
+              return { sessions, activeSessionId: newActive }
+            }
+            return { sessions }
+          })
+          break
+        }
+      }
+    },
+
+    submitTurn: (prompt: string) => {
+      if (get().chatState === "active") return
+      const sessionId = get().activeSessionId
+      if (!sessionId) return
+
+      set({
+        error: null,
+        _pendingPrompt: prompt,
+        chatState: "active",
+        lastCompression: null,
+        streamingTurn: {
+          userMessage: prompt,
+          status: "waiting",
+          blocks: [],
+        },
       })
-      set((state) => ({
-        turns: [...historyPage.turns, ...state.turns],
-        historyHasMore: historyPage.has_more,
-        historyNextBeforeTurnId: historyPage.next_before_turn_id,
-        historyLoadingMore: false,
-      }))
-    } catch {
-      set({ historyLoadingMore: false })
-    }
-  },
-
-  deleteSession: async (id: string) => {
-    await apiDeleteSession(id)
-    const state = get()
-    const remaining = state.sessions.filter((s) => s.id !== id)
-    set({ sessions: remaining })
-
-    // If we deleted the active session, switch to first remaining
-    if (state.activeSessionId === id) {
-      const next = remaining[0]
-      if (next) {
-        await get().switchSession(next.id)
-      } else {
+      apiSubmitTurn(prompt, sessionId).catch((err: unknown) => {
         set({
-          activeSessionId: null,
-          turns: [],
-          historyHasMore: false,
-          historyNextBeforeTurnId: null,
-          historyLoadingMore: false,
+          error: err instanceof Error ? err.message : "Network error",
+          _pendingPrompt: null,
           streamingTurn: null,
           chatState: "idle",
-          lastCompression: null,
+        })
+      })
+    },
+
+    cancelTurn: async () => {
+      const sessionId = get().activeSessionId
+      const streamingTurn = get().streamingTurn
+      if (!sessionId || !streamingTurn) return
+
+      try {
+        const cancelled = await apiCancelTurn(sessionId)
+        if (!cancelled) return
+        set({
+          streamingTurn: { ...streamingTurn, status: "cancelled" },
+          chatState: "idle",
+          error: null,
+        })
+      } catch (err) {
+        set({
+          error: err instanceof Error ? err.message : "Cancel failed",
         })
       }
-    }
-  },
-}))
+    },
+
+    switchModel: (providerName: string, modelId?: string) => {
+      apiSwitchProvider(providerName, modelId)
+        .then((info) => {
+          set({ provider: info })
+          get().refreshProviders()
+        })
+        .catch((err: unknown) => {
+          set({
+            error: err instanceof Error ? err.message : "Switch failed",
+          })
+        })
+    },
+
+    refreshProviders: () => {
+      Promise.all([apiListProviders(), fetchProviders()])
+        .then(([providerList, provider]) => set({ providerList, provider }))
+        .catch(() => {})
+    },
+
+    setView: (view: AppView) => set({ view }),
+
+    createProvider: async (body) => {
+      await apiCreateProvider(body)
+      get().refreshProviders()
+    },
+
+    updateProvider: async (name, body) => {
+      await apiUpdateProvider(name, body)
+      get().refreshProviders()
+    },
+
+    deleteProvider: async (name) => {
+      await apiDeleteProvider(name)
+      get().refreshProviders()
+    },
+
+    fetchSessions: async () => {
+      const sessions = await apiFetchSessions()
+      set({ sessions })
+    },
+
+    createSession: async () => {
+      const session = await apiCreateSession()
+      set((state) => ({
+        sessions: [...state.sessions, session],
+      }))
+      await get().switchSession(session.id)
+    },
+
+    switchSession: async (id: string) => {
+      if (id === get().activeSessionId && !get().sessionHydrating) {
+        return
+      }
+      await hydrateSession(id)
+    },
+
+    loadOlderTurns: async () => {
+      const sessionId = get().activeSessionId
+      const beforeTurnId = get().historyNextBeforeTurnId
+      if (!sessionId || !beforeTurnId || get().historyLoadingMore) return
+
+      set({ historyLoadingMore: true })
+      try {
+        const historyPage = await fetchHistory({
+          sessionId,
+          beforeTurnId,
+          limit: 10,
+        })
+        set((state) => ({
+          turns: [...historyPage.turns, ...state.turns],
+          historyHasMore: historyPage.has_more,
+          historyNextBeforeTurnId: historyPage.next_before_turn_id,
+          historyLoadingMore: false,
+        }))
+      } catch {
+        set({ historyLoadingMore: false })
+      }
+    },
+
+    deleteSession: async (id: string) => {
+      await apiDeleteSession(id)
+      const state = get()
+      const remaining = state.sessions.filter((s) => s.id !== id)
+      set({ sessions: remaining })
+
+      if (state.activeSessionId === id) {
+        const next = remaining[0]
+        if (next) {
+          await get().switchSession(next.id)
+        } else {
+          set({
+            activeSessionId: null,
+            sessionHydrating: false,
+            turns: [],
+            historyHasMore: false,
+            historyNextBeforeTurnId: null,
+            historyLoadingMore: false,
+            streamingTurn: null,
+            chatState: "idle",
+            lastCompression: null,
+          })
+        }
+      }
+    },
+  }
+})

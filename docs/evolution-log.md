@@ -161,15 +161,14 @@
 **提交**：待提交
 **下次方向**：继续补 Web 测试入口，并让前端取消态回归真正纳入标准验证链路；之后再回到 provider / shell 的真实取消覆盖率诊断。
 
-## 2026-03-16 Session 20
+## 2026-03-16 Session 21
 
-**诊断**：`session-tape` 的 typed payload builder 仍在 `serde_json::to_value(...).unwrap_or_default()` 失败时静默写入空对象 / null，这会把“条目序列化失败”悄悄变成语义损坏的磁带事实，后续 replay 只能看到空 payload 而看不到真正错误。
-**决策**：先把 tape entry 与 legacy conversion 的序列化失败统一收口为显式错误 payload，并补回归测试；这是高优先级的事实持久化可靠性修复，能避免 silent corruption。
+**诊断**：`apps/web` 工作区里已有一半完成的 session hydration UX 改动，但 store 类型/状态仍叫 `turnsHydrating`，组件却读取 `sessionHydrating`；这会直接导致 TypeScript 断裂或运行时 selector 失配，属于必须先收口的半完成改动。
+**决策**：先把 Web session hydration 状态命名统一为 `sessionHydrating`，并保留当前“切换 session 时显示稳定 loading 占位”的行为；这是遵循“close before you open”的最小可靠性修复。
 **变更**：
-- `crates/session-tape/src/entry.rs`：新增 `serialize_payload` / `fallback_serialization_payload` helper，让 `message` / `tool_call` / `tool_result` 条目在序列化失败时保留结构化 `{ "error": ... }` payload，而不是 `unwrap_or_default()`。
-- `crates/session-tape/src/compat.rs`：legacy message / provider binding / tool call / tool result 转换改为复用同一显式错误 payload helper，避免旧格式兼容路径也静默降级。
-- `crates/session-tape/src/tests.rs`：新增 1 条回归测试，验证 payload 序列化失败时会写出明确错误 JSON。
-**验证**：`cargo test -p session-tape` 通过；`cargo check -p session-tape` 通过；随后执行全量 `cargo check` 与 `cargo test`。
-**提交**：`9901e13` `fix: preserve tape serialization errors`
-**下次方向**：继续清理持久化与事件链路中的 silent fallback，优先关注 `session-tape` / server 侧其余 `unwrap_or_default()` 是否仍会把真实错误伪装成空数据。
+- `apps/web/src/stores/chat-store.ts`：将 hydration 状态统一命名为 `sessionHydrating`，修正初始化、hydrate 完成/失败、重复切换短路判断与删除最后一个 session 的收尾路径。
+- `apps/web/src/components/chat-messages.tsx`：继续消费统一后的 `sessionHydrating`，在 session 切换水合期间显示稳定的 loading 占位，而不是立刻闪回空态文案。
+**验证**：通过代码级一致性检查确认 `apps/web/src` 中不再残留 `turnsHydrating` 引用；尝试按 `apps/web/AGENTS.md` 使用 `vp check` / `vp test`，但当前环境未提供 `vp` 命令。
+**提交**：待提交
+**下次方向**：若后续环境可用，优先补跑 Web 工具链校验；随后继续评估这条 hydration UX 是否还需要前端回归测试覆盖，以避免 session 切换时空白闪烁回归。
 
