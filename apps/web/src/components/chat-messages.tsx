@@ -3,6 +3,10 @@ import { Check, X as XIcon } from "lucide-react"
 import { MarkdownContent } from "@/components/markdown-content"
 import { Shimmer } from "@/components/ai-elements/shimmer"
 import { getToolDisplayName, getToolDisplayPath } from "@/lib/tool-display"
+import {
+  buildMeasuredWindow,
+  calculateAnchorScrollTop,
+} from "@/lib/chat-virtualization"
 import { useChatStore } from "@/stores/chat-store"
 import type {
   StreamingToolOutput,
@@ -749,67 +753,11 @@ type VirtualizedTurns = {
   visibleTurns: TurnLifecycle[]
   topSpacerHeight: number
   bottomSpacerHeight: number
-  startIndex: number
 }
 
 const VIRTUALIZATION_OVERSCAN = 4
 const VIRTUALIZATION_MIN_TURNS = 40
 const DEFAULT_TURN_ROW_HEIGHT = 280
-
-function buildMeasuredWindow(
-  turns: TurnLifecycle[],
-  containerHeight: number,
-  scrollTop: number,
-  measuredHeights: Record<string, number>
-): VirtualizedTurns {
-  if (turns.length < VIRTUALIZATION_MIN_TURNS || containerHeight <= 0) {
-    return {
-      visibleTurns: turns,
-      topSpacerHeight: 0,
-      bottomSpacerHeight: 0,
-      startIndex: 0,
-    }
-  }
-
-  const heights = turns.map(
-    (turn) => measuredHeights[turn.turn_id] ?? DEFAULT_TURN_ROW_HEIGHT
-  )
-
-  let accumulatedHeight = 0
-  let startIndex = 0
-  while (
-    startIndex < heights.length &&
-    accumulatedHeight + heights[startIndex]! < scrollTop
-  ) {
-    accumulatedHeight += heights[startIndex]!
-    startIndex += 1
-  }
-
-  let endIndex = startIndex
-  let visibleHeight = 0
-  while (endIndex < heights.length && visibleHeight < containerHeight) {
-    visibleHeight += heights[endIndex]!
-    endIndex += 1
-  }
-
-  startIndex = Math.max(0, startIndex - VIRTUALIZATION_OVERSCAN)
-  endIndex = Math.min(turns.length, endIndex + VIRTUALIZATION_OVERSCAN)
-
-  const topSpacerHeight = heights
-    .slice(0, startIndex)
-    .reduce((sum, height) => sum + height, 0)
-  const visibleTurns = turns.slice(startIndex, endIndex)
-  const bottomSpacerHeight = heights
-    .slice(endIndex)
-    .reduce((sum, height) => sum + height, 0)
-
-  return {
-    visibleTurns,
-    topSpacerHeight,
-    bottomSpacerHeight,
-    startIndex,
-  }
-}
 
 function useMeasuredWindowedTurns(
   turns: TurnLifecycle[],
@@ -819,7 +767,21 @@ function useMeasuredWindowedTurns(
   version: number
 ): VirtualizedTurns {
   void version
-  return buildMeasuredWindow(turns, containerHeight, scrollTop, measuredHeights)
+  const window = buildMeasuredWindow({
+    itemIds: turns.map((turn) => turn.turn_id),
+    containerHeight,
+    scrollTop,
+    measuredHeights,
+    overscan: VIRTUALIZATION_OVERSCAN,
+    minItems: VIRTUALIZATION_MIN_TURNS,
+    defaultItemHeight: DEFAULT_TURN_ROW_HEIGHT,
+  })
+
+  return {
+    visibleTurns: turns.slice(window.startIndex, window.endIndex),
+    topSpacerHeight: window.topSpacerHeight,
+    bottomSpacerHeight: window.bottomSpacerHeight,
+  }
 }
 
 function TurnMeasurement({
@@ -848,7 +810,7 @@ function TurnMeasurement({
     return () => resizeObserver.disconnect()
   }, [onHeightChange, turnId])
 
-  return <div ref={wrapperRef}>{children}</div>
+  return <div ref={wrapperRef} data-turn-id={turnId}>{children}</div>
 }
 
 function SessionHydratingIndicator() {
@@ -882,6 +844,8 @@ export function ChatMessages() {
   const skipNextAutoScrollRef = useRef(false)
   const scrollPositionsRef = useRef<Record<string, number>>({})
   const measuredTurnHeightsRef = useRef<Record<string, number>>({})
+  const anchorTurnRef = useRef<{ turnId: string; offset: number } | null>(null)
+  const pendingAnchorCompensationRef = useRef(false)
   const [scrollTop, setScrollTop] = useState(0)
   const [containerHeight, setContainerHeight] = useState(0)
   const [heightVersion, setHeightVersion] = useState(0)
@@ -897,6 +861,22 @@ export function ChatMessages() {
 
   const handleTurnHeightChange = (turnId: string, height: number) => {
     if (measuredTurnHeightsRef.current[turnId] === height) return
+
+    const container = containerRef.current
+    if (container && !shouldStickToBottomRef.current) {
+      const anchorElement = container.querySelector<HTMLElement>(
+        "[data-turn-id]"
+      )
+      if (anchorElement?.dataset.turnId) {
+        const containerTop = container.getBoundingClientRect().top
+        anchorTurnRef.current = {
+          turnId: anchorElement.dataset.turnId,
+          offset: anchorElement.getBoundingClientRect().top - containerTop,
+        }
+        pendingAnchorCompensationRef.current = true
+      }
+    }
+
     measuredTurnHeightsRef.current = {
       ...measuredTurnHeightsRef.current,
       [turnId]: height,
@@ -932,6 +912,45 @@ export function ChatMessages() {
       resizeObserver.disconnect()
     }
   }, [activeSessionId])
+
+  useLayoutEffect(() => {
+    if (!pendingAnchorCompensationRef.current) return
+
+    const container = containerRef.current
+    const anchor = anchorTurnRef.current
+    if (!container || !anchor) {
+      pendingAnchorCompensationRef.current = false
+      anchorTurnRef.current = null
+      return
+    }
+
+    const anchorElement = container.querySelector<HTMLElement>(
+      `[data-turn-id="${anchor.turnId}"]`
+    )
+    if (!anchorElement) {
+      pendingAnchorCompensationRef.current = false
+      anchorTurnRef.current = null
+      return
+    }
+
+    const containerTop = container.getBoundingClientRect().top
+    const desiredOffset = anchorElement.getBoundingClientRect().top - containerTop
+    const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight)
+    const nextScrollTop = calculateAnchorScrollTop({
+      currentScrollTop: container.scrollTop,
+      currentOffset: anchor.offset,
+      desiredOffset,
+      maxScrollTop,
+    })
+
+    container.scrollTop = nextScrollTop
+    setScrollTop(nextScrollTop)
+    if (activeSessionId) {
+      scrollPositionsRef.current[activeSessionId] = nextScrollTop
+    }
+    pendingAnchorCompensationRef.current = false
+    anchorTurnRef.current = null
+  }, [activeSessionId, heightVersion])
 
   useEffect(() => {
     const previousSessionId = previousSessionIdRef.current

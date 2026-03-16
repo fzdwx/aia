@@ -1,5 +1,18 @@
 # 演进日志
 
+## 2026-03-17 Session 4
+
+**诊断**：动态测量窗口化已经比固定高度估算稳定，但在超长工具输出、折叠 details 或 Markdown 高度突变时，已测高度更新仍可能让当前视口突然上跳/下跳，尤其当用户正在阅读中段内容时更明显。
+**决策**：继续把窗口化体验收口到“可读性优先”：抽出独立的 virtualization helper，并在高度更新时引入“首个可见 turn 锚定补偿”；这样在局部块展开/收起时，视口会尽量围绕当前阅读锚点稳定，而不是跟着总高度变化一起漂移。
+**变更**：
+- `apps/web/src/lib/chat-virtualization.ts`：新增动态窗口计算与锚定滚动补偿 helper，收口窗口化核心算法。
+- `apps/web/src/lib/chat-virtualization.test.ts`：新增 measured window / anchor scroll 补偿测试。
+- `apps/web/src/components/chat-messages.tsx`：为每个可见 turn 增加高度测量包装，并在测量值变更时记录当前首个可见 turn 的屏幕偏移；布局更新后按锚点补偿 `scrollTop`，减少超长工具输出展开/收起造成的视口跳动。
+- `docs/status.md`、`docs/architecture.md`：补充聊天列表第三轮锚定稳定性收口说明。
+**验证**：`bun test`（`apps/web`）通过；`bun run typecheck`（`apps/web`）通过；`cargo check` 通过。
+**提交**：`787559d` `perf: stabilize chat viewport anchoring`
+**下次方向**：继续观察工具输出大段折叠/展开与 streaming 同时发生时的边界行为；必要时再把锚点从“首个可见 turn”细化到“首个可见 block / DOM rect 片段”。
+
 ## 2026-03-17 Session 3
 
 **诊断**：上一轮的轻量窗口化已经减轻了长历史重渲染，但仍依赖固定高度估算，遇到工具输出/Markdown 高度波动较大时 spacer 误差会累积；同时用户希望切换 session 时直接回到最新消息，而不是恢复旧的中段滚动位置。
