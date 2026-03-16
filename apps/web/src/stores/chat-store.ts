@@ -32,6 +32,7 @@ import type {
 } from "@/lib/types"
 
 const SESSION_HISTORY_PAGE_SIZE = 5
+const INITIAL_SESSION_HISTORY_PAGE_SIZE = 1
 const MAX_CACHED_SESSION_SNAPSHOTS = 24
 
 type SessionSnapshot = {
@@ -52,6 +53,21 @@ const EMPTY_SESSION_SNAPSHOT: SessionSnapshot = {
   chatState: "idle",
   contextPressure: null,
   lastCompression: null,
+}
+
+function latestTurns(turns: TurnLifecycle[], count = 1): TurnLifecycle[] {
+  if (count <= 0 || turns.length === 0) return []
+  return turns.slice(Math.max(0, turns.length - count))
+}
+
+function snapshotWithLatestTurns(
+  snapshot: SessionSnapshot,
+  count = 1
+): SessionSnapshot {
+  return {
+    ...snapshot,
+    turns: latestTurns(snapshot.turns, count),
+  }
 }
 
 function currentTurnToStreamingTurn(
@@ -213,27 +229,36 @@ export const useChatStore = create<ChatStore>((set, get) => {
   async function hydrateSession(id: string) {
     const loadId = ++latestSessionLoadId
     const cachedSnapshot = get()._sessionSnapshots[id] ?? EMPTY_SESSION_SNAPSHOT
+    const historyPagePromise = fetchHistory({
+      sessionId: id,
+      limit: INITIAL_SESSION_HISTORY_PAGE_SIZE,
+    })
+    const currentTurnPromise = fetchCurrentTurn(id)
+    const sessionInfoPromise = fetchSessionInfo(id)
 
     set((state) => ({
       activeSessionId: id,
-      ...applySessionSnapshot(cachedSnapshot, true),
+      ...applySessionSnapshot(snapshotWithLatestTurns(cachedSnapshot), true),
       _sessionSnapshots: upsertSessionSnapshot(
         state._sessionSnapshots,
         state.activeSessionId,
-        {
-          turns: state.turns,
-          historyHasMore: state.historyHasMore,
-          historyNextBeforeTurnId: state.historyNextBeforeTurnId,
-          streamingTurn: state.streamingTurn,
-          chatState: state.chatState,
-          contextPressure: state.contextPressure,
-          lastCompression: state.lastCompression,
-        },
+        snapshotWithLatestTurns(
+          {
+            turns: state.turns,
+            historyHasMore: state.historyHasMore,
+            historyNextBeforeTurnId: state.historyNextBeforeTurnId,
+            streamingTurn: state.streamingTurn,
+            chatState: state.chatState,
+            contextPressure: state.contextPressure,
+            lastCompression: state.lastCompression,
+          },
+          1
+        ),
         state.sessions
       ),
     }))
 
-    fetchSessionInfo(id)
+    sessionInfoPromise
       .then((info) => {
         if (loadId !== latestSessionLoadId) return
         set((state) => {
@@ -256,8 +281,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
     try {
       const [historyPage, currentTurn] = await Promise.all([
-        fetchHistory({ sessionId: id, limit: SESSION_HISTORY_PAGE_SIZE }),
-        fetchCurrentTurn(id),
+        historyPagePromise,
+        currentTurnPromise,
       ])
 
       if (loadId !== latestSessionLoadId) {
@@ -283,6 +308,43 @@ export const useChatStore = create<ChatStore>((set, get) => {
           state.sessions
         ),
       }))
+
+      if (
+        INITIAL_SESSION_HISTORY_PAGE_SIZE < SESSION_HISTORY_PAGE_SIZE &&
+        historyPage.has_more &&
+        historyPage.next_before_turn_id
+      ) {
+        void fetchHistory({
+          sessionId: id,
+          limit: SESSION_HISTORY_PAGE_SIZE,
+        })
+          .then((fullHistoryPage) => {
+            if (loadId !== latestSessionLoadId || get().activeSessionId !== id) {
+              return
+            }
+            const nextSnapshot: SessionSnapshot = {
+              turns: fullHistoryPage.turns,
+              historyHasMore: fullHistoryPage.has_more,
+              historyNextBeforeTurnId: fullHistoryPage.next_before_turn_id,
+              streamingTurn: get().streamingTurn,
+              chatState: get().chatState,
+              contextPressure: get().contextPressure,
+              lastCompression: get().lastCompression,
+            }
+            set((state) => ({
+              turns: fullHistoryPage.turns,
+              historyHasMore: fullHistoryPage.has_more,
+              historyNextBeforeTurnId: fullHistoryPage.next_before_turn_id,
+              _sessionSnapshots: upsertSessionSnapshot(
+                state._sessionSnapshots,
+                id,
+                nextSnapshot,
+                state.sessions
+              ),
+            }))
+          })
+          .catch(() => {})
+      }
     } catch {
       if (loadId !== latestSessionLoadId) {
         return

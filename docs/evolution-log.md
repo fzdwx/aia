@@ -1,5 +1,17 @@
 # 演进日志
 
+## 2026-03-17 Session 5
+
+**诊断**：session 切换时的延迟主要不在网络，而在切换前同步保存旧快照和切入新会话时一次性处理整页历史；即便接口本身不慢，主线程也会先被大数组复制和状态收口卡住一小段时间。
+**决策**：把 session 切换首屏改成“两阶段 hydrate”：旧 session 只同步保存最后一个 turn，新 session 首先只请求/展示最后一个 turn，再后台补齐初始历史页；这样先让用户“进会话”，再继续补历史，减少切换体感延迟。
+**变更**：
+- `apps/web/src/stores/chat-store.ts`：切换时旧 session snapshot 改为仅保留最后一个 turn；新 session 先并发请求 `info/current-turn/latest history`，首屏只展示最新一条历史，随后后台补齐初始历史页。
+- `apps/web/src/stores/chat-store.test.ts`：新增回归测试，验证旧 session 只保存最后一个 turn，以及新 session 会先以最新一条历史完成首屏 hydrate，再异步补齐更多历史。
+- `docs/status.md`、`docs/architecture.md`：补充 session 切换首屏两阶段 hydrate 说明。
+**验证**：`bun test`（`apps/web`）通过；`bun run typecheck`（`apps/web`）通过；`cargo check` 通过。
+**提交**：`e517fa6` `perf: speed up session switch hydration`
+**下次方向**：继续观察新 session “首条历史 + 后台补页”在超长会话下的感知效果；必要时再把“后台补页”进一步改成 idle/可取消的增量补齐，减少和滚动/streaming 的竞争。
+
 ## 2026-03-17 Session 4
 
 **诊断**：动态测量窗口化已经比固定高度估算稳定，但在超长工具输出、折叠 details 或 Markdown 高度突变时，已测高度更新仍可能让当前视口突然上跳/下跳，尤其当用户正在阅读中段内容时更明显。

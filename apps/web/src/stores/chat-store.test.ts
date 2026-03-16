@@ -283,6 +283,185 @@ describe("chat store submitTurn", () => {
     assert.equal(state._sessionSnapshots["session-1"]?.streamingTurn, null)
   })
 
+  test("switchSession snapshots previous session with only latest turn and hydrates target from latest turn first", async () => {
+    const originalFetchImpl = globalThis.fetch
+    let resolveInitialHistory: ((value: Response) => void) | null = null
+    let resolveFullHistory: ((value: Response) => void) | null = null
+    let historyRequestCount = 0
+
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString()
+      if (url.includes("/api/session/info")) {
+        return new Response(
+          JSON.stringify({
+            total_entries: 0,
+            anchor_count: 0,
+            entries_since_last_anchor: 0,
+            last_input_tokens: null,
+            context_limit: null,
+            output_limit: null,
+            pressure_ratio: 0.25,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
+      }
+      if (url.includes("/api/session/current-turn")) {
+        return new Response("null", {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      }
+      if (url.includes("/api/session/history")) {
+        historyRequestCount += 1
+        if (historyRequestCount === 1) {
+          return await new Promise<Response>((resolve) => {
+            resolveInitialHistory = resolve
+          })
+        }
+        return await new Promise<Response>((resolve) => {
+          resolveFullHistory = resolve
+        })
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }) as FetchMock
+
+    useChatStore.setState({
+      activeSessionId: "session-1",
+      sessionHydrating: false,
+      turns: [
+        {
+          turn_id: "turn-1-old",
+          started_at_ms: 1,
+          finished_at_ms: 2,
+          source_entry_ids: [1],
+          user_message: "older question",
+          blocks: [{ kind: "assistant", content: "older answer" }],
+          assistant_message: "older answer",
+          thinking: null,
+          tool_invocations: [],
+          usage: null,
+          failure_message: null,
+          outcome: "succeeded",
+        },
+        {
+          turn_id: "turn-1-latest",
+          started_at_ms: 3,
+          finished_at_ms: 4,
+          source_entry_ids: [2],
+          user_message: "latest question",
+          blocks: [{ kind: "assistant", content: "latest answer" }],
+          assistant_message: "latest answer",
+          thinking: null,
+          tool_invocations: [],
+          usage: null,
+          failure_message: null,
+          outcome: "succeeded",
+        },
+      ],
+    })
+
+    const switchPromise = useChatStore.getState().switchSession("session-2")
+
+    const duringHydration = useChatStore.getState()
+    assert.equal(duringHydration._sessionSnapshots["session-1"]?.turns.length, 1)
+    assert.equal(
+      duringHydration._sessionSnapshots["session-1"]?.turns[0]?.turn_id,
+      "turn-1-latest"
+    )
+
+    resolveInitialHistory?.(
+      new Response(
+        JSON.stringify({
+          turns: [
+            {
+              turn_id: "turn-2-latest",
+              started_at_ms: 11,
+              finished_at_ms: 12,
+              source_entry_ids: [3],
+              user_message: "target latest question",
+              blocks: [{ kind: "assistant", content: "target latest answer" }],
+              assistant_message: "target latest answer",
+              thinking: null,
+              tool_invocations: [],
+              usage: null,
+              failure_message: null,
+              outcome: "succeeded",
+            },
+          ],
+          has_more: true,
+          next_before_turn_id: "turn-2-latest",
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      )
+    )
+
+    await switchPromise
+
+    const firstHydrated = useChatStore.getState()
+    assert.equal(firstHydrated.turns.length, 1)
+    assert.equal(firstHydrated.turns[0]?.turn_id, "turn-2-latest")
+    assert.equal(firstHydrated.historyHasMore, true)
+
+    resolveFullHistory?.(
+      new Response(
+        JSON.stringify({
+          turns: [
+            {
+              turn_id: "turn-2-older",
+              started_at_ms: 9,
+              finished_at_ms: 10,
+              source_entry_ids: [4],
+              user_message: "target older question",
+              blocks: [{ kind: "assistant", content: "target older answer" }],
+              assistant_message: "target older answer",
+              thinking: null,
+              tool_invocations: [],
+              usage: null,
+              failure_message: null,
+              outcome: "succeeded",
+            },
+            {
+              turn_id: "turn-2-latest",
+              started_at_ms: 11,
+              finished_at_ms: 12,
+              source_entry_ids: [3],
+              user_message: "target latest question",
+              blocks: [{ kind: "assistant", content: "target latest answer" }],
+              assistant_message: "target latest answer",
+              thinking: null,
+              tool_invocations: [],
+              usage: null,
+              failure_message: null,
+              outcome: "succeeded",
+            },
+          ],
+          has_more: false,
+          next_before_turn_id: null,
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      )
+    )
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const fullyHydrated = useChatStore.getState()
+    assert.deepEqual(
+      fullyHydrated.turns.map((turn) => turn.turn_id),
+      ["turn-2-older", "turn-2-latest"]
+    )
+
+    globalThis.fetch = originalFetchImpl
+  })
+
   test("switchSession keeps cached snapshot visible while hydrating next session", async () => {
     const originalFetchImpl = globalThis.fetch
     let resolveHistory: ((value: Response) => void) | null = null
