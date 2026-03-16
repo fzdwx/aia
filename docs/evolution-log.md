@@ -161,14 +161,14 @@
 **提交**：待提交
 **下次方向**：继续补 Web 测试入口，并让前端取消态回归真正纳入标准验证链路；之后再回到 provider / shell 的真实取消覆盖率诊断。
 
-## 2026-03-16 Session 21
+## 2026-03-16 Session 22
 
-**诊断**：`apps/web` 工作区里已有一半完成的 session hydration UX 改动，但 store 类型/状态仍叫 `turnsHydrating`，组件却读取 `sessionHydrating`；这会直接导致 TypeScript 断裂或运行时 selector 失配，属于必须先收口的半完成改动。
-**决策**：先把 Web session hydration 状态命名统一为 `sessionHydrating`，并保留当前“切换 session 时显示稳定 loading 占位”的行为；这是遵循“close before you open”的最小可靠性修复。
+**诊断**：`apps/agent-server` 的 `GET /api/session/info` 在 session 正在运行 turn、slot 暂时不持有 runtime 时会直接报 `session is currently running a turn`，导致前端在最需要恢复上下文压力信息的时刻反而拿不到任何 session info。
+**决策**：先把 session info 查询改成在 runtime 不可借用时回退到 session tape 视角，并补回归测试；这是局部、低风险且直接改善长轮次/恢复期可用性的可靠性修复。
 **变更**：
-- `apps/web/src/stores/chat-store.ts`：将 hydration 状态统一命名为 `sessionHydrating`，修正初始化、hydrate 完成/失败、重复切换短路判断与删除最后一个 session 的收尾路径。
-- `apps/web/src/components/chat-messages.tsx`：继续消费统一后的 `sessionHydrating`，在 session 切换水合期间显示稳定的 loading 占位，而不是立刻闪回空态文案。
-**验证**：通过代码级一致性检查确认 `apps/web/src` 中不再残留 `turnsHydrating` 引用；尝试按 `apps/web/AGENTS.md` 使用 `vp check` / `vp test`，但当前环境未提供 `vp` 命令。
-**提交**：`87f161b` `fix: align web session hydration state`
-**下次方向**：若后续环境可用，优先补跑 Web 工具链校验；随后继续评估这条 hydration UX 是否还需要前端回归测试覆盖，以避免 session 切换时空白闪烁回归。
+- `apps/agent-server/src/session_manager.rs`：`handle_get_session_info` 在 `slot.runtime` 缺失时改为从 session tape 载入并返回基于 tape 的基础 `ContextStats`（entries / anchors / entries_since_last_anchor），不再直接报错。
+- `apps/agent-server/src/session_manager.rs`：新增 1 条回归测试，验证运行中 turn 场景下会回退到 tape 统计并返回有效 session info。
+**验证**：`cargo test -p agent-server` 通过；`cargo check -p agent-server` 通过；随后执行全量 `cargo check` 与 `cargo test`。
+**提交**：待提交
+**下次方向**：继续清理 server 查询路径在“runtime 暂不可借用”时的剩余硬失败点，优先评估 handoff / auto-compress / current session metadata 是否也需要类似降级视角。
 

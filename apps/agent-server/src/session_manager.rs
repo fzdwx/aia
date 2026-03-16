@@ -704,11 +704,24 @@ fn handle_get_session_info(
     let slot = slots
         .get(session_id)
         .ok_or_else(|| RuntimeWorkerError::not_found(format!("session not found: {session_id}")))?;
-    let runtime = slot
-        .runtime
-        .as_ref()
-        .ok_or_else(|| RuntimeWorkerError::bad_request("session is currently running a turn"))?;
-    Ok(runtime.context_stats())
+
+    if let Some(runtime) = slot.runtime.as_ref() {
+        return Ok(runtime.context_stats());
+    }
+
+    let tape = SessionTape::load_jsonl_or_default(&slot.session_path)
+        .map_err(|error| RuntimeWorkerError::internal(format!("session tape load failed: {error}")))?;
+    let view = tape.default_view();
+    let anchors = tape.anchors();
+    Ok(ContextStats {
+        total_entries: tape.entries().len(),
+        anchor_count: anchors.len(),
+        entries_since_last_anchor: view.entries.len(),
+        last_input_tokens: None,
+        context_limit: None,
+        output_limit: None,
+        pressure_ratio: None,
+    })
 }
 
 fn handle_create_handoff(
@@ -1207,12 +1220,17 @@ impl CurrentStatusInner {
 mod tests {
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::sync::{Arc, RwLock};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use agent_core::{Message, Role};
+    use session_tape::SessionTape;
 
     use crate::runtime_worker::RunningTurnHandle;
     use crate::sse::TurnStatus;
 
     use super::{
-        CurrentTurnSnapshot, handle_cancel_turn, read_lock, update_current_turn_status, write_lock,
+        CurrentTurnSnapshot, handle_cancel_turn, handle_get_session_info, read_lock,
+        update_current_turn_status, write_lock,
     };
 
     fn poison_lock<T>(lock: &RwLock<T>) {
@@ -1220,6 +1238,11 @@ mod tests {
             let _guard = lock.write().expect("test should acquire write lock before poisoning");
             panic!("poison test lock");
         }));
+    }
+
+    fn temp_session_path(name: &str) -> std::path::PathBuf {
+        let suffix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+        std::env::temp_dir().join(format!("aia-session-manager-{name}-{suffix}.jsonl"))
     }
 
     #[test]
@@ -1238,6 +1261,40 @@ mod tests {
 
         write_lock(&lock).push(4);
         assert_eq!(&*read_lock(&lock), &[1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn get_session_info_falls_back_to_tape_when_turn_is_running() {
+        let session_path = temp_session_path("context-stats");
+        let mut tape = SessionTape::new();
+        tape.append(Message::new(Role::User, "hello"));
+        let _ = tape.anchor("summary", Some(serde_json::json!({"summary": "kept"})));
+        tape.append(Message::new(Role::Assistant, "world"));
+        tape.save_jsonl(&session_path).expect("session tape should save");
+
+        let mut slots = std::collections::HashMap::new();
+        slots.insert(
+            "session-1".to_string(),
+            super::SessionSlot {
+                runtime: None,
+                subscriber: 0,
+                session_path: session_path.clone(),
+                history: Arc::new(RwLock::new(Vec::new())),
+                current_turn: Arc::new(RwLock::new(None)),
+                running_turn: None,
+                status: super::SlotStatus::Running,
+            },
+        );
+
+        let stats = handle_get_session_info(&slots, "session-1").expect("session info should fall back");
+
+        assert_eq!(stats.total_entries, 3);
+        assert_eq!(stats.anchor_count, 1);
+        assert_eq!(stats.entries_since_last_anchor, 1);
+        assert_eq!(stats.last_input_tokens, None);
+        assert_eq!(stats.pressure_ratio, None);
+
+        let _ = std::fs::remove_file(session_path);
     }
 
     #[test]
