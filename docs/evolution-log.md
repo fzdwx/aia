@@ -172,6 +172,6 @@
 - `crates/agent-runtime/src/runtime/tests.rs`：新增 1 条回归测试，验证 runtime 时间 helper 的零时长回退行为。
 - `docs/status.md`、`docs/architecture.md`：同步记录共享时间辅助函数的无 panic 约束。
 **验证**：`cargo test -p agent-core -p agent-runtime` 通过；`cargo check -p agent-core -p agent-runtime` 通过；随后执行全量 `cargo check` 与 `cargo test`。
-**提交**：待提交
+**提交**：`5dff961` `fix: harden time-based id generation`
 **下次方向**：继续清理剩余生产路径中的 panic helpers，优先关注 `builtin-tools` shell 执行线程错误边界，以及 server / runtime 之外仍残留的非测试 `expect`。
 
