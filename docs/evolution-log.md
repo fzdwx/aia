@@ -169,6 +169,6 @@
 - `apps/agent-server/src/sse.rs`：新增 `serialize_sse_data` helper，将 SSE payload 序列化失败统一回退为结构化 `{ "error": ... }` JSON，而不是空字符串；所有 stream/status/turn/session 事件都改为复用该 helper。
 - `apps/agent-server/src/sse.rs`：新增 1 条回归测试，验证序列化失败时会回退为可解析的错误 payload。
 **验证**：`cargo test -p agent-server` 通过；`cargo check -p agent-server` 通过；随后执行全量 `cargo check` 与 `cargo test`。
-**提交**：待提交
+**提交**：`2402a4f` `fix: preserve SSE serialization errors`
 **下次方向**：继续清理 server 主路径里剩余“静默降级”边界，优先评估 SSE / trace / routes 中是否还存在把可报告错误悄悄吞掉的 fallback 行为。
 
