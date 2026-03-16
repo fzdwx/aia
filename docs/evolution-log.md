@@ -170,6 +170,6 @@
 - `docs/status.md`：更新已完成事项，记录 server 启动初始化错误已收口为可报告失败。
 - `docs/architecture.md`：补充 `apps/agent-server` 主入口也遵循“错误显式返回而非 panic” 的初始化约束。
 **验证**：`cargo check -p agent-server` 通过；`cargo test -p agent-server` 通过；随后执行全量 `cargo check` 与 `cargo test`。
-**提交**：`986d9cb` `fix: handle server startup failures gracefully`
+**提交**：`ac0bb50` `fix: handle server startup failures gracefully`
 **下次方向**：继续清理剩余生产路径中的 panic-on-init / `expect`，优先检查 `routes` 序列化响应与共享时间戳生成辅助函数是否也能收口为显式错误或无 panic 实现。
 
