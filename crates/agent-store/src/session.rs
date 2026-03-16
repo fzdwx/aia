@@ -13,7 +13,7 @@ pub struct SessionRecord {
 
 impl AiaStore {
     pub(crate) fn init_session_schema(&self) -> Result<(), AiaStoreError> {
-        let conn = self.conn.lock().expect("lock poisoned");
+        let conn = self.lock_conn();
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS sessions (
                 id         TEXT PRIMARY KEY,
@@ -27,7 +27,7 @@ impl AiaStore {
     }
 
     pub fn create_session(&self, record: &SessionRecord) -> Result<(), AiaStoreError> {
-        let conn = self.conn.lock().expect("lock poisoned");
+        let conn = self.lock_conn();
         conn.execute(
             "INSERT INTO sessions (id, title, created_at, updated_at, model) VALUES (?1, ?2, ?3, ?4, ?5)",
             (&record.id, &record.title, &record.created_at, &record.updated_at, &record.model),
@@ -36,7 +36,7 @@ impl AiaStore {
     }
 
     pub fn list_sessions(&self) -> Result<Vec<SessionRecord>, AiaStoreError> {
-        let conn = self.conn.lock().expect("lock poisoned");
+        let conn = self.lock_conn();
         let mut stmt = conn.prepare(
             "SELECT id, title, created_at, updated_at, model FROM sessions ORDER BY created_at ASC",
         )?;
@@ -53,7 +53,7 @@ impl AiaStore {
     }
 
     pub fn get_session(&self, id: &str) -> Result<Option<SessionRecord>, AiaStoreError> {
-        let conn = self.conn.lock().expect("lock poisoned");
+        let conn = self.lock_conn();
         let mut stmt = conn.prepare(
             "SELECT id, title, created_at, updated_at, model FROM sessions WHERE id = ?1",
         )?;
@@ -78,7 +78,7 @@ impl AiaStore {
         title: Option<&str>,
         model: Option<&str>,
     ) -> Result<bool, AiaStoreError> {
-        let conn = self.conn.lock().expect("lock poisoned");
+        let conn = self.lock_conn();
         let now = iso8601_now();
         let mut parts = Vec::new();
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -105,7 +105,7 @@ impl AiaStore {
     }
 
     pub fn delete_session(&self, id: &str) -> Result<bool, AiaStoreError> {
-        let conn = self.conn.lock().expect("lock poisoned");
+        let conn = self.lock_conn();
         let changed = conn.execute("DELETE FROM sessions WHERE id = ?1", [id])?;
         Ok(changed > 0)
     }
@@ -176,6 +176,8 @@ fn random_hex_8() -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
     use super::*;
     use crate::AiaStore;
 
@@ -227,6 +229,48 @@ mod tests {
         let store = AiaStore::in_memory().expect("store init");
         let deleted = store.delete_session("nonexistent").expect("delete");
         assert!(!deleted);
+    }
+
+    #[test]
+    fn session_operations_recover_after_poisoned_mutex() {
+        let store = Arc::new(AiaStore::in_memory().expect("store init"));
+        let cloned = store.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = cloned.conn.lock().expect("test should lock before poisoning");
+            panic!("poison store mutex");
+        })
+        .join();
+
+        let now = iso8601_now();
+        let record = SessionRecord {
+            id: "20260316_poisoned".to_string(),
+            title: "Recovered session".to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+            model: "gpt-4.1".to_string(),
+        };
+
+        store.create_session(&record).expect("create after poison");
+        let sessions = store.list_sessions().expect("list after poison");
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0], record);
+    }
+
+    #[test]
+    fn lock_conn_recovers_poisoned_mutex() {
+        let lock = Arc::new(Mutex::new(1_u8));
+        let cloned = lock.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = cloned.lock().expect("test should lock before poisoning");
+            panic!("poison helper mutex");
+        })
+        .join();
+
+        let guard = match lock.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        assert_eq!(*guard, 1);
     }
 
     #[test]

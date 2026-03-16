@@ -161,13 +161,17 @@
 **提交**：待提交
 **下次方向**：继续补 Web 测试入口，并让前端取消态回归真正纳入标准验证链路；之后再回到 provider / shell 的真实取消覆盖率诊断。
 
-## 2026-03-16 Session 11
+## 2026-03-16 Session 12
 
-**诊断**：`apps/web` 已有基于 `node:test` / Bun 运行的 store 与工具显示回归测试，但 `package.json` 没有标准测试脚本，导致 `npm test` 无法作为常规验证入口，前端取消态回归也进不了统一验证链路。
-**决策**：先为 `apps/web` 补最小标准测试入口，直接复用现有 Bun 测试基线并暴露 `npm test` / `npm run test:watch`；这是把已存在前端回归测试纳入日常验证链路的最小改动。
+**诊断**：`agent-store` 在 trace/session 主路径里仍对 `Mutex<Connection>` 使用 `expect("lock poisoned")`，一旦之前有持锁 panic，就会把本地存储能力进一步升级成服务 panic。
+**决策**：先把 `agent-store` 的 SQLite 锁访问改成 poisoned mutex 可恢复，并补回归测试；这是局部、低风险且高优先级的可靠性修复，优先级高于继续扩展能力。
 **变更**：
-- `apps/web/package.json`：新增 `test` 与 `test:watch` 脚本，分别映射到 `bun test` 与 `bun test --watch`。
-- `docs/evolution-log.md`：追加本次演进记录。
-**验证**：`cargo check` 通过；`cargo test` 通过；`cd apps/web && npm test` 通过（10 个测试，包括 cancelled partial content 的 chat-store 回归测试）。
+- `crates/agent-store/src/lib.rs`：新增统一 `lock_conn` helper，集中恢复 poisoned SQLite mutex guard，并用于 legacy migration 路径。
+- `crates/agent-store/src/session.rs`：将 session schema/CRUD 全部切到可恢复锁访问，并新增 poisoned mutex 后仍可继续 create/list 的回归测试。
+- `crates/agent-store/src/trace.rs`：将 trace schema/store/list/get/summary 全部切到可恢复锁访问，并新增 poisoned mutex 后仍可继续 record/get/summary 的回归测试。
+- `docs/status.md`：更新已完成事项，记录 `agent-store` 锁中毒恢复已收口。
+- `docs/architecture.md`：补充 `agent-store` SQLite 访问的 poisoned mutex 恢复约束。
+**验证**：`cargo check` 通过；`cargo test` 通过；新增 2 个 `agent-store` poisoned mutex 回归测试。
 **提交**：待提交
-**下次方向**：继续把前端测试纳入更完整的验证链路（例如 CI / workspace 级命令），随后回到 provider / shell 的真实 stop/cancel 覆盖率诊断。
+**下次方向**：继续清理其余生产路径中的 panic-on-poison / `expect`，优先关注 `apps/agent-server/src/main.rs` 初始化阶段和其他共享状态锁访问。
+

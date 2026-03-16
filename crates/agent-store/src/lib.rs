@@ -2,7 +2,7 @@ mod session;
 mod trace;
 
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 use rusqlite::Connection;
 
@@ -75,13 +75,17 @@ impl AiaStore {
         Ok(store)
     }
 
+    pub(crate) fn lock_conn(&self) -> MutexGuard<'_, Connection> {
+        self.conn.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     /// Migrate data from a legacy SQLite file by ATTACHing it and copying rows.
     pub fn migrate_from_legacy_file(
         &self,
         old_path: &Path,
         table_name: &str,
     ) -> Result<(), AiaStoreError> {
-        let conn = self.conn.lock().expect("lock poisoned");
+        let conn = self.lock_conn();
         let path_str = old_path.to_string_lossy().replace('\'', "''");
         conn.execute_batch(&format!(
             "ATTACH DATABASE '{path_str}' AS legacy;

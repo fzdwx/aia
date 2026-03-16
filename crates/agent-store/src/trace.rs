@@ -152,7 +152,7 @@ pub trait LlmTraceStore: Send + Sync {
 
 impl AiaStore {
     pub(crate) fn init_trace_schema(&self) -> Result<(), AiaStoreError> {
-        let conn = self.conn.lock().expect("lock poisoned");
+        let conn = self.lock_conn();
         conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS llm_request_traces (
@@ -217,7 +217,7 @@ impl AiaStore {
 
 impl LlmTraceStore for AiaStore {
     fn record(&self, record: &LlmTraceRecord) -> Result<(), AiaStoreError> {
-        self.conn.lock().expect("lock poisoned").execute(
+        self.lock_conn().execute(
             "
             INSERT OR REPLACE INTO llm_request_traces (
                 id, trace_id, span_id, parent_span_id, root_span_id,
@@ -282,7 +282,7 @@ impl LlmTraceStore for AiaStore {
     }
 
     fn list_page(&self, limit: usize, offset: usize) -> Result<LlmTraceListPage, AiaStoreError> {
-        let conn = self.conn.lock().expect("lock poisoned");
+        let conn = self.lock_conn();
         let total_loops =
             conn.query_row("SELECT COUNT(DISTINCT trace_id) FROM llm_request_traces", [], |row| {
                 row.get::<_, u64>(0)
@@ -351,7 +351,7 @@ impl LlmTraceStore for AiaStore {
     }
 
     fn get(&self, id: &str) -> Result<Option<LlmTraceRecord>, AiaStoreError> {
-        let conn = self.conn.lock().expect("lock poisoned");
+        let conn = self.lock_conn();
         let mut stmt = conn.prepare(
             "
             SELECT id, trace_id, span_id, parent_span_id, root_span_id,
@@ -444,7 +444,7 @@ impl LlmTraceStore for AiaStore {
     }
 
     fn summary(&self) -> Result<LlmTraceSummary, AiaStoreError> {
-        let conn = self.conn.lock().expect("lock poisoned");
+        let conn = self.lock_conn();
         let (
             total_requests,
             failed_requests,
@@ -588,6 +588,8 @@ fn extract_text_content(value: &Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use serde_json::json;
 
     use super::{LlmTraceEvent, LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus, LlmTraceStore};
@@ -657,6 +659,63 @@ mod tests {
         assert_eq!(summary.total_tokens, 18);
         assert_eq!(summary.total_cached_tokens, 4);
         assert_eq!(summary.p95_duration_ms, Some(80));
+    }
+
+    #[test]
+    fn trace_operations_recover_after_poisoned_mutex() {
+        let store = Arc::new(AiaStore::in_memory().expect("store should initialize"));
+        let cloned = store.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = cloned.conn.lock().expect("test should lock before poisoning");
+            panic!("poison store mutex");
+        })
+        .join();
+
+        let record = LlmTraceRecord {
+            id: "trace-poisoned".into(),
+            trace_id: "trace-poisoned-group".into(),
+            span_id: "trace-poisoned".into(),
+            parent_span_id: Some("trace-poisoned-root".into()),
+            root_span_id: "trace-poisoned-root".into(),
+            operation_name: "chat".into(),
+            span_kind: LlmTraceSpanKind::Client,
+            turn_id: "turn-poisoned".into(),
+            run_id: "turn-poisoned".into(),
+            request_kind: "completion".into(),
+            step_index: 0,
+            provider: "openai".into(),
+            protocol: "openai-responses".into(),
+            model: "gpt-5.4".into(),
+            base_url: "https://api.example.com".into(),
+            endpoint_path: "/responses".into(),
+            streaming: false,
+            started_at_ms: 100,
+            finished_at_ms: Some(180),
+            duration_ms: Some(80),
+            status_code: Some(200),
+            status: LlmTraceStatus::Succeeded,
+            stop_reason: Some("stop".into()),
+            error: None,
+            request_summary: json!({}),
+            provider_request: json!({"messages": [{"role": "user", "content": "recover"}]}),
+            response_summary: json!({}),
+            response_body: None,
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            cached_tokens: None,
+            otel_attributes: json!({}),
+            events: vec![],
+        };
+
+        store.record(&record).expect("record should persist after poison");
+        let loaded = store
+            .get("trace-poisoned")
+            .expect("query should succeed after poison")
+            .expect("trace should exist after poison");
+        assert_eq!(loaded.id, "trace-poisoned");
+        let summary = store.summary().expect("summary should succeed after poison");
+        assert_eq!(summary.total_requests, 1);
     }
 
     #[test]
