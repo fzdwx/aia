@@ -5,7 +5,7 @@ mod session_manager;
 mod sse;
 mod state;
 
-use std::sync::{Arc, RwLock};
+use std::{fmt, path::PathBuf, sync::{Arc, RwLock}};
 
 use agent_store::{AiaStore, SessionRecord, generate_session_id, iso8601_now};
 use axum::{
@@ -20,14 +20,14 @@ use model::{ProviderLaunchChoice, build_model_from_selection};
 use session_manager::{ProviderInfoSnapshot, SessionManagerConfig, spawn_session_manager};
 use state::AppState;
 
-fn default_aia_store_path() -> std::path::PathBuf {
+fn default_aia_store_path() -> PathBuf {
     provider_registry::default_registry_path()
         .parent()
         .unwrap_or_else(|| std::path::Path::new("."))
         .join("store.sqlite3")
 }
 
-fn default_sessions_dir() -> std::path::PathBuf {
+fn default_sessions_dir() -> PathBuf {
     provider_registry::default_registry_path()
         .parent()
         .unwrap_or_else(|| std::path::Path::new("."))
@@ -41,34 +41,59 @@ fn build_server_user_agent() -> String {
     format!("aia-{os}-{arch}/{version}")
 }
 
+#[derive(Debug)]
+struct ServerInitError {
+    step: &'static str,
+    message: String,
+}
+
+impl ServerInitError {
+    fn new(step: &'static str, message: impl Into<String>) -> Self {
+        Self { step, message: message.into() }
+    }
+}
+
+impl fmt::Display for ServerInitError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{step}失败: {message}", step = self.step, message = self.message)
+    }
+}
+
+impl std::error::Error for ServerInitError {}
+
 #[tokio::main]
 async fn main() {
+    if let Err(error) = run().await {
+        eprintln!("agent-server 启动失败：{error}");
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<(), ServerInitError> {
     let registry_path = provider_registry::default_registry_path();
     let aia_store_path = default_aia_store_path();
     let sessions_dir = default_sessions_dir();
-    let workspace_root = match std::env::current_dir() {
-        Ok(path) => path,
-        Err(error) => {
-            eprintln!("workspace 根目录获取失败: {error}");
-            return;
-        }
-    };
+    let workspace_root = std::env::current_dir()
+        .map_err(|error| ServerInitError::new("workspace 根目录获取", error.to_string()))?;
 
-    let registry =
-        ProviderRegistry::load_or_default(&registry_path).expect("provider 注册表加载失败");
+    let registry = ProviderRegistry::load_or_default(&registry_path)
+        .map_err(|error| ServerInitError::new("provider 注册表加载", error.to_string()))?;
 
-    // Initialize unified store (traces + sessions in one DB)
-    let store = Arc::new(AiaStore::new(&aia_store_path).expect("数据库初始化失败"));
+    let store = Arc::new(
+        AiaStore::new(&aia_store_path)
+            .map_err(|error| ServerInitError::new("数据库初始化", error.to_string()))?,
+    );
 
-    // Ensure sessions directory exists
-    std::fs::create_dir_all(&sessions_dir).expect("sessions 目录创建失败");
+    std::fs::create_dir_all(&sessions_dir)
+        .map_err(|error| ServerInitError::new("sessions 目录创建", error.to_string()))?;
 
-    // If no sessions exist, create a default one
-    if store.list_sessions().map(|s| s.is_empty()).unwrap_or(true) {
+    if store.list_sessions().map(|sessions| sessions.is_empty()).unwrap_or(true) {
         let session_id = generate_session_id();
         let now = iso8601_now();
-        let model_name =
-            registry.active_provider().and_then(|p| p.active_model.clone()).unwrap_or_default();
+        let model_name = registry
+            .active_provider()
+            .and_then(|provider| provider.active_model.clone())
+            .unwrap_or_default();
         let record = SessionRecord {
             id: session_id,
             title: "New session".to_string(),
@@ -76,18 +101,19 @@ async fn main() {
             updated_at: now,
             model: model_name,
         };
-        store.create_session(&record).expect("默认 session 创建失败");
+        store
+            .create_session(&record)
+            .map_err(|error| ServerInitError::new("默认 session 创建", error.to_string()))?;
     }
 
-    // Determine initial model
     let selection = registry
         .active_provider()
         .cloned()
         .map(ProviderLaunchChoice::OpenAi)
         .unwrap_or(ProviderLaunchChoice::Bootstrap);
 
-    let (identity, _model) =
-        build_model_from_selection(selection, Some(store.clone())).expect("模型构建失败");
+    let (identity, _model) = build_model_from_selection(selection, Some(store.clone()))
+        .map_err(|error| ServerInitError::new("模型构建", error.to_string()))?;
 
     let (broadcast_tx, _) = tokio::sync::broadcast::channel(512);
     let provider_registry_snapshot = Arc::new(RwLock::new(registry.clone()));
@@ -124,11 +150,9 @@ async fn main() {
         .route("/api/providers/{name}", put(routes::update_provider))
         .route("/api/providers/{name}", delete(routes::delete_provider))
         .route("/api/providers/switch", post(routes::switch_provider))
-        // Session management
         .route("/api/sessions", get(routes::list_sessions))
         .route("/api/sessions", post(routes::create_session))
         .route("/api/sessions/{id}", delete(routes::delete_session))
-        // Per-session endpoints
         .route("/api/session/history", get(routes::get_history))
         .route("/api/session/current-turn", get(routes::get_current_turn))
         .route("/api/session/info", get(routes::get_session_info))
@@ -140,8 +164,14 @@ async fn main() {
         .layer(CorsLayer::permissive())
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3434").await.expect("端口 3434 绑定失败");
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3434")
+        .await
+        .map_err(|error| ServerInitError::new("端口 3434 绑定", error.to_string()))?;
     println!("agent-server listening on http://localhost:3434");
 
-    axum::serve(listener, app).await.expect("服务器启动失败");
+    axum::serve(listener, app)
+        .await
+        .map_err(|error| ServerInitError::new("服务器启动", error.to_string()))?;
+
+    Ok(())
 }

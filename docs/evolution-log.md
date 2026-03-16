@@ -161,17 +161,15 @@
 **提交**：待提交
 **下次方向**：继续补 Web 测试入口，并让前端取消态回归真正纳入标准验证链路；之后再回到 provider / shell 的真实取消覆盖率诊断。
 
-## 2026-03-16 Session 12
+## 2026-03-16 Session 13
 
-**诊断**：`agent-store` 在 trace/session 主路径里仍对 `Mutex<Connection>` 使用 `expect("lock poisoned")`，一旦之前有持锁 panic，就会把本地存储能力进一步升级成服务 panic。
-**决策**：先把 `agent-store` 的 SQLite 锁访问改成 poisoned mutex 可恢复，并补回归测试；这是局部、低风险且高优先级的可靠性修复，优先级高于继续扩展能力。
+**诊断**：`apps/agent-server` 主入口仍在 provider 注册表、SQLite store、sessions 目录、默认 session、模型构建、端口绑定与 serve 路径上直接 `expect`，一旦初始化失败就会把可恢复的配置/环境问题升级成进程 panic。
+**决策**：先把 server 启动路径收口为结构化初始化错误并以非零退出码失败；这是比继续扩展能力更高优先级的可靠性修复，而且改动局部、验证直接。
 **变更**：
-- `crates/agent-store/src/lib.rs`：新增统一 `lock_conn` helper，集中恢复 poisoned SQLite mutex guard，并用于 legacy migration 路径。
-- `crates/agent-store/src/session.rs`：将 session schema/CRUD 全部切到可恢复锁访问，并新增 poisoned mutex 后仍可继续 create/list 的回归测试。
-- `crates/agent-store/src/trace.rs`：将 trace schema/store/list/get/summary 全部切到可恢复锁访问，并新增 poisoned mutex 后仍可继续 record/get/summary 的回归测试。
-- `docs/status.md`：更新已完成事项，记录 `agent-store` 锁中毒恢复已收口。
-- `docs/architecture.md`：补充 `agent-store` SQLite 访问的 poisoned mutex 恢复约束。
-**验证**：`cargo check` 通过；`cargo test` 通过；新增 2 个 `agent-store` poisoned mutex 回归测试。
-**提交**：待提交
-**下次方向**：继续清理其余生产路径中的 panic-on-poison / `expect`，优先关注 `apps/agent-server/src/main.rs` 初始化阶段和其他共享状态锁访问。
+- `apps/agent-server/src/main.rs`：新增 `ServerInitError` 与 `run() -> Result` 启动入口，统一处理 provider 注册表、AiaStore、sessions 目录、默认 session、模型构建、端口绑定与 `axum::serve` 的初始化失败，不再在生产路径 `expect` panic。
+- `docs/status.md`：更新已完成事项，记录 server 启动初始化错误已收口为可报告失败。
+- `docs/architecture.md`：补充 `apps/agent-server` 主入口也遵循“错误显式返回而非 panic” 的初始化约束。
+**验证**：`cargo check -p agent-server` 通过；`cargo test -p agent-server` 通过；随后执行全量 `cargo check` 与 `cargo test`。
+**提交**：`986d9cb` `fix: handle server startup failures gracefully`
+**下次方向**：继续清理剩余生产路径中的 panic-on-init / `expect`，优先检查 `routes` 序列化响应与共享时间戳生成辅助函数是否也能收口为显式错误或无 panic 实现。
 

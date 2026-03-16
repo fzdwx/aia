@@ -97,6 +97,7 @@ README 里真正难的是这些能力：
 - crate 内部已继续拆分为运行时主循环、请求构造、工具执行、事件缓冲、错误与测试子模块，避免继续把所有逻辑堆在单个实现文件中
 - `apps/agent-server` 现在提供显式 turn cancel API；session manager 为运行中轮次持有 `TurnControl`，Web/其他客户端可发起取消，runtime 会把 abort signal 继续传到工具执行上下文与模型流式调用；当前 OpenAI streaming 读取会在 SSE 循环中主动检查取消信号，embedded shell 也会尝试向 brush 当前作业发送 `TERM` 收尾，取消完成态则通过共享 `TurnLifecycle.outcome` 明确表达，避免前后端继续仅靠 failure message 猜测；server 侧也把“请求取消”与“轮次真正结束”为 cancelled 的 SSE 发射点收口为单一完成路径，避免客户端收到重复 cancelled 事件；块级结果里取消也使用独立 `TurnBlock::Cancelled`，不再伪装成 failure
 - `agent-store` 的 SQLite 访问统一通过可恢复的 `Mutex<Connection>` guard 辅助方法进入；即使之前有持锁 panic 造成 poisoned mutex，trace/session 读写与 schema 初始化也不会再直接 panic，而是恢复 guard 继续提供本地存储能力
+- `apps/agent-server` 的进程启动初始化路径也遵循同样原则：provider registry、统一 store、sessions 目录、默认 session、模型构建、监听端口与 `axum::serve` 失败都收口为结构化初始化错误，不再在主入口用 `expect` 直接 panic
 - `StreamEvent` 中与工具相关的语义继续细分：`ToolCallDetected` 表示模型流里已经产出 tool call 决策，但 runtime 还未真正开始执行；`ToolCallStarted` 才表示工具执行正式启动，避免把“模型建议”与“runtime 执行”混成同一个阶段
 - `tape_info` / `tape_handoff` 不再只是 `execute_tool_call` 里的字符串特判；它们现在通过 `Tool` trait 注册到独立 runtime tool registry，再借助 `ToolExecutionContext` 暴露的 runtime host 能力访问会话统计与 handoff 写入，工具协议层与普通工具保持一致
 
