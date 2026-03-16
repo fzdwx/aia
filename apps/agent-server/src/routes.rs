@@ -178,6 +178,21 @@ fn trace_store_error_response(error: LlmTraceStoreError) -> (StatusCode, Json<se
     (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": error.to_string() })))
 }
 
+fn json_response<T: Serialize>(
+    status: StatusCode,
+    payload: T,
+) -> (StatusCode, Json<serde_json::Value>) {
+    match serde_json::to_value(payload) {
+        Ok(value) => (status, Json(value)),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": format!("response serialization failed: {error}")
+            })),
+        ),
+    }
+}
+
 /// Resolve session_id: use provided, or fall back to first session from DB
 fn resolve_session_id(
     state: &crate::state::AppState,
@@ -196,9 +211,7 @@ pub async fn list_sessions(
     State(state): State<SharedState>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     match state.store.list_sessions() {
-        Ok(sessions) => {
-            (StatusCode::OK, Json(serde_json::to_value(sessions).expect("serialize sessions")))
-        }
+        Ok(sessions) => json_response(StatusCode::OK, sessions),
         Err(e) => {
             (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e.to_string() })))
         }
@@ -210,9 +223,7 @@ pub async fn create_session(
     Json(body): Json<CreateSessionRequest>,
 ) -> impl IntoResponse {
     match state.session_manager.create_session(body.title).await {
-        Ok(record) => {
-            (StatusCode::CREATED, Json(serde_json::to_value(record).expect("serialize session")))
-        }
+        Ok(record) => json_response(StatusCode::CREATED, record),
         Err(error) => runtime_worker_error_response(error),
     }
 }
@@ -238,9 +249,7 @@ pub async fn list_traces(
     let offset = (page - 1) * page_size;
     let store = state.store.clone();
     match tokio::task::spawn_blocking(move || store.list_page(page_size, offset)).await {
-        Ok(Ok(result)) => {
-            (StatusCode::OK, Json(serde_json::to_value(result).expect("serialize trace page")))
-        }
+        Ok(Ok(result)) => json_response(StatusCode::OK, result),
         Ok(Err(error)) => trace_store_error_response(error),
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -256,9 +265,7 @@ pub async fn get_trace(
     let store = state.store.clone();
     let missing_id = id.clone();
     match tokio::task::spawn_blocking(move || store.get(&id)).await {
-        Ok(Ok(Some(trace))) => {
-            (StatusCode::OK, Json(serde_json::to_value(trace).expect("serialize trace")))
-        }
+        Ok(Ok(Some(trace))) => json_response(StatusCode::OK, trace),
         Ok(Ok(None)) => (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": format!("trace 不存在：{missing_id}") })),
@@ -276,9 +283,7 @@ pub async fn get_trace_summary(
 ) -> (StatusCode, Json<serde_json::Value>) {
     let store = state.store.clone();
     match tokio::task::spawn_blocking(move || store.summary()).await {
-        Ok(Ok(summary)) => {
-            (StatusCode::OK, Json(serde_json::to_value(summary).expect("serialize trace summary")))
-        }
+        Ok(Ok(summary)) => json_response(StatusCode::OK, summary),
         Ok(Err(error)) => trace_store_error_response(error),
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -443,7 +448,7 @@ pub async fn get_session_info(
         );
     };
     match state.session_manager.get_session_info(session_id).await {
-        Ok(stats) => (StatusCode::OK, Json(serde_json::to_value(stats).expect("serialize stats"))),
+        Ok(stats) => json_response(StatusCode::OK, stats),
         Err(error) => runtime_worker_error_response(error),
     }
 }
@@ -487,7 +492,7 @@ pub async fn get_history(
     Query(query): Query<SessionQuery>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     let Some(session_id) = resolve_session_id(&state, query.session_id) else {
-        return (StatusCode::OK, Json(serde_json::to_value(Vec::<()>::new()).expect("empty")));
+        return json_response(StatusCode::OK, Vec::<()>::new());
     };
     match state.session_manager.get_history(session_id).await {
         Ok(turns) => {
@@ -517,12 +522,10 @@ pub async fn get_current_turn(
     Query(query): Query<SessionQuery>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     let Some(session_id) = resolve_session_id(&state, query.session_id) else {
-        return (StatusCode::OK, Json(serde_json::to_value(Option::<()>::None).expect("null")));
+        return json_response(StatusCode::OK, Option::<()>::None);
     };
     match state.session_manager.get_current_turn(session_id).await {
-        Ok(current) => {
-            (StatusCode::OK, Json(serde_json::to_value(current).expect("serialize current turn")))
-        }
+        Ok(current) => json_response(StatusCode::OK, current),
         Err(error) => runtime_worker_error_response(error),
     }
 }
@@ -591,7 +594,9 @@ pub async fn cancel_turn(
 
 #[cfg(test)]
 mod tests {
-    use super::{CancelTurnRequest, ModelConfigDto, ModelLimitDto};
+    use axum::http::StatusCode;
+
+    use super::{CancelTurnRequest, ModelConfigDto, ModelLimitDto, json_response};
     use provider_registry::{ModelConfig, ModelLimit};
 
     #[test]
@@ -610,6 +615,14 @@ mod tests {
 
         let round_trip = ModelConfigDto::from(&model);
         assert_eq!(round_trip.limit, dto.limit);
+    }
+
+    #[test]
+    fn json_response_serializes_payload() {
+        let (status, body) = json_response(StatusCode::CREATED, serde_json::json!({ "ok": true }));
+
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(body.0, serde_json::json!({ "ok": true }));
     }
 
     #[test]

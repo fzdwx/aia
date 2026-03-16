@@ -80,6 +80,7 @@
 - 完成 stop/cancel 第二阶段基线：runtime 会把 abort 继续传到 OpenAI streaming 调用，`openai-adapter` 在流式读取中主动检查取消信号；embedded `brush` shell 在收到取消后会向当前作业发送 `TERM` 并尽快收尾；`TurnLifecycle` 新增共享 `outcome` 字段，让前后端不再仅靠 `failure_message` 猜测取消状态；server 取消 API 只负责触发 abort，真正的 cancelled SSE 改由 worker 在轮次结束时统一发出一次，避免重复事件；块级协议也已把取消从 `failure` 中拆出为独立 `cancelled` block，避免前端继续把取消渲染成失败
 - 完成 `agent-store` SQLite 锁中毒恢复：trace/session 读写与 schema 初始化不再因 `Mutex<Connection>` poisoned 而 panic，改为恢复 guard 继续服务，并补回归测试覆盖 poisoned mutex 路径
 - 完成 `apps/agent-server` 启动路径错误收口：provider 注册表、SQLite store、sessions 目录、默认 session、模型构建、端口绑定与 server serve 失败不再 `expect` panic，而是统一返回结构化初始化错误并以非零退出码结束进程
+- 完成 `apps/agent-server` 路由响应序列化收口：session/trace/current-turn/info 等 JSON 响应不再因 `serde_json::to_value(...).expect(...)` 在服务路径 panic，而是统一回退为 500 错误响应
 
 ## 正在进行
 

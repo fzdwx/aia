@@ -161,15 +161,16 @@
 **提交**：待提交
 **下次方向**：继续补 Web 测试入口，并让前端取消态回归真正纳入标准验证链路；之后再回到 provider / shell 的真实取消覆盖率诊断。
 
-## 2026-03-16 Session 13
+## 2026-03-16 Session 14
 
-**诊断**：`apps/agent-server` 主入口仍在 provider 注册表、SQLite store、sessions 目录、默认 session、模型构建、端口绑定与 serve 路径上直接 `expect`，一旦初始化失败就会把可恢复的配置/环境问题升级成进程 panic。
-**决策**：先把 server 启动路径收口为结构化初始化错误并以非零退出码失败；这是比继续扩展能力更高优先级的可靠性修复，而且改动局部、验证直接。
+**诊断**：`apps/agent-server` 多个 HTTP handler 仍通过 `serde_json::to_value(...).expect(...)` 构造响应；一旦某个响应对象序列化失败，本应返回 500 的请求会被升级成服务 panic。
+**决策**：先在路由层引入统一安全 JSON 序列化 helper，并替换 session/trace/current-turn/info 等主路径上的 `expect`；这是延续上一轮 server 稳定性收口的最小高杠杆修复。
 **变更**：
-- `apps/agent-server/src/main.rs`：新增 `ServerInitError` 与 `run() -> Result` 启动入口，统一处理 provider 注册表、AiaStore、sessions 目录、默认 session、模型构建、端口绑定与 `axum::serve` 的初始化失败，不再在生产路径 `expect` panic。
-- `docs/status.md`：更新已完成事项，记录 server 启动初始化错误已收口为可报告失败。
-- `docs/architecture.md`：补充 `apps/agent-server` 主入口也遵循“错误显式返回而非 panic” 的初始化约束。
+- `apps/agent-server/src/routes.rs`：新增 `json_response` helper，将响应序列化失败统一降级为 500 JSON 错误；替换 session 列表、创建 session、trace 列表/详情/汇总、session info、空 history/null current-turn 与 current turn 响应中的 `expect`。
+- `apps/agent-server/src/routes.rs`：新增 1 条 `json_response` 回归测试，覆盖 helper 的正常序列化路径。
+- `docs/status.md`：更新已完成事项，记录 route 响应序列化 panic 已收口。
+- `docs/architecture.md`：补充 server 路由层响应序列化也遵循显式错误返回约束。
 **验证**：`cargo check -p agent-server` 通过；`cargo test -p agent-server` 通过；随后执行全量 `cargo check` 与 `cargo test`。
-**提交**：`ac0bb50` `fix: handle server startup failures gracefully`
-**下次方向**：继续清理剩余生产路径中的 panic-on-init / `expect`，优先检查 `routes` 序列化响应与共享时间戳生成辅助函数是否也能收口为显式错误或无 panic 实现。
+**提交**：待提交
+**下次方向**：继续清理剩余生产路径中的 panic helpers，优先关注共享时间戳/ID 生成里的 `SystemTime` `expect`，以及 server 以外 crate 的非测试 `unwrap_or_else(panic)` 风险点。
 
