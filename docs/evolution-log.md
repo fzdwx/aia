@@ -171,6 +171,6 @@
 - `crates/agent-runtime/src/runtime/helpers.rs`、`crates/provider-registry/src/registry.rs`、`crates/session-tape/src/tape.rs`、`apps/agent-server/src/main.rs`、`apps/agent-server/src/model.rs`、`apps/agent-server/src/session_manager.rs`、`apps/agent-server/src/sse.rs`：继续复用 `aia-config` 的共享默认值与标识 helper，收口分散常量。
 - `README.md`、`docs/status.md`、`docs/architecture.md`：同步记录 `aia-config` 已覆盖的共享配置边界。
 **验证**：`cargo test -p aia-config -p agent-runtime -p provider-registry -p session-tape -p agent-server` 通过；`cargo check -p aia-config -p agent-runtime -p provider-registry -p session-tape -p agent-server` 通过。
-**提交**：待提交
+**提交**：`d12df14` `refactor: centralize shared defaults in aia-config`
 **下次方向**：继续收口这批共享配置接入的剩余表层影响，优先清理未提交的 Web/tooling 变更与 Rust 侧仍分散的默认值常量。
 
