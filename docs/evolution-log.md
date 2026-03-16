@@ -171,6 +171,6 @@
 - `docs/status.md`：更新已完成事项，记录 route 响应序列化 panic 已收口。
 - `docs/architecture.md`：补充 server 路由层响应序列化也遵循显式错误返回约束。
 **验证**：`cargo check -p agent-server` 通过；`cargo test -p agent-server` 通过；随后执行全量 `cargo check` 与 `cargo test`。
-**提交**：待提交
+**提交**：`07803dc` `fix: avoid route response serialization panics`
 **下次方向**：继续清理剩余生产路径中的 panic helpers，优先关注共享时间戳/ID 生成里的 `SystemTime` `expect`，以及 server 以外 crate 的非测试 `unwrap_or_else(panic)` 风险点。
 
