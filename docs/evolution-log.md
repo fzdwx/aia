@@ -49,18 +49,6 @@
 **提交**：`760d2bb` `refactor: remove unsafe runtime tool bridge`
 **下次方向**：优先继续把统一取消/中断机制上推到 runtime 工具执行层，或补一轮 workspace lint 配置收口，确保 `unsafe_code`/clippy 约束被各 crate 真正继承。
 
-## 2026-03-16 Session 3
-
-**诊断**：仓库里对“生成式 UI”只有 `docs/todo.md` 中的一条外链提醒，缺少结合 `aia` 当前 runtime / SSE / trace / tape 架构的本地设计说明，后续实现容易直接滑向前端私有协议或模型生成任意代码。
-**决策**：先补一份项目内的 `generative-ui-article.md` 设计文章，把生成式 UI 的分层、边界、渐进落地路线和与现有架构的衔接方式说清楚；这是低风险但高杠杆的架构收口。
-**变更**：
-- `docs/generative-ui-article.md`：新增生成式 UI 设计文章，定义 `aia` 语境下的 generative UI、推荐的协议分层、安全边界、与 trace/tape 的关系，以及从 tool-driven widget 到 assistant-declared widget 的迭代路线。
-- `docs/todo.md`：将原先单一外链替换为“本地设计文章 + 外部参考”，让后续实现有仓库内可追溯起点。
-- `docs/evolution-log.md`：追加本次演进记录并补充提交信息。
-**验证**：`cargo check` 通过；`cargo test` 通过；文档文件已纳入工作区。
-**提交**：`8a63d37` `docs: add generative ui design article`
-**下次方向**：按文档中的最小路线，优先在共享层引入最小 `UiWidget` 协议草案，并从 `tape_info`/`grep` 这类结构化结果开始试做 tool-driven widget。
-
 ## 2026-03-16 Session 2
 
 **诊断**：`apps/agent-server` 的 session manager 在运行态路径里对多个 `RwLock` 使用 `expect("lock poisoned")`，一旦后台任务曾在持锁期间 panic，后续读取 history/current turn 或写入 provider/session 快照时会把中毒继续升级成 server panic。
@@ -75,6 +63,18 @@
 
 ## 2026-03-16 Session 3
 
+**诊断**：仓库里对“生成式 UI”只有 `docs/todo.md` 中的一条外链提醒，缺少结合 `aia` 当前 runtime / SSE / trace / tape 架构的本地设计说明，后续实现容易直接滑向前端私有协议或模型生成任意代码。
+**决策**：先补一份项目内的 `generative-ui-article.md` 设计文章，把生成式 UI 的分层、边界、渐进落地路线和与现有架构的衔接方式说清楚；这是低风险但高杠杆的架构收口。
+**变更**：
+- `docs/generative-ui-article.md`：新增生成式 UI 设计文章，定义 `aia` 语境下的 generative UI、推荐的协议分层、安全边界、与 trace/tape 的关系，以及从 tool-driven widget 到 assistant-declared widget 的迭代路线。
+- `docs/todo.md`：将原先单一外链替换为“本地设计文章 + 外部参考”，让后续实现有仓库内可追溯起点。
+- `docs/evolution-log.md`：追加本次演进记录并补充提交信息。
+**验证**：`cargo check` 通过；`cargo test` 通过；文档文件已纳入工作区。
+**提交**：`263f220` `docs: add generative ui design article`
+**下次方向**：按文档中的最小路线，优先在共享层引入最小 `UiWidget` 协议草案，并从 `tape_info`/`grep` 这类结构化结果开始试做 tool-driven widget。
+
+## 2026-03-16 Session 4
+
 **诊断**：stop/cancel 语义仍停留在产品需求层，运行中 turn 一旦进入长工具调用就无法从 server/Web 主路径发起中断，导致长轮次恢复与资源回收不可靠。
 **决策**：先做一条最小但闭环的 cancel 主链：server 新增取消 API，session manager 持有运行中 `TurnControl`，runtime 把 abort signal 传到工具执行上下文，Web 提供 stop 按钮并显示 cancelled 状态；这是当前最有杠杆的可靠性补口。
 **变更**：
@@ -84,5 +84,16 @@
 - `apps/web/src/lib/api.ts`、`apps/web/src/lib/types.ts`、`apps/web/src/stores/chat-store.ts`、`apps/web/src/components/chat-input.tsx`、`apps/web/src/components/chat-messages.tsx`：新增取消 API 调用、SSE 事件类型与 store 处理，输入区发送按钮在运行中切换为 stop，消息区能显示 cancelled 状态。
 - `docs/status.md`、`docs/architecture.md`：更新当前 stop/cancel 进展与剩余缺口说明。
 **验证**：`cargo check` 通过；`cargo test` 通过；新增 runtime/server 取消相关回归测试。
-**提交**：代码提交 `da2ff68` `feat: add turn cancellation flow`
+**提交**：`da2ff68` `feat: add turn cancellation flow`
 **下次方向**：继续把 cancel 从当前 server→runtime→tool context 基线扩展到真正中断 OpenAI streaming 请求与 embedded shell 长任务，并评估是否把取消状态也收口进共享 turn protocol，避免前后端分别猜测。
+
+## 2026-03-16 Session 5
+
+**诊断**：`chore: clean` 之后仓库把 `docs/generative-ui-article.md` 删掉了，但 `docs/todo.md` 和演进历史仍把它当作本地设计基线，导致文档引用悬空、架构记录与实际仓库状态不一致。
+**决策**：先恢复被误删的生成式 UI 设计文章，并校正 `docs/evolution-log.md` 里的提交记录与 session 顺序；这是对现有未收口文档改动的低风险收口，能立刻恢复设计文档可追溯性。
+**变更**：
+- `docs/generative-ui-article.md`：从历史提交恢复生成式 UI 设计文章，重新补回本地协议分层、安全边界与迭代路线说明。
+- `docs/evolution-log.md`：修正生成式 UI / cancel 两次会话的提交信息与 session 顺序，并追加本次恢复记录。
+**验证**：`cargo check` 通过；`cargo test` 通过；`docs/todo.md` 的本地文档引用重新有效。
+**提交**：`0606ea8` `docs: restore generative ui design article`
+**下次方向**：优先把文档中的最小 `UiWidget` 协议草案落到共享类型，并从 `tape_info` 或 `grep` 开始试做 tool-driven widget。
