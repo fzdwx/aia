@@ -261,6 +261,12 @@ where
             }
 
             let assistant_text = completion.plain_text();
+            if !assistant_text.is_empty()
+                && buffers.last_assistant_text.is_none()
+                && buffers.streamed_assistant_text == assistant_text
+            {
+                self.flush_streamed_partial_segments(&turn_id, &mut buffers)?;
+            }
             let saw_tool_calls = match self.process_completion_segments(
                 &turn_id,
                 llm_trace_context.as_ref(),
@@ -405,6 +411,9 @@ where
                     buffers.blocks.push(TurnBlock::Thinking { content: text.clone() });
                 }
                 CompletionSegment::Text(text) if !text.is_empty() => {
+                    if buffers.last_assistant_text.as_deref() == Some(text.as_str()) {
+                        continue;
+                    }
                     let assistant_message = Message::new(Role::Assistant, text.clone());
                     let entry_id = self.append_tape_entry(
                         TapeEntry::message(&assistant_message).with_run_id(turn_id),

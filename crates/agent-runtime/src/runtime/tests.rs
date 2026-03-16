@@ -597,6 +597,46 @@ fn provider_取消错误前的流式_partial_output_会进入最终轮次() {
     }));
 }
 
+struct StreamingTextThenSameCompletionModel;
+
+impl LanguageModel for StreamingTextThenSameCompletionModel {
+    type Error = CoreError;
+
+    fn complete(&self, _request: CompletionRequest) -> Result<Completion, Self::Error> {
+        Err(CoreError::new("should use streaming path"))
+    }
+
+    fn complete_streaming_with_abort(
+        &self,
+        _request: CompletionRequest,
+        _abort: &AbortSignal,
+        sink: &mut dyn FnMut(agent_core::StreamEvent),
+    ) -> Result<Completion, Self::Error> {
+        sink(agent_core::StreamEvent::TextDelta {
+            text: "同一段回答".into(),
+        });
+        Ok(Completion::text("同一段回答"))
+    }
+}
+
+#[test]
+fn 流式文本与最终完成文本相同时不会重复记录助手消息() {
+    let identity = ModelIdentity::new("local", "streaming-same-text", ModelDisposition::Balanced);
+    let mut runtime = AgentRuntime::new(StreamingTextThenSameCompletionModel, StubTools, identity);
+
+    let output = runtime.handle_turn("测试重复显示").expect("应成功完成");
+
+    assert_eq!(output.assistant_text, "同一段回答");
+    let assistant_messages = runtime
+        .tape()
+        .entries()
+        .iter()
+        .filter_map(|entry| entry.as_message())
+        .filter(|message| message.role == Role::Assistant && message.content == "同一段回答")
+        .count();
+    assert_eq!(assistant_messages, 1);
+}
+
 #[test]
 fn 运行时工具失败事件保留失败结果() {
     let identity = ModelIdentity::new("local", "stub", ModelDisposition::Balanced);
