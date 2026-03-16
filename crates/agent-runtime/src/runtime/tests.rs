@@ -10,7 +10,9 @@ use serde_json::json;
 use session_tape::SessionTape;
 
 use super::{AgentRuntime, RuntimeEvent};
-use crate::{ToolInvocationLifecycle, ToolInvocationOutcome, TurnControl, TurnLifecycle};
+use crate::{
+    ToolInvocationLifecycle, ToolInvocationOutcome, TurnControl, TurnLifecycle, TurnOutcome,
+};
 
 struct StubModel;
 
@@ -476,6 +478,40 @@ fn 运行时可暴露独立_turn_control() {
     assert!(!control.abort_signal().is_aborted());
     control.cancel();
     assert!(control.abort_signal().is_aborted());
+}
+
+#[test]
+fn 取消轮次会标记为_cancelled_outcome() {
+    let identity = ModelIdentity::new("local", "stub", ModelDisposition::Balanced);
+    let mut runtime = AgentRuntime::new(StubModel, BlockingCancelAwareTools, identity);
+    let control = TurnControl::new(AbortSignal::new());
+    let cancel_handle = control.clone();
+
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        cancel_handle.cancel();
+    });
+
+    let subscriber = runtime.subscribe();
+    let _ = runtime
+        .handle_turn_streaming_with_control("请执行", control, |_| {})
+        .expect_err("取消后应结束当前轮");
+
+    let events = runtime.collect_events(subscriber).expect("应读取事件");
+    let last_turn = runtime
+        .tape()
+        .entries()
+        .iter()
+        .any(|entry| entry.event_name() == Some("turn_failed"));
+    assert!(last_turn);
+    let lifecycle = events
+        .into_iter()
+        .find_map(|event| match event {
+            RuntimeEvent::TurnLifecycle { turn } => Some(turn),
+            _ => None,
+        })
+        .expect("应发布 turn lifecycle");
+    assert_eq!(lifecycle.outcome, TurnOutcome::Cancelled);
 }
 
 #[test]
@@ -997,6 +1033,7 @@ fn 成功轮会聚合成完整轮次块事件() {
                 tool_invocations,
                 usage: None,
                 failure_message: None,
+                outcome: TurnOutcome::Succeeded,
             }
         }
             if turn_id.starts_with("turn-")
@@ -1043,6 +1080,7 @@ fn 工具失败后成功收尾的轮次也会聚合完整块事件() {
                 tool_invocations,
                 usage: None,
                 failure_message: None,
+                outcome: TurnOutcome::Succeeded,
             }
         }
             if turn_id.starts_with("turn-")

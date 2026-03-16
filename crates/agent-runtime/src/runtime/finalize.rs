@@ -3,7 +3,7 @@ use session_tape::TapeEntry;
 
 use agent_core::{LanguageModel, ToolExecutor};
 
-use crate::{TurnBlock, TurnLifecycle};
+use crate::{TurnBlock, TurnLifecycle, TurnOutcome};
 
 use super::{
     AgentRuntime, RuntimeError,
@@ -42,6 +42,7 @@ where
             tool_invocations: context.tool_invocations,
             usage: context.summary.usage,
             failure_message: None,
+            outcome: TurnOutcome::Succeeded,
         });
         Ok(())
     }
@@ -76,6 +77,11 @@ where
             tool_invocations: context.tool_invocations.to_vec(),
             usage: None,
             failure_message: Some(runtime_error.to_string()),
+            outcome: if runtime_error.is_cancelled() {
+                TurnOutcome::Cancelled
+            } else {
+                TurnOutcome::Failed
+            },
         });
         Ok(())
     }

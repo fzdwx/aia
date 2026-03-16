@@ -191,7 +191,7 @@ impl LanguageModel for ServerModel {
     type Error = ServerModelError;
 
     fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
-        self.complete_with_trace(request, None)
+        self.complete_with_trace(request, None, None)
     }
 
     fn complete_streaming(
@@ -199,7 +199,20 @@ impl LanguageModel for ServerModel {
         request: CompletionRequest,
         sink: &mut dyn FnMut(StreamEvent),
     ) -> Result<Completion, Self::Error> {
-        self.complete_with_trace(request, Some(sink))
+        self.complete_with_trace(request, None, Some(sink))
+    }
+
+    fn complete_streaming_with_abort(
+        &self,
+        request: CompletionRequest,
+        abort: &agent_core::AbortSignal,
+        sink: &mut dyn FnMut(StreamEvent),
+    ) -> Result<Completion, Self::Error> {
+        self.complete_with_trace(request, Some(abort), Some(sink))
+    }
+
+    fn is_cancelled_error(error: &Self::Error) -> bool {
+        matches!(error, ServerModelError::OpenAi(openai) if openai.is_cancelled())
     }
 }
 
@@ -207,17 +220,18 @@ impl ServerModel {
     fn complete_with_trace(
         &self,
         request: CompletionRequest,
+        abort: Option<&agent_core::AbortSignal>,
         sink: Option<&mut dyn FnMut(StreamEvent)>,
     ) -> Result<Completion, ServerModelError> {
         let started_at_ms = now_timestamp_ms();
         let trace_seed = self.trace_seed(&request, sink.is_some());
         let mut event_collector = TraceEventCollector::new(started_at_ms);
         let started = Instant::now();
-        let result = match (&self.inner, sink) {
-            (ServerModelInner::Bootstrap(model), None) => {
+        let result = match (&self.inner, abort, sink) {
+            (ServerModelInner::Bootstrap(model), _, None) => {
                 model.complete(request).map_err(ServerModelError::Bootstrap)
             }
-            (ServerModelInner::Bootstrap(model), Some(sink)) => {
+            (ServerModelInner::Bootstrap(model), _, Some(sink)) => {
                 let mut traced_sink = |event: StreamEvent| {
                     event_collector.observe(&event);
                     sink(event);
@@ -226,10 +240,10 @@ impl ServerModel {
                     .complete_streaming(request, &mut traced_sink)
                     .map_err(ServerModelError::Bootstrap)
             }
-            (ServerModelInner::OpenAiResponses(model), None) => {
+            (ServerModelInner::OpenAiResponses(model), None, None) => {
                 model.complete(request).map_err(ServerModelError::OpenAi)
             }
-            (ServerModelInner::OpenAiResponses(model), Some(sink)) => {
+            (ServerModelInner::OpenAiResponses(model), None, Some(sink)) => {
                 let mut traced_sink = |event: StreamEvent| {
                     event_collector.observe(&event);
                     sink(event);
@@ -238,10 +252,22 @@ impl ServerModel {
                     .complete_streaming(request, &mut traced_sink)
                     .map_err(ServerModelError::OpenAi)
             }
-            (ServerModelInner::OpenAiChatCompletions(model), None) => {
+            (ServerModelInner::OpenAiResponses(model), Some(abort), Some(sink)) => {
+                let mut traced_sink = |event: StreamEvent| {
+                    event_collector.observe(&event);
+                    sink(event);
+                };
+                model
+                    .complete_streaming_with_abort(request, abort, &mut traced_sink)
+                    .map_err(ServerModelError::OpenAi)
+            }
+            (ServerModelInner::OpenAiResponses(model), Some(_), None) => {
                 model.complete(request).map_err(ServerModelError::OpenAi)
             }
-            (ServerModelInner::OpenAiChatCompletions(model), Some(sink)) => {
+            (ServerModelInner::OpenAiChatCompletions(model), None, None) => {
+                model.complete(request).map_err(ServerModelError::OpenAi)
+            }
+            (ServerModelInner::OpenAiChatCompletions(model), None, Some(sink)) => {
                 let mut traced_sink = |event: StreamEvent| {
                     event_collector.observe(&event);
                     sink(event);
@@ -249,6 +275,18 @@ impl ServerModel {
                 model
                     .complete_streaming(request, &mut traced_sink)
                     .map_err(ServerModelError::OpenAi)
+            }
+            (ServerModelInner::OpenAiChatCompletions(model), Some(abort), Some(sink)) => {
+                let mut traced_sink = |event: StreamEvent| {
+                    event_collector.observe(&event);
+                    sink(event);
+                };
+                model
+                    .complete_streaming_with_abort(request, abort, &mut traced_sink)
+                    .map_err(ServerModelError::OpenAi)
+            }
+            (ServerModelInner::OpenAiChatCompletions(model), Some(_), None) => {
+                model.complete(request).map_err(ServerModelError::OpenAi)
             }
         };
 
@@ -612,14 +650,78 @@ mod tests {
     };
 
     use agent_core::{
-        CompletionRequest, ConversationItem, LanguageModel, Message, ModelDisposition,
+        AbortSignal, CompletionRequest, ConversationItem, LanguageModel, Message, ModelDisposition,
         ModelIdentity, Role,
     };
     use agent_store::{AiaStore, LlmTraceStatus, LlmTraceStore};
     use provider_registry::{ModelConfig, ModelLimit, ProviderKind, ProviderProfile};
     use serde_json::json;
 
-    use super::{ProviderLaunchChoice, build_model_from_selection};
+    use super::{ProviderLaunchChoice, ServerModel, build_model_from_selection};
+
+    fn server_model_marks_cancelled_openai_errors_as_cancelled() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+        let address = listener.local_addr().expect("address should resolve");
+
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept should succeed");
+            let mut buffer = [0_u8; 4096];
+            let _ = stream.read(&mut buffer).expect("request should be readable");
+
+            let response =
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n";
+            stream.write_all(response.as_bytes()).expect("response write should succeed");
+            stream.flush().expect("response flush should succeed");
+            thread::sleep(std::time::Duration::from_millis(120));
+            let _ = stream.write_all(b"data: [DONE]\n\n");
+        });
+
+        let profile = ProviderProfile {
+            name: "rayin".to_string(),
+            kind: ProviderKind::OpenAiResponses,
+            base_url: format!("http://{address}"),
+            api_key: "test-key".to_string(),
+            models: vec![ModelConfig {
+                id: "gpt-5.4".to_string(),
+                display_name: None,
+                limit: Some(ModelLimit { context: Some(200_000), output: Some(8_192) }),
+                default_temperature: None,
+                supports_reasoning: false,
+                reasoning_effort: None,
+            }],
+            active_model: Some("gpt-5.4".to_string()),
+        };
+
+        let (_, model) = build_model_from_selection(ProviderLaunchChoice::OpenAi(profile), None)
+            .expect("model should build");
+
+        let abort = AbortSignal::new();
+        let cancel = abort.clone();
+        thread::spawn(move || {
+            thread::sleep(std::time::Duration::from_millis(30));
+            cancel.abort();
+        });
+
+        let error = model
+            .complete_streaming_with_abort(
+                CompletionRequest {
+                    model: ModelIdentity::new("openai", "gpt-5.4", ModelDisposition::Balanced),
+                    instructions: Some("保持简洁".into()),
+                    conversation: vec![ConversationItem::Message(Message::new(Role::User, "hi"))],
+                    max_output_tokens: Some(128),
+                    available_tools: vec![],
+                    prompt_cache: None,
+                    user_agent: Some("aia-test/1.0".into()),
+                    trace_context: None,
+                },
+                &abort,
+                &mut |_| {},
+            )
+            .expect_err("completion should be cancelled");
+
+        handle.join().expect("server thread should exit");
+        assert!(ServerModel::is_cancelled_error(&error));
+    }
 
     #[test]
     fn responses_model_call_writes_llm_trace_record() {

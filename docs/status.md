@@ -73,17 +73,18 @@
 - 完成 Web 端 turn 提交请求的 `keepalive` 加固：页面刷新或跳转时，已发出的 `POST /api/turn` 不再容易因为浏览器中断请求而导致本轮根本未进入 server worker
 - 完成 provider 注册表加载的旧路径兼容：当 `.aia/providers.json` 缺失时，server 会自动回退读取历史遗留的 `.aia/sessions/providers.json`，避免已有 provider 数据因为路径迁移而在启动后表现为“空配置”
 - 完成完整的 stop/cancel 基线：server 暴露 `POST /api/turn/cancel`，session manager 能中断运行中 turn，runtime 把取消信号传到工具执行上下文，Web 输入区提供 stop 按钮并显示 cancelled 状态
+- 完成 stop/cancel 第二阶段基线：runtime 会把 abort 继续传到 OpenAI streaming 调用，`openai-adapter` 在流式读取中主动检查取消信号；embedded `brush` shell 在收到取消后会向当前作业发送 `TERM` 并尽快收尾；`TurnLifecycle` 新增共享 `outcome` 字段，让前后端不再仅靠 `failure_message` 猜测取消状态
 
 ## 正在进行
 
 - 收口 runtime worker 留在 `apps/agent-server`、哪些能力适合上移到 `agent-runtime` 的边界
 - 观察内嵌 `brush` 作为 shell 运行时的实际稳定性、命令兼容性与中断语义
 - 继续把 trace 数据模型从“本地 span store + event timeline”推进到更完整的 resources / richer events 模型，但暂不抢在工具协议映射与 MCP 之前做 exporter / collector 集成
-- 验证 stop/cancel 目前对长时间 shell / 外部 provider streaming 的实际覆盖率；当前已打通 server→runtime→tool context，但 LLM HTTP 请求本身仍待下一步继续做可中断化
+- 验证 stop/cancel 目前对长时间 shell / 外部 provider streaming 的实际覆盖率；当前已打通 server→runtime→tool context，并进一步补上 OpenAI streaming 读取中的取消检查与 shell 作业 `TERM` 中断，后续仍需继续观察 provider/运行时在不同上游和复杂 shell pipeline 下的真实中断覆盖率
 
 ## 下一步
 
-1. 继续把 stop/cancel 从当前 server→runtime→tool context 基线扩展到真正中断 OpenAI streaming 请求与 embedded shell 长任务
+1. 继续观察并补强 stop/cancel 在不同 OpenAI 兼容上游与复杂 embedded shell pipeline 下的实际中断覆盖率，必要时把“读流中断”继续升级为更底层的 HTTP 连接级取消
 1. runtime 驱动辅助从 `apps/agent-server` 继续抽到共享层
 2. 在工具协议边界进一步收稳后，把 `llm-trace` 从当前本地 span record + event timeline 继续推进到更完整的 resources / richer events 形态
 3. 继续补强 shell 中断 / 长任务处理与更细粒度的工具运行时能力

@@ -10,6 +10,7 @@ use agent_core::{
 };
 use brush_builtins::{BuiltinSet, ShellBuilderExt};
 use brush_core::openfiles::OpenFiles;
+use brush_core::traps::TrapSignal;
 
 const EMBEDDED_SHELL_NAME: &str = "brush";
 const SHELL_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(25);
@@ -52,7 +53,7 @@ impl Tool for ShellTool {
             return Ok(ToolResult::from_call(call, "[aborted]"));
         }
 
-        let execution = run_embedded_brush(&command, cwd, output)?;
+        let execution = run_embedded_brush(&command, cwd, &context.abort, output)?;
 
         let mut result_text = execution.stdout.clone();
         if !execution.stderr.is_empty() {
@@ -82,11 +83,18 @@ enum ShellEvent {
     Output(ToolOutputDelta),
     StreamClosed(ToolOutputStream),
     Finished(Result<i32, CoreError>),
+    ShellReady(tokio::sync::oneshot::Sender<ShellControlMessage>),
+}
+
+#[derive(Clone, Copy)]
+enum ShellControlMessage {
+    Abort,
 }
 
 fn run_embedded_brush(
     command: &str,
     cwd: &Path,
+    abort: &agent_core::AbortSignal,
     output: &mut dyn FnMut(ToolOutputDelta),
 ) -> Result<EmbeddedShellExecution, CoreError> {
     let (stdout_reader, stdout_writer) = std::io::pipe()
@@ -104,8 +112,13 @@ fn run_embedded_brush(
     let shell_cwd = cwd.to_path_buf();
     let shell_tx = event_tx.clone();
     let shell_handle = thread::spawn(move || {
-        let result =
-            run_embedded_brush_in_runtime(shell_command, shell_cwd, stdout_writer, stderr_writer);
+        let result = run_embedded_brush_in_runtime(
+            shell_command,
+            shell_cwd,
+            stdout_writer,
+            stderr_writer,
+            shell_tx.clone(),
+        );
         let _ = shell_tx.send(ShellEvent::Finished(result));
     });
     drop(event_tx);
@@ -115,8 +128,17 @@ fn run_embedded_brush(
     let mut stdout_closed = false;
     let mut stderr_closed = false;
     let mut finished = None;
+    let mut control: Option<tokio::sync::oneshot::Sender<ShellControlMessage>> = None;
+    let mut abort_sent = false;
 
     while !(stdout_closed && stderr_closed && finished.is_some()) {
+        if abort.is_aborted() && !abort_sent {
+            if let Some(control_tx) = control.take() {
+                let _ = control_tx.send(ShellControlMessage::Abort);
+            }
+            abort_sent = true;
+        }
+
         match event_rx.recv_timeout(SHELL_EVENT_POLL_INTERVAL) {
             Ok(ShellEvent::Output(delta)) => {
                 match delta.stream {
@@ -131,6 +153,9 @@ fn run_embedded_brush(
             },
             Ok(ShellEvent::Finished(result)) => {
                 finished = Some(result);
+            }
+            Ok(ShellEvent::ShellReady(control_tx)) => {
+                control = Some(control_tx);
             }
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => break,
@@ -152,6 +177,7 @@ fn run_embedded_brush_in_runtime(
     cwd: PathBuf,
     stdout_writer: std::io::PipeWriter,
     stderr_writer: std::io::PipeWriter,
+    shell_tx: mpsc::Sender<ShellEvent>,
 ) -> Result<i32, CoreError> {
     let runtime =
         tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| {
@@ -178,7 +204,26 @@ fn run_embedded_brush_in_runtime(
         params.set_fd(OpenFiles::STDOUT_FD, stdout_writer.into());
         params.set_fd(OpenFiles::STDERR_FD, stderr_writer.into());
 
-        shell.run_string(command, &params).await.map_err(|e| {
+        let (control_tx, control_rx) = tokio::sync::oneshot::channel::<ShellControlMessage>();
+        let _ = shell_tx.send(ShellEvent::ShellReady(control_tx));
+
+        tokio::pin!(control_rx);
+        let run_result = tokio::select! {
+            result = shell.run_string(command, &params) => result,
+            message = &mut control_rx => {
+                if matches!(message, Ok(ShellControlMessage::Abort)) {
+                    for job in &shell.jobs.jobs {
+                        let _ = job.kill(TrapSignal::try_from("TERM").map_err(|e| {
+                            CoreError::new(format!("failed to resolve TERM signal: {e}"))
+                        })?);
+                    }
+                    return Ok(130);
+                }
+                return Ok(130);
+            }
+        };
+
+        run_result.map_err(|e| {
             CoreError::new(format!("embedded {EMBEDDED_SHELL_NAME} execution failed: {e}"))
         })?;
 
@@ -227,7 +272,7 @@ mod tests {
     #[test]
     fn embedded_brush_runtime_executes_shell_command() {
         let mut deltas = Vec::new();
-        let execution = run_embedded_brush("printf 'ok'", Path::new("."), &mut |delta| {
+        let execution = run_embedded_brush("printf 'ok'", Path::new("."), &AbortSignal::new(), &mut |delta| {
             deltas.push(delta);
         })
         .expect("embedded brush execution should succeed");
@@ -275,5 +320,32 @@ mod tests {
 
         assert_eq!(stdout, "out");
         assert_eq!(stderr, "err");
+    }
+
+    #[test]
+    fn embedded_brush_runtime_honors_abort_signal() {
+        let abort = AbortSignal::new();
+        let cancel = abort.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            cancel.abort();
+        });
+
+        let mut deltas = Vec::new();
+        let execution = run_embedded_brush(
+            "sleep 5; printf 'done'",
+            Path::new("."),
+            &abort,
+            &mut |delta| deltas.push(delta),
+        )
+        .expect("embedded brush should return after abort");
+
+        assert_eq!(execution.exit_code, 130);
+        let stdout = deltas
+            .iter()
+            .filter(|delta| matches!(delta.stream, ToolOutputStream::Stdout))
+            .map(|delta| delta.text.as_str())
+            .collect::<String>();
+        assert!(!stdout.contains("done"));
     }
 }

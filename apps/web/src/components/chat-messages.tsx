@@ -569,13 +569,24 @@ function TurnUsageBadge({ usage }: { usage: TurnUsage }) {
 
 function TurnMeta({ turn }: { turn: TurnLifecycle }) {
   const duration = formatDurationMs(turn.started_at_ms, turn.finished_at_ms)
+  const statusLabel =
+    turn.outcome === "cancelled"
+      ? "cancelled"
+      : turn.outcome === "failed"
+        ? "failed"
+        : null
 
-  if (!duration && !turn.usage) return null
+  if (!duration && !turn.usage && !statusLabel) return null
 
   return (
     <div className="mt-2 flex items-center gap-3 text-[11px] text-muted-foreground/55 opacity-0 transition-opacity duration-150 group-hover/turn:opacity-100 group-focus-within/turn:opacity-100">
       {duration && (
         <span className="tabular-nums text-muted-foreground/65">{`latency ${duration}`}</span>
+      )}
+      {statusLabel && (
+        <span className="rounded-full border border-border/40 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground/80">
+          {statusLabel}
+        </span>
       )}
       {turn.usage && (
         <span className="pointer-events-none">

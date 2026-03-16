@@ -1,6 +1,6 @@
 use crate::{
-    Completion, CompletionRequest, CoreError, StreamEvent, ToolDefinition, ToolExecutionContext,
-    ToolOutputDelta, ToolResult,
+    AbortSignal, Completion, CompletionRequest, CoreError, StreamEvent, ToolDefinition,
+    ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
 
 pub trait LanguageModel {
@@ -16,6 +16,20 @@ pub trait LanguageModel {
         let completion = self.complete(request)?;
         sink(StreamEvent::Done);
         Ok(completion)
+    }
+
+    fn complete_streaming_with_abort(
+        &self,
+        request: CompletionRequest,
+        abort: &AbortSignal,
+        sink: &mut dyn FnMut(StreamEvent),
+    ) -> Result<Completion, Self::Error> {
+        let _ = abort;
+        self.complete_streaming(request, sink)
+    }
+
+    fn is_cancelled_error(_error: &Self::Error) -> bool {
+        false
     }
 }
 

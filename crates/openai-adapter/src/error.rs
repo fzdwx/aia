@@ -5,11 +5,21 @@ pub struct OpenAiAdapterError {
     message: String,
     status_code: Option<u16>,
     response_body: Option<String>,
+    cancelled: bool,
 }
 
 impl OpenAiAdapterError {
     pub fn new(message: impl Into<String>) -> Self {
-        Self { message: message.into(), status_code: None, response_body: None }
+        Self { message: message.into(), status_code: None, response_body: None, cancelled: false }
+    }
+
+    pub fn cancelled(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            status_code: None,
+            response_body: None,
+            cancelled: true,
+        }
     }
 
     pub fn with_status_code(mut self, status_code: Option<u16>) -> Self {
@@ -28,6 +38,10 @@ impl OpenAiAdapterError {
 
     pub fn response_body(&self) -> Option<&str> {
         self.response_body.as_deref()
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled
     }
 }
 

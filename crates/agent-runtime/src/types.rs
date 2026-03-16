@@ -55,6 +55,14 @@ pub struct ToolInvocationLifecycle {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnOutcome {
+    Succeeded,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TurnLifecycle {
     pub turn_id: String,
     pub started_at_ms: u64,
@@ -68,6 +76,12 @@ pub struct TurnLifecycle {
     #[serde(default)]
     pub usage: Option<CompletionUsage>,
     pub failure_message: Option<String>,
+    #[serde(default = "default_turn_outcome")]
+    pub outcome: TurnOutcome,
+}
+
+fn default_turn_outcome() -> TurnOutcome {
+    TurnOutcome::Succeeded
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

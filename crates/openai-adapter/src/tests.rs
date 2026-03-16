@@ -7,7 +7,7 @@ use std::{
 use agent_core::{
     CompletionRequest, CompletionSegment, CompletionStopReason, ConversationItem, LanguageModel,
     Message, ModelDisposition, ModelIdentity, PromptCacheConfig, PromptCacheRetention, Role,
-    StreamEvent, ToolCall, ToolDefinition, ToolResult,
+    StreamEvent, ToolCall, ToolDefinition, ToolResult, AbortSignal,
 };
 use serde_json::{Value, json};
 
@@ -519,6 +519,45 @@ fn responses_流式失败消息包含请求路径() {
 
     handle.join().expect("服务线程退出");
     assert!(error.to_string().contains("/responses"));
+}
+
+#[test]
+fn responses_流式调用在_abort_后返回取消错误() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("监听成功");
+    let address = listener.local_addr().expect("读取地址成功");
+
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("接受连接成功");
+        let mut buffer = [0_u8; 4096];
+        let _ = stream.read(&mut buffer).expect("读取请求成功");
+
+        let response = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n";
+        stream.write_all(response.as_bytes()).expect("写回响应头成功");
+        stream.flush().expect("刷新响应头成功");
+        thread::sleep(std::time::Duration::from_millis(120));
+        let _ = stream.write_all(b"data: [DONE]\n\n");
+    });
+
+    let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
+        format!("http://{address}"),
+        "test-key",
+        "gpt-4.1-mini",
+    ))
+    .expect("模型创建成功");
+
+    let abort = AbortSignal::new();
+    let cancel = abort.clone();
+    thread::spawn(move || {
+        thread::sleep(std::time::Duration::from_millis(30));
+        cancel.abort();
+    });
+
+    let error = model
+        .complete_streaming_with_abort(sample_request(), &abort, &mut |_| {})
+        .expect_err("应当因取消而失败");
+
+    handle.join().expect("服务线程退出");
+    assert!(error.is_cancelled());
 }
 
 #[test]

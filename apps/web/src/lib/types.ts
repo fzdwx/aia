@@ -83,6 +83,8 @@ export type TurnBlock =
   | { kind: "tool_invocation"; invocation: ToolInvocationLifecycle }
   | { kind: "failure"; message: string }
 
+export type TurnOutcome = "succeeded" | "failed" | "cancelled"
+
 export type TurnLifecycle = {
   turn_id: string
   started_at_ms: number
@@ -95,6 +97,7 @@ export type TurnLifecycle = {
   tool_invocations: ToolInvocationLifecycle[]
   usage: TurnUsage | null
   failure_message: string | null
+  outcome: TurnOutcome
 }
 
 export type ProviderInfo = {

@@ -162,7 +162,10 @@ where
             let request = self.build_completion_request(&turn_id, "completion", llm_step_index);
             let llm_trace_context = request.trace_context.clone();
             llm_step_index = llm_step_index.saturating_add(1);
-            let completion = match self.model.complete_streaming(request, &mut on_delta) {
+            let completion = match self
+                .model
+                .complete_streaming_with_abort(request, &abort_signal, &mut on_delta)
+            {
                 Ok(completion) => {
                     if let Some(usage) = completion.usage.as_ref() {
                         self.last_input_tokens = Some(usage.input_tokens);
@@ -170,6 +173,23 @@ where
                     completion
                 }
                 Err(error) => {
+                    if M::is_cancelled_error(&error) {
+                        let runtime_error = RuntimeError::cancelled();
+                        self.record_turn_failure(
+                            TurnFailureContext {
+                                turn_id: &turn_id,
+                                started_at_ms,
+                                user_message: &user_message.content,
+                                source_entry_ids: &mut buffers.source_entry_ids,
+                                blocks: &buffers.blocks,
+                                assistant_message: buffers.last_assistant_text.clone(),
+                                aggregated_thinking: buffers.aggregated_thinking.as_str(),
+                                tool_invocations: &buffers.tool_invocations,
+                            },
+                            runtime_error.clone(),
+                        )?;
+                        return Err(runtime_error);
+                    }
                     if !already_compressed && is_context_length_error(&error.to_string()) {
                         already_compressed = true;
                         if self.compress_context(Some(&turn_id), llm_step_index).is_ok() {

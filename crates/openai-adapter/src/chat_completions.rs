@@ -4,8 +4,8 @@ use std::{
 };
 
 use agent_core::{
-    Completion, CompletionRequest, CompletionSegment, CompletionStopReason, CompletionUsage,
-    LanguageModel, StreamEvent, ToolCall,
+    AbortSignal, Completion, CompletionRequest, CompletionSegment, CompletionStopReason,
+    CompletionUsage, LanguageModel, StreamEvent, ToolCall,
 };
 use reqwest::{
     blocking::Client,
@@ -242,9 +242,10 @@ impl LanguageModel for OpenAiChatCompletionsModel {
         Ok(completion)
     }
 
-    fn complete_streaming(
+    fn complete_streaming_with_abort(
         &self,
         request: CompletionRequest,
+        abort: &AbortSignal,
         sink: &mut dyn FnMut(StreamEvent),
     ) -> Result<Completion, Self::Error> {
         if request.model.name != self.config.model {
@@ -281,6 +282,11 @@ impl LanguageModel for OpenAiChatCompletionsModel {
         let mut response_events = Vec::new();
 
         for line in reader.lines() {
+            if abort.is_aborted() {
+                return Err(OpenAiAdapterError::cancelled(
+                    "OpenAI Chat Completions 流式请求已取消",
+                ));
+            }
             let line = line.map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
             let Some(data) = line.strip_prefix("data: ") else {
                 continue;
@@ -393,5 +399,17 @@ impl LanguageModel for OpenAiChatCompletionsModel {
             response_body: Some(response_events.join("\n")),
             http_status_code: Some(status.as_u16()),
         })
+    }
+
+    fn complete_streaming(
+        &self,
+        request: CompletionRequest,
+        sink: &mut dyn FnMut(StreamEvent),
+    ) -> Result<Completion, Self::Error> {
+        self.complete_streaming_with_abort(request, &AbortSignal::new(), sink)
+    }
+
+    fn is_cancelled_error(error: &Self::Error) -> bool {
+        error.is_cancelled()
     }
 }

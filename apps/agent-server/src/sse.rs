@@ -123,7 +123,7 @@ impl SsePayload {
 #[cfg(test)]
 mod tests {
     use agent_core::StreamEvent;
-    use agent_runtime::TurnLifecycle;
+    use agent_runtime::{TurnLifecycle, TurnOutcome};
 
     use super::{SsePayload, TurnStatus};
 
@@ -153,6 +153,7 @@ mod tests {
                 cached_tokens: 0,
             }),
             failure_message: None,
+            outcome: TurnOutcome::Succeeded,
         };
 
         let event = SsePayload::TurnCompleted { session_id: "s1".into(), turn }.into_axum_event();
