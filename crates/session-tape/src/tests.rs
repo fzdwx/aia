@@ -7,14 +7,32 @@ use std::{
 use agent_core::{ConversationItem, Message, Role, ToolCall, ToolResult};
 use serde_json::json;
 
-use crate::entry::now_iso8601;
+use crate::entry::{now_iso8601, serialize_payload};
 use crate::{
     SessionProviderBinding, SessionTape, TapeEntry, TapeQuery, default_meta, default_session_path,
 };
 
+struct FailingSerialize;
+
+impl serde::Serialize for FailingSerialize {
+    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        Err(serde::ser::Error::custom("boom"))
+    }
+}
+
 fn temp_file(name: &str) -> PathBuf {
     let suffix = SystemTime::now().duration_since(UNIX_EPOCH).expect("时间有效").as_nanos();
     std::env::temp_dir().join(format!("aia-session-{name}-{suffix}.jsonl"))
+}
+
+#[test]
+fn serialize_payload_falls_back_to_explicit_error_json() {
+    let payload = serialize_payload("message", &FailingSerialize);
+
+    assert_eq!(payload["error"], "failed to serialize message: boom");
 }
 
 #[test]

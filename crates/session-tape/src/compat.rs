@@ -2,6 +2,7 @@ use agent_core::{Message, ToolCall, ToolResult};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::entry::serialize_payload;
 use crate::{SessionProviderBinding, SessionTapeError, TapeEntry, default_meta};
 
 #[derive(Deserialize)]
@@ -64,7 +65,7 @@ fn convert_legacy(legacy: LegacyEntry) -> TapeEntry {
         LegacyFact::Message(msg) => TapeEntry {
             id: legacy.id,
             kind: "message".into(),
-            payload: serde_json::to_value(&msg).unwrap_or_default(),
+            payload: serialize_payload("legacy_message", &msg),
             meta: default_meta(),
             date,
         },
@@ -73,7 +74,7 @@ fn convert_legacy(legacy: LegacyEntry) -> TapeEntry {
             kind: "event".into(),
             payload: serde_json::json!({
                 "name": "provider_binding",
-                "data": serde_json::to_value(&meta.provider_binding).unwrap_or_default()
+                "data": serialize_payload("legacy_provider_binding", &meta.provider_binding)
             }),
             meta: default_meta(),
             date,
@@ -97,14 +98,14 @@ fn convert_legacy(legacy: LegacyEntry) -> TapeEntry {
         LegacyFact::ToolCall(call) => TapeEntry {
             id: legacy.id,
             kind: "tool_call".into(),
-            payload: serde_json::to_value(&call).unwrap_or_default(),
+            payload: serialize_payload("legacy_tool_call", &call),
             meta: default_meta(),
             date,
         },
         LegacyFact::ToolResult(result) => TapeEntry {
             id: legacy.id,
             kind: "tool_result".into(),
-            payload: serde_json::to_value(&result).unwrap_or_default(),
+            payload: serialize_payload("legacy_tool_result", &result),
             meta: default_meta(),
             date,
         },

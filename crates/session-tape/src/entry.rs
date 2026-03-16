@@ -19,13 +19,23 @@ pub(crate) fn default_meta() -> Value {
     Value::Object(serde_json::Map::new())
 }
 
+pub(crate) fn fallback_serialization_payload(kind: &str, error: &serde_json::Error) -> Value {
+    serde_json::json!({
+        "error": format!("failed to serialize {kind}: {error}")
+    })
+}
+
+pub(crate) fn serialize_payload<T: Serialize>(kind: &str, value: &T) -> Value {
+    serde_json::to_value(value).unwrap_or_else(|error| fallback_serialization_payload(kind, &error))
+}
+
 impl TapeEntry {
     fn new(kind: &str, payload: Value) -> Self {
         Self { id: 0, kind: kind.to_string(), payload, meta: default_meta(), date: now_iso8601() }
     }
 
     pub fn message(msg: &Message) -> Self {
-        Self::new("message", serde_json::to_value(msg).unwrap_or_default())
+        Self::new("message", serialize_payload("message", msg))
     }
 
     pub fn system(content: &str) -> Self {
@@ -43,11 +53,11 @@ impl TapeEntry {
     }
 
     pub fn tool_call(call: &ToolCall) -> Self {
-        Self::new("tool_call", serde_json::to_value(call).unwrap_or_default())
+        Self::new("tool_call", serialize_payload("tool_call", call))
     }
 
     pub fn tool_result(result: &ToolResult) -> Self {
-        Self::new("tool_result", serde_json::to_value(result).unwrap_or_default())
+        Self::new("tool_result", serialize_payload("tool_result", result))
     }
 
     pub fn event(name: &str, data: Option<Value>) -> Self {

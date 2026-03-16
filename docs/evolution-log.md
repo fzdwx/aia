@@ -161,14 +161,15 @@
 **提交**：待提交
 **下次方向**：继续补 Web 测试入口，并让前端取消态回归真正纳入标准验证链路；之后再回到 provider / shell 的真实取消覆盖率诊断。
 
-## 2026-03-16 Session 19
+## 2026-03-16 Session 20
 
-**诊断**：`apps/agent-server` 的 SSE payload 序列化仍在 `unwrap_or_default()` 失败时静默退化为空字符串；一旦某个事件 payload 无法序列化，客户端会收到语义损坏的空事件，而不是可诊断的错误载荷。
-**决策**：先把 SSE payload 序列化收口为显式错误 JSON 回退，并补回归测试；这是比继续扩展功能更高优先级的可靠性修复，而且改动局部、影响直接。
+**诊断**：`session-tape` 的 typed payload builder 仍在 `serde_json::to_value(...).unwrap_or_default()` 失败时静默写入空对象 / null，这会把“条目序列化失败”悄悄变成语义损坏的磁带事实，后续 replay 只能看到空 payload 而看不到真正错误。
+**决策**：先把 tape entry 与 legacy conversion 的序列化失败统一收口为显式错误 payload，并补回归测试；这是高优先级的事实持久化可靠性修复，能避免 silent corruption。
 **变更**：
-- `apps/agent-server/src/sse.rs`：新增 `serialize_sse_data` helper，将 SSE payload 序列化失败统一回退为结构化 `{ "error": ... }` JSON，而不是空字符串；所有 stream/status/turn/session 事件都改为复用该 helper。
-- `apps/agent-server/src/sse.rs`：新增 1 条回归测试，验证序列化失败时会回退为可解析的错误 payload。
-**验证**：`cargo test -p agent-server` 通过；`cargo check -p agent-server` 通过；随后执行全量 `cargo check` 与 `cargo test`。
-**提交**：`2402a4f` `fix: preserve SSE serialization errors`
-**下次方向**：继续清理 server 主路径里剩余“静默降级”边界，优先评估 SSE / trace / routes 中是否还存在把可报告错误悄悄吞掉的 fallback 行为。
+- `crates/session-tape/src/entry.rs`：新增 `serialize_payload` / `fallback_serialization_payload` helper，让 `message` / `tool_call` / `tool_result` 条目在序列化失败时保留结构化 `{ "error": ... }` payload，而不是 `unwrap_or_default()`。
+- `crates/session-tape/src/compat.rs`：legacy message / provider binding / tool call / tool result 转换改为复用同一显式错误 payload helper，避免旧格式兼容路径也静默降级。
+- `crates/session-tape/src/tests.rs`：新增 1 条回归测试，验证 payload 序列化失败时会写出明确错误 JSON。
+**验证**：`cargo test -p session-tape` 通过；`cargo check -p session-tape` 通过；随后执行全量 `cargo check` 与 `cargo test`。
+**提交**：待提交
+**下次方向**：继续清理持久化与事件链路中的 silent fallback，优先关注 `session-tape` / server 侧其余 `unwrap_or_default()` 是否仍会把真实错误伪装成空数据。
 
