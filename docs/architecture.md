@@ -95,7 +95,7 @@ README 里真正难的是这些能力：
 - 轮次块只作为运行时事件发出，不再写入磁带（"derivatives never replace original facts"）
 - 历史轮次可从磁带 entries 按 `meta.run_id` 分组重建，不依赖磁带内的 TurnRecord
 - crate 内部已继续拆分为运行时主循环、请求构造、工具执行、事件缓冲、错误与测试子模块，避免继续把所有逻辑堆在单个实现文件中
-- `apps/agent-server` 通过运行时条目追加钩子把原始 entries 实时 append 到 `.aia/session.jsonl`
+- `apps/agent-server` 现在提供显式 turn cancel API；session manager 为运行中轮次持有 `TurnControl`，Web/其他客户端可发起取消，runtime 会把 abort signal 继续传到工具执行上下文，当前取消语义已覆盖运行中 tool path 与会话/状态事件回收，后续再继续补齐 provider HTTP 请求与 embedded shell 的真正中断
 - `StreamEvent` 中与工具相关的语义继续细分：`ToolCallDetected` 表示模型流里已经产出 tool call 决策，但 runtime 还未真正开始执行；`ToolCallStarted` 才表示工具执行正式启动，避免把“模型建议”与“runtime 执行”混成同一个阶段
 - `tape_info` / `tape_handoff` 不再只是 `execute_tool_call` 里的字符串特判；它们现在通过 `Tool` trait 注册到独立 runtime tool registry，再借助 `ToolExecutionContext` 暴露的 runtime host 能力访问会话统计与 handoff 写入，工具协议层与普通工具保持一致
 

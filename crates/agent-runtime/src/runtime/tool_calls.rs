@@ -27,6 +27,7 @@ pub(super) struct ExecuteToolCallContext<'a> {
     pub call: &'a ToolCall,
     pub seen_tool_calls: &'a mut BTreeMap<String, PreviousToolCall>,
     pub source_entry_ids: &'a mut Vec<u64>,
+    pub abort_signal: AbortSignal,
 }
 
 struct FailedToolCallContext<'a> {
@@ -60,6 +61,28 @@ where
             .collect::<BTreeSet<_>>();
         let call_signature = tool_call_signature(context.call);
 
+        if context.abort_signal.is_aborted() {
+            let runtime_error = RuntimeError::cancelled();
+            let lifecycle = self.record_failed_tool_call(
+                FailedToolCallContext {
+                    turn_id: context.turn_id,
+                    assistant_entry_id: context.assistant_entry_id,
+                    tool_call_entry_id: context.tool_call_entry_id,
+                    call: context.call,
+                    started_at_ms,
+                    tool_trace_context: tool_trace_context.clone(),
+                    source_entry_ids: context.source_entry_ids,
+                    event_name: "tool_call_cancelled",
+                },
+                runtime_error,
+                on_delta,
+            )?;
+            context
+                .seen_tool_calls
+                .insert(call_signature, PreviousToolCall::from_outcome(&lifecycle.outcome));
+            return Ok(lifecycle);
+        }
+
         if !available_tool_names.contains(&context.call.tool_name) {
             let runtime_error = RuntimeError::tool_unavailable(context.call.tool_name.clone());
             let lifecycle = self.record_failed_tool_call(
@@ -83,6 +106,28 @@ where
         }
 
         if tape_tools::is_runtime_tool(&context.call.tool_name) {
+            if context.abort_signal.is_aborted() {
+                let runtime_error = RuntimeError::cancelled();
+                let lifecycle = self.record_failed_tool_call(
+                    FailedToolCallContext {
+                        turn_id: context.turn_id,
+                        assistant_entry_id: context.assistant_entry_id,
+                        tool_call_entry_id: context.tool_call_entry_id,
+                        call: context.call,
+                        started_at_ms,
+                        tool_trace_context: tool_trace_context.clone(),
+                        source_entry_ids: context.source_entry_ids,
+                        event_name: "tool_call_cancelled",
+                    },
+                    runtime_error,
+                    on_delta,
+                )?;
+                context
+                    .seen_tool_calls
+                    .insert(call_signature, PreviousToolCall::from_outcome(&lifecycle.outcome));
+                return Ok(lifecycle);
+            }
+
             on_delta(StreamEvent::ToolCallStarted {
                 invocation_id: context.call.invocation_id.clone(),
                 tool_name: context.call.tool_name.clone(),
@@ -99,20 +144,21 @@ where
                     &ToolExecutionContext {
                         run_id: context.turn_id.to_string(),
                         workspace_root: self.workspace_root.clone(),
-                        abort: AbortSignal::new(),
+                        abort: context.abort_signal.clone(),
                         runtime: Some(runtime_context),
                     },
                 )
                 .map_err(RuntimeError::tool)?;
             self.apply_runtime_tool_handoffs(context.turn_id, &runtime_bridge)?;
 
+            let failed = context.abort_signal.is_aborted();
             let tool_result_entry_id = self
                 .append_tape_entry(TapeEntry::tool_result(&result).with_run_id(context.turn_id))?;
             context.source_entry_ids.push(tool_result_entry_id);
             let tool_result_event_id = self.append_tape_entry(
                 TapeEntry::event(
-                    "tool_result_recorded",
-                    Some(json!({"tool_name": result.tool_name.clone(), "status": "ok"})),
+                    if failed { "tool_result_cancelled" } else { "tool_result_recorded" },
+                    Some(json!({"tool_name": result.tool_name.clone(), "status": if failed { "cancelled" } else { "ok" }})),
                 )
                 .with_run_id(context.turn_id)
                 .with_meta(
@@ -131,10 +177,14 @@ where
                 tool_name: context.call.tool_name.clone(),
                 content: result.content.clone(),
                 details: result.details.clone(),
-                failed: false,
+                failed,
             });
 
-            let outcome = ToolInvocationOutcome::Succeeded { result: result.clone() };
+            let outcome = if failed {
+                ToolInvocationOutcome::Failed { message: RuntimeError::cancelled().to_string() }
+            } else {
+                ToolInvocationOutcome::Succeeded { result: result.clone() }
+            };
             self.publish_event(RuntimeEvent::ToolInvocation {
                 call: context.call.clone(),
                 outcome: outcome.clone(),
@@ -170,7 +220,7 @@ where
             &ToolExecutionContext {
                 run_id: context.turn_id.to_string(),
                 workspace_root: self.workspace_root.clone(),
-                abort: AbortSignal::new(),
+                abort: context.abort_signal.clone(),
                 runtime: None,
             },
         ) {
@@ -199,14 +249,15 @@ where
                     return Ok(lifecycle);
                 }
 
+                let failed = context.abort_signal.is_aborted();
                 let tool_result_entry_id = self.append_tape_entry(
                     TapeEntry::tool_result(&result).with_run_id(context.turn_id),
                 )?;
                 context.source_entry_ids.push(tool_result_entry_id);
                 let tool_result_event_id = self.append_tape_entry(
                     TapeEntry::event(
-                        "tool_result_recorded",
-                        Some(json!({"tool_name": result.tool_name.clone(), "status": "ok"})),
+                        if failed { "tool_result_cancelled" } else { "tool_result_recorded" },
+                        Some(json!({"tool_name": result.tool_name.clone(), "status": if failed { "cancelled" } else { "ok" }})),
                     )
                     .with_run_id(context.turn_id)
                     .with_meta(
@@ -225,10 +276,14 @@ where
                     tool_name: context.call.tool_name.clone(),
                     content: result.content.clone(),
                     details: result.details.clone(),
-                    failed: false,
+                    failed,
                 });
 
-                let outcome = ToolInvocationOutcome::Succeeded { result: result.clone() };
+                let outcome = if failed {
+                    ToolInvocationOutcome::Failed { message: RuntimeError::cancelled().to_string() }
+                } else {
+                    ToolInvocationOutcome::Succeeded { result: result.clone() }
+                };
                 self.publish_event(RuntimeEvent::ToolInvocation {
                     call: context.call.clone(),
                     outcome: outcome.clone(),
@@ -287,8 +342,9 @@ where
     ) -> Result<ToolInvocationLifecycle, RuntimeError> {
         let failure_message = runtime_error.to_string();
         let failed_result = ToolResult::from_call(context.call, failure_message.clone());
-        let tool_result_entry_id = self
-            .append_tape_entry(TapeEntry::tool_result(&failed_result).with_run_id(context.turn_id))?;
+        let tool_result_entry_id = self.append_tape_entry(
+            TapeEntry::tool_result(&failed_result).with_run_id(context.turn_id),
+        )?;
         context.source_entry_ids.push(tool_result_entry_id);
         let failure_event_id = self.append_tape_entry(
             TapeEntry::event(

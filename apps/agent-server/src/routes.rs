@@ -29,6 +29,11 @@ pub struct TurnRequest {
 }
 
 #[derive(Deserialize)]
+pub struct CancelTurnRequest {
+    pub session_id: Option<String>,
+}
+
+#[derive(Deserialize)]
 pub struct HandoffRequest {
     pub name: String,
     pub summary: String,
@@ -278,12 +283,12 @@ pub async fn get_trace_summary(
 // ── Provider endpoints ─────────────────────────────────────────
 
 pub async fn get_providers(State(state): State<SharedState>) -> Json<ProviderInfo> {
-    let snapshot = state.provider_info_snapshot.read().expect("lock poisoned");
+    let snapshot = crate::session_manager::read_lock(&state.provider_info_snapshot);
     Json(provider_info_from_snapshot(&snapshot))
 }
 
 pub async fn list_providers(State(state): State<SharedState>) -> Json<Vec<ProviderListItem>> {
-    let registry = state.provider_registry_snapshot.read().expect("lock poisoned");
+    let registry = crate::session_manager::read_lock(&state.provider_registry_snapshot);
     let active_name = registry.active_provider().map(|p| p.name.clone());
     let items: Vec<ProviderListItem> = registry
         .providers()
@@ -517,9 +522,26 @@ pub async fn submit_turn(
     (StatusCode::ACCEPTED, Json(serde_json::json!({ "ok": true })))
 }
 
+pub async fn cancel_turn(
+    State(state): State<SharedState>,
+    Json(body): Json<CancelTurnRequest>,
+) -> impl IntoResponse {
+    let Some(session_id) = resolve_session_id(&state, body.session_id) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "no session available" })),
+        );
+    };
+
+    match state.session_manager.cancel_turn(session_id).await {
+        Ok(cancelled) => (StatusCode::OK, Json(serde_json::json!({ "cancelled": cancelled }))),
+        Err(error) => runtime_worker_error_response(error),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ModelConfigDto, ModelLimitDto};
+    use super::{CancelTurnRequest, ModelConfigDto, ModelLimitDto};
     use provider_registry::{ModelConfig, ModelLimit};
 
     #[test]
@@ -538,5 +560,15 @@ mod tests {
 
         let round_trip = ModelConfigDto::from(&model);
         assert_eq!(round_trip.limit, dto.limit);
+    }
+
+    #[test]
+    fn cancel_turn_request_deserializes_session_id() {
+        let parsed: CancelTurnRequest = serde_json::from_value(serde_json::json!({
+            "session_id": "session-1"
+        }))
+        .expect("cancel turn request should deserialize");
+
+        assert_eq!(parsed.session_id.as_deref(), Some("session-1"));
     }
 }

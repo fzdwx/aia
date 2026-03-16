@@ -542,6 +542,7 @@ const STATUS_LABELS: Record<StreamingTurn["status"], string> = {
   thinking: "Thinking",
   working: "Working",
   generating: "Generating",
+  cancelled: "Cancelled",
 }
 
 function StatusIndicator({ status }: { status: StreamingTurn["status"] }) {

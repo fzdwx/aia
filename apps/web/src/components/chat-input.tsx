@@ -1,5 +1,5 @@
 import { useRef, useState } from "react"
-import { ArrowUp } from "lucide-react"
+import { ArrowUp, Square } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ModelSelector } from "@/components/model-selector"
 import { useChatStore } from "@/stores/chat-store"
@@ -21,6 +21,7 @@ function ContextPressure() {
 
 export function ChatInput() {
   const submitTurn = useChatStore((s) => s.submitTurn)
+  const cancelTurn = useChatStore((s) => s.cancelTurn)
   const chatState = useChatStore((s) => s.chatState)
   const disabled = chatState === "active"
 
@@ -62,16 +63,23 @@ export function ChatInput() {
             style={{ fieldSizing: "content" } as React.CSSProperties}
           />
           <button
-            onClick={handleSend}
-            disabled={!canSend}
+            onClick={disabled ? () => void cancelTurn() : handleSend}
+            disabled={!disabled && !canSend}
             className={cn(
               "flex size-7 shrink-0 items-center justify-center rounded-lg transition-all duration-150",
-              canSend
-                ? "bg-foreground text-background hover:opacity-80"
-                : "bg-muted text-muted-foreground/30"
+              disabled
+                ? "bg-amber-500/90 text-black hover:bg-amber-500"
+                : canSend
+                  ? "bg-foreground text-background hover:opacity-80"
+                  : "bg-muted text-muted-foreground/30"
             )}
+            title={disabled ? "Cancel current turn" : "Send message"}
           >
-            <ArrowUp className="size-4" strokeWidth={2.5} />
+            {disabled ? (
+              <Square className="size-3.5 fill-current" strokeWidth={2.5} />
+            ) : (
+              <ArrowUp className="size-4" strokeWidth={2.5} />
+            )}
           </button>
         </div>
         <div className="mt-2 flex items-center justify-between text-[11px]">

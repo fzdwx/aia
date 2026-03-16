@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 
 use agent_core::{
-    Completion, CompletionSegment, CompletionStopReason, CompletionUsage, LanguageModel,
-    LlmTraceRequestContext, Message, Role, StreamEvent, ToolExecutor,
+    AbortSignal, Completion, CompletionSegment, CompletionStopReason, CompletionUsage,
+    LanguageModel, LlmTraceRequestContext, Message, Role, StreamEvent, ToolExecutor,
 };
 use session_tape::TapeEntry;
 
-use crate::{RuntimeEvent, ToolInvocationLifecycle, TurnBlock, TurnOutput};
+use crate::{RuntimeEvent, ToolInvocationLifecycle, TurnBlock, TurnControl, TurnOutput};
 
 use super::{
     AgentRuntime, RuntimeError,
@@ -86,8 +86,22 @@ where
     pub fn handle_turn_streaming(
         &mut self,
         user_input: impl Into<String>,
+        on_delta: impl FnMut(StreamEvent),
+    ) -> Result<TurnOutput, RuntimeError> {
+        self.handle_turn_streaming_with_control(
+            user_input,
+            TurnControl::new(AbortSignal::new()),
+            on_delta,
+        )
+    }
+
+    pub fn handle_turn_streaming_with_control(
+        &mut self,
+        user_input: impl Into<String>,
+        control: TurnControl,
         mut on_delta: impl FnMut(StreamEvent),
     ) -> Result<TurnOutput, RuntimeError> {
+        let abort_signal = control.abort_signal();
         let turn_id = next_turn_id();
         let started_at_ms = now_timestamp_ms();
         let user_message = Message::new(Role::User, user_input.into());
@@ -97,6 +111,24 @@ where
         self.publish_event(RuntimeEvent::UserMessage { content: user_message.content.clone() });
 
         let mut llm_step_index = 0_u32;
+
+        if abort_signal.is_aborted() {
+            let runtime_error = RuntimeError::cancelled();
+            self.record_turn_failure(
+                TurnFailureContext {
+                    turn_id: &turn_id,
+                    started_at_ms,
+                    user_message: &user_message.content,
+                    source_entry_ids: &mut buffers.source_entry_ids,
+                    blocks: &buffers.blocks,
+                    assistant_message: buffers.last_assistant_text.clone(),
+                    aggregated_thinking: buffers.aggregated_thinking.as_str(),
+                    tool_invocations: &buffers.tool_invocations,
+                },
+                runtime_error.clone(),
+            )?;
+            return Err(runtime_error);
+        }
 
         // Pre-turn context pressure check (based on last real token count)
         if let Some(ratio) = self.context_pressure_ratio()
@@ -109,6 +141,24 @@ where
         let mut already_compressed = false;
 
         loop {
+            if abort_signal.is_aborted() {
+                let runtime_error = RuntimeError::cancelled();
+                self.record_turn_failure(
+                    TurnFailureContext {
+                        turn_id: &turn_id,
+                        started_at_ms,
+                        user_message: &user_message.content,
+                        source_entry_ids: &mut buffers.source_entry_ids,
+                        blocks: &buffers.blocks,
+                        assistant_message: buffers.last_assistant_text.clone(),
+                        aggregated_thinking: buffers.aggregated_thinking.as_str(),
+                        tool_invocations: &buffers.tool_invocations,
+                    },
+                    runtime_error.clone(),
+                )?;
+                return Err(runtime_error);
+            }
+
             let request = self.build_completion_request(&turn_id, "completion", llm_step_index);
             let llm_trace_context = request.trace_context.clone();
             llm_step_index = llm_step_index.saturating_add(1);
@@ -145,6 +195,24 @@ where
                 }
             };
 
+            if abort_signal.is_aborted() {
+                let runtime_error = RuntimeError::cancelled();
+                self.record_turn_failure(
+                    TurnFailureContext {
+                        turn_id: &turn_id,
+                        started_at_ms,
+                        user_message: &user_message.content,
+                        source_entry_ids: &mut buffers.source_entry_ids,
+                        blocks: &buffers.blocks,
+                        assistant_message: buffers.last_assistant_text.clone(),
+                        aggregated_thinking: buffers.aggregated_thinking.as_str(),
+                        tool_invocations: &buffers.tool_invocations,
+                    },
+                    runtime_error.clone(),
+                )?;
+                return Err(runtime_error);
+            }
+
             if let Err(runtime_error) = self.validate_completion_stop_reason(&completion) {
                 self.record_turn_failure(
                     TurnFailureContext {
@@ -168,6 +236,7 @@ where
                 llm_trace_context.as_ref(),
                 &completion,
                 &mut buffers,
+                &abort_signal,
                 &mut on_delta,
             ) {
                 Ok(value) => value,
@@ -279,6 +348,7 @@ where
         llm_trace_context: Option<&LlmTraceRequestContext>,
         completion: &Completion,
         buffers: &mut TurnBuffers,
+        abort_signal: &AbortSignal,
         on_delta: &mut dyn FnMut(StreamEvent),
     ) -> Result<bool, RuntimeError> {
         let mut assistant_entry_id = None;
@@ -308,6 +378,9 @@ where
                     if buffers.tool_invocations.len() >= self.max_tool_calls_per_turn {
                         return Err(RuntimeError::tool_call_limit(self.max_tool_calls_per_turn));
                     }
+                    if abort_signal.is_aborted() {
+                        return Err(RuntimeError::cancelled());
+                    }
                     saw_tool_calls = true;
                     let tool_call_entry_id =
                         self.append_tape_entry(TapeEntry::tool_call(call).with_run_id(turn_id))?;
@@ -321,6 +394,7 @@ where
                             call,
                             seen_tool_calls: &mut buffers.seen_tool_calls,
                             source_entry_ids: &mut buffers.source_entry_ids,
+                            abort_signal: abort_signal.clone(),
                         },
                         on_delta,
                     )?;

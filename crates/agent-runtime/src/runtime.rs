@@ -13,10 +13,12 @@ mod turn;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use agent_core::{LanguageModel, ModelIdentity, PromptCacheConfig, ToolDefinition, ToolExecutor};
+use agent_core::{
+    AbortSignal, LanguageModel, ModelIdentity, PromptCacheConfig, ToolDefinition, ToolExecutor,
+};
 use session_tape::{Handoff, SessionTape, SessionTapeError, TapeEntry};
 
-use crate::{RuntimeEvent, RuntimeSubscriberId};
+use crate::{RuntimeEvent, RuntimeSubscriberId, TurnControl};
 
 pub use self::error::RuntimeError;
 
@@ -165,6 +167,10 @@ where
     pub fn replace_model(&mut self, model: M, identity: ModelIdentity) {
         self.model = model;
         self.model_identity = identity;
+    }
+
+    pub fn turn_control(&self) -> TurnControl {
+        TurnControl::new(AbortSignal::new())
     }
 
     pub(super) fn append_tape_entry(&mut self, entry: TapeEntry) -> Result<u64, RuntimeError> {

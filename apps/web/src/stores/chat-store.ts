@@ -10,6 +10,7 @@ import {
   listProviders as apiListProviders,
   switchProvider as apiSwitchProvider,
   submitTurn as apiSubmitTurn,
+  cancelTurn as apiCancelTurn,
   createProvider as apiCreateProvider,
   updateProvider as apiUpdateProvider,
   deleteProvider as apiDeleteProvider,
@@ -87,6 +88,7 @@ type ChatStore = {
   initialize: () => void
   handleSseEvent: (event: SseEvent) => void
   submitTurn: (prompt: string) => void
+  cancelTurn: () => Promise<void>
   switchModel: (providerName: string, modelId?: string) => void
   refreshProviders: () => void
   setView: (view: AppView) => void
@@ -399,6 +401,17 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         })
         break
       }
+      case "turn_cancelled": {
+        if (event.data.session_id !== activeId) break
+        const prev = get().streamingTurn
+        if (!prev) break
+        set({
+          streamingTurn: { ...prev, status: "cancelled" },
+          chatState: "idle",
+          error: null,
+        })
+        break
+      }
       case "session_created": {
         // Add to session list
         get().fetchSessions()
@@ -443,6 +456,26 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         chatState: "idle",
       })
     })
+  },
+
+  cancelTurn: async () => {
+    const sessionId = get().activeSessionId
+    const streamingTurn = get().streamingTurn
+    if (!sessionId || !streamingTurn) return
+
+    try {
+      const cancelled = await apiCancelTurn(sessionId)
+      if (!cancelled) return
+      set({
+        streamingTurn: { ...streamingTurn, status: "cancelled" },
+        chatState: "idle",
+        error: null,
+      })
+    } catch (err) {
+      set({
+        error: err instanceof Error ? err.message : "Cancel failed",
+      })
+    }
   },
 
   switchModel: (providerName: string, modelId?: string) => {

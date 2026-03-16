@@ -92,6 +92,17 @@ export async function submitTurn(
   if (!res.ok) throw new Error(`POST /api/turn failed: ${res.status}`)
 }
 
+export async function cancelTurn(sessionId?: string): Promise<boolean> {
+  const res = await fetch("/api/turn/cancel", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId }),
+  })
+  if (!res.ok) throw new Error(`POST /api/turn/cancel failed: ${res.status}`)
+  const payload = (await res.json()) as { cancelled?: boolean }
+  return payload.cancelled === true
+}
+
 // ── Provider endpoints (unchanged) ─────────────────────────────
 
 export async function fetchProviders(): Promise<ProviderInfo> {
@@ -213,6 +224,7 @@ export function connectEvents(onEvent: (event: SseEvent) => void): () => void {
   es.addEventListener("error", handle("error"))
   es.addEventListener("session_created", handle("session_created"))
   es.addEventListener("session_deleted", handle("session_deleted"))
+  es.addEventListener("turn_cancelled", handle("turn_cancelled"))
 
   return () => es.close()
 }

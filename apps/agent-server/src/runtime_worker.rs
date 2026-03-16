@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use agent_core::{CompletionUsage, Role};
-use agent_runtime::TurnLifecycle;
+use agent_runtime::{TurnControl, TurnLifecycle};
 use axum::http::StatusCode;
 use provider_registry::{ModelConfig, ProviderKind};
 use serde::{Deserialize, Serialize};
@@ -112,6 +112,11 @@ pub struct UpdateProviderInput {
 pub struct SwitchProviderInput {
     pub name: String,
     pub model_id: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct RunningTurnHandle {
+    pub control: TurnControl,
 }
 
 // ── Tape snapshot reconstruction ───────────────────────────────
@@ -326,6 +331,12 @@ impl TurnHistoryBuilder {
     fn into_current_turn(self) -> Option<CurrentTurnSnapshot> {
         let lifecycle = self.into_turn_lifecycle()?;
         let status = if lifecycle
+            .failure_message
+            .as_deref()
+            .is_some_and(|message| message.contains("已取消"))
+        {
+            TurnStatus::Cancelled
+        } else if lifecycle
             .blocks
             .iter()
             .any(|block| matches!(block, agent_runtime::TurnBlock::ToolInvocation { .. }))

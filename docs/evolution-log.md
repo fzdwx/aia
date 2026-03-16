@@ -72,3 +72,17 @@
 **验证**：`cargo check` 通过；`cargo test` 通过；新增 3 个 poisoned-lock 回归测试。
 **提交**：`5b19d5a` `fix: recover poisoned session manager locks`
 **下次方向**：继续清理 server/runtime 主路径中的其他 panic-on-poison 或 stop/cancel 缺口，优先把长轮次中断语义真正贯穿到 runtime/tool 执行层。
+
+## 2026-03-16 Session 3
+
+**诊断**：stop/cancel 语义仍停留在产品需求层，运行中 turn 一旦进入长工具调用就无法从 server/Web 主路径发起中断，导致长轮次恢复与资源回收不可靠。
+**决策**：先做一条最小但闭环的 cancel 主链：server 新增取消 API，session manager 持有运行中 `TurnControl`，runtime 把 abort signal 传到工具执行上下文，Web 提供 stop 按钮并显示 cancelled 状态；这是当前最有杠杆的可靠性补口。
+**变更**：
+- `crates/agent-runtime/src/runtime.rs`、`crates/agent-runtime/src/types.rs`、`crates/agent-runtime/src/runtime/turn.rs`、`crates/agent-runtime/src/runtime/tool_calls.rs`、`crates/agent-runtime/src/runtime/error.rs`：新增 `TurnControl` 与 `handle_turn_streaming_with_control`，让取消信号在 turn 级别与工具执行路径间传递，并把取消收敛为结构化失败事件而不是悬挂执行。
+- `crates/agent-runtime/src/runtime/tests.rs`：新增预取消、工具执行中取消和 `TurnControl` 暴露回归测试，并补一条工具失败事件断言，覆盖新的取消/失败语义。
+- `apps/agent-server/src/session_manager.rs`、`apps/agent-server/src/runtime_worker.rs`、`apps/agent-server/src/sse.rs`、`apps/agent-server/src/routes.rs`、`apps/agent-server/src/main.rs`：为运行中 session 保存 cancel handle，新增 `POST /api/turn/cancel`、`turn_cancelled` SSE 事件与 `cancelled` 状态，确保取消请求能落到 worker 并反馈给前端。
+- `apps/web/src/lib/api.ts`、`apps/web/src/lib/types.ts`、`apps/web/src/stores/chat-store.ts`、`apps/web/src/components/chat-input.tsx`、`apps/web/src/components/chat-messages.tsx`：新增取消 API 调用、SSE 事件类型与 store 处理，输入区发送按钮在运行中切换为 stop，消息区能显示 cancelled 状态。
+- `docs/status.md`、`docs/architecture.md`：更新当前 stop/cancel 进展与剩余缺口说明。
+**验证**：`cargo check` 通过；`cargo test` 通过；新增 runtime/server 取消相关回归测试。
+**提交**：代码提交 `da2ff68` `feat: add turn cancellation flow`
+**下次方向**：继续把 cancel 从当前 server→runtime→tool context 基线扩展到真正中断 OpenAI streaming 请求与 embedded shell 长任务，并评估是否把取消状态也收口进共享 turn protocol，避免前后端分别猜测。

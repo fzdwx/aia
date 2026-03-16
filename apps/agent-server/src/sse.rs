@@ -10,6 +10,7 @@ pub enum TurnStatus {
     Thinking,
     Working,
     Generating,
+    Cancelled,
 }
 
 #[derive(Clone)]
@@ -21,6 +22,7 @@ pub enum SsePayload {
     Error { session_id: String, message: String },
     SessionCreated { session_id: String, title: String },
     SessionDeleted { session_id: String },
+    TurnCancelled { session_id: String },
 }
 
 #[derive(Serialize)]
@@ -66,6 +68,11 @@ struct SessionDeletedData {
     session_id: String,
 }
 
+#[derive(Serialize)]
+struct TurnCancelledData {
+    session_id: String,
+}
+
 impl SsePayload {
     pub fn into_axum_event(self) -> Result<Event, std::convert::Infallible> {
         match self {
@@ -103,6 +110,11 @@ impl SsePayload {
                 let data =
                     serde_json::to_string(&SessionDeletedData { session_id }).unwrap_or_default();
                 Ok(Event::default().event("session_deleted").data(data))
+            }
+            Self::TurnCancelled { session_id } => {
+                let data =
+                    serde_json::to_string(&TurnCancelledData { session_id }).unwrap_or_default();
+                Ok(Event::default().event("turn_cancelled").data(data))
             }
         }
     }
@@ -168,6 +180,12 @@ mod tests {
     #[test]
     fn session_deleted_payload_can_convert_to_event() {
         let event = SsePayload::SessionDeleted { session_id: "s1".into() }.into_axum_event();
+        assert!(event.is_ok());
+    }
+
+    #[test]
+    fn turn_cancelled_payload_can_convert_to_event() {
+        let event = SsePayload::TurnCancelled { session_id: "s1".into() }.into_axum_event();
         assert!(event.is_ok());
     }
 }

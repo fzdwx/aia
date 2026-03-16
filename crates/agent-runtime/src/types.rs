@@ -1,5 +1,24 @@
-use agent_core::{Completion, CompletionUsage, ToolCall, ToolDefinition, ToolResult};
+use agent_core::{AbortSignal, Completion, CompletionUsage, ToolCall, ToolDefinition, ToolResult};
 use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug)]
+pub struct TurnControl {
+    abort: AbortSignal,
+}
+
+impl TurnControl {
+    pub fn new(abort: AbortSignal) -> Self {
+        Self { abort }
+    }
+
+    pub fn cancel(&self) {
+        self.abort.abort();
+    }
+
+    pub fn abort_signal(&self) -> AbortSignal {
+        self.abort.clone()
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ContextStats {

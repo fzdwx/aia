@@ -22,7 +22,8 @@ use crate::{
 use crate::runtime_worker::rebuild_session_snapshots_from_tape;
 pub use crate::runtime_worker::{
     CreateProviderInput, CurrentToolOutput, CurrentTurnBlock, CurrentTurnSnapshot,
-    ProviderInfoSnapshot, RuntimeWorkerError, SwitchProviderInput, UpdateProviderInput,
+    ProviderInfoSnapshot, RunningTurnHandle, RuntimeWorkerError, SwitchProviderInput,
+    UpdateProviderInput,
 };
 
 pub type SessionId = String;
@@ -39,6 +40,7 @@ struct SessionSlot {
     session_path: PathBuf,
     history: Arc<RwLock<Vec<TurnLifecycle>>>,
     current_turn: Arc<RwLock<Option<CurrentTurnSnapshot>>>,
+    running_turn: Option<RunningTurnHandle>,
     status: SlotStatus,
 }
 
@@ -62,6 +64,10 @@ enum SessionCommand {
         session_id: SessionId,
         prompt: String,
         reply: oneshot::Sender<Result<(), RuntimeWorkerError>>,
+    },
+    CancelTurn {
+        session_id: SessionId,
+        reply: oneshot::Sender<Result<bool, RuntimeWorkerError>>,
     },
     GetHistory {
         session_id: SessionId,
@@ -137,6 +143,15 @@ impl SessionManagerHandle {
             .try_send(SessionCommand::SubmitTurn { session_id, prompt, reply: reply_tx })
             .map_err(|_| RuntimeWorkerError::unavailable())?;
         Ok(())
+    }
+
+    pub async fn cancel_turn(&self, session_id: String) -> Result<bool, RuntimeWorkerError> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.tx
+            .send(SessionCommand::CancelTurn { session_id, reply: reply_tx })
+            .await
+            .map_err(|_| RuntimeWorkerError::unavailable())?;
+        reply_rx.await.map_err(|_| RuntimeWorkerError::unavailable())?
     }
 
     pub async fn get_history(
@@ -254,14 +269,14 @@ pub fn spawn_session_manager(config: SessionManagerConfig) -> SessionManagerHand
     SessionManagerHandle { tx }
 }
 
-fn read_lock<T>(lock: &RwLock<T>) -> RwLockReadGuard<'_, T> {
+pub(crate) fn read_lock<T>(lock: &RwLock<T>) -> RwLockReadGuard<'_, T> {
     match lock.read() {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
     }
 }
 
-fn write_lock<T>(lock: &RwLock<T>) -> RwLockWriteGuard<'_, T> {
+pub(crate) fn write_lock<T>(lock: &RwLock<T>) -> RwLockWriteGuard<'_, T> {
     match lock.write() {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
@@ -298,6 +313,10 @@ async fn session_manager_loop(
                     }
                     SessionCommand::SubmitTurn { session_id, prompt, reply } => {
                         let result = handle_submit_turn(&mut slots, &config, &return_tx, &session_id, prompt);
+                        let _ = reply.send(result);
+                    }
+                    SessionCommand::CancelTurn { session_id, reply } => {
+                        let result = handle_cancel_turn(&mut slots, &config, &session_id);
                         let _ = reply.send(result);
                     }
                     SessionCommand::GetHistory { session_id, reply } => {
@@ -339,6 +358,7 @@ async fn session_manager_loop(
                 if let Some(slot) = slots.get_mut(&ret.session_id) {
                     slot.runtime = Some(ret.runtime);
                     slot.subscriber = ret.subscriber;
+                    slot.running_turn = None;
                     slot.status = SlotStatus::Idle;
                 }
             }
@@ -390,6 +410,7 @@ fn create_slot_for_session(
         session_path,
         history: Arc::new(RwLock::new(snapshots.history)),
         current_turn: Arc::new(RwLock::new(snapshots.current_turn)),
+        running_turn: None,
         status: SlotStatus::Idle,
     })
 }
@@ -506,6 +527,8 @@ fn handle_submit_turn(
     let mut runtime =
         slot.runtime.take().ok_or_else(|| RuntimeWorkerError::internal("runtime not available"))?;
     let subscriber = slot.subscriber;
+    let turn_control = runtime.turn_control();
+    slot.running_turn = Some(RunningTurnHandle { control: turn_control.clone() });
     slot.status = SlotStatus::Running;
 
     let _ = config.store.update_session(session_id, None, None);
@@ -524,6 +547,7 @@ fn handle_submit_turn(
     let trace_store = config.store.clone();
     let sid = session_id.to_string();
     let return_tx = return_tx.clone();
+    let turn_control = turn_control.clone();
 
     let _ = broadcast_tx
         .send(SsePayload::Status { session_id: sid.clone(), status: TurnStatus::Waiting });
@@ -534,7 +558,7 @@ fn handle_submit_turn(
         let sid2 = sid.clone();
         let cts = current_turn_snapshot.clone();
 
-        let result = runtime.handle_turn_streaming(prompt, |event| {
+        let result = runtime.handle_turn_streaming_with_control(prompt, turn_control, |event| {
             let new_status = match &event {
                 StreamEvent::ThinkingDelta { .. } => CurrentStatusInner::Thinking,
                 StreamEvent::TextDelta { .. } => CurrentStatusInner::Generating,
@@ -570,6 +594,7 @@ fn handle_submit_turn(
                 *write_lock(&current_turn_snapshot) = None;
             }
             Err(error) => {
+                let was_cancelled = error.is_cancelled();
                 let events = runtime.collect_events(subscriber).unwrap_or_default();
                 let turn = broadcast_runtime_events_with_session(events, &broadcast_tx, &sid);
                 if let Some(turn) = turn {
@@ -577,6 +602,15 @@ fn handle_submit_turn(
                     write_lock(&history_snapshot).push(turn.clone());
                     let _ = broadcast_tx
                         .send(SsePayload::TurnCompleted { session_id: sid.clone(), turn });
+                }
+                if was_cancelled {
+                    update_current_turn_status(&current_turn_snapshot, TurnStatus::Cancelled);
+                    let _ = broadcast_tx.send(SsePayload::Status {
+                        session_id: sid.clone(),
+                        status: TurnStatus::Cancelled,
+                    });
+                    let _ =
+                        broadcast_tx.send(SsePayload::TurnCancelled { session_id: sid.clone() });
                 }
                 *write_lock(&current_turn_snapshot) = None;
                 let _ = broadcast_tx.send(SsePayload::Error {
@@ -591,6 +625,34 @@ fn handle_submit_turn(
     });
 
     Ok(())
+}
+
+fn handle_cancel_turn(
+    slots: &mut HashMap<SessionId, SessionSlot>,
+    config: &SessionManagerConfig,
+    session_id: &str,
+) -> Result<bool, RuntimeWorkerError> {
+    let slot = slots
+        .get_mut(session_id)
+        .ok_or_else(|| RuntimeWorkerError::not_found(format!("session not found: {session_id}")))?;
+
+    if slot.status != SlotStatus::Running {
+        return Ok(false);
+    }
+
+    let Some(running_turn) = slot.running_turn.as_ref() else {
+        return Err(RuntimeWorkerError::internal("running turn handle missing"));
+    };
+
+    running_turn.control.cancel();
+    update_current_turn_status(&slot.current_turn, TurnStatus::Cancelled);
+    let _ = config.broadcast_tx.send(SsePayload::Status {
+        session_id: session_id.to_string(),
+        status: TurnStatus::Cancelled,
+    });
+    let _ =
+        config.broadcast_tx.send(SsePayload::TurnCancelled { session_id: session_id.to_string() });
+    Ok(true)
 }
 
 fn handle_get_history(
@@ -728,7 +790,7 @@ fn handle_switch_provider(
         if !profile.has_model(model_id) {
             return Err(RuntimeWorkerError::bad_request(format!("模型不存在：{model_id}")));
         }
-        profile.active_model = Some(model_id.clone());
+        profile.active_model = Some(model_id.to_string());
     }
 
     let mut candidate_registry = config.registry.clone();
@@ -974,6 +1036,10 @@ fn persist_tool_trace_spans(turn: &TurnLifecycle, store: &dyn LlmTraceStore) {
 
         let failed =
             matches!(&invocation.outcome, agent_runtime::ToolInvocationOutcome::Failed { .. });
+        let cancelled = matches!(
+            &invocation.outcome,
+            agent_runtime::ToolInvocationOutcome::Failed { message } if message.contains("已取消")
+        );
         let (status, error, response_summary, response_body, events, details) = match &invocation
             .outcome
         {
@@ -1050,7 +1116,7 @@ fn persist_tool_trace_spans(turn: &TurnLifecycle, store: &dyn LlmTraceStore) {
             output_tokens: None,
             total_tokens: None,
             cached_tokens: None,
-            otel_attributes: json!({"aia.operation.name":context.operation_name,"aia.tool.name":invocation.call.tool_name,"aia.tool.invocation_id":invocation.call.invocation_id,"aia.parent.request_kind":context.parent_request_kind,"aia.parent.step_index":context.parent_step_index,"aia.tool.failed":failed,"aia.tool.details":details}),
+            otel_attributes: json!({"aia.operation.name":context.operation_name,"aia.tool.name":invocation.call.tool_name,"aia.tool.invocation_id":invocation.call.invocation_id,"aia.parent.request_kind":context.parent_request_kind,"aia.parent.step_index":context.parent_step_index,"aia.tool.failed":failed,"aia.tool.cancelled":cancelled,"aia.tool.details":details}),
             events,
         };
         if let Err(e) = store.record(&record) {
@@ -1091,9 +1157,12 @@ mod tests {
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::sync::{Arc, RwLock};
 
-    use crate::sse::TurnStatus;
+    use crate::runtime_worker::RunningTurnHandle;
+    use crate::sse::{SsePayload, TurnStatus};
 
-    use super::{CurrentTurnSnapshot, read_lock, update_current_turn_status, write_lock};
+    use super::{
+        CurrentTurnSnapshot, handle_cancel_turn, read_lock, update_current_turn_status, write_lock,
+    };
 
     fn poison_lock<T>(lock: &RwLock<T>) {
         let _ = catch_unwind(AssertUnwindSafe(|| {
@@ -1136,5 +1205,61 @@ mod tests {
         let current = guard.as_ref().expect("snapshot should still exist");
         assert_eq!(current.status, TurnStatus::Generating);
     }
-}
 
+    #[test]
+    fn handle_cancel_turn_marks_running_snapshot_as_cancelled() {
+        let current_turn = Arc::new(RwLock::new(Some(CurrentTurnSnapshot {
+            started_at_ms: 1,
+            user_message: "hello".into(),
+            status: TurnStatus::Working,
+            blocks: Vec::new(),
+        })));
+        let control = agent_runtime::TurnControl::new(agent_core::AbortSignal::new());
+        let handle = RunningTurnHandle { control: control.clone() };
+        let mut slots = std::collections::HashMap::new();
+        slots.insert(
+            "session-1".to_string(),
+            super::SessionSlot {
+                runtime: None,
+                subscriber: 0,
+                session_path: std::path::PathBuf::new(),
+                history: Arc::new(RwLock::new(Vec::new())),
+                current_turn: current_turn.clone(),
+                running_turn: Some(handle),
+                status: super::SlotStatus::Running,
+            },
+        );
+        let (broadcast_tx, mut broadcast_rx) = tokio::sync::broadcast::channel(8);
+        let config = super::SessionManagerConfig {
+            sessions_dir: std::path::PathBuf::new(),
+            store: Arc::new(agent_store::AiaStore::new(":memory:").expect("memory store")),
+            registry: provider_registry::ProviderRegistry::default(),
+            store_path: std::path::PathBuf::new(),
+            broadcast_tx,
+            provider_registry_snapshot: Arc::new(RwLock::new(
+                provider_registry::ProviderRegistry::default(),
+            )),
+            provider_info_snapshot: Arc::new(RwLock::new(super::ProviderInfoSnapshot {
+                name: "bootstrap".into(),
+                model: "bootstrap".into(),
+                connected: true,
+            })),
+            workspace_root: std::path::PathBuf::new(),
+            user_agent: "test-agent".into(),
+        };
+
+        let cancelled =
+            handle_cancel_turn(&mut slots, &config, "session-1").expect("cancel succeeds");
+
+        assert!(cancelled);
+        assert!(control.abort_signal().is_aborted());
+        let guard = read_lock(&current_turn);
+        let current = guard.as_ref().expect("snapshot should still exist");
+        assert_eq!(current.status, TurnStatus::Cancelled);
+
+        let first_event = broadcast_rx.try_recv().expect("status event should be sent");
+        assert!(matches!(first_event, SsePayload::Status { status: TurnStatus::Cancelled, .. }));
+        let second_event = broadcast_rx.try_recv().expect("turn_cancelled event should be sent");
+        assert!(matches!(second_event, SsePayload::TurnCancelled { .. }));
+    }
+}

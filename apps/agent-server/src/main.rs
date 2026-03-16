@@ -135,6 +135,7 @@ async fn main() {
         .route("/api/session/handoff", post(routes::create_handoff))
         .route("/api/events", get(routes::events))
         .route("/api/turn", post(routes::submit_turn))
+        .route("/api/turn/cancel", post(routes::cancel_turn))
         .layer(CorsLayer::permissive())
         .with_state(state);
 

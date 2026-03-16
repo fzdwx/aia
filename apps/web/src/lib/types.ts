@@ -130,9 +130,15 @@ export type SseEvent =
       data: { session_id: string; title: string }
     }
   | { type: "session_deleted"; data: { session_id: string } }
+  | { type: "turn_cancelled"; data: { session_id: string } }
 
 // Mirrors Rust TurnStatus
-export type TurnStatus = "waiting" | "thinking" | "working" | "generating"
+export type TurnStatus =
+  | "waiting"
+  | "thinking"
+  | "working"
+  | "generating"
+  | "cancelled"
 
 export type CurrentToolOutput = {
   invocation_id: string

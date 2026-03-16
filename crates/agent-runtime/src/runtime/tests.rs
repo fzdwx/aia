@@ -1,15 +1,16 @@
 use std::cell::RefCell;
 
 use agent_core::{
-    Completion, CompletionRequest, CompletionSegment, CompletionStopReason, CompletionUsage,
-    ConversationItem, CoreError, LanguageModel, Message, ModelDisposition, ModelIdentity, Role,
-    ToolCall, ToolDefinition, ToolExecutionContext, ToolExecutor, ToolOutputDelta, ToolResult,
+    AbortSignal, Completion, CompletionRequest, CompletionSegment, CompletionStopReason,
+    CompletionUsage, ConversationItem, CoreError, LanguageModel, Message, ModelDisposition,
+    ModelIdentity, Role, ToolCall, ToolDefinition, ToolExecutionContext, ToolExecutor,
+    ToolOutputDelta, ToolResult,
 };
 use serde_json::json;
 use session_tape::SessionTape;
 
 use super::{AgentRuntime, RuntimeEvent};
-use crate::{ToolInvocationLifecycle, ToolInvocationOutcome, TurnLifecycle};
+use crate::{ToolInvocationLifecycle, ToolInvocationOutcome, TurnControl, TurnLifecycle};
 
 struct StubModel;
 
@@ -392,6 +393,107 @@ impl ToolExecutor for MismatchedTools {
             details: None,
         })
     }
+}
+
+struct BlockingCancelAwareTools;
+
+impl ToolExecutor for BlockingCancelAwareTools {
+    type Error = CoreError;
+
+    fn definitions(&self) -> Vec<ToolDefinition> {
+        vec![ToolDefinition::new("search", "搜索代码")]
+    }
+
+    fn call(
+        &self,
+        call: &ToolCall,
+        _output: &mut dyn FnMut(ToolOutputDelta),
+        context: &ToolExecutionContext,
+    ) -> Result<ToolResult, Self::Error> {
+        for _ in 0..200 {
+            if context.abort.is_aborted() {
+                return Ok(ToolResult::from_call(call, "[aborted]"));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        Ok(ToolResult::from_call(call, "finished without cancellation"))
+    }
+}
+
+#[test]
+fn 运行时可在工具执行期间取消当前轮() {
+    let identity = ModelIdentity::new("local", "stub", ModelDisposition::Balanced);
+    let mut runtime = AgentRuntime::new(StubModel, BlockingCancelAwareTools, identity);
+    let control = TurnControl::new(AbortSignal::new());
+    let cancel_handle = control.clone();
+
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        cancel_handle.cancel();
+    });
+
+    let error = runtime
+        .handle_turn_streaming_with_control("请执行", control, |_| {})
+        .expect_err("取消后应结束当前轮");
+
+    assert!(error.is_cancelled());
+    assert!(runtime.tape().entries().iter().any(|entry| {
+        entry.event_name() == Some("tool_result_cancelled")
+            || entry.event_name() == Some("tool_call_cancelled")
+    }));
+    assert!(runtime.tape().entries().iter().any(|entry| {
+        entry.event_name() == Some("turn_failed")
+            && entry
+                .event_data()
+                .and_then(|value| value.get("message"))
+                .and_then(|value| value.as_str())
+                .is_some_and(|message| message.contains("已取消"))
+    }));
+}
+
+#[test]
+fn 运行时在开始前取消时不会执行模型() {
+    let identity = ModelIdentity::new("local", "recording", ModelDisposition::Balanced);
+    let model = RecordingModel::new();
+    let mut runtime = AgentRuntime::new(model, StubTools, identity);
+    let control = TurnControl::new(AbortSignal::new());
+    control.cancel();
+
+    let error = runtime
+        .handle_turn_streaming_with_control("不要执行", control, |_| {})
+        .expect_err("预取消应直接失败");
+
+    assert!(error.is_cancelled());
+    assert!(runtime.model.seen_requests.borrow().is_empty());
+}
+
+#[test]
+fn 运行时可暴露独立_turn_control() {
+    let identity = ModelIdentity::new("local", "stub", ModelDisposition::Balanced);
+    let runtime = AgentRuntime::new(StubModel, StubTools, identity);
+
+    let control = runtime.turn_control();
+    assert!(!control.abort_signal().is_aborted());
+    control.cancel();
+    assert!(control.abort_signal().is_aborted());
+}
+
+#[test]
+fn 运行时工具失败事件保留失败结果() {
+    let identity = ModelIdentity::new("local", "stub", ModelDisposition::Balanced);
+    let mut runtime = AgentRuntime::new(StubModel, FailingTools, identity);
+    let subscriber = runtime.subscribe();
+
+    let _ = runtime.handle_turn("你好").expect("工具失败应写入轮次而不是直接报错");
+    let events = runtime.collect_events(subscriber).expect("读取事件成功");
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        RuntimeEvent::ToolInvocation {
+            outcome: ToolInvocationOutcome::Failed { message },
+            ..
+        } if message.contains("工具执行失败")
+    )));
 }
 
 #[test]

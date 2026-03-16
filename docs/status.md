@@ -72,17 +72,18 @@
 - 完成真实 token usage 贯通到 turn 主链：provider 返回的 `completion.usage` 现在会进入 `TurnLifecycle`、随 `turn_completed` SSE 与 session history 一起返回，并持久化到 `turn_completed` tape event，Web 聊天视图可直接显示本轮 input/output/total tokens
 - 完成 Web 端 turn 提交请求的 `keepalive` 加固：页面刷新或跳转时，已发出的 `POST /api/turn` 不再容易因为浏览器中断请求而导致本轮根本未进入 server worker
 - 完成 provider 注册表加载的旧路径兼容：当 `.aia/providers.json` 缺失时，server 会自动回退读取历史遗留的 `.aia/sessions/providers.json`，避免已有 provider 数据因为路径迁移而在启动后表现为“空配置”
-- 完成 OpenAI prompt caching 统一接入：`apps/agent-server` 现在会自动为同一 session 生成稳定 `prompt_cache_key`，并固定发送 `24h` retention；Responses / Chat Completions 的 `cached_tokens` 也已进入 completion usage、trace SQLite、trace summary 与 Web 聊天/诊断视图
+- 完成完整的 stop/cancel 基线：server 暴露 `POST /api/turn/cancel`，session manager 能中断运行中 turn，runtime 把取消信号传到工具执行上下文，Web 输入区提供 stop 按钮并显示 cancelled 状态
 
 ## 正在进行
 
 - 收口 runtime worker 留在 `apps/agent-server`、哪些能力适合上移到 `agent-runtime` 的边界
 - 观察内嵌 `brush` 作为 shell 运行时的实际稳定性、命令兼容性与中断语义
 - 继续把 trace 数据模型从“本地 span store + event timeline”推进到更完整的 resources / richer events 模型，但暂不抢在工具协议映射与 MCP 之前做 exporter / collector 集成
+- 验证 stop/cancel 目前对长时间 shell / 外部 provider streaming 的实际覆盖率；当前已打通 server→runtime→tool context，但 LLM HTTP 请求本身仍待下一步继续做可中断化
 
 ## 下一步
 
-1. 支持完整的异步功能，支持完整的中断功能（停止llm调用，停止tool运行）
+1. 继续把 stop/cancel 从当前 server→runtime→tool context 基线扩展到真正中断 OpenAI streaming 请求与 embedded shell 长任务
 1. runtime 驱动辅助从 `apps/agent-server` 继续抽到共享层
 2. 在工具协议边界进一步收稳后，把 `llm-trace` 从当前本地 span record + event timeline 继续推进到更完整的 resources / richer events 形态
 3. 继续补强 shell 中断 / 长任务处理与更细粒度的工具运行时能力
