@@ -161,16 +161,16 @@
 **提交**：待提交
 **下次方向**：继续补 Web 测试入口，并让前端取消态回归真正纳入标准验证链路；之后再回到 provider / shell 的真实取消覆盖率诊断。
 
-## 2026-03-16 Session 17
+## 2026-03-16 Session 18
 
-**诊断**：工作区里已有一半完成的 `aia-config` 共享配置 refactor，`agent-server` / `provider-registry` / `session-tape` / `agent-runtime` 已开始引用新 crate，但 `aia-config` 自身的 `lib.rs` 仍和子模块重复定义同一批路径/标识/默认值，且这批改动还未被正式收口记录。
-**决策**：先把这条已在途的高价值共享配置收口完成：让 `aia-config` 成为真正的单一配置源，并验证所有已接入 Rust crate；这是遵循“close before you open”的最小闭环。
+**诊断**：工作区当前只剩一组未提交的文档改动，目标是把 README / requirements / architecture / Web README 重新对齐到现在的真实仓库形态；但现有 `docs/architecture.md` diff 中混入了文本损坏字符和过时 crate 叙事，若直接提交会让文档本身变成新的错误源。
+**决策**：先把这组文档改动收口并修正损坏文本，统一对齐到当前 `aia-config` / `agent-store` / `apps/web` / `apps/agent-server` 的真实边界；这是遵循“close before you open”的最小高价值收尾。
 **变更**：
-- `crates/aia-config/src/lib.rs`：改为薄 façade，统一 `pub use` `paths` / `identifiers` / `server` 子模块，移除重复定义并保留集中测试。
-- `crates/aia-config/src/paths.rs`、`crates/aia-config/src/identifiers.rs`、`crates/aia-config/src/server.rs`：作为共享配置的真实实现来源，承载 `.aia` 路径、默认 session/server 常量、trace/span/prompt-cache 标识与 user agent helper。
-- `crates/agent-runtime/src/runtime/helpers.rs`、`crates/provider-registry/src/registry.rs`、`crates/session-tape/src/tape.rs`、`apps/agent-server/src/main.rs`、`apps/agent-server/src/model.rs`、`apps/agent-server/src/session_manager.rs`、`apps/agent-server/src/sse.rs`：继续复用 `aia-config` 的共享默认值与标识 helper，收口分散常量。
-- `README.md`、`docs/status.md`、`docs/architecture.md`：同步记录 `aia-config` 已覆盖的共享配置边界。
-**验证**：`cargo test -p aia-config -p agent-runtime -p provider-registry -p session-tape -p agent-server` 通过；`cargo check -p aia-config -p agent-runtime -p provider-registry -p session-tape -p agent-server` 通过。
-**提交**：`d12df14` `refactor: centralize shared defaults in aia-config`
-**下次方向**：继续收口这批共享配置接入的剩余表层影响，优先清理未提交的 Web/tooling 变更与 Rust 侧仍分散的默认值常量。
+- `README.md`：把项目概览收口为当前实际工作区形态，补上 `aia-config`、`agent-store`、Web-first shell、当前 trace / cancellation / prompt caching 行为与文档入口说明。
+- `apps/web/README.md`：更新 Web 子项目说明，改为当前真实能力、Vite+ 工作流与前端约束，而不是旧骨架期描述。
+- `docs/requirements.md`：同步当前主交互形态、server 作为控制面、stop/cancel 与本地 trace 关系，并整理“已完成 / 不做 / 下一阶段优先事项”。
+- `docs/architecture.md`：修正损坏文本与过时的 `llm-trace` 叙事，统一说明 `aia-config`、`agent-store`、Web / server / runtime 的现有边界与下一阶段承接能力。
+**验证**：`cargo check` 通过；`cargo test` 通过；文档内容已与当前工作区结构对齐。
+**提交**：待提交
+**下次方向**：回到代码层面，优先评估 `apps/web` 当前未提交的工具链迁移改动是否值得收口；若不继续 Web 工具链路线，则转而清理下一批非测试 panic/脆弱测试边界。
 
