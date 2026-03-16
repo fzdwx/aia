@@ -169,6 +169,6 @@
 - `apps/web/src/stores/chat-store.ts`：将 hydration 状态统一命名为 `sessionHydrating`，修正初始化、hydrate 完成/失败、重复切换短路判断与删除最后一个 session 的收尾路径。
 - `apps/web/src/components/chat-messages.tsx`：继续消费统一后的 `sessionHydrating`，在 session 切换水合期间显示稳定的 loading 占位，而不是立刻闪回空态文案。
 **验证**：通过代码级一致性检查确认 `apps/web/src` 中不再残留 `turnsHydrating` 引用；尝试按 `apps/web/AGENTS.md` 使用 `vp check` / `vp test`，但当前环境未提供 `vp` 命令。
-**提交**：待提交
+**提交**：`87f161b` `fix: align web session hydration state`
 **下次方向**：若后续环境可用，优先补跑 Web 工具链校验；随后继续评估这条 hydration UX 是否还需要前端回归测试覆盖，以避免 session 切换时空白闪烁回归。
 
