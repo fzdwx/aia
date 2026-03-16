@@ -659,6 +659,7 @@ mod tests {
 
     use super::{ProviderLaunchChoice, ServerModel, build_model_from_selection};
 
+    #[test]
     fn server_model_marks_cancelled_openai_errors_as_cancelled() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
         let address = listener.local_addr().expect("address should resolve");

@@ -111,3 +111,15 @@
 **验证**：`cargo check` 通过；`cargo test` 通过；新增 OpenAI adapter 取消与 server model 取消识别测试，并补 shell/runtime 取消回归验证。
 **提交**：`dbd0828` `feat: propagate cancellation into streaming model and shell`
 **下次方向**：继续验证不同 OpenAI 兼容上游与复杂 shell pipeline 的实际中断覆盖率，必要时再把“读流中断”继续下推到更底层的 HTTP 连接级取消或 provider 超时/中止控制。
+
+## 2026-03-16 Session 7
+
+**诊断**：server 取消 API 在收到 cancel 请求时会立即广播 `status=cancelled` 和 `turn_cancelled`，而运行中的 worker 在轮次真正结束后又会再次广播一次，导致 cancelled SSE 重复发射、客户端需要自行去重。
+**决策**：把 cancelled SSE 的发射点收口到 worker 完成路径：取消请求只负责触发 abort 和更新本地快照，不再抢先广播；这样能在不改动 HTTP API 的前提下统一“取消已请求”和“轮次已确认结束”的边界。
+**变更**：
+- `apps/agent-server/src/session_manager.rs`：移除 `handle_cancel_turn` 中抢先发送的 cancelled SSE，仅保留 abort 触发与 current turn 快照状态更新，并同步调整测试与告警清理。
+- `apps/agent-server/src/model.rs`：补上取消识别回归测试的 `#[test]` 标记，确保该路径真正被测试执行。
+- `docs/status.md`、`docs/architecture.md`：补充说明 server 侧已把 cancelled SSE 发射点收口到单一路径，避免重复事件。
+**验证**：`cargo check` 通过；`cargo test` 通过；`agent-server` 取消快照测试通过。
+**提交**：待提交
+**下次方向**：继续观察 stop/cancel 在真实上游和复杂 shell 任务下的覆盖率；如果 provider 侧仍有阻塞窗口，再评估更底层的 transport 取消方案。

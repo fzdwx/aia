@@ -629,7 +629,7 @@ fn handle_submit_turn(
 
 fn handle_cancel_turn(
     slots: &mut HashMap<SessionId, SessionSlot>,
-    config: &SessionManagerConfig,
+    _config: &SessionManagerConfig,
     session_id: &str,
 ) -> Result<bool, RuntimeWorkerError> {
     let slot = slots
@@ -646,12 +646,6 @@ fn handle_cancel_turn(
 
     running_turn.control.cancel();
     update_current_turn_status(&slot.current_turn, TurnStatus::Cancelled);
-    let _ = config.broadcast_tx.send(SsePayload::Status {
-        session_id: session_id.to_string(),
-        status: TurnStatus::Cancelled,
-    });
-    let _ =
-        config.broadcast_tx.send(SsePayload::TurnCancelled { session_id: session_id.to_string() });
     Ok(true)
 }
 
@@ -1158,7 +1152,7 @@ mod tests {
     use std::sync::{Arc, RwLock};
 
     use crate::runtime_worker::RunningTurnHandle;
-    use crate::sse::{SsePayload, TurnStatus};
+    use crate::sse::TurnStatus;
 
     use super::{
         CurrentTurnSnapshot, handle_cancel_turn, read_lock, update_current_turn_status, write_lock,
@@ -1229,7 +1223,7 @@ mod tests {
                 status: super::SlotStatus::Running,
             },
         );
-        let (broadcast_tx, mut broadcast_rx) = tokio::sync::broadcast::channel(8);
+        let (broadcast_tx, _broadcast_rx) = tokio::sync::broadcast::channel(8);
         let config = super::SessionManagerConfig {
             sessions_dir: std::path::PathBuf::new(),
             store: Arc::new(agent_store::AiaStore::new(":memory:").expect("memory store")),
@@ -1256,10 +1250,5 @@ mod tests {
         let guard = read_lock(&current_turn);
         let current = guard.as_ref().expect("snapshot should still exist");
         assert_eq!(current.status, TurnStatus::Cancelled);
-
-        let first_event = broadcast_rx.try_recv().expect("status event should be sent");
-        assert!(matches!(first_event, SsePayload::Status { status: TurnStatus::Cancelled, .. }));
-        let second_event = broadcast_rx.try_recv().expect("turn_cancelled event should be sent");
-        assert!(matches!(second_event, SsePayload::TurnCancelled { .. }));
     }
 }

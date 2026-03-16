@@ -73,7 +73,7 @@
 - 完成 Web 端 turn 提交请求的 `keepalive` 加固：页面刷新或跳转时，已发出的 `POST /api/turn` 不再容易因为浏览器中断请求而导致本轮根本未进入 server worker
 - 完成 provider 注册表加载的旧路径兼容：当 `.aia/providers.json` 缺失时，server 会自动回退读取历史遗留的 `.aia/sessions/providers.json`，避免已有 provider 数据因为路径迁移而在启动后表现为“空配置”
 - 完成完整的 stop/cancel 基线：server 暴露 `POST /api/turn/cancel`，session manager 能中断运行中 turn，runtime 把取消信号传到工具执行上下文，Web 输入区提供 stop 按钮并显示 cancelled 状态
-- 完成 stop/cancel 第二阶段基线：runtime 会把 abort 继续传到 OpenAI streaming 调用，`openai-adapter` 在流式读取中主动检查取消信号；embedded `brush` shell 在收到取消后会向当前作业发送 `TERM` 并尽快收尾；`TurnLifecycle` 新增共享 `outcome` 字段，让前后端不再仅靠 `failure_message` 猜测取消状态
+- 完成 stop/cancel 第二阶段基线：runtime 会把 abort 继续传到 OpenAI streaming 调用，`openai-adapter` 在流式读取中主动检查取消信号；embedded `brush` shell 在收到取消后会向当前作业发送 `TERM` 并尽快收尾；`TurnLifecycle` 新增共享 `outcome` 字段，让前后端不再仅靠 `failure_message` 猜测取消状态；server 取消 API 只负责触发 abort，真正的 cancelled SSE 改由 worker 在轮次结束时统一发出一次，避免重复事件
 
 ## 正在进行
 
