@@ -60,19 +60,14 @@ pub enum CompletionSegment {
     ToolUse(ToolCall),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub enum CompletionStopReason {
+    #[default]
     Stop,
     ToolUse,
     MaxTokens,
     ContentFilter,
     Unknown(String),
-}
-
-impl Default for CompletionStopReason {
-    fn default() -> Self {
-        Self::Stop
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

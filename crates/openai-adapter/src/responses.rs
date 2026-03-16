@@ -322,11 +322,11 @@ impl LanguageModel for OpenAiResponsesModel {
                     }
                 }
                 Some("response.output_text.done") => {
-                    if !saw_text_delta {
-                        if let Some(text) = extract_stream_text(&event["text"]) {
-                            text_buf.push_str(&text);
-                            sink(StreamEvent::TextDelta { text });
-                        }
+                    if !saw_text_delta
+                        && let Some(text) = extract_stream_text(&event["text"])
+                    {
+                        text_buf.push_str(&text);
+                        sink(StreamEvent::TextDelta { text });
                     }
                 }
                 Some(

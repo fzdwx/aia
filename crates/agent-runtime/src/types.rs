@@ -63,7 +63,7 @@ pub enum ToolInvocationOutcome {
 pub enum TurnBlock {
     Thinking { content: String },
     Assistant { content: String },
-    ToolInvocation { invocation: ToolInvocationLifecycle },
+    ToolInvocation { invocation: Box<ToolInvocationLifecycle> },
     Failure { message: String },
 }
 

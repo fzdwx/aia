@@ -268,7 +268,7 @@ fn 查询可按锚点区间日期类型文本与数量切片() {
     let e1 = TapeEntry {
         id: 0,
         kind: "message".into(),
-        payload: serde_json::to_value(&Message::new(Role::User, "alpha start")).unwrap(),
+        payload: serde_json::to_value(Message::new(Role::User, "alpha start")).unwrap(),
         meta: default_meta(),
         date: "2026-03-10T00:00:00Z".into(),
     };
@@ -280,7 +280,7 @@ fn 查询可按锚点区间日期类型文本与数量切片() {
     let e3 = TapeEntry {
         id: 0,
         kind: "message".into(),
-        payload: serde_json::to_value(&Message::new(Role::Assistant, "alpha implementation note"))
+        payload: serde_json::to_value(Message::new(Role::Assistant, "alpha implementation note"))
             .unwrap(),
         meta: default_meta(),
         date: "2026-03-12T00:00:00Z".into(),
@@ -309,7 +309,7 @@ fn 查询可按锚点区间日期类型文本与数量切片() {
     let e6 = TapeEntry {
         id: 0,
         kind: "message".into(),
-        payload: serde_json::to_value(&Message::new(Role::User, "omega finish")).unwrap(),
+        payload: serde_json::to_value(Message::new(Role::User, "omega finish")).unwrap(),
         meta: default_meta(),
         date: "2026-03-15T00:00:00Z".into(),
     };

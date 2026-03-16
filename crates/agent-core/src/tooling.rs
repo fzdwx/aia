@@ -44,12 +44,11 @@ impl ToolDefinition {
                     serde_json::json!({ "type": "string", "description": description }),
                 );
             }
-            if required {
-                if let Some(required_fields) =
+            if required
+                && let Some(required_fields) =
                     obj.get_mut("required").and_then(|value| value.as_array_mut())
-                {
-                    required_fields.push(Value::String(name));
-                }
+            {
+                required_fields.push(Value::String(name));
             }
         }
         self

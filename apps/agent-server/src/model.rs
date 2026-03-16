@@ -204,11 +204,6 @@ impl LanguageModel for ServerModel {
 }
 
 impl ServerModel {
-    #[cfg(test)]
-    pub fn bootstrap() -> Self {
-        Self { inner: ServerModelInner::Bootstrap(BootstrapModel), trace_store: None }
-    }
-
     fn complete_with_trace(
         &self,
         request: CompletionRequest,

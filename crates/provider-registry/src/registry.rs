@@ -22,13 +22,13 @@ pub struct ProviderRegistry {
 impl ProviderRegistry {
     pub fn load_or_default(path: &Path) -> Result<Self, ProviderRegistryError> {
         if !path.exists() {
-            if let Some(legacy_path) = legacy_registry_path(path) {
-                if legacy_path.exists() {
-                    let contents = fs::read_to_string(&legacy_path)
-                        .map_err(|error| ProviderRegistryError::new(error.to_string()))?;
-                    return serde_json::from_str(&contents)
-                        .map_err(|error| ProviderRegistryError::new(error.to_string()));
-                }
+            if let Some(legacy_path) = legacy_registry_path(path)
+                && legacy_path.exists()
+            {
+                let contents = fs::read_to_string(&legacy_path)
+                    .map_err(|error| ProviderRegistryError::new(error.to_string()))?;
+                return serde_json::from_str(&contents)
+                    .map_err(|error| ProviderRegistryError::new(error.to_string()));
             }
             return Ok(Self::default());
         }

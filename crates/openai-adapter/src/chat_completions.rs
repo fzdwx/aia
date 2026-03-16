@@ -308,18 +308,18 @@ impl LanguageModel for OpenAiChatCompletionsModel {
                     .map(ToString::to_string);
             }
 
-            if let Some(reasoning) = delta.get("reasoning").and_then(|value| value.as_str()) {
-                if !reasoning.is_empty() {
-                    thinking_buf.push_str(reasoning);
-                    sink(StreamEvent::ThinkingDelta { text: reasoning.to_string() });
-                }
+            if let Some(reasoning) = delta.get("reasoning").and_then(|value| value.as_str())
+                && !reasoning.is_empty()
+            {
+                thinking_buf.push_str(reasoning);
+                sink(StreamEvent::ThinkingDelta { text: reasoning.to_string() });
             }
 
-            if let Some(content) = delta.get("content").and_then(|value| value.as_str()) {
-                if !content.is_empty() {
-                    text_buf.push_str(content);
-                    sink(StreamEvent::TextDelta { text: content.to_string() });
-                }
+            if let Some(content) = delta.get("content").and_then(|value| value.as_str())
+                && !content.is_empty()
+            {
+                text_buf.push_str(content);
+                sink(StreamEvent::TextDelta { text: content.to_string() });
             }
 
             if let Some(tool_deltas) = delta.get("tool_calls").and_then(|value| value.as_array()) {

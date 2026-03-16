@@ -136,10 +136,10 @@ fn convert_legacy(legacy: LegacyEntry) -> TapeEntry {
 }
 
 pub(crate) fn decode_persisted_line(line: &str) -> Result<TapeEntry, SessionTapeError> {
-    if let Ok(entry) = serde_json::from_str::<TapeEntry>(line) {
-        if !entry.kind.is_empty() {
-            return Ok(entry);
-        }
+    if let Ok(entry) = serde_json::from_str::<TapeEntry>(line)
+        && !entry.kind.is_empty()
+    {
+        return Ok(entry);
     }
     if let Ok(legacy) = serde_json::from_str::<LegacyEntry>(line) {
         return Ok(convert_legacy(legacy));

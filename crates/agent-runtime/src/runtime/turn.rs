@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use agent_core::{
-    Completion, CompletionSegment, CompletionStopReason, LanguageModel, LlmTraceRequestContext,
-    Message, Role, StreamEvent, ToolExecutor,
+    Completion, CompletionSegment, CompletionStopReason, CompletionUsage, LanguageModel,
+    LlmTraceRequestContext, Message, Role, StreamEvent, ToolExecutor,
 };
 use session_tape::TapeEntry;
 
@@ -44,6 +44,33 @@ impl TurnBuffers {
     }
 }
 
+pub(super) struct TurnCompletionSummary {
+    pub assistant_message: Option<String>,
+    pub thinking: Option<String>,
+    pub usage: Option<CompletionUsage>,
+}
+
+pub(super) struct TurnSuccessContext {
+    pub turn_id: String,
+    pub started_at_ms: u64,
+    pub source_entry_ids: Vec<u64>,
+    pub user_message: String,
+    pub blocks: Vec<TurnBlock>,
+    pub tool_invocations: Vec<ToolInvocationLifecycle>,
+    pub summary: TurnCompletionSummary,
+}
+
+pub(super) struct TurnFailureContext<'a> {
+    pub turn_id: &'a str,
+    pub started_at_ms: u64,
+    pub user_message: &'a str,
+    pub source_entry_ids: &'a mut Vec<u64>,
+    pub blocks: &'a [TurnBlock],
+    pub assistant_message: Option<String>,
+    pub aggregated_thinking: &'a str,
+    pub tool_invocations: &'a [ToolInvocationLifecycle],
+}
+
 impl<M, T> AgentRuntime<M, T>
 where
     M: LanguageModel,
@@ -72,11 +99,11 @@ where
         let mut llm_step_index = 0_u32;
 
         // Pre-turn context pressure check (based on last real token count)
-        if let Some(ratio) = self.context_pressure_ratio() {
-            if ratio >= self.context_pressure_threshold {
-                let _ = self.compress_context(Some(&turn_id), llm_step_index);
-                llm_step_index = llm_step_index.saturating_add(1);
-            }
+        if let Some(ratio) = self.context_pressure_ratio()
+            && ratio >= self.context_pressure_threshold
+        {
+            let _ = self.compress_context(Some(&turn_id), llm_step_index);
+            llm_step_index = llm_step_index.saturating_add(1);
         }
 
         let mut already_compressed = false;
@@ -102,14 +129,16 @@ where
                     }
                     let runtime_error = RuntimeError::model(error);
                     self.record_turn_failure(
-                        &turn_id,
-                        started_at_ms,
-                        &mut buffers.source_entry_ids,
-                        &user_message.content,
-                        &buffers.blocks,
-                        buffers.last_assistant_text.clone(),
-                        buffers.aggregated_thinking.as_str(),
-                        &buffers.tool_invocations,
+                        TurnFailureContext {
+                            turn_id: &turn_id,
+                            started_at_ms,
+                            user_message: &user_message.content,
+                            source_entry_ids: &mut buffers.source_entry_ids,
+                            blocks: &buffers.blocks,
+                            assistant_message: buffers.last_assistant_text.clone(),
+                            aggregated_thinking: buffers.aggregated_thinking.as_str(),
+                            tool_invocations: &buffers.tool_invocations,
+                        },
                         runtime_error.clone(),
                     )?;
                     return Err(runtime_error);
@@ -118,14 +147,16 @@ where
 
             if let Err(runtime_error) = self.validate_completion_stop_reason(&completion) {
                 self.record_turn_failure(
-                    &turn_id,
-                    started_at_ms,
-                    &mut buffers.source_entry_ids,
-                    &user_message.content,
-                    &buffers.blocks,
-                    buffers.last_assistant_text.clone(),
-                    buffers.aggregated_thinking.as_str(),
-                    &buffers.tool_invocations,
+                    TurnFailureContext {
+                        turn_id: &turn_id,
+                        started_at_ms,
+                        user_message: &user_message.content,
+                        source_entry_ids: &mut buffers.source_entry_ids,
+                        blocks: &buffers.blocks,
+                        assistant_message: buffers.last_assistant_text.clone(),
+                        aggregated_thinking: buffers.aggregated_thinking.as_str(),
+                        tool_invocations: &buffers.tool_invocations,
+                    },
                     runtime_error.clone(),
                 )?;
                 return Err(runtime_error);
@@ -142,14 +173,16 @@ where
                 Ok(value) => value,
                 Err(runtime_error) => {
                     self.record_turn_failure(
-                        &turn_id,
-                        started_at_ms,
-                        &mut buffers.source_entry_ids,
-                        &user_message.content,
-                        &buffers.blocks,
-                        buffers.last_assistant_text.clone(),
-                        buffers.aggregated_thinking.as_str(),
-                        &buffers.tool_invocations,
+                        TurnFailureContext {
+                            turn_id: &turn_id,
+                            started_at_ms,
+                            user_message: &user_message.content,
+                            source_entry_ids: &mut buffers.source_entry_ids,
+                            blocks: &buffers.blocks,
+                            assistant_message: buffers.last_assistant_text.clone(),
+                            aggregated_thinking: buffers.aggregated_thinking.as_str(),
+                            tool_invocations: &buffers.tool_invocations,
+                        },
                         runtime_error.clone(),
                     )?;
                     return Err(runtime_error);
@@ -162,14 +195,16 @@ where
                         let runtime_error =
                             RuntimeError::stop_reason_mismatch(&completion.stop_reason);
                         self.record_turn_failure(
-                            &turn_id,
-                            started_at_ms,
-                            &mut buffers.source_entry_ids,
-                            &user_message.content,
-                            &buffers.blocks,
-                            buffers.last_assistant_text.clone(),
-                            buffers.aggregated_thinking.as_str(),
-                            &buffers.tool_invocations,
+                            TurnFailureContext {
+                                turn_id: &turn_id,
+                                started_at_ms,
+                                user_message: &user_message.content,
+                                source_entry_ids: &mut buffers.source_entry_ids,
+                                blocks: &buffers.blocks,
+                                assistant_message: buffers.last_assistant_text.clone(),
+                                aggregated_thinking: buffers.aggregated_thinking.as_str(),
+                                tool_invocations: &buffers.tool_invocations,
+                            },
                             runtime_error.clone(),
                         )?;
                         return Err(runtime_error);
@@ -180,31 +215,35 @@ where
                         let runtime_error =
                             RuntimeError::stop_reason_mismatch(&completion.stop_reason);
                         self.record_turn_failure(
-                            &turn_id,
-                            started_at_ms,
-                            &mut buffers.source_entry_ids,
-                            &user_message.content,
-                            &buffers.blocks,
-                            buffers.last_assistant_text.clone(),
-                            buffers.aggregated_thinking.as_str(),
-                            &buffers.tool_invocations,
+                            TurnFailureContext {
+                                turn_id: &turn_id,
+                                started_at_ms,
+                                user_message: &user_message.content,
+                                source_entry_ids: &mut buffers.source_entry_ids,
+                                blocks: &buffers.blocks,
+                                assistant_message: buffers.last_assistant_text.clone(),
+                                aggregated_thinking: buffers.aggregated_thinking.as_str(),
+                                tool_invocations: &buffers.tool_invocations,
+                            },
                             runtime_error.clone(),
                         )?;
                         return Err(runtime_error);
                     }
 
                     let thinking = buffers.thinking();
-                    self.finish_success_turn(
+                    self.finish_success_turn(TurnSuccessContext {
                         turn_id,
                         started_at_ms,
-                        buffers.source_entry_ids,
-                        user_message.content,
-                        buffers.blocks,
-                        buffers.last_assistant_text.clone(),
-                        thinking,
-                        buffers.tool_invocations,
-                        completion.usage.clone(),
-                    )?;
+                        source_entry_ids: buffers.source_entry_ids,
+                        user_message: user_message.content,
+                        blocks: buffers.blocks,
+                        tool_invocations: buffers.tool_invocations,
+                        summary: TurnCompletionSummary {
+                            assistant_message: buffers.last_assistant_text.clone(),
+                            thinking,
+                            usage: completion.usage.clone(),
+                        },
+                    })?;
 
                     return Ok(TurnOutput {
                         assistant_text,
@@ -274,18 +313,20 @@ where
                         self.append_tape_entry(TapeEntry::tool_call(call).with_run_id(turn_id))?;
                     buffers.source_entry_ids.push(tool_call_entry_id);
                     let invocation = self.execute_tool_call(
-                        turn_id,
-                        llm_trace_context,
-                        assistant_entry_id,
-                        tool_call_entry_id,
-                        call,
-                        &mut buffers.seen_tool_calls,
-                        &mut buffers.source_entry_ids,
+                        super::tool_calls::ExecuteToolCallContext {
+                            turn_id,
+                            parent_trace_context: llm_trace_context,
+                            assistant_entry_id,
+                            tool_call_entry_id,
+                            call,
+                            seen_tool_calls: &mut buffers.seen_tool_calls,
+                            source_entry_ids: &mut buffers.source_entry_ids,
+                        },
                         on_delta,
                     )?;
-                    buffers
-                        .blocks
-                        .push(TurnBlock::ToolInvocation { invocation: invocation.clone() });
+                    buffers.blocks.push(TurnBlock::ToolInvocation {
+                        invocation: Box::new(invocation.clone()),
+                    });
                     buffers.tool_invocations.push(invocation);
                 }
                 CompletionSegment::Thinking(_) | CompletionSegment::Text(_) => {}

@@ -447,12 +447,12 @@ fn handle_delete_session(
     config: &SessionManagerConfig,
     session_id: &str,
 ) -> Result<(), RuntimeWorkerError> {
-    if let Some(slot) = slots.get(session_id) {
-        if slot.status == SlotStatus::Running {
-            return Err(RuntimeWorkerError::bad_request(
-                "cannot delete a session while a turn is running",
-            ));
-        }
+    if let Some(slot) = slots.get(session_id)
+        && slot.status == SlotStatus::Running
+    {
+        return Err(RuntimeWorkerError::bad_request(
+            "cannot delete a session while a turn is running",
+        ));
     }
 
     slots.remove(session_id);

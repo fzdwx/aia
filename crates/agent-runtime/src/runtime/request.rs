@@ -50,10 +50,10 @@ where
     ) -> (Option<String>, Vec<ConversationItem>, Vec<ToolDefinition>) {
         let view = self.tape.default_view();
         let mut conversation = Vec::new();
-        if let Some(anchor) = view.origin_anchor.as_ref() {
-            if let Some(msg) = anchor_state_message(anchor) {
-                conversation.push(ConversationItem::Message(msg));
-            }
+        if let Some(anchor) = view.origin_anchor.as_ref()
+            && let Some(msg) = anchor_state_message(anchor)
+        {
+            conversation.push(ConversationItem::Message(msg));
         }
         conversation.extend(drop_orphaned_tool_results(view.conversation));
 
@@ -165,7 +165,7 @@ pub(super) fn drop_orphaned_tool_results(
         .into_iter()
         .filter(|item| {
             item.as_tool_result()
-                .map_or(true, |result| known_call_ids.contains(&result.invocation_id))
+                .is_none_or(|result| known_call_ids.contains(&result.invocation_id))
         })
         .collect()
 }

@@ -1497,7 +1497,7 @@ fn runtime_tool_bridge_创建锚点后后续请求会过滤孤立_tool_result() 
 
     assert!(tool_result_index > anchor_index);
     assert!(request.conversation.iter().all(|item| {
-        item.as_tool_result().map_or(true, |result| result.tool_name != "tape_handoff")
+        item.as_tool_result().is_none_or(|result| result.tool_name != "tape_handoff")
     }));
 }
 
@@ -1529,7 +1529,7 @@ fn 孤立的_tool_result_会被过滤() {
     assert!(
         filtered
             .iter()
-            .all(|item| { item.as_tool_result().map_or(true, |r| r.invocation_id != "orphan-id") })
+            .all(|item| { item.as_tool_result().is_none_or(|r| r.invocation_id != "orphan-id") })
     );
     // The matching result should remain
     assert!(

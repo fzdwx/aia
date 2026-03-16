@@ -273,8 +273,9 @@ impl TurnHistoryBuilder {
                 trace_context: None,
                 outcome: agent_runtime::ToolInvocationOutcome::Succeeded { result },
             };
-            self.blocks
-                .push(agent_runtime::TurnBlock::ToolInvocation { invocation: invocation.clone() });
+            self.blocks.push(agent_runtime::TurnBlock::ToolInvocation {
+                invocation: Box::new(invocation.clone()),
+            });
             self.tool_invocations.push(invocation);
             return;
         }
@@ -361,6 +362,7 @@ impl TurnHistoryBuilder {
                         Some(CurrentTurnBlock::Text { content })
                     }
                     agent_runtime::TurnBlock::ToolInvocation { invocation } => {
+                        let invocation = *invocation;
                         let (result_content, result_details, failed) = match invocation.outcome {
                             agent_runtime::ToolInvocationOutcome::Succeeded { result } => {
                                 (Some(result.content), result.details, Some(false))

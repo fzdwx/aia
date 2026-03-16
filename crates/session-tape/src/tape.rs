@@ -142,10 +142,10 @@ impl SessionTape {
     }
 
     pub fn set_entry_meta(&mut self, entry_id: u64, key: &str, value: Value) {
-        if let Some(entry) = self.entries.iter_mut().rev().find(|e| e.id == entry_id) {
-            if let Value::Object(ref mut map) = entry.meta {
-                map.insert(key.to_string(), value);
-            }
+        if let Some(entry) = self.entries.iter_mut().rev().find(|e| e.id == entry_id)
+            && let Value::Object(ref mut map) = entry.meta
+        {
+            map.insert(key.to_string(), value);
         }
     }
 
