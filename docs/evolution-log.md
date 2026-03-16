@@ -146,5 +146,17 @@
 - `apps/web/src/lib/types.ts`、`apps/web/src/components/chat-messages.tsx`：前端类型与渲染支持 `cancelled` block，取消消息改用中性样式而非 destructive 失败样式。
 - `docs/status.md`、`docs/architecture.md`：更新取消块级语义已经独立化的说明。
 **验证**：`cargo check` 通过；`cargo test` 通过；新增 runtime/server 取消块语义回归测试。
-**提交**：待提交
+**提交**：`b4b9162` `fix: distinguish cancelled blocks from failures`
 **下次方向**：继续补 Web 测试入口，把前端取消态与 cancelled block 渲染回归纳入标准验证；随后再回到 provider / shell 取消覆盖率诊断。
+
+## 2026-03-16 Session 10
+
+**诊断**：即使前端已能保留 cancelled 状态下的流式块内容，provider 若是在流式过程中先输出部分 thinking/text 再返回 cancelled error，runtime 仍不会把这些已流出的 partial delta 写入 tape / `TurnLifecycle`，导致最终历史只剩取消提示而缺失真实已生成内容。
+**决策**：先在 runtime 内部缓存流式 thinking/text delta，并在 cancelled provider error 路径下先 flush partial 内容再记录 cancelled 结束态；这是修复“用户看见过但历史里消失”的最小闭环补口。
+**变更**：
+- `crates/agent-runtime/src/runtime/turn.rs`：为 turn buffers 增加流式 thinking / assistant text 缓冲，provider cancelled error 时先把 partial output 落到 tape 和 turn blocks，再进入 cancelled failure path；正常 completion 仍沿用原有 segment 持久化链路，避免重复写入。
+- `crates/agent-runtime/src/runtime/tests.rs`：新增回归测试，验证“先流出 partial output，再 cancelled error”时，最终 `TurnLifecycle` 与 tape 都会保留 thinking / assistant partial 内容并附带 cancelled block。
+- `docs/evolution-log.md`：追加本次演进记录。
+**验证**：`cargo check` 通过；`cargo test` 通过；新增 1 条 runtime partial-output-on-cancel 回归测试。
+**提交**：待提交
+**下次方向**：继续补 Web 测试入口，并让前端取消态回归真正纳入标准验证链路；之后再回到 provider / shell 的真实取消覆盖率诊断。

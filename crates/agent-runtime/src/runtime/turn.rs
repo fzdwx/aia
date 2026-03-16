@@ -17,9 +17,11 @@ use super::{
 struct TurnBuffers {
     source_entry_ids: Vec<u64>,
     aggregated_thinking: String,
+    streamed_thinking: String,
     tool_invocations: Vec<ToolInvocationLifecycle>,
     blocks: Vec<TurnBlock>,
     last_assistant_text: Option<String>,
+    streamed_assistant_text: String,
     seen_tool_calls: BTreeMap<String, super::helpers::PreviousToolCall>,
 }
 
@@ -28,9 +30,11 @@ impl TurnBuffers {
         Self {
             source_entry_ids: vec![user_entry_id],
             aggregated_thinking: String::new(),
+            streamed_thinking: String::new(),
             tool_invocations: Vec::new(),
             blocks: Vec::new(),
             last_assistant_text: None,
+            streamed_assistant_text: String::new(),
             seen_tool_calls: BTreeMap::new(),
         }
     }
@@ -40,6 +44,23 @@ impl TurnBuffers {
             None
         } else {
             Some(self.aggregated_thinking.clone())
+        }
+    }
+
+    fn record_stream_event(&mut self, event: &StreamEvent) {
+        match event {
+            StreamEvent::ThinkingDelta { text } => {
+                self.streamed_thinking.push_str(text);
+            }
+            StreamEvent::TextDelta { text } => {
+                self.streamed_assistant_text.push_str(text);
+            }
+            StreamEvent::ToolCallDetected { .. }
+            | StreamEvent::ToolCallStarted { .. }
+            | StreamEvent::ToolOutputDelta { .. }
+            | StreamEvent::ToolCallCompleted { .. }
+            | StreamEvent::Log { .. }
+            | StreamEvent::Done => {}
         }
     }
 }
@@ -162,10 +183,14 @@ where
             let request = self.build_completion_request(&turn_id, "completion", llm_step_index);
             let llm_trace_context = request.trace_context.clone();
             llm_step_index = llm_step_index.saturating_add(1);
-            let completion = match self
-                .model
-                .complete_streaming_with_abort(request, &abort_signal, &mut on_delta)
-            {
+            let completion = match self.model.complete_streaming_with_abort(
+                request,
+                &abort_signal,
+                &mut |event| {
+                    buffers.record_stream_event(&event);
+                    on_delta(event);
+                },
+            ) {
                 Ok(completion) => {
                     if let Some(usage) = completion.usage.as_ref() {
                         self.last_input_tokens = Some(usage.input_tokens);
@@ -175,6 +200,7 @@ where
                 Err(error) => {
                     if M::is_cancelled_error(&error) {
                         let runtime_error = RuntimeError::cancelled();
+                        self.flush_streamed_partial_segments(&turn_id, &mut buffers)?;
                         self.record_turn_failure(
                             TurnFailureContext {
                                 turn_id: &turn_id,
@@ -371,6 +397,7 @@ where
         abort_signal: &AbortSignal,
         on_delta: &mut dyn FnMut(StreamEvent),
     ) -> Result<bool, RuntimeError> {
+        self.flush_streamed_partial_segments(turn_id, buffers)?;
         let mut assistant_entry_id = None;
         let mut saw_tool_calls = false;
 
@@ -428,5 +455,33 @@ where
         }
 
         Ok(saw_tool_calls)
+    }
+
+    fn flush_streamed_partial_segments(
+        &mut self,
+        turn_id: &str,
+        buffers: &mut TurnBuffers,
+    ) -> Result<(), RuntimeError> {
+        if !buffers.streamed_thinking.is_empty() && buffers.aggregated_thinking.is_empty() {
+            let thinking = std::mem::take(&mut buffers.streamed_thinking);
+            let thinking_entry_id =
+                self.append_tape_entry(TapeEntry::thinking(&thinking).with_run_id(turn_id))?;
+            buffers.source_entry_ids.push(thinking_entry_id);
+            buffers.aggregated_thinking.push_str(&thinking);
+            buffers.blocks.push(TurnBlock::Thinking { content: thinking });
+        }
+
+        if !buffers.streamed_assistant_text.is_empty() && buffers.last_assistant_text.is_none() {
+            let assistant_text = std::mem::take(&mut buffers.streamed_assistant_text);
+            let assistant_message = Message::new(Role::Assistant, assistant_text.clone());
+            let entry_id =
+                self.append_tape_entry(TapeEntry::message(&assistant_message).with_run_id(turn_id))?;
+            buffers.source_entry_ids.push(entry_id);
+            self.publish_event(RuntimeEvent::AssistantMessage { content: assistant_text.clone() });
+            buffers.last_assistant_text = Some(assistant_text.clone());
+            buffers.blocks.push(TurnBlock::Assistant { content: assistant_text });
+        }
+
+        Ok(())
     }
 }

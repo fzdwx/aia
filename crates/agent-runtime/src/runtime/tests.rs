@@ -153,6 +153,35 @@ impl LanguageModel for ContinueAfterToolModel {
     }
 }
 
+struct StreamingCancelledModel;
+
+impl LanguageModel for StreamingCancelledModel {
+    type Error = CoreError;
+
+    fn complete(&self, _request: CompletionRequest) -> Result<Completion, Self::Error> {
+        Err(CoreError::new("should use streaming path"))
+    }
+
+    fn complete_streaming_with_abort(
+        &self,
+        _request: CompletionRequest,
+        _abort: &AbortSignal,
+        sink: &mut dyn FnMut(agent_core::StreamEvent),
+    ) -> Result<Completion, Self::Error> {
+        sink(agent_core::StreamEvent::ThinkingDelta {
+            text: "先分析".into(),
+        });
+        sink(agent_core::StreamEvent::TextDelta {
+            text: "部分回答".into(),
+        });
+        Err(CoreError::new("stream cancelled after partial output"))
+    }
+
+    fn is_cancelled_error(error: &Self::Error) -> bool {
+        error.to_string().contains("cancelled")
+    }
+}
+
 struct DuplicateToolLoopModel {
     seen_requests: RefCell<Vec<CompletionRequest>>,
 }
@@ -516,6 +545,56 @@ fn 取消轮次会标记为_cancelled_outcome() {
         block,
         crate::TurnBlock::Cancelled { message } if message.contains("已取消")
     )));
+}
+
+#[test]
+fn provider_取消错误前的流式_partial_output_会进入最终轮次() {
+    let identity = ModelIdentity::new("local", "stream-cancelled", ModelDisposition::Balanced);
+    let mut runtime = AgentRuntime::new(StreamingCancelledModel, StubTools, identity);
+    let subscriber = runtime.subscribe();
+
+    let error = runtime
+        .handle_turn_streaming_with_control(
+            "请开始",
+            TurnControl::new(AbortSignal::new()),
+            |_| {},
+        )
+        .expect_err("应按取消失败返回");
+
+    assert!(error.is_cancelled());
+
+    let events = runtime.collect_events(subscriber).expect("读取事件成功");
+    let lifecycle = events
+        .into_iter()
+        .find_map(|event| match event {
+            RuntimeEvent::TurnLifecycle { turn } => Some(turn),
+            _ => None,
+        })
+        .expect("应发布 turn lifecycle");
+
+    assert_eq!(lifecycle.outcome, TurnOutcome::Cancelled);
+    assert_eq!(lifecycle.thinking.as_deref(), Some("先分析"));
+    assert_eq!(lifecycle.assistant_message.as_deref(), Some("部分回答"));
+    assert!(lifecycle.blocks.iter().any(|block| matches!(
+        block,
+        crate::TurnBlock::Thinking { content } if content == "先分析"
+    )));
+    assert!(lifecycle.blocks.iter().any(|block| matches!(
+        block,
+        crate::TurnBlock::Assistant { content } if content == "部分回答"
+    )));
+    assert!(lifecycle.blocks.iter().any(|block| matches!(
+        block,
+        crate::TurnBlock::Cancelled { .. }
+    )));
+    assert!(runtime.tape().entries().iter().any(|entry| {
+        entry.as_thinking().is_some_and(|content| content == "先分析")
+    }));
+    assert!(runtime.tape().entries().iter().any(|entry| {
+        entry
+            .as_message()
+            .is_some_and(|message| message.role == Role::Assistant && message.content == "部分回答")
+    }));
 }
 
 #[test]
