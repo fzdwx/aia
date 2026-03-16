@@ -14,12 +14,7 @@ impl OpenAiAdapterError {
     }
 
     pub fn cancelled(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-            status_code: None,
-            response_body: None,
-            cancelled: true,
-        }
+        Self { message: message.into(), status_code: None, response_body: None, cancelled: true }
     }
 
     pub fn with_status_code(mut self, status_code: Option<u16>) -> Self {

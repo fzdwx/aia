@@ -76,7 +76,9 @@ impl<'de> Deserialize<'de> for ProviderProfile {
     {
         let wire = ProviderProfileWire::deserialize(deserializer)?;
         let mut models = wire.models;
-        if models.is_empty() && let Some(model) = wire.model {
+        if models.is_empty()
+            && let Some(model) = wire.model
+        {
             models.push(ModelConfig::new(model));
         }
         let active_model =

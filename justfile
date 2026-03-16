@@ -13,7 +13,7 @@ dev:
 	set -e
 	cargo run -p agent-server &
 	SERVER_PID=$!
-	cd apps/web && bun i && bun dev &
+	cd apps/web && pnpm i && pnpm dev &
 	WEB_PID=$!
 	trap "kill $SERVER_PID $WEB_PID 2>/dev/null" EXIT
 	wait
@@ -24,8 +24,8 @@ dev-server:
 
 # 只启动前端
 dev-web:
-	cd apps/web && bun dev
+	cd apps/web && pnpm dev
 
 # TypeScript 类型检查
 typecheck:
-	cd apps/web && bun run typecheck
+	cd apps/web && pnpm run typecheck

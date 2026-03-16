@@ -18,5 +18,5 @@ pub(crate) use payloads::{
     ChatCompletionsResponse, ChatCompletionsUsage, ReasoningSummaryPart, ResponsesContent,
     ResponsesOutput, ResponsesResponse, ResponsesUsage,
 };
-pub(crate) use streaming::stream_lines_with_abort;
 pub use responses::{OpenAiResponsesConfig, OpenAiResponsesModel};
+pub(crate) use streaming::stream_lines_with_abort;

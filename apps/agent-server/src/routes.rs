@@ -585,8 +585,11 @@ pub async fn submit_turn(
 
     match state.session_manager.get_session_info(session_id.clone()).await {
         Ok(stats) => {
-            if stats.pressure_ratio.is_some_and(|ratio| ratio >= agent_prompts::AUTO_COMPRESSION_THRESHOLD)
-                && let Err(error) = state.session_manager.auto_compress_session(session_id.clone()).await
+            if stats
+                .pressure_ratio
+                .is_some_and(|ratio| ratio >= agent_prompts::AUTO_COMPRESSION_THRESHOLD)
+                && let Err(error) =
+                    state.session_manager.auto_compress_session(session_id.clone()).await
             {
                 return runtime_worker_error_response(error);
             }
@@ -713,7 +716,8 @@ mod tests {
             })
             .expect("second session should save");
 
-        let resolved = resolve_session_id(&state, None).expect("fallback session lookup should succeed");
+        let resolved =
+            resolve_session_id(&state, None).expect("fallback session lookup should succeed");
 
         assert_eq!(resolved.as_deref(), Some("session-1"));
     }

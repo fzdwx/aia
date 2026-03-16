@@ -5,9 +5,9 @@ use std::{
 };
 
 use agent_core::{
-    CompletionRequest, CompletionSegment, CompletionStopReason, ConversationItem, LanguageModel,
-    Message, ModelDisposition, ModelIdentity, PromptCacheConfig, PromptCacheRetention, Role,
-    StreamEvent, ToolCall, ToolDefinition, ToolResult, AbortSignal,
+    AbortSignal, CompletionRequest, CompletionSegment, CompletionStopReason, ConversationItem,
+    LanguageModel, Message, ModelDisposition, ModelIdentity, PromptCacheConfig,
+    PromptCacheRetention, Role, StreamEvent, ToolCall, ToolDefinition, ToolResult,
 };
 use serde_json::{Value, json};
 
@@ -532,7 +532,8 @@ fn responses_流式调用在_abort_后返回取消错误() {
         let mut buffer = [0_u8; 4096];
         let _ = stream.read(&mut buffer).expect("读取请求成功");
 
-        let response = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n";
+        let response =
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n";
         stream.write_all(response.as_bytes()).expect("写回响应头成功");
         stream.flush().expect("刷新响应头成功");
         thread::sleep(std::time::Duration::from_millis(120));
@@ -571,7 +572,8 @@ fn chat_completions_流式调用在_abort_后返回取消错误() {
         let mut buffer = [0_u8; 4096];
         let _ = stream.read(&mut buffer).expect("读取请求成功");
 
-        let response = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n";
+        let response =
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n";
         stream.write_all(response.as_bytes()).expect("写回响应头成功");
         stream.flush().expect("刷新响应头成功");
         thread::sleep(std::time::Duration::from_millis(120));

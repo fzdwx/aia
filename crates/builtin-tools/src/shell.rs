@@ -272,10 +272,11 @@ mod tests {
     #[test]
     fn embedded_brush_runtime_executes_shell_command() {
         let mut deltas = Vec::new();
-        let execution = run_embedded_brush("printf 'ok'", Path::new("."), &AbortSignal::new(), &mut |delta| {
-            deltas.push(delta);
-        })
-        .expect("embedded brush execution should succeed");
+        let execution =
+            run_embedded_brush("printf 'ok'", Path::new("."), &AbortSignal::new(), &mut |delta| {
+                deltas.push(delta);
+            })
+            .expect("embedded brush execution should succeed");
 
         assert_eq!(execution.stdout, "ok");
         assert_eq!(execution.stderr, "");
@@ -343,13 +344,11 @@ mod tests {
         });
 
         let mut deltas = Vec::new();
-        let execution = run_embedded_brush(
-            "sleep 5; printf 'done'",
-            Path::new("."),
-            &abort,
-            &mut |delta| deltas.push(delta),
-        )
-        .expect("embedded brush should return after abort");
+        let execution =
+            run_embedded_brush("sleep 5; printf 'done'", Path::new("."), &abort, &mut |delta| {
+                deltas.push(delta)
+            })
+            .expect("embedded brush should return after abort");
 
         assert_eq!(execution.exit_code, 130);
         let stdout = deltas

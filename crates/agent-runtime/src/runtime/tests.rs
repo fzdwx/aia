@@ -1,4 +1,7 @@
-use std::{cell::RefCell, time::{Duration, UNIX_EPOCH}};
+use std::{
+    cell::RefCell,
+    time::{Duration, UNIX_EPOCH},
+};
 
 use agent_core::{
     AbortSignal, Completion, CompletionRequest, CompletionSegment, CompletionStopReason,
@@ -175,12 +178,8 @@ impl LanguageModel for StreamingCancelledModel {
         _abort: &AbortSignal,
         sink: &mut dyn FnMut(agent_core::StreamEvent),
     ) -> Result<Completion, Self::Error> {
-        sink(agent_core::StreamEvent::ThinkingDelta {
-            text: "先分析".into(),
-        });
-        sink(agent_core::StreamEvent::TextDelta {
-            text: "部分回答".into(),
-        });
+        sink(agent_core::StreamEvent::ThinkingDelta { text: "先分析".into() });
+        sink(agent_core::StreamEvent::TextDelta { text: "部分回答".into() });
         Err(CoreError::new("stream cancelled after partial output"))
     }
 
@@ -534,11 +533,8 @@ fn 取消轮次会标记为_cancelled_outcome() {
         .expect_err("取消后应结束当前轮");
 
     let events = runtime.collect_events(subscriber).expect("应读取事件");
-    let last_turn = runtime
-        .tape()
-        .entries()
-        .iter()
-        .any(|entry| entry.event_name() == Some("turn_failed"));
+    let last_turn =
+        runtime.tape().entries().iter().any(|entry| entry.event_name() == Some("turn_failed"));
     assert!(last_turn);
     let lifecycle = events
         .into_iter()
@@ -561,11 +557,7 @@ fn provider_取消错误前的流式_partial_output_会进入最终轮次() {
     let subscriber = runtime.subscribe();
 
     let error = runtime
-        .handle_turn_streaming_with_control(
-            "请开始",
-            TurnControl::new(AbortSignal::new()),
-            |_| {},
-        )
+        .handle_turn_streaming_with_control("请开始", TurnControl::new(AbortSignal::new()), |_| {})
         .expect_err("应按取消失败返回");
 
     assert!(error.is_cancelled());
@@ -590,13 +582,16 @@ fn provider_取消错误前的流式_partial_output_会进入最终轮次() {
         block,
         crate::TurnBlock::Assistant { content } if content == "部分回答"
     )));
-    assert!(lifecycle.blocks.iter().any(|block| matches!(
-        block,
-        crate::TurnBlock::Cancelled { .. }
-    )));
-    assert!(runtime.tape().entries().iter().any(|entry| {
-        entry.as_thinking().is_some_and(|content| content == "先分析")
-    }));
+    assert!(
+        lifecycle.blocks.iter().any(|block| matches!(block, crate::TurnBlock::Cancelled { .. }))
+    );
+    assert!(
+        runtime
+            .tape()
+            .entries()
+            .iter()
+            .any(|entry| { entry.as_thinking().is_some_and(|content| content == "先分析") })
+    );
     assert!(runtime.tape().entries().iter().any(|entry| {
         entry
             .as_message()
@@ -619,9 +614,7 @@ impl LanguageModel for StreamingTextThenSameCompletionModel {
         _abort: &AbortSignal,
         sink: &mut dyn FnMut(agent_core::StreamEvent),
     ) -> Result<Completion, Self::Error> {
-        sink(agent_core::StreamEvent::TextDelta {
-            text: "同一段回答".into(),
-        });
+        sink(agent_core::StreamEvent::TextDelta { text: "同一段回答".into() });
         Ok(Completion::text("同一段回答"))
     }
 }
@@ -641,9 +634,7 @@ impl LanguageModel for StreamingThinkingThenSameCompletionModel {
         _abort: &AbortSignal,
         sink: &mut dyn FnMut(agent_core::StreamEvent),
     ) -> Result<Completion, Self::Error> {
-        sink(agent_core::StreamEvent::ThinkingDelta {
-            text: "同一段思考".into(),
-        });
+        sink(agent_core::StreamEvent::ThinkingDelta { text: "同一段思考".into() });
         Ok(Completion {
             segments: vec![CompletionSegment::Thinking("同一段思考".into())],
             stop_reason: CompletionStopReason::Stop,
@@ -656,8 +647,10 @@ impl LanguageModel for StreamingThinkingThenSameCompletionModel {
 
 #[test]
 fn 流式思考与最终完成思考相同时不会重复记录思考() {
-    let identity = ModelIdentity::new("local", "streaming-same-thinking", ModelDisposition::Balanced);
-    let mut runtime = AgentRuntime::new(StreamingThinkingThenSameCompletionModel, StubTools, identity);
+    let identity =
+        ModelIdentity::new("local", "streaming-same-thinking", ModelDisposition::Balanced);
+    let mut runtime =
+        AgentRuntime::new(StreamingThinkingThenSameCompletionModel, StubTools, identity);
 
     let _ = runtime.handle_turn("测试思考重复").expect("应成功完成");
 
@@ -895,20 +888,15 @@ fn 未设置自定义指令时不会自动注入预算提示词() {
 fn 运行时会把全局_request_timeout_映射到请求() {
     let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced);
     let model = BudgetRecordingModel::new();
-    let mut runtime = AgentRuntime::new(model, StubTools, identity).with_request_timeout(
-        agent_core::RequestTimeoutConfig {
-            read_timeout_ms: Some(90_000),
-        },
-    );
+    let mut runtime = AgentRuntime::new(model, StubTools, identity)
+        .with_request_timeout(agent_core::RequestTimeoutConfig { read_timeout_ms: Some(90_000) });
 
     let _ = runtime.handle_turn("检查超时配置").expect("应成功完成");
 
     let requests = runtime.model.seen_requests.borrow();
     assert_eq!(
         requests[0].timeout,
-        Some(agent_core::RequestTimeoutConfig {
-            read_timeout_ms: Some(90_000),
-        })
+        Some(agent_core::RequestTimeoutConfig { read_timeout_ms: Some(90_000) })
     );
 }
 
@@ -1834,14 +1822,8 @@ fn tape_info_结果包含结构化_details() {
 
     assert_eq!(details.get("entries").and_then(|value| value.as_u64()), Some(4));
     assert_eq!(details.get("anchors").and_then(|value| value.as_u64()), Some(0));
-    assert_eq!(
-        details.get("entries_since_last_anchor").and_then(|value| value.as_u64()),
-        Some(4)
-    );
-    assert_eq!(
-        details.get("last_input_tokens").and_then(|value| value.as_u64()),
-        None
-    );
+    assert_eq!(details.get("entries_since_last_anchor").and_then(|value| value.as_u64()), Some(4));
+    assert_eq!(details.get("last_input_tokens").and_then(|value| value.as_u64()), None);
     assert_eq!(details.get("context_limit").and_then(|value| value.as_u64()), Some(1000));
     assert_eq!(details.get("output_limit").and_then(|value| value.as_u64()), Some(500));
     assert!(tool_result.content.contains("\"entries\""));

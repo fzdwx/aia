@@ -178,7 +178,8 @@ where
                 },
             ) {
                 Ok(completion) => {
-                    self.last_input_tokens = completion.usage.as_ref().map(|usage| usage.input_tokens);
+                    self.last_input_tokens =
+                        completion.usage.as_ref().map(|usage| usage.input_tokens);
                     completion
                 }
                 Err(error) => {
@@ -480,8 +481,8 @@ where
         if !buffers.streamed_assistant_text.is_empty() && buffers.last_assistant_text.is_none() {
             let assistant_text = std::mem::take(&mut buffers.streamed_assistant_text);
             let assistant_message = Message::new(Role::Assistant, assistant_text.clone());
-            let entry_id =
-                self.append_tape_entry(TapeEntry::message(&assistant_message).with_run_id(turn_id))?;
+            let entry_id = self
+                .append_tape_entry(TapeEntry::message(&assistant_message).with_run_id(turn_id))?;
             buffers.source_entry_ids.push(entry_id);
             self.publish_event(RuntimeEvent::AssistantMessage { content: assistant_text.clone() });
             buffers.last_assistant_text = Some(assistant_text.clone());

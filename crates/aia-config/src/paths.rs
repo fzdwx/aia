@@ -27,15 +27,9 @@ pub fn default_sessions_dir() -> PathBuf {
 }
 
 pub fn sessions_dir_from_registry_path(registry_path: &Path) -> PathBuf {
-    registry_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(SESSIONS_DIR_NAME)
+    registry_path.parent().unwrap_or_else(|| Path::new(".")).join(SESSIONS_DIR_NAME)
 }
 
 pub fn store_path_from_registry_path(registry_path: &Path) -> PathBuf {
-    registry_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(STORE_FILE_NAME)
+    registry_path.parent().unwrap_or_else(|| Path::new(".")).join(STORE_FILE_NAME)
 }

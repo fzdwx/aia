@@ -3,12 +3,12 @@ use std::{fs, fs::OpenOptions, io::Write, path::Path};
 use agent_core::{ConversationItem, Message};
 use serde_json::Value;
 
+use crate::entry::serialize_payload;
 use crate::{
     Anchor, Handoff, SessionProviderBinding, SessionTapeError, SessionTapeFork, SessionView,
     TapeEntry, TapeQuery, anchor_from_entry, decode_persisted_line, project_conversation_item,
     project_message,
 };
-use crate::entry::serialize_payload;
 
 pub fn default_session_path() -> std::path::PathBuf {
     aia_config::default_session_tape_path()
@@ -79,11 +79,9 @@ impl SessionTape {
     }
 
     pub fn latest_provider_binding(&self) -> Option<SessionProviderBinding> {
-        let entry = self
-            .entries
-            .iter()
-            .rev()
-            .find(|entry| entry.kind == "event" && entry.event_name() == Some("provider_binding"))?;
+        let entry = self.entries.iter().rev().find(|entry| {
+            entry.kind == "event" && entry.event_name() == Some("provider_binding")
+        })?;
         let data = entry.event_data()?;
         serde_json::from_value(data.clone()).ok()
     }

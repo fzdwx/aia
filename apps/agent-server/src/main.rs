@@ -5,7 +5,10 @@ mod session_manager;
 mod sse;
 mod state;
 
-use std::{fmt, sync::{Arc, RwLock}};
+use std::{
+    fmt,
+    sync::{Arc, RwLock},
+};
 
 use agent_store::{AiaStore, SessionRecord, generate_session_id, iso8601_now};
 use axum::{
@@ -101,7 +104,8 @@ async fn run() -> Result<(), ServerInitError> {
     let (identity, _model) = build_model_from_selection(selection, Some(store.clone()))
         .map_err(|error| ServerInitError::new("模型构建", error.to_string()))?;
 
-    let (broadcast_tx, _) = tokio::sync::broadcast::channel(aia_config::DEFAULT_SERVER_EVENT_BUFFER);
+    let (broadcast_tx, _) =
+        tokio::sync::broadcast::channel(aia_config::DEFAULT_SERVER_EVENT_BUFFER);
     let provider_registry_snapshot = Arc::new(RwLock::new(registry.clone()));
     let provider_info_snapshot =
         Arc::new(RwLock::new(ProviderInfoSnapshot::from_identity(&identity)));

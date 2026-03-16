@@ -87,7 +87,8 @@ impl OpenAiChatCompletionsModel {
 
     fn http_client(&self, request: &CompletionRequest) -> Result<Client, OpenAiAdapterError> {
         let mut builder = Client::builder();
-        if let Some(timeout_ms) = request.timeout.as_ref().and_then(|timeout| timeout.read_timeout_ms)
+        if let Some(timeout_ms) =
+            request.timeout.as_ref().and_then(|timeout| timeout.read_timeout_ms)
         {
             builder = builder.timeout(Duration::from_millis(timeout_ms));
         }

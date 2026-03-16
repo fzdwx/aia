@@ -1,4 +1,7 @@
-use std::{path::PathBuf, time::{Duration, UNIX_EPOCH}};
+use std::{
+    path::PathBuf,
+    time::{Duration, UNIX_EPOCH},
+};
 
 use super::*;
 use crate::tooling::duration_since_unix_epoch;

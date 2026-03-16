@@ -22,7 +22,5 @@ pub fn build_tool_span_id(run_id: &str, invocation_id: &str) -> String {
 }
 
 pub fn build_prompt_cache_key(provider_name: &str, model_id: &str, session_id: &str) -> String {
-    format!(
-        "{PROMPT_CACHE_KEY_PREFIX}:{provider_name}:{model_id}:session:{session_id}"
-    )
+    format!("{PROMPT_CACHE_KEY_PREFIX}:{provider_name}:{model_id}:session:{session_id}")
 }

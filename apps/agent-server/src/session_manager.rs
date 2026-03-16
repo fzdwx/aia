@@ -444,9 +444,7 @@ fn create_slot_for_session(
 }
 
 fn runtime_request_timeout() -> RequestTimeoutConfig {
-    RequestTimeoutConfig {
-        read_timeout_ms: Some(aia_config::DEFAULT_SERVER_REQUEST_TIMEOUT_MS),
-    }
+    RequestTimeoutConfig { read_timeout_ms: Some(aia_config::DEFAULT_SERVER_REQUEST_TIMEOUT_MS) }
 }
 
 fn choose_provider_for_tape(
@@ -480,9 +478,9 @@ fn collect_runtime_events(
     runtime: &mut AgentRuntime<ServerModel, ToolRegistry>,
     subscriber: RuntimeSubscriberId,
 ) -> Result<Vec<RuntimeEvent>, RuntimeWorkerError> {
-    runtime
-        .collect_events(subscriber)
-        .map_err(|error| RuntimeWorkerError::internal(format!("runtime event collection failed: {error}")))
+    runtime.collect_events(subscriber).map_err(|error| {
+        RuntimeWorkerError::internal(format!("runtime event collection failed: {error}"))
+    })
 }
 
 fn handle_create_session(
@@ -647,7 +645,8 @@ fn handle_submit_turn(
                 let was_cancelled = error.is_cancelled();
                 match collect_runtime_events(&mut runtime, subscriber) {
                     Ok(events) => {
-                        let turn = broadcast_runtime_events_with_session(events, &broadcast_tx, &sid);
+                        let turn =
+                            broadcast_runtime_events_with_session(events, &broadcast_tx, &sid);
                         if let Some(turn) = turn {
                             persist_tool_trace_spans(&turn, trace_store.as_ref());
                             write_lock(&history_snapshot).push(turn.clone());
@@ -668,7 +667,8 @@ fn handle_submit_turn(
                         session_id: sid.clone(),
                         status: TurnStatus::Cancelled,
                     });
-                    let _ = broadcast_tx.send(SsePayload::TurnCancelled { session_id: sid.clone() });
+                    let _ =
+                        broadcast_tx.send(SsePayload::TurnCancelled { session_id: sid.clone() });
                 }
                 *write_lock(&current_turn_snapshot) = None;
                 let _ = broadcast_tx.send(SsePayload::Error {
@@ -739,8 +739,9 @@ fn handle_get_session_info(
         return Ok(runtime.context_stats());
     }
 
-    let tape = SessionTape::load_jsonl_or_default(&slot.session_path)
-        .map_err(|error| RuntimeWorkerError::internal(format!("session tape load failed: {error}")))?;
+    let tape = SessionTape::load_jsonl_or_default(&slot.session_path).map_err(|error| {
+        RuntimeWorkerError::internal(format!("session tape load failed: {error}"))
+    })?;
     let view = tape.default_view();
     let anchors = tape.anchors();
     Ok(ContextStats {
@@ -798,9 +799,9 @@ fn handle_auto_compress_session(
         .as_mut()
         .ok_or_else(|| RuntimeWorkerError::bad_request("session is currently running a turn"))?;
 
-    let compressed = runtime.auto_compress_now().map_err(|error| {
-        RuntimeWorkerError::internal(format!("auto compress failed: {error}"))
-    })?;
+    let compressed = runtime
+        .auto_compress_now()
+        .map_err(|error| RuntimeWorkerError::internal(format!("auto compress failed: {error}")))?;
     runtime
         .tape()
         .save_jsonl(&slot.session_path)
@@ -1316,7 +1317,8 @@ mod tests {
             },
         );
 
-        let stats = handle_get_session_info(&slots, "session-1").expect("session info should fall back");
+        let stats =
+            handle_get_session_info(&slots, "session-1").expect("session info should fall back");
 
         assert_eq!(stats.total_entries, 3);
         assert_eq!(stats.anchor_count, 1);
@@ -1331,18 +1333,14 @@ mod tests {
     fn collect_runtime_events_reports_missing_subscriber() {
         let path = temp_session_path("missing-subscriber");
         let store = Arc::new(agent_store::AiaStore::new(":memory:").expect("memory store"));
-        let (identity, model) = super::build_model_from_selection(
-            super::ProviderLaunchChoice::Bootstrap,
-            Some(store),
-        )
-        .expect("bootstrap model");
-        let mut runtime = agent_runtime::AgentRuntime::new(
-            model,
-            builtin_tools::build_tool_registry(),
-            identity,
-        );
+        let (identity, model) =
+            super::build_model_from_selection(super::ProviderLaunchChoice::Bootstrap, Some(store))
+                .expect("bootstrap model");
+        let mut runtime =
+            agent_runtime::AgentRuntime::new(model, builtin_tools::build_tool_registry(), identity);
 
-        let error = collect_runtime_events(&mut runtime, 999).expect_err("missing subscriber should fail");
+        let error =
+            collect_runtime_events(&mut runtime, 999).expect_err("missing subscriber should fail");
 
         assert_eq!(error.status, axum::http::StatusCode::INTERNAL_SERVER_ERROR);
         assert!(error.message.contains("runtime event collection failed"));

@@ -177,10 +177,7 @@ fn parse_legacy_turn_record(entry: &session_tape::TapeEntry) -> Option<TurnLifec
     match serde_json::from_value(data) {
         Ok(turn) => Some(turn),
         Err(error) => {
-            eprintln!(
-                "legacy turn_record decode failed for entry {}: {error}",
-                entry.id
-            );
+            eprintln!("legacy turn_record decode failed for entry {}: {error}", entry.id);
             None
         }
     }
@@ -193,10 +190,7 @@ fn decode_completion_usage(
     match serde_json::from_value(usage.clone()) {
         Ok(usage) => Some(usage),
         Err(error) => {
-            eprintln!(
-                "turn_completed usage decode failed for entry {}: {error}",
-                entry.id
-            );
+            eprintln!("turn_completed usage decode failed for entry {}: {error}", entry.id);
             None
         }
     }
@@ -383,13 +377,15 @@ impl TurnHistoryBuilder {
             _ if lifecycle
                 .blocks
                 .iter()
-                .any(|block| matches!(block, agent_runtime::TurnBlock::Assistant { .. })) => {
+                .any(|block| matches!(block, agent_runtime::TurnBlock::Assistant { .. })) =>
+            {
                 TurnStatus::Generating
             }
             _ if lifecycle
                 .blocks
                 .iter()
-                .any(|block| matches!(block, agent_runtime::TurnBlock::Thinking { .. })) => {
+                .any(|block| matches!(block, agent_runtime::TurnBlock::Thinking { .. })) =>
+            {
                 TurnStatus::Thinking
             }
             _ => TurnStatus::Waiting,

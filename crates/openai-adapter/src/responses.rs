@@ -81,7 +81,8 @@ impl OpenAiResponsesModel {
 
     fn http_client(&self, request: &CompletionRequest) -> Result<Client, OpenAiAdapterError> {
         let mut builder = Client::builder();
-        if let Some(timeout_ms) = request.timeout.as_ref().and_then(|timeout| timeout.read_timeout_ms)
+        if let Some(timeout_ms) =
+            request.timeout.as_ref().and_then(|timeout| timeout.read_timeout_ms)
         {
             builder = builder.timeout(Duration::from_millis(timeout_ms));
         }
@@ -332,9 +333,7 @@ impl LanguageModel for OpenAiResponsesModel {
                     }
                 }
                 Some("response.output_text.done") => {
-                    if !saw_text_delta
-                        && let Some(text) = extract_stream_text(&event["text"])
-                    {
+                    if !saw_text_delta && let Some(text) = extract_stream_text(&event["text"]) {
                         text_buf.push_str(&text);
                         sink(StreamEvent::TextDelta { text });
                     }
@@ -377,7 +376,8 @@ impl LanguageModel for OpenAiResponsesModel {
                         } else {
                             current_tool_id.clone()
                         };
-                        let arguments = parse_tool_arguments(&current_tool_args).unwrap_or_default();
+                        let arguments =
+                            parse_tool_arguments(&current_tool_args).unwrap_or_default();
                         sink(StreamEvent::ToolCallDetected {
                             invocation_id: id.clone(),
                             tool_name: current_tool_name.clone(),

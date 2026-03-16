@@ -43,7 +43,10 @@ fn provider_binding_event_uses_explicit_error_payload_on_serialize_failure() {
     );
 
     assert_eq!(entry.event_name(), Some("provider_binding"));
-    assert_eq!(entry.event_data().and_then(|value| value.get("error")).and_then(|value| value.as_str()), Some("failed to serialize provider_binding: boom"));
+    assert_eq!(
+        entry.event_data().and_then(|value| value.get("error")).and_then(|value| value.as_str()),
+        Some("failed to serialize provider_binding: boom")
+    );
 }
 
 #[test]

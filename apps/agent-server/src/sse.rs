@@ -92,21 +92,27 @@ impl SsePayload {
             Self::Status { session_id, status } => Ok(Event::default()
                 .event("status")
                 .data(serialize_sse_data("status", &StatusData { session_id, status }))),
-            Self::TurnCompleted { session_id, turn } => Ok(Event::default().event("turn_completed").data(
-                serialize_sse_data("turn_completed", &TurnCompletedData { session_id, turn }),
-            )),
-            Self::ContextCompressed { session_id, summary } => Ok(Event::default()
-                .event("context_compressed")
-                .data(serialize_sse_data(
+            Self::TurnCompleted { session_id, turn } => {
+                Ok(Event::default().event("turn_completed").data(serialize_sse_data(
+                    "turn_completed",
+                    &TurnCompletedData { session_id, turn },
+                )))
+            }
+            Self::ContextCompressed { session_id, summary } => {
+                Ok(Event::default().event("context_compressed").data(serialize_sse_data(
                     "context_compressed",
                     &ContextCompressedData { session_id, summary },
-                ))),
+                )))
+            }
             Self::Error { session_id, message } => Ok(Event::default()
                 .event("error")
                 .data(serialize_sse_data("error", &ErrorData { session_id, message }))),
-            Self::SessionCreated { session_id, title } => Ok(Event::default().event("session_created").data(
-                serialize_sse_data("session_created", &SessionCreatedData { session_id, title }),
-            )),
+            Self::SessionCreated { session_id, title } => {
+                Ok(Event::default().event("session_created").data(serialize_sse_data(
+                    "session_created",
+                    &SessionCreatedData { session_id, title },
+                )))
+            }
             Self::SessionDeleted { session_id } => Ok(Event::default()
                 .event("session_deleted")
                 .data(serialize_sse_data("session_deleted", &SessionDeletedData { session_id }))),
@@ -138,12 +144,10 @@ mod tests {
     #[test]
     fn serialize_sse_data_falls_back_to_error_payload() {
         let json = serialize_sse_data("test_event", &FailingPayload);
-        let value: serde_json::Value = serde_json::from_str(&json).expect("fallback json should parse");
+        let value: serde_json::Value =
+            serde_json::from_str(&json).expect("fallback json should parse");
 
-        assert_eq!(
-            value["error"],
-            "failed to serialize SSE payload for test_event: boom"
-        );
+        assert_eq!(value["error"], "failed to serialize SSE payload for test_event: boom");
     }
 
     #[test]
