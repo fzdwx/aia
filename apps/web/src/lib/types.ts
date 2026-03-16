@@ -165,6 +165,12 @@ export type CurrentTurnBlock =
   | { kind: "tool"; tool: CurrentToolOutput }
   | { kind: "text"; content: string }
 
+export type HistoryPage = {
+  turns: TurnLifecycle[]
+  has_more: boolean
+  next_before_turn_id: string | null
+}
+
 export type CurrentTurnSnapshot = {
   started_at_ms: number
   user_message: string

@@ -9,6 +9,9 @@ type FetchMock = typeof fetch
 const initialState = {
   activeSessionId: "session-1",
   turns: [],
+  historyHasMore: false,
+  historyNextBeforeTurnId: null,
+  historyLoadingMore: false,
   streamingTurn: null,
   chatState: "idle" as const,
   provider: null,

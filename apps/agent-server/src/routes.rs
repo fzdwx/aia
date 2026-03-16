@@ -48,6 +48,8 @@ pub struct AutoCompressRequest {
 #[derive(Deserialize)]
 pub struct SessionQuery {
     pub session_id: Option<String>,
+    pub before_turn_id: Option<String>,
+    pub limit: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -489,7 +491,22 @@ pub async fn get_history(
     };
     match state.session_manager.get_history(session_id).await {
         Ok(turns) => {
-            (StatusCode::OK, Json(serde_json::to_value(turns).expect("serialize history")))
+            let limit = query.limit.unwrap_or(50).clamp(1, 200);
+            let end_exclusive = query
+                .before_turn_id
+                .as_ref()
+                .and_then(|turn_id| turns.iter().position(|turn| &turn.turn_id == turn_id))
+                .unwrap_or(turns.len());
+            let start = end_exclusive.saturating_sub(limit);
+            let page = turns[start..end_exclusive].to_vec();
+            let has_more = start > 0;
+            let next_before_turn_id = page.first().map(|turn| turn.turn_id.clone());
+            let payload = serde_json::json!({
+                "turns": page,
+                "has_more": has_more,
+                "next_before_turn_id": next_before_turn_id,
+            });
+            (StatusCode::OK, Json(payload))
         }
         Err(error) => runtime_worker_error_response(error),
     }

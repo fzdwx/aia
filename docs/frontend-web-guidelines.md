@@ -27,7 +27,7 @@ React (Vite :5173)  ──proxy──>  axum server (:3434)
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/providers` | 返回当前 provider 信息 |
-| GET | `/api/session/history` | 返回已完成的 `TurnLifecycle[]` |
+| GET | `/api/session/history` | 返回已完成 turn 的历史页（最新一页默认 10 条，可用 `before_turn_id` 继续加载更早历史） |
 | GET | `/api/session/current-turn` | 返回当前运行中的 turn 快照（如果存在） |
 | GET | `/api/events` | 全局 SSE 事件流（stream / status / turn_completed / error） |
 | POST | `/api/turn` | 发送用户消息，202 fire-and-forget，事件通过 SSE 返回 |

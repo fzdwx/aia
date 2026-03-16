@@ -738,14 +738,78 @@ function CompressionNotice({ summary }: { summary: string }) {
 
 export function ChatMessages() {
   const turns = useChatStore((s) => s.turns)
+  const historyHasMore = useChatStore((s) => s.historyHasMore)
+  const historyLoadingMore = useChatStore((s) => s.historyLoadingMore)
+  const loadOlderTurns = useChatStore((s) => s.loadOlderTurns)
   const streamingTurn = useChatStore((s) => s.streamingTurn)
   const error = useChatStore((s) => s.error)
   const lastCompression = useChatStore((s) => s.lastCompression)
+  const activeSessionId = useChatStore((s) => s.activeSessionId)
+  const containerRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const previousSessionIdRef = useRef<string | null>(null)
+  const previousTurnCountRef = useRef(0)
+  const previousStreamingBlockCountRef = useRef(0)
+  const shouldStickToBottomRef = useRef(true)
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [turns.length, streamingTurn?.blocks.length, streamingTurn?.blocks])
+    const container = containerRef.current
+    if (!container) return
+
+    const handleScroll = () => {
+      const distanceFromBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight
+      shouldStickToBottomRef.current = distanceFromBottom < 120
+    }
+
+    handleScroll()
+    container.addEventListener("scroll", handleScroll)
+    return () => container.removeEventListener("scroll", handleScroll)
+  }, [])
+
+  useEffect(() => {
+    const currentStreamingBlockCount = streamingTurn?.blocks.length ?? 0
+    const sessionChanged = previousSessionIdRef.current !== activeSessionId
+    const hydratedManyTurns = turns.length > previousTurnCountRef.current + 1
+    const hydratedStreamingSnapshot =
+      currentStreamingBlockCount > previousStreamingBlockCountRef.current + 1
+
+    const shouldAutoScroll =
+      sessionChanged ||
+      hydratedManyTurns ||
+      hydratedStreamingSnapshot ||
+      shouldStickToBottomRef.current
+
+    if (!shouldAutoScroll) {
+      previousSessionIdRef.current = activeSessionId
+      previousTurnCountRef.current = turns.length
+      previousStreamingBlockCountRef.current = currentStreamingBlockCount
+      return
+    }
+
+    const behavior: ScrollBehavior =
+      sessionChanged || hydratedManyTurns || hydratedStreamingSnapshot
+        ? "auto"
+        : "smooth"
+
+    bottomRef.current?.scrollIntoView({ behavior })
+
+    previousSessionIdRef.current = activeSessionId
+    previousTurnCountRef.current = turns.length
+    previousStreamingBlockCountRef.current = currentStreamingBlockCount
+  }, [activeSessionId, turns.length, streamingTurn?.blocks.length])
+
+  async function handleLoadOlderTurns() {
+    const container = containerRef.current
+    const previousScrollHeight = container?.scrollHeight ?? 0
+    await loadOlderTurns()
+    requestAnimationFrame(() => {
+      const nextContainer = containerRef.current
+      if (!nextContainer) return
+      const nextScrollHeight = nextContainer.scrollHeight
+      nextContainer.scrollTop += nextScrollHeight - previousScrollHeight
+    })
+  }
 
   if (turns.length === 0 && !streamingTurn) {
     return (
@@ -766,8 +830,19 @@ export function ChatMessages() {
   }
 
   return (
-    <div className="relative flex-1 overflow-y-auto">
+    <div ref={containerRef} className="relative flex-1 overflow-y-auto">
       <div className="mx-auto max-w-[720px] px-6 py-8">
+        {historyHasMore && (
+          <div className="mb-6 flex justify-center">
+            <button
+              onClick={() => void handleLoadOlderTurns()}
+              disabled={historyLoadingMore}
+              className="rounded-full border border-border/40 px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground disabled:cursor-default disabled:opacity-50"
+            >
+              {historyLoadingMore ? "Loading…" : "Load older messages"}
+            </button>
+          </div>
+        )}
         {turns.map((turn) => (
           <TurnView key={turn.turn_id} turn={turn} />
         ))}

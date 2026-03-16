@@ -72,6 +72,9 @@ type ChatStore = {
 
   // Per-session state
   turns: TurnLifecycle[]
+  historyHasMore: boolean
+  historyNextBeforeTurnId: string | null
+  historyLoadingMore: boolean
   streamingTurn: StreamingTurn | null
   chatState: ChatState
   provider: ProviderInfo | null
@@ -118,6 +121,7 @@ type ChatStore = {
   fetchSessions: () => Promise<void>
   createSession: () => Promise<void>
   switchSession: (id: string) => Promise<void>
+  loadOlderTurns: () => Promise<void>
   deleteSession: (id: string) => Promise<void>
 }
 
@@ -125,6 +129,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   sessions: [],
   activeSessionId: null,
   turns: [],
+  historyHasMore: false,
+  historyNextBeforeTurnId: null,
+  historyLoadingMore: false,
   streamingTurn: null,
   chatState: "idle",
   provider: null,
@@ -151,10 +158,15 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         const activeId = sessions[0]?.id ?? null
         set({ sessions, activeSessionId: activeId })
         if (activeId) {
-          Promise.all([fetchHistory(activeId), fetchCurrentTurn(activeId)])
-            .then(([turns, currentTurn]) =>
+          Promise.all([
+            fetchHistory({ sessionId: activeId, limit: 10 }),
+            fetchCurrentTurn(activeId),
+          ])
+            .then(([historyPage, currentTurn]) =>
               set({
-                turns,
+                turns: historyPage.turns,
+                historyHasMore: historyPage.has_more,
+                historyNextBeforeTurnId: historyPage.next_before_turn_id,
                 streamingTurn: currentTurn
                   ? currentTurnToStreamingTurn(currentTurn)
                   : null,
@@ -551,6 +563,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set({
       activeSessionId: id,
       turns: [],
+      historyHasMore: false,
+      historyNextBeforeTurnId: null,
+      historyLoadingMore: false,
       streamingTurn: null,
       chatState: "idle",
       error: null,
@@ -559,12 +574,14 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     })
 
     try {
-      const [turns, currentTurn] = await Promise.all([
-        fetchHistory(id),
+      const [historyPage, currentTurn] = await Promise.all([
+        fetchHistory({ sessionId: id, limit: 10 }),
         fetchCurrentTurn(id),
       ])
       set({
-        turns,
+        turns: historyPage.turns,
+        historyHasMore: historyPage.has_more,
+        historyNextBeforeTurnId: historyPage.next_before_turn_id,
         streamingTurn: currentTurn
           ? currentTurnToStreamingTurn(currentTurn)
           : null,
@@ -577,6 +594,29 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     fetchSessionInfo(id)
       .then((info) => set({ contextPressure: info.pressure_ratio }))
       .catch(() => {})
+  },
+
+  loadOlderTurns: async () => {
+    const sessionId = get().activeSessionId
+    const beforeTurnId = get().historyNextBeforeTurnId
+    if (!sessionId || !beforeTurnId || get().historyLoadingMore) return
+
+    set({ historyLoadingMore: true })
+    try {
+      const historyPage = await fetchHistory({
+        sessionId,
+        beforeTurnId,
+        limit: 10,
+      })
+      set((state) => ({
+        turns: [...historyPage.turns, ...state.turns],
+        historyHasMore: historyPage.has_more,
+        historyNextBeforeTurnId: historyPage.next_before_turn_id,
+        historyLoadingMore: false,
+      }))
+    } catch {
+      set({ historyLoadingMore: false })
+    }
   },
 
   deleteSession: async (id: string) => {
@@ -594,6 +634,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         set({
           activeSessionId: null,
           turns: [],
+          historyHasMore: false,
+          historyNextBeforeTurnId: null,
+          historyLoadingMore: false,
           streamingTurn: null,
           chatState: "idle",
           lastCompression: null,

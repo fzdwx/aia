@@ -1,5 +1,6 @@
 import type {
   CurrentTurnSnapshot,
+  HistoryPage,
   ModelConfig,
   ProviderInfo,
   ProviderListItem,
@@ -60,14 +61,20 @@ export async function fetchSessionInfo(
   return res.json() as Promise<ContextStats>
 }
 
-export async function fetchHistory(
+export async function fetchHistory(params?: {
   sessionId?: string
-): Promise<TurnLifecycle[]> {
-  const params = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ""
-  const res = await fetch(`/api/session/history${params}`)
+  beforeTurnId?: string
+  limit?: number
+}): Promise<HistoryPage> {
+  const search = new URLSearchParams()
+  if (params?.sessionId) search.set("session_id", params.sessionId)
+  if (params?.beforeTurnId) search.set("before_turn_id", params.beforeTurnId)
+  if (params?.limit != null) search.set("limit", String(params.limit))
+  const query = search.size > 0 ? `?${search.toString()}` : ""
+  const res = await fetch(`/api/session/history${query}`)
   if (!res.ok)
     throw new Error(`GET /api/session/history failed: ${res.status}`)
-  return res.json() as Promise<TurnLifecycle[]>
+  return res.json() as Promise<HistoryPage>
 }
 
 export async function fetchCurrentTurn(
