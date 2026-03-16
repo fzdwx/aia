@@ -404,6 +404,9 @@ where
         for segment in &completion.segments {
             match segment {
                 CompletionSegment::Thinking(text) if !text.is_empty() => {
+                    if buffers.aggregated_thinking == *text {
+                        continue;
+                    }
                     let thinking_entry_id =
                         self.append_tape_entry(TapeEntry::thinking(text).with_run_id(turn_id))?;
                     buffers.source_entry_ids.push(thinking_entry_id);

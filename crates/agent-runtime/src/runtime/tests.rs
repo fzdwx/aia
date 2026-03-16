@@ -619,6 +619,50 @@ impl LanguageModel for StreamingTextThenSameCompletionModel {
     }
 }
 
+struct StreamingThinkingThenSameCompletionModel;
+
+impl LanguageModel for StreamingThinkingThenSameCompletionModel {
+    type Error = CoreError;
+
+    fn complete(&self, _request: CompletionRequest) -> Result<Completion, Self::Error> {
+        Err(CoreError::new("should use streaming path"))
+    }
+
+    fn complete_streaming_with_abort(
+        &self,
+        _request: CompletionRequest,
+        _abort: &AbortSignal,
+        sink: &mut dyn FnMut(agent_core::StreamEvent),
+    ) -> Result<Completion, Self::Error> {
+        sink(agent_core::StreamEvent::ThinkingDelta {
+            text: "同一段思考".into(),
+        });
+        Ok(Completion {
+            segments: vec![CompletionSegment::Thinking("同一段思考".into())],
+            stop_reason: CompletionStopReason::Stop,
+            usage: None,
+            response_body: None,
+            http_status_code: None,
+        })
+    }
+}
+
+#[test]
+fn 流式思考与最终完成思考相同时不会重复记录思考() {
+    let identity = ModelIdentity::new("local", "streaming-same-thinking", ModelDisposition::Balanced);
+    let mut runtime = AgentRuntime::new(StreamingThinkingThenSameCompletionModel, StubTools, identity);
+
+    let _ = runtime.handle_turn("测试思考重复").expect("应成功完成");
+
+    let thinking_entries = runtime
+        .tape()
+        .entries()
+        .iter()
+        .filter(|entry| entry.as_thinking().is_some_and(|content| content == "同一段思考"))
+        .count();
+    assert_eq!(thinking_entries, 1);
+}
+
 #[test]
 fn 流式文本与最终完成文本相同时不会重复记录助手消息() {
     let identity = ModelIdentity::new("local", "streaming-same-text", ModelDisposition::Balanced);
