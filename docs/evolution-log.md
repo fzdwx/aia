@@ -161,17 +161,14 @@
 **提交**：待提交
 **下次方向**：继续补 Web 测试入口，并让前端取消态回归真正纳入标准验证链路；之后再回到 provider / shell 的真实取消覆盖率诊断。
 
-## 2026-03-16 Session 15
+## 2026-03-16 Session 16
 
-**诊断**：`agent-core` 与 `agent-runtime` 的时间辅助函数仍假设 `SystemTime::now()` 一定晚于 `UNIX_EPOCH`，并在 tool invocation id、turn id 与时间戳生成里直接 `expect`；宿主时钟回拨时会把本可降级处理的时间异常升级成 panic。
-**决策**：先把共享时间辅助函数改成安全回退到零时长基线，并补最小回归测试；这是比继续扩展功能更高优先级的可靠性收口，而且影响范围小但覆盖核心主链。
+**诊断**：full-suite 执行时 `builtin-tools` 的 `embedded_brush_runtime_executes_shell_command` 偶发失败，因为测试断言假设嵌入式 shell stdout 只会以单个 delta 到达；在线程调度或 pipe 分块不同步时，这会把等价正确输出误判为失败。
+**决策**：先把 shell 测试断言改为校验拼接后的 stdout/stderr 内容，而不是单块数量；这是低风险但高杠杆的稳定性修复，能直接减少回归链路中的偶发红灯。
 **变更**：
-- `crates/agent-core/src/tooling.rs`：新增 `duration_since_unix_epoch` helper，让 tool invocation id 生成在系统时间早于 `UNIX_EPOCH` 时不再 panic。
-- `crates/agent-core/src/tests.rs`：新增 1 条回归测试，验证时间早于 `UNIX_EPOCH` 时会回退到零时长。
-- `crates/agent-runtime/src/runtime/helpers.rs`：让 turn id 与运行时时间戳都复用安全时间 helper，避免时钟回拨触发 panic。
-- `crates/agent-runtime/src/runtime/tests.rs`：新增 1 条回归测试，验证 runtime 时间 helper 的零时长回退行为。
-- `docs/status.md`、`docs/architecture.md`：同步记录共享时间辅助函数的无 panic 约束。
-**验证**：`cargo test -p agent-core -p agent-runtime` 通过；`cargo check -p agent-core -p agent-runtime` 通过；随后执行全量 `cargo check` 与 `cargo test`。
-**提交**：`5dff961` `fix: harden time-based id generation`
-**下次方向**：继续清理剩余生产路径中的 panic helpers，优先关注 `builtin-tools` shell 执行线程错误边界，以及 server / runtime 之外仍残留的非测试 `expect`。
+- `crates/builtin-tools/src/shell.rs`：调整 `embedded_brush_runtime_executes_shell_command` 测试，按流类型拼接全部 delta 后断言 stdout/stderr 内容，不再假设只有一个 stdout chunk。
+- `docs/status.md`、`docs/architecture.md`：同步记录 shell 测试基线已从“单 delta 假设”收口到“最终流内容正确”。
+**验证**：`cargo test -p builtin-tools shell::tests::embedded_brush_runtime_executes_shell_command -- --exact` 通过；`cargo test -p builtin-tools` 通过；尝试执行全量 `cargo check` / `cargo test`，但被现有未提交的 `aia_config` 接线改动阻塞（`crates/agent-runtime/src/runtime/helpers.rs` 当前引用了未接入的 `aia_config` crate）。
+**提交**：待提交
+**下次方向**：先收口当前工作区里未完成的 `aia_config` 接线改动，再继续清理剩余生产路径中的 panic helpers，优先关注 `builtin-tools` shell 执行线程错误边界与其他非测试 `expect`。
 

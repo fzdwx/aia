@@ -280,9 +280,20 @@ mod tests {
         assert_eq!(execution.stdout, "ok");
         assert_eq!(execution.stderr, "");
         assert_eq!(execution.exit_code, 0);
-        assert_eq!(deltas.len(), 1);
-        assert!(matches!(deltas[0].stream, ToolOutputStream::Stdout));
-        assert_eq!(deltas[0].text, "ok");
+
+        let stdout = deltas
+            .iter()
+            .filter(|delta| matches!(delta.stream, ToolOutputStream::Stdout))
+            .map(|delta| delta.text.as_str())
+            .collect::<String>();
+        let stderr = deltas
+            .iter()
+            .filter(|delta| matches!(delta.stream, ToolOutputStream::Stderr))
+            .map(|delta| delta.text.as_str())
+            .collect::<String>();
+
+        assert_eq!(stdout, "ok");
+        assert_eq!(stderr, "");
     }
 
     #[test]

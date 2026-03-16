@@ -19,6 +19,7 @@ README 里真正难的是这些能力：
 
 这些如果先揉在界面里，后面会很难拆。第一阶段因此采用“库优先”：
 
+- `aia-config`：应用级共享默认值与路径约定（如 `.aia/` 下的 providers / session / store 路径、server 默认标识），避免这些固定约定散落在 app 壳与存储 crate 中
 - `agent-core`：领域模型与协议边界
 - `session-tape`：扁平条目磁带（`{id, kind, payload, meta, date}`）、轻量锚点、handoff 事件、查询切片、fork / merge 与重建状态
 - `agent-runtime`：运行时编排与最小 turn 执行
@@ -34,7 +35,16 @@ README 里真正难的是这些能力：
 
 - 各 crate 的 `lib.rs` 保持为薄 façade，只负责 `mod` 声明与稳定 `pub use`
 - 领域模型、协议映射、存储后端、兼容层、错误与测试分别落到独立模块，避免继续把实现堆在单个入口文件
-- 内部模块化不改变 crate 级职责边界；跨 crate 的公开抽象仍以 `agent-core`、`session-tape`、`agent-runtime`、`provider-registry`、`openai-adapter` 的现有职责划分为准
+- 内部模块化不改变 crate 级职责边界；跨 crate 的公开抽象仍以 `aia-config`、`agent-core`、`session-tape`、`agent-runtime`、`provider-registry`、`openai-adapter` 的现有职责划分为准
+
+### `aia-config`
+
+负责应用级共享默认值与稳定约定：
+
+- `.aia/` 目录及其下 `providers.json`、`session.jsonl`、`store.sqlite3`、`sessions/` 等默认路径
+- server 默认 bind 地址、默认 base url、事件缓冲大小、请求超时等应用壳通用默认值
+- 默认 session 标题与统一 user agent 组装辅助
+- 只承载共享配置，不承载 provider 业务、运行时编排或协议映射
 
 ### `agent-core`
 
@@ -100,6 +110,7 @@ README 里真正难的是这些能力：
 - `apps/agent-server` 的进程启动初始化路径也遵循同样原则：provider registry、统一 store、sessions 目录、默认 session、模型构建、监听端口与 `axum::serve` 失败都收口为结构化初始化错误，不再在主入口用 `expect` 直接 panic
 - `apps/agent-server` 路由层的 JSON 响应序列化同样不依赖 `expect`；session/trace/current-turn/info 等 handler 统一通过安全序列化 helper 生成响应，避免“本应返回 500 的序列化失败”被升级成服务 panic
 - `agent-core` 与 `agent-runtime` 的时间辅助函数不假设系统时间恒定晚于 `UNIX_EPOCH`；tool invocation id、turn id 与运行时时间戳在时钟回拨场景下会安全回退为零基线，避免因宿主时间异常触发 panic
+- `builtin-tools` 的 shell 测试基线不假设 stdout/stderr 流一定只产生单个 delta；验证聚焦于最终拼接后的流内容，减少嵌入式 shell 线程调度带来的脆弱回归
 - `StreamEvent` 中与工具相关的语义继续细分：`ToolCallDetected` 表示模型流里已经产出 tool call 决策，但 runtime 还未真正开始执行；`ToolCallStarted` 才表示工具执行正式启动，避免把“模型建议”与“runtime 执行”混成同一个阶段
 - `tape_info` / `tape_handoff` 不再只是 `execute_tool_call` 里的字符串特判；它们现在通过 `Tool` trait 注册到独立 runtime tool registry，再借助 `ToolExecutionContext` 暴露的 runtime host 能力访问会话统计与 handoff 写入，工具协议层与普通工具保持一致
 
