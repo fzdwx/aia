@@ -160,3 +160,14 @@
 **验证**：`cargo check` 通过；`cargo test` 通过；新增 1 条 runtime partial-output-on-cancel 回归测试。
 **提交**：待提交
 **下次方向**：继续补 Web 测试入口，并让前端取消态回归真正纳入标准验证链路；之后再回到 provider / shell 的真实取消覆盖率诊断。
+
+## 2026-03-16 Session 11
+
+**诊断**：`apps/web` 已有基于 `node:test` / Bun 运行的 store 与工具显示回归测试，但 `package.json` 没有标准测试脚本，导致 `npm test` 无法作为常规验证入口，前端取消态回归也进不了统一验证链路。
+**决策**：先为 `apps/web` 补最小标准测试入口，直接复用现有 Bun 测试基线并暴露 `npm test` / `npm run test:watch`；这是把已存在前端回归测试纳入日常验证链路的最小改动。
+**变更**：
+- `apps/web/package.json`：新增 `test` 与 `test:watch` 脚本，分别映射到 `bun test` 与 `bun test --watch`。
+- `docs/evolution-log.md`：追加本次演进记录。
+**验证**：`cargo check` 通过；`cargo test` 通过；`cd apps/web && npm test` 通过（10 个测试，包括 cancelled partial content 的 chat-store 回归测试）。
+**提交**：待提交
+**下次方向**：继续把前端测试纳入更完整的验证链路（例如 CI / workspace 级命令），随后回到 provider / shell 的真实 stop/cancel 覆盖率诊断。
