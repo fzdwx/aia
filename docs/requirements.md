@@ -2,7 +2,7 @@
 
 ## 愿景
 
-做一个正常、好用、性能克制、跨平台的代理运行壳，以 Web 界面为主承接点，并可被桌面壳复用。
+做一个正常、好用、性能克制、跨平台的代理运行壳，以 Web 界面为当前主承接点，并可继续被桌面壳复用。
 
 ## 核心需求
 
@@ -11,6 +11,7 @@
 - 提供一个好用的 Web 界面
 - 提供桌面应用支持
 - 支持 Windows、Linux、macOS
+- 当前以 `apps/web` + `apps/agent-server` 作为主交互承接形态
 
 ### 2. 运行特性
 
@@ -18,6 +19,7 @@
 - 作为代理运行壳时注重性能
 - 不能在内存和处理器占用上走极端
 - 不以跑分最大化为第一目标
+- 应保持 server 作为“其他客户端可驱动接口层”的能力，而不是只服务单一前端页面
 
 ### 3. 代理能力
 
@@ -28,75 +30,57 @@
 - 兼容 Claude 与 Codex 风格的工具规范
 - 支持增量压缩与交接
 - 可以作为驱动其他客户端的接口层
+- 取消 / stop 语义需要贯穿 server、runtime、provider streaming 与工具执行路径
+- 本地 trace 诊断需要能还原 agent loop、LLM 请求与工具执行的关系
 
 ## 当前阶段边界
 
 ### 已完成
 
 - Rust 工作区骨架已建立
-- 共享核心库边界已拆分为 `agent-core`、`session-tape`、`agent-runtime`
+- 共享核心库边界已拆分为 `aia-config`、`agent-core`、`session-tape`、`agent-runtime`、`provider-registry`、`openai-adapter`、`agent-store`
+- `aia-config` 已承担跨 crate 复用的应用级路径、默认值、稳定标识与构造 helper
 - `provider-registry` 已承担本地 provider 管理与持久化
 - 首个真实模型适配库 `openai-adapter` 已建立，并已同时覆盖 Responses 与 OpenAI 兼容 Chat Completions 两条协议链路
 - OpenAI 请求当前已自动启用 prompt caching：server 会为同一 session 生成稳定 `prompt_cache_key`，并固定使用 `24h` retention
-- `apps/agent-server` 已可编译、测试并运行，作为 Web 主界面的共享运行时桥接壳
+- `apps/agent-server` 已可编译、测试并运行，作为 Web 主界面与其他客户端的共享运行时桥接壳
+- `apps/agent-server` 启动路径、路由序列化路径与本地 store 锁中毒路径都已收口为非 panic 错误路径
 - 会话磁带、结构化锚点、handoff 事件、工具启停基础能力已落地
 - 工具调用与工具结果已进入类型化会话磁带，并能投影到后续默认上下文
 - 工具调用与工具结果现已通过稳定调用标识关联，便于后续 replay 与压缩
-- 默认上下文里的工具结果投影也保留调用标识，避免同名工具结果混淆
 - 历史轮次当前由磁带 entries 按 `meta.run_id` 重建，不再把轮次块直接落盘到 `.aia/session.jsonl`
 - `session-tape` 已补齐命名锚点、查询切片、命名磁带存储抽象与 fork / merge 语义
 - `session-tape` TapeEntry 已改为扁平 `{id, kind, payload, meta, date}` 模型，对齐 republic 数据模型
-- 锚点已简化为 `{entry_id, name, state: Value}`，不再硬编码固定字段
-- 运行时不再将 TurnRecord 写入磁带，遵循 "derivatives never replace original facts" 原则
 - 旧格式 JSONL 可兼容载入并自动转换为新扁平格式
-- `.aia/session.jsonl` 当前统一以扁平 `TapeEntry` JSONL 形式 append-only 落盘；旧格式仅在载入时兼容转换，不再继续按旧格式写回
-- provider 本地资料当前落盘在 `.aia/providers.json`，并通过 `.gitignore` 避免误提交
+- `.aia/session.jsonl` 当前统一以扁平 `TapeEntry` JSONL 形式 append-only 落盘
+- provider 本地资料当前落盘在 `.aia/providers.json`
+- 本地 SQLite 状态当前落盘在 `.aia/store.sqlite3`
 - provider 当前已具备协议级区分能力，可在同一地址 / 模型下区分 Responses 与 Chat Completions
-- `apps/web` 已建立 React + Vite 基础工程，并替换掉模板首页，开始承接主界面方向
-- `apps/web` 已建立 Web 工作台骨架，并接入 `shadcn` 基础组件体系，开始承接主界面方向
+- `apps/web` 已建立为实际主工作台，而不是仅布局骨架
+- Web 客户端当前已接入 provider 管理、session 列表 / 历史 / 当前轮次恢复、流式消息展示、trace 诊断视图
 - 内建基础编码工具名已收口为 `shell`、`read`、`write`、`edit`、`glob`、`grep`，其中 `shell` 当前以内嵌 `brush` 库执行
-- 当前会话会记住上次使用的 provider 绑定，除非用户在启动阶段主动替换
-- Web 客户端当前通过 `apps/agent-server` 复用统一运行时接口，便于后续桌面壳继续承接同一驱动层
-- 运行时事件已统一通过单一方法取回，并支持多个订阅者独立消费
+- 运行时事件已统一通过共享事件模型暴露，并支持多个订阅者独立消费
 - 默认上下文已改为从最新锚点之后重建，而不是无条件带上全量历史
-- 会话记住的 provider 绑定现已包含协议信息，避免同地址同模型的不同协议互相串用
-- `agent-runtime` 已从单次模型调用收敛为单轮内多步执行：模型 → 工具 → 再回模型，直到没有更多工具调用或达到内部步数上限
+- `agent-runtime` 已从单次模型调用收敛为单轮内多步执行：模型 → 工具 → 再回模型
 - 工具不可用、工具执行失败、工具结果错配已改为轮次内结构化失败结果，而不是直接终止整个会话循环
 - Web 流式 turn 已与共享运行时失败语义对齐：当前轮失败会通过 SSE 发出错误事件，但不会直接结束整个交互会话
-- 模型续调上下文已不再只依赖扁平文本消息；工具调用与工具结果已作为结构化会话条目贯穿核心层到适配层
-- OpenAI Responses 与 OpenAI 兼容 Chat Completions 在工具续调时已能按各自协议原生形态重建请求，而不是把工具结果压平为普通文本
-- OpenAI Responses 与 OpenAI 兼容 Chat Completions 当前都基于统一结构化会话条目重建请求，不再把 provider 私有续调状态暴露到共享协议层
-- cached prompt usage 已贯通到 `completion.usage`、trace 存储、trace 汇总与 Web 聊天/诊断展示，可直接观察缓存命中效果
-- 运行时步数与工具调用预算已配置化：默认安全护栏保留在核心层，当前 Web 运行壳使用更高预算，模型同时收到剩余预算提示以便更早收尾
-- 已建立 `docs/frontend-web-guidelines.md` 作为 Web 前端开发规范
-- 已建立 `apps/agent-server` axum HTTP+SSE 服务器，作为 Web 前端与 Rust 运行时的桥接层
-- `apps/agent-server` 启动时会从 `.aia/providers.json` 与 `.aia/session.jsonl` 恢复 provider 绑定，无匹配时回退 bootstrap
-- 已完成全局 SSE 事件流架构：`GET /api/events` 基于 `broadcast::channel`，`POST /api/turn` fire-and-forget（202）
-- `apps/agent-server` 当前已把 `AgentRuntime` 从全局 Mutex 中拆出，由后台 runtime worker 串行驱动 turn / info / handoff / provider 变更，避免大工具调用拖住整个 server
-- `apps/agent-server` 当前通过 provider / history / current-turn 共享快照对外暴露轻量读取接口，长时间 turn 不再阻塞这类查询
-- `apps/agent-server` 当前会把会话磁带新增条目实时 append 到 `.aia/session.jsonl`，而不是等整轮结束后再整体写回
-- 已完成 Rust 侧核心类型的 Serialize/Deserialize 支持，u128 时间戳已改为 u64
-- 已完成前端全局 store 与全局 EventSource 连接，支持流式状态累积、turn 完成回收与 provider 当前状态刷新
-- 已完成流式轮次状态指示（waiting / thinking / working / generating）与 shimmer 文字动画
-- 已完成流式 tool_output_delta 实时渲染，工具调用不再等 turn_completed 才显示
-- 已完成 Web 端用户消息提交时的乐观显示，不再依赖 `waiting` SSE 或 `turn_completed` 才进入消息列表
-- 已完成 Vite 开发代理（`/api` → `:3434`）与 justfile 开发命令
-- 已移除 `apps/agent-cli` 包，工作区当前以 `apps/agent-server` + `apps/web` 作为唯一应用层入口
-- Web 端已接入 provider 创建、更新、删除、切换与当前 provider / provider 列表刷新
+- cached prompt usage 已贯通到 `completion.usage`、trace 存储、trace 汇总与 Web 聊天/诊断展示
+- `apps/agent-server` 当前由后台 runtime worker 独占运行时，provider / history / current-turn 读取走共享快照
 - provider 变更已采用事务式提交：候选 registry 校验、registry 落盘、session tape 落盘全部成功后才更新内存 runtime / tape
+- 已完成完整 stop/cancel 基线，并继续打通到 OpenAI streaming 与 embedded shell `TERM` 中断
+- 本地 trace 当前已形成 OTel-shaped 诊断模型：agent loop root span、LLM client spans、tool internal spans 与本地 event timeline
 
 ### 当前不做
 
 - 桌面壳实现
 - 完整 MCP 接入
-- 多提供商真实适配
+- 多提供商真实适配扩展
 - 异步子代理调度
-- 跨磁带视图与锚点图内存策略
+- 完整 OTLP exporter / collector 集成
 
 ### 下一阶段优先事项
 
-- 明确内部统一工具规范与外部协议映射
-- 推进 MCP 方向的工具协议接入
-- 在现有 Web provider 管理链路基础上补强会话恢复与更细粒度的状态管理
-- 在保持现有会话文件兼容的前提下，逐步把运行时接到更完整的命名磁带能力
-- 在运行时语义已收稳的前提下，继续推进统一工具规范向外部协议映射与 MCP 接入
+- 继续补强 stop/cancel 在不同 provider 与复杂 shell pipeline 下的实际覆盖率
+- 继续把 runtime 驱动辅助从 `apps/agent-server` 上移到共享层
+- 在工具协议边界进一步收稳后，推进统一工具规范向外部协议映射与 MCP 接入
+- 在现有 Web / server 主路径稳定的前提下，继续补强 trace 数据模型与桌面壳复用基础

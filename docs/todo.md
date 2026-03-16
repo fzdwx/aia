@@ -17,7 +17,7 @@
 **新增 tape_info / tape_handoff 工具**：
 - `tape_info`：返回上下文统计（entries、anchors、pressure_ratio 等），让 agent 感知上下文用量
 - `tape_handoff`：agent 主动创建 anchor 截断历史，传入 summary 作为最小继承状态
-- 两个工具由 runtime 拦截执行（需访问 SessionTape），不经过 builtin-tools
+- 两个工具当前已通过 runtime tool registry 正式注册，不再是简单 runtime 字符串拦截
 
 **自动压缩（安全回退）保留**：
 - 压力 ≥80% 时 pre-turn 自动压缩
@@ -58,7 +58,7 @@
 - 参考 bub 的 workspace_hash__session_hash 命名隔离
 - 参考 republic 的 tape name 独立命名
 - 需要考虑：如何创建/切换/列出会话，后端 session 路由，前端会话列表
-- 当前 aia 只有单会话单 JSONL 文件
+- 当前 aia 已支持多会话：可创建 / 切换 / 列出 / 删除 session，session 列表元信息走 SQLite，具体磁带内容仍按每个 session 一个 jsonl 文件落盘
 
 1. 怎么创建多个会话
 2. 后端server需要做哪些修改
