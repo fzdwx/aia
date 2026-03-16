@@ -1,6 +1,7 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, time::{Duration, UNIX_EPOCH}};
 
 use super::*;
+use crate::tooling::duration_since_unix_epoch;
 
 #[test]
 fn 工具定义用_json_schema_构建参数() {
@@ -61,6 +62,13 @@ fn 工具结果继承工具调用标识() {
     assert_eq!(result.invocation_id, call.invocation_id);
     assert_eq!(result.tool_name, "search");
     assert_eq!(result.content, "ok");
+}
+
+#[test]
+fn system_time_before_unix_epoch_falls_back_to_zero_duration() {
+    let before_epoch = UNIX_EPOCH - Duration::from_secs(1);
+
+    assert_eq!(duration_since_unix_epoch(before_epoch), Duration::ZERO);
 }
 
 #[test]

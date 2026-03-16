@@ -81,6 +81,7 @@
 - 完成 `agent-store` SQLite 锁中毒恢复：trace/session 读写与 schema 初始化不再因 `Mutex<Connection>` poisoned 而 panic，改为恢复 guard 继续服务，并补回归测试覆盖 poisoned mutex 路径
 - 完成 `apps/agent-server` 启动路径错误收口：provider 注册表、SQLite store、sessions 目录、默认 session、模型构建、端口绑定与 server serve 失败不再 `expect` panic，而是统一返回结构化初始化错误并以非零退出码结束进程
 - 完成 `apps/agent-server` 路由响应序列化收口：session/trace/current-turn/info 等 JSON 响应不再因 `serde_json::to_value(...).expect(...)` 在服务路径 panic，而是统一回退为 500 错误响应
+- 完成 `agent-core` / `agent-runtime` 时间辅助函数收口：tool invocation id、turn id 与时间戳生成在系统时钟回拨到 UNIX_EPOCH 之前时不再 panic，而是安全回退为零时长基线
 
 ## 正在进行
 

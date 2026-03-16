@@ -161,16 +161,17 @@
 **提交**：待提交
 **下次方向**：继续补 Web 测试入口，并让前端取消态回归真正纳入标准验证链路；之后再回到 provider / shell 的真实取消覆盖率诊断。
 
-## 2026-03-16 Session 14
+## 2026-03-16 Session 15
 
-**诊断**：`apps/agent-server` 多个 HTTP handler 仍通过 `serde_json::to_value(...).expect(...)` 构造响应；一旦某个响应对象序列化失败，本应返回 500 的请求会被升级成服务 panic。
-**决策**：先在路由层引入统一安全 JSON 序列化 helper，并替换 session/trace/current-turn/info 等主路径上的 `expect`；这是延续上一轮 server 稳定性收口的最小高杠杆修复。
+**诊断**：`agent-core` 与 `agent-runtime` 的时间辅助函数仍假设 `SystemTime::now()` 一定晚于 `UNIX_EPOCH`，并在 tool invocation id、turn id 与时间戳生成里直接 `expect`；宿主时钟回拨时会把本可降级处理的时间异常升级成 panic。
+**决策**：先把共享时间辅助函数改成安全回退到零时长基线，并补最小回归测试；这是比继续扩展功能更高优先级的可靠性收口，而且影响范围小但覆盖核心主链。
 **变更**：
-- `apps/agent-server/src/routes.rs`：新增 `json_response` helper，将响应序列化失败统一降级为 500 JSON 错误；替换 session 列表、创建 session、trace 列表/详情/汇总、session info、空 history/null current-turn 与 current turn 响应中的 `expect`。
-- `apps/agent-server/src/routes.rs`：新增 1 条 `json_response` 回归测试，覆盖 helper 的正常序列化路径。
-- `docs/status.md`：更新已完成事项，记录 route 响应序列化 panic 已收口。
-- `docs/architecture.md`：补充 server 路由层响应序列化也遵循显式错误返回约束。
-**验证**：`cargo check -p agent-server` 通过；`cargo test -p agent-server` 通过；随后执行全量 `cargo check` 与 `cargo test`。
-**提交**：`07803dc` `fix: avoid route response serialization panics`
-**下次方向**：继续清理剩余生产路径中的 panic helpers，优先关注共享时间戳/ID 生成里的 `SystemTime` `expect`，以及 server 以外 crate 的非测试 `unwrap_or_else(panic)` 风险点。
+- `crates/agent-core/src/tooling.rs`：新增 `duration_since_unix_epoch` helper，让 tool invocation id 生成在系统时间早于 `UNIX_EPOCH` 时不再 panic。
+- `crates/agent-core/src/tests.rs`：新增 1 条回归测试，验证时间早于 `UNIX_EPOCH` 时会回退到零时长。
+- `crates/agent-runtime/src/runtime/helpers.rs`：让 turn id 与运行时时间戳都复用安全时间 helper，避免时钟回拨触发 panic。
+- `crates/agent-runtime/src/runtime/tests.rs`：新增 1 条回归测试，验证 runtime 时间 helper 的零时长回退行为。
+- `docs/status.md`、`docs/architecture.md`：同步记录共享时间辅助函数的无 panic 约束。
+**验证**：`cargo test -p agent-core -p agent-runtime` 通过；`cargo check -p agent-core -p agent-runtime` 通过；随后执行全量 `cargo check` 与 `cargo test`。
+**提交**：待提交
+**下次方向**：继续清理剩余生产路径中的 panic helpers，优先关注 `builtin-tools` shell 执行线程错误边界，以及 server / runtime 之外仍残留的非测试 `expect`。
 

@@ -99,6 +99,7 @@ README 里真正难的是这些能力：
 - `agent-store` 的 SQLite 访问统一通过可恢复的 `Mutex<Connection>` guard 辅助方法进入；即使之前有持锁 panic 造成 poisoned mutex，trace/session 读写与 schema 初始化也不会再直接 panic，而是恢复 guard 继续提供本地存储能力
 - `apps/agent-server` 的进程启动初始化路径也遵循同样原则：provider registry、统一 store、sessions 目录、默认 session、模型构建、监听端口与 `axum::serve` 失败都收口为结构化初始化错误，不再在主入口用 `expect` 直接 panic
 - `apps/agent-server` 路由层的 JSON 响应序列化同样不依赖 `expect`；session/trace/current-turn/info 等 handler 统一通过安全序列化 helper 生成响应，避免“本应返回 500 的序列化失败”被升级成服务 panic
+- `agent-core` 与 `agent-runtime` 的时间辅助函数不假设系统时间恒定晚于 `UNIX_EPOCH`；tool invocation id、turn id 与运行时时间戳在时钟回拨场景下会安全回退为零基线，避免因宿主时间异常触发 panic
 - `StreamEvent` 中与工具相关的语义继续细分：`ToolCallDetected` 表示模型流里已经产出 tool call 决策，但 runtime 还未真正开始执行；`ToolCallStarted` 才表示工具执行正式启动，避免把“模型建议”与“runtime 执行”混成同一个阶段
 - `tape_info` / `tape_handoff` 不再只是 `execute_tool_call` 里的字符串特判；它们现在通过 `Tool` trait 注册到独立 runtime tool registry，再借助 `ToolExecutionContext` 暴露的 runtime host 能力访问会话统计与 handoff 写入，工具协议层与普通工具保持一致
 

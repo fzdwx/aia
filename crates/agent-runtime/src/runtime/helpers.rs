@@ -1,6 +1,6 @@
 use std::{
     sync::atomic::{AtomicU64, Ordering},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use agent_core::{LlmTraceRequestContext, Message, Role, ToolCall};
@@ -34,19 +34,19 @@ fn summarize_for_duplicate_message(content: &str) -> String {
     preview.replace('\n', " ")
 }
 
+pub(super) fn duration_since_unix_epoch(now: SystemTime) -> Duration {
+    now.duration_since(UNIX_EPOCH).unwrap_or_default()
+}
+
 pub(super) fn next_turn_id() -> String {
     static NEXT_TURN_ID: AtomicU64 = AtomicU64::new(1);
     let id = NEXT_TURN_ID.fetch_add(1, Ordering::Relaxed);
-    let now_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("系统时间应晚于 UNIX_EPOCH")
-        .as_millis();
+    let now_ms = duration_since_unix_epoch(SystemTime::now()).as_millis();
     format!("turn-{now_ms}-{id}")
 }
 
 pub(super) fn now_timestamp_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).expect("系统时间应晚于 UNIX_EPOCH").as_millis()
-        as u64
+    duration_since_unix_epoch(SystemTime::now()).as_millis() as u64
 }
 
 pub(super) fn anchor_state_message(anchor: &Anchor) -> Option<Message> {

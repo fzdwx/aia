@@ -1,6 +1,6 @@
 use std::{
     sync::atomic::{AtomicU64, Ordering},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use serde::{Deserialize, Serialize};
@@ -152,12 +152,13 @@ impl ToolResult {
     }
 }
 
+pub(crate) fn duration_since_unix_epoch(now: SystemTime) -> Duration {
+    now.duration_since(UNIX_EPOCH).unwrap_or_default()
+}
+
 fn next_tool_invocation_id() -> String {
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-    let now_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("系统时间应晚于 UNIX_EPOCH")
-        .as_millis();
+    let now_ms = duration_since_unix_epoch(SystemTime::now()).as_millis();
     format!("tool-call-{now_ms}-{id}")
 }

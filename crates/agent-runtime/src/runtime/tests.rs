@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::{cell::RefCell, time::{Duration, UNIX_EPOCH}};
 
 use agent_core::{
     AbortSignal, Completion, CompletionRequest, CompletionSegment, CompletionStopReason,
@@ -9,10 +9,17 @@ use agent_core::{
 use serde_json::json;
 use session_tape::SessionTape;
 
-use super::{AgentRuntime, RuntimeEvent};
+use super::{AgentRuntime, RuntimeEvent, helpers::duration_since_unix_epoch};
 use crate::{
     ToolInvocationLifecycle, ToolInvocationOutcome, TurnControl, TurnLifecycle, TurnOutcome,
 };
+
+#[test]
+fn time_before_unix_epoch_falls_back_to_zero_duration() {
+    let before_epoch = UNIX_EPOCH - Duration::from_secs(1);
+
+    assert_eq!(duration_since_unix_epoch(before_epoch), Duration::ZERO);
+}
 
 struct StubModel;
 
