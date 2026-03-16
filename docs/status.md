@@ -70,6 +70,7 @@
 - 完成 provider 注册表加载的旧路径兼容：当 `.aia/providers.json` 缺失时，自动回退读取 `.aia/sessions/providers.json`
 - 完成完整的 stop/cancel 基线：server 暴露 `POST /api/turn/cancel`，session manager 能中断运行中 turn，runtime 把取消信号传到工具执行上下文，Web 输入区提供 stop 按钮并显示 cancelled 状态
 - 完成 stop/cancel 第二阶段基线：runtime 会把 abort 继续传到 OpenAI streaming 调用；embedded `brush` shell 在收到取消后会向当前作业发送 `TERM` 并尽快收尾；`TurnLifecycle` 新增共享 `outcome` 字段；server 取消 API 只负责触发 abort，真正的 cancelled SSE 由 worker 在轮次结束时统一发出一次
+- 完成 OpenAI 流式读流中断收口：`openai-adapter` 不再只在 `BufRead::lines()` 的逐行循环间隙检查 abort，而是通过后台按行泵送 + 主线程轮询 abort 的方式让 Responses / Chat Completions 的阻塞读流也能及时响应取消
 - 完成 `agent-store` SQLite 锁中毒恢复：trace/session 读写与 schema 初始化不再因 `Mutex<Connection>` poisoned 而 panic
 - 完成 `aia-config` 共享配置 crate：把 `.aia` 路径、默认 session 标题、server 默认地址 / 事件缓冲 / 请求超时、统一 user agent 组装，以及 trace / span / prompt-cache 稳定前缀从 `apps/agent-server` 与相关共享 crate 中收口
 - 完成 `aia-config` 内部模块化：拆为 `paths`、`server`、`identifiers` 三类共享配置模块，`lib.rs` 保持薄 façade
@@ -86,11 +87,12 @@
 - 观察内嵌 `brush` 作为 shell 运行时的实际稳定性、命令兼容性与中断语义
 - 继续把 trace 数据模型从“本地 span store + event timeline”推进到更完整的 resources / richer events 模型，但暂不抢在工具协议映射与 MCP 之前做 exporter / collector 集成
 - 验证 stop/cancel 目前对长时间 shell / 外部 provider streaming 的实际覆盖率；当前已打通 server→runtime→tool context，并进一步补上 OpenAI streaming 读取中的取消检查与 shell 作业 `TERM` 中断，后续仍需继续观察 provider/运行时在不同上游和复杂 shell pipeline 下的真实中断覆盖率
+- 当前 OpenAI adapter 已把 SSE 读流取消从“逐行检查”推进到“阻塞读期间也能轮询 abort”；后续观察重点转为不同上游是否仍在连接建立、TLS、代理缓冲或服务端长时间不刷新的窗口里残留取消迟滞
 - 持续校准哪些跨 crate 应用级常量应该进入 `aia-config`，哪些应继续留在协议层、运行时或算法层
 
 ## 下一步
 
-1. 继续观察并补强 stop/cancel 在不同 OpenAI 兼容上游与复杂 embedded shell pipeline 下的实际中断覆盖率，必要时把“读流中断”继续升级为更底层的 HTTP 连接级取消
+1. 继续观察并补强 stop/cancel 在不同 OpenAI 兼容上游与复杂 embedded shell pipeline 下的实际中断覆盖率，当前 OpenAI adapter 已能在阻塞读流期间及时响应 abort，下一步重点转向连接建立 / 代理缓冲 / 非 OpenAI provider 的剩余阻塞窗口
 2. runtime 驱动辅助从 `apps/agent-server` 继续抽到共享层
 3. 在工具协议边界进一步收稳后，把本地 trace 从当前 span record + event timeline 继续推进到更完整的 resources / richer events 形态
 4. 继续补强 shell 中断 / 长任务处理与更细粒度的工具运行时能力

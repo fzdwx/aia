@@ -1,7 +1,4 @@
-use std::{
-    io::{self, BufRead},
-    time::Duration,
-};
+use std::time::Duration;
 
 use agent_core::{
     AbortSignal, Completion, CompletionRequest, CompletionSegment, CompletionStopReason,
@@ -16,7 +13,7 @@ use serde_json::{Value, json};
 use crate::{
     OpenAiAdapterError, ReasoningSummaryPart, ResponsesContent, ResponsesOutput, ResponsesResponse,
     ResponsesUsage, extract_reasoning_stream_text, extract_stream_text, parse_tool_arguments,
-    responses_input_item,
+    responses_input_item, stream_lines_with_abort,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -297,7 +294,6 @@ impl LanguageModel for OpenAiResponsesModel {
             return Err(self.request_failure(status, &body));
         }
 
-        let reader = io::BufReader::new(response);
         let mut text_buf = String::new();
         let mut thinking_buf = String::new();
         let mut saw_text_delta = false;
@@ -312,21 +308,17 @@ impl LanguageModel for OpenAiResponsesModel {
         let mut usage: Option<CompletionUsage> = None;
         let mut response_events = Vec::new();
 
-        for line in reader.lines() {
-            if abort.is_aborted() {
-                return Err(OpenAiAdapterError::cancelled("OpenAI Responses 流式请求已取消"));
-            }
-            let line = line.map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
+        stream_lines_with_abort(response, abort, sink, |line, sink| {
             let Some(data) = line.strip_prefix("data: ") else {
-                continue;
+                return Ok(false);
             };
-            response_events.push(line.clone());
+            response_events.push(line.to_string());
             if data == "[DONE]" {
-                break;
+                return Ok(true);
             }
             let event: Value = match serde_json::from_str(data) {
                 Ok(value) => value,
-                Err(_) => continue,
+                Err(_) => return Ok(false),
             };
             match event["type"].as_str() {
                 Some("response.created") => {
@@ -385,8 +377,7 @@ impl LanguageModel for OpenAiResponsesModel {
                         } else {
                             current_tool_id.clone()
                         };
-                        let arguments =
-                            parse_tool_arguments(&current_tool_args).unwrap_or_default();
+                        let arguments = parse_tool_arguments(&current_tool_args).unwrap_or_default();
                         sink(StreamEvent::ToolCallDetected {
                             invocation_id: id.clone(),
                             tool_name: current_tool_name.clone(),
@@ -422,7 +413,8 @@ impl LanguageModel for OpenAiResponsesModel {
                 }
                 None => {}
             }
-        }
+            Ok(false)
+        })?;
 
         let mut segments = Vec::new();
         if !thinking_buf.is_empty() {

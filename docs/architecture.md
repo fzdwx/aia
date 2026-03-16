@@ -100,6 +100,7 @@ README 里真正难的是这些能力：
 - 历史轮次可从磁带 entries 按 `meta.run_id` 分组重建，不依赖磁带内 TurnRecord
 - trace context 生成已统一通过共享 helper 收口，不再由不同路径各自手写 trace/span 标识
 - stop/cancel 已贯穿 server → runtime → provider streaming / embedded shell
+- `openai-adapter` 的流式读取已从单线程阻塞 `BufRead::lines()` 轮询升级为“后台按行泵送 + 前台 abort 轮询”，避免 SSE 长时间不出新行时取消被卡在阻塞读里
 - 时间辅助函数不假设系统时间恒定晚于 `UNIX_EPOCH`，异常场景下会安全回退
 - `tape_info` / `tape_handoff` 已通过真正的 runtime tool registry 暴露，而不是字符串特判
 

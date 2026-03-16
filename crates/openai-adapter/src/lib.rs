@@ -3,6 +3,7 @@ mod error;
 mod mapping;
 mod payloads;
 mod responses;
+mod streaming;
 
 #[cfg(test)]
 mod tests;
@@ -17,4 +18,5 @@ pub(crate) use payloads::{
     ChatCompletionsResponse, ChatCompletionsUsage, ReasoningSummaryPart, ResponsesContent,
     ResponsesOutput, ResponsesResponse, ResponsesUsage,
 };
+pub(crate) use streaming::stream_lines_with_abort;
 pub use responses::{OpenAiResponsesConfig, OpenAiResponsesModel};

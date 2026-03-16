@@ -1,8 +1,4 @@
-use std::{
-    collections::BTreeMap,
-    io::{self, BufRead},
-    time::Duration,
-};
+use std::{collections::BTreeMap, time::Duration};
 
 use agent_core::{
     AbortSignal, Completion, CompletionRequest, CompletionSegment, CompletionStopReason,
@@ -16,7 +12,7 @@ use serde_json::{Value, json};
 
 use crate::{
     ChatCompletionsResponse, ChatCompletionsUsage, OpenAiAdapterError, chat_completion_messages,
-    parse_tool_arguments,
+    parse_tool_arguments, stream_lines_with_abort,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -285,7 +281,6 @@ impl LanguageModel for OpenAiChatCompletionsModel {
             return Err(self.request_failure(status, &body));
         }
 
-        let reader = io::BufReader::new(response);
         let mut text_buf = String::new();
         let mut thinking_buf = String::new();
         let mut tool_calls: BTreeMap<usize, StreamingToolCallState> = BTreeMap::new();
@@ -293,30 +288,24 @@ impl LanguageModel for OpenAiChatCompletionsModel {
         let mut usage: Option<CompletionUsage> = None;
         let mut response_events = Vec::new();
 
-        for line in reader.lines() {
-            if abort.is_aborted() {
-                return Err(OpenAiAdapterError::cancelled(
-                    "OpenAI Chat Completions 流式请求已取消",
-                ));
-            }
-            let line = line.map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
+        stream_lines_with_abort(response, abort, sink, |line, sink| {
             let Some(data) = line.strip_prefix("data: ") else {
-                continue;
+                return Ok(false);
             };
-            response_events.push(line.clone());
+            response_events.push(line.to_string());
             if data == "[DONE]" {
-                break;
+                return Ok(true);
             }
 
             let event: Value = match serde_json::from_str(data) {
                 Ok(value) => value,
-                Err(_) => continue,
+                Err(_) => return Ok(false),
             };
             if usage.is_none() {
                 usage = Self::map_usage(serde_json::from_value(event["usage"].clone()).ok());
             }
             let Some(delta) = event["choices"].get(0).and_then(|choice| choice.get("delta")) else {
-                continue;
+                return Ok(false);
             };
             if finish_reason.is_none() {
                 finish_reason = event["choices"]
@@ -379,7 +368,9 @@ impl LanguageModel for OpenAiChatCompletionsModel {
                     }
                 }
             }
-        }
+
+            Ok(false)
+        })?;
 
         let mut segments = Vec::new();
         if !thinking_buf.is_empty() {
