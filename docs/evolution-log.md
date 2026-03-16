@@ -161,17 +161,18 @@
 **提交**：待提交
 **下次方向**：继续补 Web 测试入口，并让前端取消态回归真正纳入标准验证链路；之后再回到 provider / shell 的真实取消覆盖率诊断。
 
-## 2026-03-16 Session 27
+## 2026-03-16 Session 28
 
-**诊断**：`apps/agent-server/src/runtime_worker.rs` 在历史重建时仍会用 `serde_json::from_value(...).ok()` 静默吞掉两类损坏数据：旧版 `turn_record` 事件，以及 `turn_completed.usage` 的无效 payload。这样虽然不会崩，但也没有任何可观测诊断。
-**决策**：保持现有“尽量继续重建历史”的策略不变，但把这两处 `.ok()` 改成显式 decode helper，在忽略坏数据时输出最小明确的 stderr 诊断；这样既不扩大接口面，也补上可观测性。
+**诊断**：OpenAI provider 的流式取消虽然已能在读到下一行 SSE 时识别 abort，但底层仍使用阻塞式 `BufRead::lines()`；一旦上游长时间不再刷出新行，取消会卡在阻塞读里，stop/cancel 仍不够“真中断”。
+**决策**：先把 `openai-adapter` 的流式读流改成“后台按行泵送 + 前台 abort 轮询”的最小可落地模型，并补 Responses / Chat Completions 两条取消回归测试；这能在不重写 provider 接口的前提下，显著缩短真实取消迟滞窗口。
 **变更**：
-- `apps/agent-server/src/runtime_worker.rs`：`parse_legacy_turn_record` 改为显式 `match` 解码并在失败时输出 `legacy turn_record decode failed ...`。
-- `apps/agent-server/src/runtime_worker.rs`：新增 `decode_completion_usage` helper，`turn_completed.usage` 解码失败时输出 `turn_completed usage decode failed ...`，同时仍保留轮次主体重建。
-- `apps/agent-server/src/runtime_worker.rs`：新增 1 条回归测试，验证无效 `usage` payload 不会导致整个 turn 丢失，只会把 `usage` 保持为 `None`。
-- `docs/status.md`：同步记录本次 runtime worker 解码告警收口。
-**验证**：`cargo test -p agent-server rebuild_turn_history_from_tape_ignores_invalid_usage_payload_without_dropping_turn -- --nocapture` 通过；`cargo test -p agent-server rebuild_turn_history_from_tape_restores_legacy_turn_record -- --nocapture` 通过；`cargo check -p agent-server` 通过。
-**提交**：待提交
-**下次方向**：继续看 `runtime_worker` 里的 `parse_iso8601_utc_seconds(...).unwrap_or(0)` 与 tool-call 重建时的默认占位 `ToolCall::new(...)`，评估哪些该继续保留容错、哪些值得补最小诊断。
-
+- `crates/openai-adapter/src/streaming.rs`：新增共享流式读流 helper，把阻塞读取移到后台线程，通过 channel 向前台泵送行事件，让主线程能持续轮询 abort。
+- `crates/openai-adapter/src/responses.rs`：Responses streaming 改用新的 abort-aware 读流 helper，保留原有 SSE 解析与事件发射语义。
+- `crates/openai-adapter/src/chat_completions.rs`：Chat Completions streaming 改用新的 abort-aware 读流 helper，保留原有 delta/tool-call 聚合逻辑。
+- `crates/openai-adapter/src/lib.rs`：注册新的内部 `streaming` 模块导出。
+- `crates/openai-adapter/src/tests.rs`：新增 Chat Completions 阻塞读流取消回归测试，并保留/验证 Responses 同类测试。
+- `docs/status.md`、`docs/architecture.md`：同步记录 OpenAI 流式取消已收口到阻塞读期间也可响应 abort。
+**验证**：`cargo test -p openai-adapter responses_流式调用在_abort_后返回取消错误 -- --nocapture` 通过；`cargo test -p openai-adapter chat_completions_流式调用在_abort_后返回取消错误 -- --nocapture` 通过；`cargo check -p openai-adapter` 通过；`cargo test -p agent-runtime provider_取消错误前的流式_partial_output_会进入最终轮次 -- --nocapture` 通过；`cargo check` 通过。
+**提交**：`3cf8c15` `fix: tighten openai streaming cancellation`
+**下次方向**：继续观察不同 OpenAI 兼容上游在连接建立、代理缓冲和长时间不 flush 场景下的剩余取消迟滞；如果还不够，再评估把取消继续下推到更底层的 HTTP transport 级控制。
 
