@@ -38,7 +38,7 @@ pub(crate) struct SessionQuery {
 }
 
 pub(crate) async fn list_sessions(State(state): State<SharedState>) -> JsonResponse {
-    match state.store.list_sessions() {
+    match state.store.list_sessions_async().await {
         Ok(sessions) => json_response(StatusCode::OK, sessions),
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -71,7 +71,7 @@ pub(crate) async fn get_session_info(
     State(state): State<SharedState>,
     Query(query): Query<SessionQuery>,
 ) -> impl IntoResponse {
-    let session_id = match require_session_id(state.as_ref(), query.session_id) {
+    let session_id = match require_session_id(state.as_ref(), query.session_id).await {
         Ok(session_id) => session_id,
         Err(response) => return response,
     };
@@ -86,7 +86,7 @@ pub(crate) async fn create_handoff(
     State(state): State<SharedState>,
     Json(body): Json<HandoffRequest>,
 ) -> impl IntoResponse {
-    let session_id = match require_session_id(state.as_ref(), body.session_id) {
+    let session_id = match require_session_id(state.as_ref(), body.session_id).await {
         Ok(session_id) => session_id,
         Err(response) => return response,
     };
@@ -103,7 +103,7 @@ pub(crate) async fn auto_compress_session(
     State(state): State<SharedState>,
     Json(body): Json<AutoCompressRequest>,
 ) -> impl IntoResponse {
-    let session_id = match require_session_id(state.as_ref(), body.session_id) {
+    let session_id = match require_session_id(state.as_ref(), body.session_id).await {
         Ok(session_id) => session_id,
         Err(response) => return response,
     };
@@ -118,7 +118,7 @@ pub(crate) async fn get_history(
     State(state): State<SharedState>,
     Query(query): Query<SessionQuery>,
 ) -> JsonResponse {
-    let session_id = match resolve_session_id(state.as_ref(), query.session_id) {
+    let session_id = match resolve_session_id(state.as_ref(), query.session_id).await {
         Ok(Some(session_id)) => session_id,
         Ok(None) => return json_response(StatusCode::OK, Vec::<()>::new()),
         Err(error) => return session_resolution_error_response(error),
@@ -154,7 +154,7 @@ pub(crate) async fn get_current_turn(
     State(state): State<SharedState>,
     Query(query): Query<SessionQuery>,
 ) -> JsonResponse {
-    let session_id = match resolve_session_id(state.as_ref(), query.session_id) {
+    let session_id = match resolve_session_id(state.as_ref(), query.session_id).await {
         Ok(Some(session_id)) => session_id,
         Ok(None) => return json_response(StatusCode::OK, Option::<()>::None),
         Err(error) => return session_resolution_error_response(error),

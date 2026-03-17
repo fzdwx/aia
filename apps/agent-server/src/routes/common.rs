@@ -41,18 +41,18 @@ pub(crate) fn no_session_available_response() -> JsonResponse {
     error_response(StatusCode::BAD_REQUEST, "no session available")
 }
 
-pub(crate) fn require_session_id(
+pub(crate) async fn require_session_id(
     state: &AppState,
     session_id: Option<String>,
 ) -> Result<String, JsonResponse> {
-    match resolve_session_id(state, session_id) {
+    match resolve_session_id(state, session_id).await {
         Ok(Some(session_id)) => Ok(session_id),
         Ok(None) => Err(no_session_available_response()),
         Err(error) => Err(session_resolution_error_response(error)),
     }
 }
 
-pub(crate) fn resolve_session_id(
+pub(crate) async fn resolve_session_id(
     state: &AppState,
     session_id: Option<String>,
 ) -> Result<Option<String>, RuntimeWorkerError> {
@@ -62,6 +62,7 @@ pub(crate) fn resolve_session_id(
 
     state
         .store
-        .first_session_id()
+        .first_session_id_async()
+        .await
         .map_err(|error| RuntimeWorkerError::internal(format!("session lookup failed: {error}")))
 }

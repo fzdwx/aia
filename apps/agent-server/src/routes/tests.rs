@@ -107,18 +107,19 @@ fn json_response_serializes_payload() {
     assert_eq!(body.0, serde_json::json!({ "ok": true }));
 }
 
-#[test]
-fn resolve_session_id_prefers_explicit_id() {
+#[tokio::test(flavor = "current_thread")]
+async fn resolve_session_id_prefers_explicit_id() {
     let state = test_state();
 
     let resolved = resolve_session_id(state.as_ref(), Some("session-explicit".into()))
+        .await
         .expect("explicit session id should resolve");
 
     assert_eq!(resolved.as_deref(), Some("session-explicit"));
 }
 
-#[test]
-fn resolve_session_id_falls_back_to_first_stored_session() {
+#[tokio::test(flavor = "current_thread")]
+async fn resolve_session_id_falls_back_to_first_stored_session() {
     let state = test_state();
     state
         .store
@@ -141,8 +142,9 @@ fn resolve_session_id_falls_back_to_first_stored_session() {
         })
         .expect("second session should save");
 
-    let resolved =
-        resolve_session_id(state.as_ref(), None).expect("fallback session lookup should succeed");
+    let resolved = resolve_session_id(state.as_ref(), None)
+        .await
+        .expect("fallback session lookup should succeed");
 
     assert_eq!(resolved.as_deref(), Some("session-1"));
 }

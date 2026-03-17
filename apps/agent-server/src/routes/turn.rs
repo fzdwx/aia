@@ -56,7 +56,7 @@ pub(crate) async fn submit_turn(
     State(state): State<SharedState>,
     Json(body): Json<TurnRequest>,
 ) -> impl IntoResponse {
-    let session_id = match require_session_id(state.as_ref(), body.session_id) {
+    let session_id = match require_session_id(state.as_ref(), body.session_id).await {
         Ok(session_id) => session_id,
         Err(response) => return response,
     };
@@ -87,7 +87,7 @@ pub(crate) async fn cancel_turn(
     State(state): State<SharedState>,
     Json(body): Json<CancelTurnRequest>,
 ) -> impl IntoResponse {
-    let session_id = match require_session_id(state.as_ref(), body.session_id) {
+    let session_id = match require_session_id(state.as_ref(), body.session_id).await {
         Ok(session_id) => session_id,
         Err(response) => return response,
     };
