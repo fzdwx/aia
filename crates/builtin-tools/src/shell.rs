@@ -4,6 +4,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::Duration;
 
+use async_trait::async_trait;
 use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta,
     ToolOutputStream, ToolResult,
@@ -17,6 +18,7 @@ const SHELL_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 pub struct ShellTool;
 
+#[async_trait(?Send)]
 impl Tool for ShellTool {
     fn name(&self) -> &str {
         "shell"
@@ -40,7 +42,7 @@ impl Tool for ShellTool {
         }
     }
 
-    fn call(
+    async fn call(
         &self,
         call: &ToolCall,
         output: &mut dyn FnMut(ToolOutputDelta),

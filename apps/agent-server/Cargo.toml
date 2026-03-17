@@ -14,6 +14,7 @@ agent-store = { path = "../../crates/agent-store" }
 openai-adapter = { path = "../../crates/openai-adapter" }
 provider-registry = { path = "../../crates/provider-registry" }
 session-tape = { path = "../../crates/session-tape" }
+async-trait = "0.1"
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["sync"] }

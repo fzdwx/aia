@@ -14,7 +14,7 @@ where
     M: LanguageModel,
     T: ToolExecutor,
 {
-    pub(super) fn compress_context(
+    pub(super) async fn compress_context(
         &mut self,
         turn_id: Option<&str>,
         step_index: u32,
@@ -47,7 +47,7 @@ where
             }),
         };
 
-        let completion = self.model.complete(request).map_err(RuntimeError::model)?;
+        let completion = self.model.complete(request).await.map_err(RuntimeError::model)?;
         let summary = completion.plain_text();
 
         self.record_handoff("context_compression", json!({ "summary": summary }), "system")?;

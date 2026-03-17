@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use async_trait::async_trait;
 use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
@@ -11,6 +12,7 @@ pub struct GlobTool;
 const DEFAULT_MATCH_LIMIT: usize = 200;
 const MAX_MATCH_LIMIT: usize = 1000;
 
+#[async_trait(?Send)]
 impl Tool for GlobTool {
     fn name(&self) -> &str {
         "glob"
@@ -44,7 +46,7 @@ impl Tool for GlobTool {
         }
     }
 
-    fn call(
+    async fn call(
         &self,
         call: &ToolCall,
         _output: &mut dyn FnMut(ToolOutputDelta),

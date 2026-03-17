@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use async_trait::async_trait;
 use agent_core::{
     AbortSignal, Completion, CompletionRequest, CompletionSegment, CompletionStopReason,
     CompletionUsage, LanguageModel, StreamEvent, ToolCall,
@@ -228,10 +229,11 @@ impl OpenAiResponsesModel {
     }
 }
 
+#[async_trait(?Send)]
 impl LanguageModel for OpenAiResponsesModel {
     type Error = OpenAiAdapterError;
 
-    fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
         if request.model.name != self.config.model {
             return Err(OpenAiAdapterError::new(format!(
                 "模型标识不一致：请求为 {}，适配器配置为 {}",
@@ -263,7 +265,7 @@ impl LanguageModel for OpenAiResponsesModel {
         Ok(completion)
     }
 
-    fn complete_streaming_with_abort(
+    async fn complete_streaming_with_abort(
         &self,
         request: CompletionRequest,
         abort: &AbortSignal,
@@ -450,12 +452,12 @@ impl LanguageModel for OpenAiResponsesModel {
         })
     }
 
-    fn complete_streaming(
+    async fn complete_streaming(
         &self,
         request: CompletionRequest,
         sink: &mut dyn FnMut(StreamEvent),
     ) -> Result<Completion, Self::Error> {
-        self.complete_streaming_with_abort(request, &AbortSignal::new(), sink)
+        self.complete_streaming_with_abort(request, &AbortSignal::new(), sink).await
     }
 
     fn is_cancelled_error(error: &Self::Error) -> bool {

@@ -114,7 +114,9 @@ Push forward unless the change involves irreversible data migration, production 
 
 ### Phase 5: Record
 
-Append to `docs/evolution-log.md`:
+Append a **new session section at the top or bottom** of `docs/evolution-log.md`; never rewrite or replace an existing session entry except to fill in the commit hash/message for the session you just created in the same wake, or to correct an objectively wrong factual typo.
+
+Use this template:
 
 ```markdown
 ## YYYY-MM-DD Session N
@@ -129,7 +131,7 @@ Append to `docs/evolution-log.md`:
 **Next direction**: (suggestion for next wake)
 ```
 
-If no code changed, still record why and what blocked you.
+If no code changed, still append a new session entry explaining why and what blocked you.
 
 ---
 

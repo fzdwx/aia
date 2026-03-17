@@ -6,9 +6,10 @@ license.workspace = true
 
 [dependencies]
 agent-core = { path = "../agent-core" }
+async-trait = "0.1"
 brush-builtins = "0.1"
 brush-core = "0.4"
-tokio = { version = "1", features = ["rt", "time"] }
+tokio = { version = "1", features = ["rt", "sync", "time"] }
 globset = "0.4"
 grep-regex = "0.1"
 grep-searcher = "0.1"

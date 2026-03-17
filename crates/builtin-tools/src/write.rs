@@ -1,11 +1,13 @@
 use std::fs;
 
+use async_trait::async_trait;
 use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
 
 pub struct WriteTool;
 
+#[async_trait(?Send)]
 impl Tool for WriteTool {
     fn name(&self) -> &str {
         "write"
@@ -33,7 +35,7 @@ impl Tool for WriteTool {
         }
     }
 
-    fn call(
+    async fn call(
         &self,
         call: &ToolCall,
         _output: &mut dyn FnMut(ToolOutputDelta),

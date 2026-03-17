@@ -46,7 +46,7 @@ where
     M: LanguageModel,
     T: ToolExecutor,
 {
-    pub(super) fn execute_tool_call(
+    pub(super) async fn execute_tool_call(
         &mut self,
         context: ExecuteToolCallContext<'_>,
         on_delta: &mut dyn FnMut(StreamEvent),
@@ -148,6 +148,7 @@ where
                         runtime: Some(runtime_context),
                     },
                 )
+                .await
                 .map_err(RuntimeError::tool)?;
             self.apply_runtime_tool_handoffs(context.turn_id, &runtime_bridge)?;
 
@@ -223,7 +224,7 @@ where
                 abort: context.abort_signal.clone(),
                 runtime: None,
             },
-        ) {
+        ).await {
             Ok(result) => {
                 if result.invocation_id != context.call.invocation_id
                     || result.tool_name != context.call.tool_name

@@ -1,5 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
+use async_trait::async_trait;
 use agent_core::{
     CoreError, LanguageModel, RuntimeToolContext, RuntimeToolContextStats, Tool, ToolCall,
     ToolDefinition, ToolExecutionContext, ToolExecutor, ToolOutputDelta, ToolRegistry, ToolResult,
@@ -71,6 +72,7 @@ impl RuntimeToolContext for RuntimeToolContextBridge {
 
 struct TapeInfoTool;
 
+#[async_trait(?Send)]
 impl Tool for TapeInfoTool {
     fn name(&self) -> &str {
         "tape_info"
@@ -80,7 +82,7 @@ impl Tool for TapeInfoTool {
         ToolDefinition::new(self.name(), "Return context usage statistics for the current session.")
     }
 
-    fn call(
+    async fn call(
         &self,
         tool_call: &ToolCall,
         _output: &mut dyn FnMut(ToolOutputDelta),
@@ -108,6 +110,7 @@ impl Tool for TapeInfoTool {
 
 struct TapeHandoffTool;
 
+#[async_trait(?Send)]
 impl Tool for TapeHandoffTool {
     fn name(&self) -> &str {
         "tape_handoff"
@@ -126,7 +129,7 @@ impl Tool for TapeHandoffTool {
         .with_parameter("name", "Optional name for the anchor (default: \"handoff\").", false)
     }
 
-    fn call(
+    async fn call(
         &self,
         tool_call: &ToolCall,
         _output: &mut dyn FnMut(ToolOutputDelta),

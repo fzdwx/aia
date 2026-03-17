@@ -1,11 +1,13 @@
 use std::{fs, io::ErrorKind};
 
+use async_trait::async_trait;
 use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
 
 pub struct ReadTool;
 
+#[async_trait(?Send)]
 impl Tool for ReadTool {
     fn name(&self) -> &str {
         "read"
@@ -37,7 +39,7 @@ impl Tool for ReadTool {
         }
     }
 
-    fn call(
+    async fn call(
         &self,
         call: &ToolCall,
         _output: &mut dyn FnMut(ToolOutputDelta),

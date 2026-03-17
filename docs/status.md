@@ -97,7 +97,7 @@
 - 继续把 trace 数据模型从“本地 span store + event timeline”推进到更完整的 resources / richer events 模型，但暂不抢在工具协议映射与 MCP 之前做 exporter / collector 集成
 - 验证 stop/cancel 目前对长时间 shell / 外部 provider streaming 的实际覆盖率；当前已打通 server→runtime→tool context，并进一步补上 OpenAI streaming 读取中的取消检查与 shell 作业 `TERM` 中断，后续仍需继续观察 provider/运行时在不同上游和复杂 shell pipeline 下的真实中断覆盖率
 - 当前 OpenAI adapter 已把 SSE 读流取消从“逐行检查”推进到“阻塞读期间也能轮询 abort”；后续观察重点转为不同上游是否仍在连接建立、TLS、代理缓冲或服务端长时间不刷新的窗口里残留取消迟滞
-- 全异步主链 Phase 1 正在推进：生产代码已完成 async trait 边界接线并保持 `cargo check` 通过，下一步需要把 `agent-runtime` / `agent-server` 的测试实现统一迁到 async trait 宏与 `block_on` 辅助
+- 全异步主链 Phase 1 正在推进：生产代码已完成 async trait 边界接线并保持 `cargo check` 通过，下一步需要把 `agent-runtime` / `agent-server` 的测试实现统一迁到 async trait 宏与 `block_on` 辅助；分阶段路线已写入 `docs/async-phases.md`
 - 持续校准哪些跨 crate 应用级常量应该进入 `aia-config`，哪些应继续留在协议层、运行时或算法层
 
 ## 下一步

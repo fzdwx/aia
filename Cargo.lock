@@ -12,8 +12,10 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 name = "agent-core"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -27,9 +29,11 @@ dependencies = [
  "agent-core",
  "agent-prompts",
  "aia-config",
+ "async-trait",
  "serde",
  "serde_json",
  "session-tape",
+ "tokio",
 ]
 
 [[package]]
@@ -41,6 +45,7 @@ dependencies = [
  "agent-runtime",
  "agent-store",
  "aia-config",
+ "async-trait",
  "axum",
  "builtin-tools",
  "openai-adapter",
@@ -411,6 +416,7 @@ name = "builtin-tools"
 version = "0.1.0"
 dependencies = [
  "agent-core",
+ "async-trait",
  "brush-builtins",
  "brush-core",
  "globset",
@@ -1638,6 +1644,7 @@ name = "openai-adapter"
 version = "0.1.0"
 dependencies = [
  "agent-core",
+ "async-trait",
  "reqwest",
  "serde",
  "serde_json",

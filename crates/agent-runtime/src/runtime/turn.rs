@@ -101,7 +101,14 @@ where
         &mut self,
         user_input: impl Into<String>,
     ) -> Result<TurnOutput, RuntimeError> {
-        self.handle_turn_streaming(user_input, |_| {})
+        tokio::runtime::Handle::current().block_on(self.handle_turn_async(user_input))
+    }
+
+    pub async fn handle_turn_async(
+        &mut self,
+        user_input: impl Into<String>,
+    ) -> Result<TurnOutput, RuntimeError> {
+        self.handle_turn_streaming_async(user_input, |_| {}).await
     }
 
     pub fn handle_turn_streaming(
@@ -109,14 +116,33 @@ where
         user_input: impl Into<String>,
         on_delta: impl FnMut(StreamEvent),
     ) -> Result<TurnOutput, RuntimeError> {
-        self.handle_turn_streaming_with_control(
+        tokio::runtime::Handle::current().block_on(self.handle_turn_streaming_async(user_input, on_delta))
+    }
+
+    pub async fn handle_turn_streaming_async(
+        &mut self,
+        user_input: impl Into<String>,
+        on_delta: impl FnMut(StreamEvent),
+    ) -> Result<TurnOutput, RuntimeError> {
+        self.handle_turn_streaming_with_control_async(
             user_input,
             TurnControl::new(AbortSignal::new()),
             on_delta,
         )
+        .await
     }
 
     pub fn handle_turn_streaming_with_control(
+        &mut self,
+        user_input: impl Into<String>,
+        control: TurnControl,
+        on_delta: impl FnMut(StreamEvent),
+    ) -> Result<TurnOutput, RuntimeError> {
+        tokio::runtime::Handle::current()
+            .block_on(self.handle_turn_streaming_with_control_async(user_input, control, on_delta))
+    }
+
+    pub async fn handle_turn_streaming_with_control_async(
         &mut self,
         user_input: impl Into<String>,
         control: TurnControl,
@@ -133,7 +159,7 @@ where
             return Err(RuntimeError::cancelled());
         }
 
-        self.maybe_auto_compress_current_context(&turn_id, &mut llm_step_index);
+        self.maybe_auto_compress_current_context(&turn_id, &mut llm_step_index).await;
 
         if abort_signal.is_aborted() {
             return Err(RuntimeError::cancelled());
@@ -176,10 +202,10 @@ where
                     buffers.record_stream_event(&event);
                     on_delta(event);
                 },
-            ) {
+            ).await {
                 Ok(completion) => {
                     self.last_input_tokens =
-                        completion.usage.as_ref().map(|usage| usage.input_tokens);
+                        completion.usage.as_ref().map(|usage| usage.input_tokens as u64);
                     completion
                 }
                 Err(error) => {
@@ -203,7 +229,7 @@ where
                     }
                     if !already_compressed && is_context_length_error(&error.to_string()) {
                         already_compressed = true;
-                        if self.compress_context(Some(&turn_id), llm_step_index).is_ok() {
+                        if self.compress_context(Some(&turn_id), llm_step_index).await.is_ok() {
                             llm_step_index = llm_step_index.saturating_add(1);
                             continue;
                         }
@@ -275,7 +301,7 @@ where
                 &mut buffers,
                 &abort_signal,
                 &mut on_delta,
-            ) {
+            ).await {
                 Ok(value) => value,
                 Err(runtime_error) => {
                     self.record_turn_failure(
@@ -350,7 +376,7 @@ where
                             usage: completion.usage.clone(),
                         },
                     })?;
-                    self.maybe_auto_compress_current_context(&turn_id, &mut llm_step_index);
+                    self.maybe_auto_compress_current_context(&turn_id, &mut llm_step_index).await;
 
                     return Ok(TurnOutput {
                         assistant_text,
@@ -362,10 +388,10 @@ where
         }
     }
 
-    fn maybe_auto_compress_current_context(&mut self, turn_id: &str, step_index: &mut u32) {
+    async fn maybe_auto_compress_current_context(&mut self, turn_id: &str, step_index: &mut u32) {
         if let Some(ratio) = self.context_pressure_ratio()
             && ratio >= self.context_pressure_threshold
-            && self.compress_context(Some(turn_id), *step_index).is_ok()
+            && self.compress_context(Some(turn_id), *step_index).await.is_ok()
         {
             *step_index = step_index.saturating_add(1);
         }
@@ -389,7 +415,7 @@ where
         }
     }
 
-    fn process_completion_segments(
+    async fn process_completion_segments(
         &mut self,
         turn_id: &str,
         llm_trace_context: Option<&LlmTraceRequestContext>,
@@ -451,7 +477,7 @@ where
                             abort_signal: abort_signal.clone(),
                         },
                         on_delta,
-                    )?;
+                    ).await?;
                     buffers.blocks.push(TurnBlock::ToolInvocation {
                         invocation: Box::new(invocation.clone()),
                     });

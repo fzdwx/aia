@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use async_trait::async_trait;
 use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
@@ -10,6 +11,7 @@ pub struct GrepTool;
 const DEFAULT_MATCH_LIMIT: usize = 200;
 const MAX_MATCH_LIMIT: usize = 1000;
 
+#[async_trait(?Send)]
 impl Tool for GrepTool {
     fn name(&self) -> &str {
         "grep"
@@ -47,7 +49,7 @@ impl Tool for GrepTool {
         }
     }
 
-    fn call(
+    async fn call(
         &self,
         call: &ToolCall,
         _output: &mut dyn FnMut(ToolOutputDelta),

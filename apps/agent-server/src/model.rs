@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use agent_core::{
     Completion, CompletionRequest, CompletionStopReason, CoreError, LanguageModel,
     ModelDisposition, ModelIdentity, ModelLimit, StreamEvent,
@@ -187,28 +188,29 @@ impl TraceEventCollector {
     }
 }
 
+#[async_trait(?Send)]
 impl LanguageModel for ServerModel {
     type Error = ServerModelError;
 
-    fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
-        self.complete_with_trace(request, None, None)
+    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+        self.complete_with_trace(request, None, None).await
     }
 
-    fn complete_streaming(
+    async fn complete_streaming(
         &self,
         request: CompletionRequest,
         sink: &mut dyn FnMut(StreamEvent),
     ) -> Result<Completion, Self::Error> {
-        self.complete_with_trace(request, None, Some(sink))
+        self.complete_with_trace(request, None, Some(sink)).await
     }
 
-    fn complete_streaming_with_abort(
+    async fn complete_streaming_with_abort(
         &self,
         request: CompletionRequest,
         abort: &agent_core::AbortSignal,
         sink: &mut dyn FnMut(StreamEvent),
     ) -> Result<Completion, Self::Error> {
-        self.complete_with_trace(request, Some(abort), Some(sink))
+        self.complete_with_trace(request, Some(abort), Some(sink)).await
     }
 
     fn is_cancelled_error(error: &Self::Error) -> bool {
@@ -217,7 +219,7 @@ impl LanguageModel for ServerModel {
 }
 
 impl ServerModel {
-    fn complete_with_trace(
+    async fn complete_with_trace(
         &self,
         request: CompletionRequest,
         abort: Option<&agent_core::AbortSignal>,
@@ -229,7 +231,7 @@ impl ServerModel {
         let started = Instant::now();
         let result = match (&self.inner, abort, sink) {
             (ServerModelInner::Bootstrap(model), _, None) => {
-                model.complete(request).map_err(ServerModelError::Bootstrap)
+                model.complete(request).await.map_err(ServerModelError::Bootstrap)
             }
             (ServerModelInner::Bootstrap(model), _, Some(sink)) => {
                 let mut traced_sink = |event: StreamEvent| {
@@ -238,10 +240,11 @@ impl ServerModel {
                 };
                 model
                     .complete_streaming(request, &mut traced_sink)
+                    .await
                     .map_err(ServerModelError::Bootstrap)
             }
             (ServerModelInner::OpenAiResponses(model), None, None) => {
-                model.complete(request).map_err(ServerModelError::OpenAi)
+                model.complete(request).await.map_err(ServerModelError::OpenAi)
             }
             (ServerModelInner::OpenAiResponses(model), None, Some(sink)) => {
                 let mut traced_sink = |event: StreamEvent| {
@@ -250,6 +253,7 @@ impl ServerModel {
                 };
                 model
                     .complete_streaming(request, &mut traced_sink)
+                    .await
                     .map_err(ServerModelError::OpenAi)
             }
             (ServerModelInner::OpenAiResponses(model), Some(abort), Some(sink)) => {
@@ -259,13 +263,14 @@ impl ServerModel {
                 };
                 model
                     .complete_streaming_with_abort(request, abort, &mut traced_sink)
+                    .await
                     .map_err(ServerModelError::OpenAi)
             }
             (ServerModelInner::OpenAiResponses(model), Some(_), None) => {
-                model.complete(request).map_err(ServerModelError::OpenAi)
+                model.complete(request).await.map_err(ServerModelError::OpenAi)
             }
             (ServerModelInner::OpenAiChatCompletions(model), None, None) => {
-                model.complete(request).map_err(ServerModelError::OpenAi)
+                model.complete(request).await.map_err(ServerModelError::OpenAi)
             }
             (ServerModelInner::OpenAiChatCompletions(model), None, Some(sink)) => {
                 let mut traced_sink = |event: StreamEvent| {
@@ -274,6 +279,7 @@ impl ServerModel {
                 };
                 model
                     .complete_streaming(request, &mut traced_sink)
+                    .await
                     .map_err(ServerModelError::OpenAi)
             }
             (ServerModelInner::OpenAiChatCompletions(model), Some(abort), Some(sink)) => {
@@ -283,10 +289,11 @@ impl ServerModel {
                 };
                 model
                     .complete_streaming_with_abort(request, abort, &mut traced_sink)
+                    .await
                     .map_err(ServerModelError::OpenAi)
             }
             (ServerModelInner::OpenAiChatCompletions(model), Some(_), None) => {
-                model.complete(request).map_err(ServerModelError::OpenAi)
+                model.complete(request).await.map_err(ServerModelError::OpenAi)
             }
         };
 
@@ -619,10 +626,11 @@ fn now_timestamp_ms() -> u64 {
 
 pub struct BootstrapModel;
 
+#[async_trait(?Send)]
 impl LanguageModel for BootstrapModel {
     type Error = CoreError;
 
-    fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
         let latest_user = request
             .conversation
             .iter()
