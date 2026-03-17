@@ -2,7 +2,7 @@ mod session;
 mod trace;
 
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use rusqlite::Connection;
 
@@ -85,6 +85,23 @@ impl AiaStore {
     ) -> Result<R, AiaStoreError> {
         let conn = self.lock_conn();
         action(&conn)
+    }
+
+    pub(crate) async fn with_conn_async<R, F>(
+        self: &Arc<Self>,
+        action: F,
+    ) -> Result<R, AiaStoreError>
+    where
+        R: Send + 'static,
+        F: FnOnce(&Connection) -> Result<R, AiaStoreError> + Send + 'static,
+    {
+        let store = Arc::clone(self);
+        tokio::task::spawn_blocking(move || {
+            let conn = store.lock_conn();
+            action(&conn)
+        })
+        .await
+        .map_err(|error| AiaStoreError::new(format!("store task join failed: {error}")))?
     }
 
     /// Migrate data from a legacy SQLite file by ATTACHing it and copying rows.
