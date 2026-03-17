@@ -9,7 +9,7 @@ pub struct EditTool;
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct EditToolArgs {
+pub(crate) struct EditToolArgs {
     #[schemars(description = "Path to the file to edit")]
     file_path: String,
     #[schemars(description = "Exact text to find (must match uniquely)")]
@@ -25,7 +25,7 @@ impl Tool for EditTool {
     }
 
     fn definition(&self) -> ToolDefinition {
-        ToolDefinition::new("edit", "Replace exact text in a file (must match uniquely)")
+        ToolDefinition::new(self.name(), "Replace exact text in a file (must match uniquely)")
             .with_parameters_schema::<EditToolArgs>()
     }
 
@@ -35,25 +35,23 @@ impl Tool for EditTool {
         _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
     ) -> Result<ToolResult, CoreError> {
-        let raw_path = call.str_arg("file_path")?;
-        let old_string = call.str_arg("old_string")?;
-        let new_string = call.str_arg("new_string")?;
-        let path = context.resolve_path(&raw_path);
+        let args: EditToolArgs = call.parse_arguments()?;
+        let path = context.resolve_path(&args.file_path);
 
         let content = tokio::fs::read_to_string(&path)
             .await
             .map_err(|e| CoreError::new(format!("failed to read {}: {e}", path.display())))?;
 
-        let count = content.matches(&*old_string).count();
+        let count = content.matches(&*args.old_string).count();
         match count {
             0 => Err(CoreError::new("old_string not found in file")),
             1 => {
-                let new_content = content.replacen(&*old_string, &new_string, 1);
+                let new_content = content.replacen(&*args.old_string, &args.new_string, 1);
                 tokio::fs::write(&path, &new_content).await.map_err(|e| {
                     CoreError::new(format!("failed to write {}: {e}", path.display()))
                 })?;
-                let old_lines = old_string.lines().count();
-                let new_lines = new_string.lines().count();
+                let old_lines = args.old_string.lines().count();
+                let new_lines = args.new_string.lines().count();
                 Ok(ToolResult::from_call(call, format!("Edited {}", path.display())).with_details(
                     serde_json::json!({
                         "file_path": path.display().to_string(),

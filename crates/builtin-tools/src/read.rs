@@ -4,8 +4,21 @@ use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 pub struct ReadTool;
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ReadToolArgs {
+    #[schemars(description = "Path to the file to read")]
+    file_path: String,
+    #[schemars(description = "Starting line number (0-based, default 0)")]
+    offset: Option<usize>,
+    #[schemars(description = "Maximum lines to read (default 2000)")]
+    limit: Option<usize>,
+}
 
 #[async_trait]
 impl Tool for ReadTool {
@@ -14,29 +27,8 @@ impl Tool for ReadTool {
     }
 
     fn definition(&self) -> ToolDefinition {
-        ToolDefinition {
-            name: "read".into(),
-            description: "Read a file with line numbers".into(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "file_path": {
-                        "type": "string",
-                        "description": "Path to the file to read"
-                    },
-                    "offset": {
-                        "type": "integer",
-                        "description": "Starting line number (0-based, default 0)"
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "Maximum lines to read (default 2000)"
-                    }
-                },
-                "required": ["file_path"],
-                "additionalProperties": false
-            }),
-        }
+        ToolDefinition::new(self.name(), "Read a file with line numbers")
+            .with_parameters_schema::<ReadToolArgs>()
     }
 
     async fn call(
@@ -45,10 +37,10 @@ impl Tool for ReadTool {
         _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
     ) -> Result<ToolResult, CoreError> {
-        let raw_path = call.str_arg("file_path")?;
-        let offset = call.opt_usize_arg("offset").unwrap_or(0);
-        let limit = call.opt_usize_arg("limit").unwrap_or(2000);
-        let path = context.resolve_path(&raw_path);
+        let args: ReadToolArgs = call.parse_arguments()?;
+        let offset = args.offset.unwrap_or(0);
+        let limit = args.limit.unwrap_or(2000);
+        let path = context.resolve_path(&args.file_path);
 
         let content =
             tokio::fs::read_to_string(&path).await.map_err(|error| match error.kind() {

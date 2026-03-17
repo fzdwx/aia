@@ -2,8 +2,19 @@ use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 pub struct WriteTool;
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct WriteToolArgs {
+    #[schemars(description = "Path to write to")]
+    file_path: String,
+    #[schemars(description = "Content to write")]
+    content: String,
+}
 
 #[async_trait]
 impl Tool for WriteTool {
@@ -12,25 +23,8 @@ impl Tool for WriteTool {
     }
 
     fn definition(&self) -> ToolDefinition {
-        ToolDefinition {
-            name: "write".into(),
-            description: "Create or overwrite a file".into(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "file_path": {
-                        "type": "string",
-                        "description": "Path to write to"
-                    },
-                    "content": {
-                        "type": "string",
-                        "description": "Content to write"
-                    }
-                },
-                "required": ["file_path", "content"],
-                "additionalProperties": false
-            }),
-        }
+        ToolDefinition::new(self.name(), "Create or overwrite a file")
+            .with_parameters_schema::<WriteToolArgs>()
     }
 
     async fn call(
@@ -39,9 +33,8 @@ impl Tool for WriteTool {
         _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
     ) -> Result<ToolResult, CoreError> {
-        let raw_path = call.str_arg("file_path")?;
-        let content = call.str_arg("content")?;
-        let path = context.resolve_path(&raw_path);
+        let args: WriteToolArgs = call.parse_arguments()?;
+        let path = context.resolve_path(&args.file_path);
 
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent)
@@ -49,9 +42,9 @@ impl Tool for WriteTool {
                 .map_err(|e| CoreError::new(format!("failed to create directory: {e}")))?;
         }
 
-        let bytes = content.len();
-        let lines = content.lines().count();
-        tokio::fs::write(&path, &content)
+        let bytes = args.content.len();
+        let lines = args.content.lines().count();
+        tokio::fs::write(&path, &args.content)
             .await
             .map_err(|e| CoreError::new(format!("failed to write {}: {e}", path.display())))?;
 

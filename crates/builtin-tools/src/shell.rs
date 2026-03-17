@@ -10,8 +10,17 @@ use agent_core::{
 };
 use async_trait::async_trait;
 use execution::run_embedded_brush;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 pub struct ShellTool;
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ShellToolArgs {
+    #[schemars(description = "The shell command to execute")]
+    command: String,
+}
 
 #[async_trait]
 impl Tool for ShellTool {
@@ -20,21 +29,8 @@ impl Tool for ShellTool {
     }
 
     fn definition(&self) -> ToolDefinition {
-        ToolDefinition {
-            name: "shell".into(),
-            description: "Execute a shell command with the embedded brush runtime".into(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "The shell command to execute"
-                    }
-                },
-                "required": ["command"],
-                "additionalProperties": false
-            }),
-        }
+        ToolDefinition::new(self.name(), "Execute a shell command with the embedded brush runtime")
+            .with_parameters_schema::<ShellToolArgs>()
     }
 
     async fn call(
@@ -43,7 +39,8 @@ impl Tool for ShellTool {
         output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
     ) -> Result<ToolResult, CoreError> {
-        let command = call.str_arg("command")?;
+        let args: ShellToolArgs = call.parse_arguments()?;
+        let command = args.command;
         let cwd = context.workspace_root.as_deref().unwrap_or_else(|| Path::new("."));
 
         if context.abort.is_aborted() {
