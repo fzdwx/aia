@@ -11,7 +11,7 @@ use provider_registry::{ModelConfig, ModelLimit, ProviderRegistry};
 use super::{
     common::{json_response, resolve_session_id},
     provider::{ModelConfigDto, ModelLimitDto},
-    trace::{TraceListQuery, get_trace, get_trace_summary, list_traces},
+    trace::{TraceListQuery, get_trace, get_trace_overview, get_trace_summary, list_traces},
     turn::CancelTurnRequest,
 };
 use crate::{
@@ -34,6 +34,15 @@ fn test_state() -> Arc<AppState> {
 }
 
 fn seed_trace(state: &AppState, id: &str, started_at_ms: u64) {
+    seed_trace_with_request_kind(state, id, started_at_ms, "completion");
+}
+
+fn seed_trace_with_request_kind(
+    state: &AppState,
+    id: &str,
+    started_at_ms: u64,
+    request_kind: &str,
+) {
     state
         .store
         .record(&LlmTraceRecord {
@@ -46,7 +55,7 @@ fn seed_trace(state: &AppState, id: &str, started_at_ms: u64) {
             span_kind: LlmTraceSpanKind::Client,
             turn_id: format!("turn-{id}"),
             run_id: format!("run-{id}"),
-            request_kind: "completion".into(),
+            request_kind: request_kind.into(),
             step_index: 0,
             provider: "openai".into(),
             protocol: "responses".into(),
@@ -62,7 +71,7 @@ fn seed_trace(state: &AppState, id: &str, started_at_ms: u64) {
             stop_reason: Some("completed".into()),
             error: None,
             request_summary: serde_json::json!({
-                "messages": [{ "role": "user", "content": "hi" }]
+                "user_message": if request_kind == "compression" { serde_json::Value::Null } else { serde_json::json!("hi") }
             }),
             provider_request: serde_json::json!({ "model": "gpt-5.4" }),
             response_summary: serde_json::json!({ "output_text": "hello" }),
@@ -165,9 +174,11 @@ async fn list_traces_reads_trace_page_from_store() {
     seed_trace(state.as_ref(), "trace-older", 1_000);
     seed_trace(state.as_ref(), "trace-newer", 2_000);
 
-    let (status, Json(body)) =
-        list_traces(State(state), Query(TraceListQuery { page: Some(1), page_size: Some(10) }))
-            .await;
+    let (status, Json(body)) = list_traces(
+        State(state),
+        Query(TraceListQuery { page: Some(1), page_size: Some(10), request_kind: None }),
+    )
+    .await;
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["items"].as_array().map(Vec::len), Some(2));
@@ -176,6 +187,50 @@ async fn list_traces_reads_trace_page_from_store() {
     assert_eq!(body["total_loops"], 2);
     assert_eq!(body["page"], 1);
     assert_eq!(body["page_size"], 10);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn list_traces_can_filter_compression_logs() {
+    let state = test_state();
+    seed_trace(state.as_ref(), "trace-chat", 1_000);
+    seed_trace_with_request_kind(state.as_ref(), "trace-compression", 2_000, "compression");
+
+    let (status, Json(body)) = list_traces(
+        State(state),
+        Query(TraceListQuery {
+            page: Some(1),
+            page_size: Some(10),
+            request_kind: Some("compression".into()),
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["items"].as_array().map(Vec::len), Some(1));
+    assert_eq!(body["items"][0]["id"], "trace-compression");
+    assert_eq!(body["items"][0]["request_kind"], "compression");
+    assert_eq!(body["total_loops"], 1);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn get_trace_overview_returns_summary_and_page_together() {
+    let state = test_state();
+    seed_trace(state.as_ref(), "trace-chat", 1_000);
+
+    let (status, Json(body)) = get_trace_overview(
+        State(state),
+        Query(TraceListQuery {
+            page: Some(1),
+            page_size: Some(10),
+            request_kind: Some("completion".into()),
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["summary"]["total_requests"], 1);
+    assert_eq!(body["page"]["items"].as_array().map(Vec::len), Some(1));
+    assert_eq!(body["page"]["total_loops"], 1);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -194,7 +249,11 @@ async fn get_trace_summary_returns_aggregate_counts() {
     seed_trace(state.as_ref(), "trace-1", 1_000);
     seed_trace(state.as_ref(), "trace-2", 2_000);
 
-    let (status, Json(body)) = get_trace_summary(State(state)).await;
+    let (status, Json(body)) = get_trace_summary(
+        State(state),
+        Query(TraceListQuery { page: None, page_size: None, request_kind: None }),
+    )
+    .await;
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["total_requests"], 2);
@@ -203,4 +262,25 @@ async fn get_trace_summary_returns_aggregate_counts() {
     assert_eq!(body["total_output_tokens"], 10);
     assert_eq!(body["total_tokens"], 30);
     assert_eq!(body["total_cached_tokens"], 4);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn get_trace_summary_can_filter_compression_logs() {
+    let state = test_state();
+    seed_trace(state.as_ref(), "trace-chat", 1_000);
+    seed_trace_with_request_kind(state.as_ref(), "trace-compression", 2_000, "compression");
+
+    let (status, Json(body)) = get_trace_summary(
+        State(state),
+        Query(TraceListQuery {
+            page: None,
+            page_size: None,
+            request_kind: Some("compression".into()),
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["total_requests"], 1);
+    assert_eq!(body["total_tokens"], 15);
 }

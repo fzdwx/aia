@@ -10,7 +10,6 @@ agent-prompts = { path = "../agent-prompts" }
 async-trait = "0.1"
 brush-builtins = "0.1"
 brush-core = "0.4"
-schemars = "1"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["fs", "io-util", "rt", "sync", "time"] }
 globset = "0.4"

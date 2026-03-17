@@ -165,7 +165,8 @@ where
 
     pub async fn auto_compress_now(&mut self) -> Result<bool, RuntimeError> {
         let before_anchor_count = self.tape.anchors().len();
-        self.compress_context(None, 0).await?;
+        let compression_id = helpers::next_compression_id();
+        self.compress_context(Some(&compression_id), 0).await?;
         Ok(self.tape.anchors().len() > before_anchor_count)
     }
 

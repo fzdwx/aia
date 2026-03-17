@@ -3,7 +3,6 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -15,6 +14,88 @@ pub struct ToolDefinition {
     pub name: String,
     pub description: String,
     pub parameters: Value,
+}
+
+pub trait ToolArgsSchema {
+    fn schema() -> ToolSchema;
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ToolSchema {
+    value: Value,
+}
+
+impl ToolSchema {
+    pub fn object() -> Self {
+        Self {
+            value: serde_json::json!({
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false,
+            }),
+        }
+    }
+
+    pub fn property(
+        mut self,
+        name: impl Into<String>,
+        property: ToolSchemaProperty,
+        required: bool,
+    ) -> Self {
+        let name = name.into();
+        if let Some(object) = self.value.as_object_mut() {
+            if let Some(properties) =
+                object.get_mut("properties").and_then(|value| value.as_object_mut())
+            {
+                properties.insert(name.clone(), property.into_value());
+            }
+            if required
+                && let Some(required_fields) =
+                    object.get_mut("required").and_then(|value| value.as_array_mut())
+            {
+                required_fields.push(Value::String(name));
+            }
+        }
+        self
+    }
+
+    pub fn into_value(self) -> Value {
+        self.value
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ToolSchemaProperty {
+    value: Value,
+}
+
+impl ToolSchemaProperty {
+    pub fn string() -> Self {
+        Self { value: serde_json::json!({ "type": "string" }) }
+    }
+
+    pub fn integer() -> Self {
+        Self { value: serde_json::json!({ "type": "integer" }) }
+    }
+
+    pub fn description(mut self, description: impl Into<String>) -> Self {
+        if let Some(object) = self.value.as_object_mut() {
+            object.insert("description".into(), Value::String(description.into()));
+        }
+        self
+    }
+
+    pub fn minimum(mut self, minimum: u64) -> Self {
+        if let Some(object) = self.value.as_object_mut() {
+            object.insert("minimum".into(), Value::Number(minimum.into()));
+        }
+        self
+    }
+
+    pub fn into_value(self) -> Value {
+        self.value
+    }
 }
 
 impl ToolDefinition {
@@ -56,8 +137,8 @@ impl ToolDefinition {
         self
     }
 
-    pub fn with_parameters_schema<T: JsonSchema>(mut self) -> Self {
-        self.parameters = normalize_schema_parameters(schemars::schema_for!(T).into());
+    pub fn with_parameters_schema<T: ToolArgsSchema>(mut self) -> Self {
+        self.parameters = normalize_schema_parameters(T::schema().into_value());
         self
     }
 

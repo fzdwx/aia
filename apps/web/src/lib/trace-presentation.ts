@@ -46,6 +46,7 @@ export type LoopTimelineNode = AgentRootNode | LlmSpanNode | ToolSpanNode
 
 export type TraceLoopGroup = {
   key: string
+  requestKind: string
   turnId: string
   runId: string
   userMessage: string | null
@@ -68,6 +69,25 @@ export type TraceLoopGroup = {
   latestError: string | null
   timeline: LoopTimelineNode[]
   finalSpanId: string | null
+}
+
+export function isCompressionRequestKind(requestKind: string) {
+  return requestKind === "compression"
+}
+
+export function partitionTraceLoopGroups(groups: TraceLoopGroup[]) {
+  const conversation: TraceLoopGroup[] = []
+  const compression: TraceLoopGroup[] = []
+
+  for (const group of groups) {
+    if (isCompressionRequestKind(group.requestKind)) {
+      compression.push(group)
+    } else {
+      conversation.push(group)
+    }
+  }
+
+  return { conversation, compression }
 }
 
 function isToolTrace(trace: TraceListItem) {
@@ -239,6 +259,7 @@ export function buildTraceLoopGroups(
 
       return {
         key,
+        requestKind: (latestLlmTrace ?? latestTrace).request_kind,
         turnId: (latestLlmTrace ?? latestTrace).turn_id,
         runId: (latestLlmTrace ?? latestTrace).run_id,
         userMessage:

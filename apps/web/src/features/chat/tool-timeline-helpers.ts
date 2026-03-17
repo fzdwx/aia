@@ -108,35 +108,3 @@ export function formatDurationMs(
   const seconds = Math.floor((duration % 60_000) / 1000)
   return `${minutes}m ${seconds}s`
 }
-
-export function getToolStats(details: Record<string, unknown> | undefined): {
-  added?: number
-  removed?: number
-  lines?: number
-  matches?: number
-  returned?: number
-  limit?: number
-  truncated?: boolean
-  linesRead?: number
-  totalLines?: number
-  exitCode?: number
-} {
-  if (!details) return {}
-  return {
-    added: typeof details.added === "number" ? details.added : undefined,
-    removed: typeof details.removed === "number" ? details.removed : undefined,
-    lines: typeof details.lines === "number" ? details.lines : undefined,
-    matches: typeof details.matches === "number" ? details.matches : undefined,
-    returned:
-      typeof details.returned === "number" ? details.returned : undefined,
-    limit: typeof details.limit === "number" ? details.limit : undefined,
-    truncated:
-      typeof details.truncated === "boolean" ? details.truncated : undefined,
-    linesRead:
-      typeof details.lines_read === "number" ? details.lines_read : undefined,
-    totalLines:
-      typeof details.total_lines === "number" ? details.total_lines : undefined,
-    exitCode:
-      typeof details.exit_code === "number" ? details.exit_code : undefined,
-  }
-}

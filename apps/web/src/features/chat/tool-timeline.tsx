@@ -1,4 +1,4 @@
-import { Check, X as XIcon } from "lucide-react"
+import { Check } from "lucide-react"
 import { memo, useEffect, useState } from "react"
 
 import { Shimmer } from "@/components/ai-elements/shimmer"
@@ -10,27 +10,21 @@ import {
   buildCategorySummary,
   formatDurationMs,
   fromStreamingTool,
-  getToolStats,
   type ToolRowItem,
 } from "./tool-timeline-helpers"
 
 function ToolRow({ item }: { item: ToolRowItem }) {
   const [showDetails, setShowDetails] = useState(false)
-  const stats = getToolStats(item.details)
-  const title = toolRendererRegistry.renderTitle({
+  const renderData = {
     toolName: item.toolName,
     arguments: item.arguments,
     details: item.details,
     outputContent: item.outputContent,
     succeeded: item.succeeded,
-  })
-  const detailsContent = toolRendererRegistry.renderDetails({
-    toolName: item.toolName,
-    arguments: item.arguments,
-    details: item.details,
-    outputContent: item.outputContent,
-    succeeded: item.succeeded,
-  })
+  }
+  const title = toolRendererRegistry.renderTitle(renderData)
+  const meta = toolRendererRegistry.renderMeta(renderData)
+  const detailsContent = toolRendererRegistry.renderDetails(renderData)
   const duration = formatDurationMs(item.startedAtMs, item.finishedAtMs)
 
   return (
@@ -39,41 +33,22 @@ function ToolRow({ item }: { item: ToolRowItem }) {
         onClick={() => setShowDetails(!showDetails)}
         className="grid w-full grid-cols-[minmax(56px,max-content)_1fr_auto] items-center gap-x-2 py-0.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
       >
-        <span className="truncate text-left font-medium text-muted-foreground/70">
+        <span
+          title={getToolDisplayName(item.toolName)}
+          className={`truncate text-left font-medium ${
+            item.succeeded
+              ? "text-muted-foreground/70"
+              : "text-destructive/80 line-through decoration-destructive/70"
+          }`}
+        >
           {getToolDisplayName(item.toolName)}
         </span>
-        <span className="truncate text-left">{title}</span>
+        <span title={title} className="truncate text-left">
+          {title}
+        </span>
         <div className="flex items-center gap-2">
-          {stats.added != null && (
-            <span className="shrink-0 text-emerald-500">+{stats.added}</span>
-          )}
-          {stats.removed != null && (
-            <span className="shrink-0 text-red-400">-{stats.removed}</span>
-          )}
-          {stats.lines != null && (
-            <span className="shrink-0 text-emerald-500">+{stats.lines}</span>
-          )}
-          {stats.matches != null && !stats.truncated && (
-            <span className="shrink-0 text-muted-foreground/50">
-              {stats.matches} matches
-            </span>
-          )}
-          {stats.truncated && stats.matches != null && (
-            <span className="shrink-0 text-amber-600/80">
-              {stats.matches} matches (showing {stats.returned})
-            </span>
-          )}
-          {stats.linesRead != null && stats.totalLines != null && (
-            <span className="shrink-0 text-muted-foreground/50">
-              {stats.linesRead}/{stats.totalLines}
-            </span>
-          )}
-          {item.succeeded ? (
-            <Check className="size-3 shrink-0 text-foreground/30" />
-          ) : (
-            <XIcon className="size-3 shrink-0 text-destructive/70" />
-          )}
-          {duration && (
+          {meta}
+          {item.toolName !== "functions.read" && duration && (
             <span className="shrink-0 text-muted-foreground/50">
               {duration}
             </span>

@@ -278,6 +278,11 @@ export type TraceListPage = {
   page_size: number
 }
 
+export type TraceOverview = {
+  summary: TraceSummary
+  page: TraceListPage
+}
+
 export type TraceRecord = {
   id: string
   trace_id: string

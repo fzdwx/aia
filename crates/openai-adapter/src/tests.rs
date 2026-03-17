@@ -8,9 +8,9 @@ use std::{
 use agent_core::{
     AbortSignal, CompletionRequest, CompletionSegment, CompletionStopReason, ConversationItem,
     LanguageModel, Message, ModelDisposition, ModelIdentity, PromptCacheConfig,
-    PromptCacheRetention, Role, StreamEvent, ToolCall, ToolDefinition, ToolResult,
+    PromptCacheRetention, Role, StreamEvent, ToolArgsSchema, ToolCall, ToolDefinition, ToolResult,
+    ToolSchema, ToolSchemaProperty,
 };
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -41,11 +41,20 @@ fn sample_request() -> CompletionRequest {
     }
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SearchToolArgs {
-    /// 要搜索的关键字
     query: String,
+}
+
+impl ToolArgsSchema for SearchToolArgs {
+    fn schema() -> ToolSchema {
+        ToolSchema::object().property(
+            "query",
+            ToolSchemaProperty::string().description("要搜索的关键字"),
+            true,
+        )
+    }
 }
 
 fn run_async<T>(future: impl Future<Output = T>) -> T {
@@ -85,7 +94,7 @@ fn 请求体会映射模型指令消息与工具() {
 }
 
 #[test]
-fn responses_请求体会透传_schemars_工具参数且不包含_schema_元字段() {
+fn responses_请求体会透传自研_schema_工具参数且不包含_schema_元字段() {
     let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
         "http://127.0.0.1:1",
         "test-key",

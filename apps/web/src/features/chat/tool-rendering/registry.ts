@@ -30,6 +30,9 @@ export function createToolRendererRegistry(
     renderTitle(data: ToolRenderData) {
       return this.resolve(data.toolName).renderTitle(data)
     },
+    renderMeta(data: ToolRenderData) {
+      return this.resolve(data.toolName).renderMeta?.(data) ?? null
+    },
     renderDetails(data: ToolRenderData) {
       return this.resolve(data.toolName).renderDetails(data)
     },

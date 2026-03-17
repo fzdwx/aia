@@ -4,7 +4,6 @@ use std::{
 };
 
 use async_trait::async_trait;
-use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -22,17 +21,23 @@ fn 工具定义用_json_schema_构建参数() {
     assert_eq!(definition.parameters["required"], serde_json::json!(["query"]));
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SearchArgsSchema {
-    /// 要搜索的关键字
     query: String,
-    /// 限定返回数量
     limit: Option<u32>,
 }
 
+impl ToolArgsSchema for SearchArgsSchema {
+    fn schema() -> ToolSchema {
+        ToolSchema::object()
+            .property("query", ToolSchemaProperty::string().description("要搜索的关键字"), true)
+            .property("limit", ToolSchemaProperty::integer().description("限定返回数量"), false)
+    }
+}
+
 #[test]
-fn 工具定义可用_schemars_生成参数() {
+fn 工具定义可用自研_schema_生成参数() {
     let definition =
         ToolDefinition::new("search", "搜索代码").with_parameters_schema::<SearchArgsSchema>();
 

@@ -145,6 +145,12 @@ pub struct LlmTraceListPage {
     pub page_size: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LlmTraceOverview {
+    pub summary: LlmTraceSummary,
+    pub page: LlmTraceListPage,
+}
+
 pub trait LlmTraceStore: Send + Sync {
     fn record(&self, record: &LlmTraceRecord) -> Result<(), crate::AiaStoreError>;
     fn list(&self, limit: usize) -> Result<Vec<LlmTraceListItem>, crate::AiaStoreError>;

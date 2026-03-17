@@ -14,5 +14,5 @@ pub(crate) use session::{
     auto_compress_session, create_handoff, create_session, delete_session, get_current_turn,
     get_history, get_session_info, list_sessions,
 };
-pub(crate) use trace::{get_trace, get_trace_summary, list_traces};
+pub(crate) use trace::{get_trace, get_trace_overview, get_trace_summary, list_traces};
 pub(crate) use turn::{cancel_turn, events, submit_turn};

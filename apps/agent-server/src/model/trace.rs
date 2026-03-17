@@ -130,6 +130,7 @@ pub(super) fn request_summary(request: &CompletionRequest) -> Value {
     json!({
         "has_instructions": request.instructions.as_ref().is_some_and(|value| !value.is_empty()),
         "conversation_items": request.conversation.len(),
+        "user_message": latest_user_message(request),
         "tool_names": request.available_tools.iter().map(|tool| tool.name.clone()).collect::<Vec<_>>(),
         "max_output_tokens": request.max_output_tokens,
         "user_agent": request.user_agent,
@@ -138,6 +139,16 @@ pub(super) fn request_summary(request: &CompletionRequest) -> Value {
             "retention": cache.retention.as_ref().map(|value| value.as_api_value()),
         })),
     })
+}
+
+fn latest_user_message(request: &CompletionRequest) -> Option<String> {
+    request
+        .conversation
+        .iter()
+        .rev()
+        .filter_map(|item| item.as_message())
+        .find(|message| matches!(message.role, agent_core::Role::User))
+        .map(|message| preview_text(&message.content))
 }
 
 pub(super) fn response_summary(completion: &Completion) -> Value {

@@ -1,11 +1,27 @@
 import { create } from "zustand"
-import { fetchTrace, fetchTraceSummary, fetchTraces } from "@/lib/api"
+import { fetchTrace, fetchTraceOverview } from "@/lib/api"
 import type { TraceListItem, TraceRecord, TraceSummary } from "@/lib/types"
 
 const TRACE_PAGE_SIZE = 12
 
+export type TraceView = "conversation" | "compression"
+
+function requestKindForView(view: TraceView) {
+  return view === "compression" ? "compression" : "completion"
+}
+
+let inflightOverviewKey: string | null = null
+let inflightOverviewPromise: Promise<{
+  traceSummary: TraceSummary
+  traces: TraceListItem[]
+  tracePage: number
+  tracePageSize: number
+  totalTraceLoops: number
+}> | null = null
+
 type TraceStore = {
   traces: TraceListItem[]
+  traceView: TraceView
   tracePage: number
   tracePageSize: number
   totalTraceLoops: number
@@ -14,13 +30,18 @@ type TraceStore = {
   traceSummary: TraceSummary | null
   traceLoading: boolean
   traceError: string | null
-  refreshTraces: (options?: { page?: number }) => Promise<void>
+  refreshTraces: (options?: {
+    page?: number
+    view?: TraceView
+  }) => Promise<void>
+  switchTraceView: (view: TraceView) => Promise<void>
   selectTrace: (traceId: string) => Promise<void>
   clearSelection: () => void
 }
 
 export const useTraceStore = create<TraceStore>((set, get) => ({
   traces: [],
+  traceView: "conversation",
   tracePage: 1,
   tracePageSize: TRACE_PAGE_SIZE,
   totalTraceLoops: 0,
@@ -33,16 +54,44 @@ export const useTraceStore = create<TraceStore>((set, get) => ({
   refreshTraces: async (options) => {
     const previousSelectedId = get().selectedTraceId
     const tracePage = options?.page ?? get().tracePage
+    const traceView = options?.view ?? get().traceView
     const tracePageSize = get().tracePageSize
+    const requestKind = requestKindForView(traceView)
 
     set({ traceLoading: true, traceError: null })
 
     try {
-      const [traceSummary, tracePageData] = await Promise.all([
-        fetchTraceSummary(),
-        fetchTraces({ page: tracePage, page_size: tracePageSize }),
-      ])
-      const traces = tracePageData.items
+      const overviewKey = `${traceView}:${tracePage}:${tracePageSize}`
+      const overviewPromise =
+        inflightOverviewKey === overviewKey && inflightOverviewPromise
+          ? inflightOverviewPromise
+          : fetchTraceOverview({
+              page: tracePage,
+              page_size: tracePageSize,
+              request_kind: requestKind,
+            }).then((overview) => ({
+              traceSummary: overview.summary,
+              traces: overview.page.items,
+              tracePage: overview.page.page,
+              tracePageSize: overview.page.page_size,
+              totalTraceLoops: overview.page.total_loops,
+            }))
+
+      inflightOverviewKey = overviewKey
+      inflightOverviewPromise = overviewPromise
+
+      const {
+        traceSummary,
+        traces,
+        tracePage: nextTracePage,
+        tracePageSize: nextTracePageSize,
+        totalTraceLoops,
+      } = await overviewPromise
+
+      if (inflightOverviewKey === overviewKey) {
+        inflightOverviewKey = null
+        inflightOverviewPromise = null
+      }
 
       const nextSelectedId = traces.some(
         (trace) => trace.id === previousSelectedId
@@ -52,9 +101,10 @@ export const useTraceStore = create<TraceStore>((set, get) => ({
 
       set({
         traces,
-        tracePage: tracePageData.page,
-        tracePageSize: tracePageData.page_size,
-        totalTraceLoops: tracePageData.total_loops,
+        traceView,
+        tracePage: nextTracePage,
+        tracePageSize: nextTracePageSize,
+        totalTraceLoops,
         traceSummary,
         selectedTraceId: nextSelectedId,
         selectedTrace:
@@ -69,12 +119,25 @@ export const useTraceStore = create<TraceStore>((set, get) => ({
         set({ selectedTrace: null, traceLoading: false })
       }
     } catch (err: unknown) {
+      inflightOverviewKey = null
+      inflightOverviewPromise = null
       set({
         traceLoading: false,
         traceError:
           err instanceof Error ? err.message : "Failed to load traces",
       })
     }
+  },
+
+  switchTraceView: async (view) => {
+    set({
+      traceView: view,
+      tracePage: 1,
+      selectedTraceId: null,
+      selectedTrace: null,
+      traceError: null,
+    })
+    await get().refreshTraces({ page: 1, view })
   },
 
   selectTrace: async (traceId: string) => {

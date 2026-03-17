@@ -1,7 +1,7 @@
 import type { ToolRenderer } from "../types"
 import { getToolDisplayPath, normalizeToolArguments } from "@/lib/tool-display"
 import { formatScalar, truncateInline } from "../helpers"
-import { ExpandableOutput, JsonBlock, ToolDetailSection } from "../ui"
+import { ExpandableOutput, ToolDetailSection } from "../ui"
 
 export function createDefaultToolRenderer(): ToolRenderer {
   return {
@@ -27,23 +27,18 @@ export function createDefaultToolRenderer(): ToolRenderer {
 
       return [primary, entries.join(" · ")].filter(Boolean).join(" — ")
     },
+    renderMeta() {
+      return null
+    },
     renderDetails(data) {
-      if (data.outputContent) {
-        return (
-          <ToolDetailSection title="Outcome">
-            <ExpandableOutput
-              value={data.outputContent}
-              failed={!data.succeeded}
-            />
-          </ToolDetailSection>
-        )
-      }
-
-      if (!data.details) return null
+      if (!data.outputContent) return null
 
       return (
-        <ToolDetailSection title="Details">
-          <JsonBlock value={data.details} />
+        <ToolDetailSection title={data.succeeded ? "Content" : "Failure"}>
+          <ExpandableOutput
+            value={data.outputContent}
+            failed={!data.succeeded}
+          />
         </ToolDetailSection>
       )
     },

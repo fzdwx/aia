@@ -32,6 +32,7 @@
 - 可以作为驱动其他客户端的接口层
 - 取消 / stop 语义需要贯穿 server、runtime、provider streaming 与工具执行路径
 - 本地 trace 诊断需要能还原 agent loop、LLM 请求与工具执行的关系
+- 本地 trace 诊断还需要能单独查看上下文压缩调用与压缩摘要日志，而不只是把它们混进普通对话请求里
 
 ## 当前阶段边界
 
@@ -74,6 +75,9 @@
 - provider 变更已采用事务式提交：候选 registry 校验、registry 落盘、session tape 落盘全部成功后才更新内存 runtime / tape
 - 已完成完整 stop/cancel 基线，并继续打通到 OpenAI streaming 与 embedded shell `TERM` 中断
 - 本地 trace 当前已形成 OTel-shaped 诊断模型：agent loop root span、LLM client spans、tool internal spans 与本地 event timeline
+- trace 列表读取已避免为每条记录反序列化完整 `provider_request` 大 JSON，优先依赖轻量 `request_summary` 里的用户消息预览
+- 手动 / 空闲上下文压缩调用现在也会产生日志化 trace，并以独立 compression 日志视图暴露，而不是混入普通 trace 列表
+- trace 首屏加载还需要避免同页重复请求和单连接串行放大：同一视图的摘要与分页应尽量合并成单次读取，SQLite 热查询需要有与过滤/分组形状匹配的索引
 
 ### 当前不做
 

@@ -7,6 +7,7 @@ import type {
   SessionListItem,
   SseEvent,
   TraceListPage,
+  TraceOverview,
   TraceRecord,
   TraceSummary,
 } from "./types"
@@ -126,11 +127,13 @@ export async function listProviders(): Promise<ProviderListItem[]> {
 export async function fetchTraces(params?: {
   page?: number
   page_size?: number
+  request_kind?: string
 }): Promise<TraceListPage> {
   const search = new URLSearchParams()
   if (params?.page != null) search.set("page", String(params.page))
   if (params?.page_size != null)
     search.set("page_size", String(params.page_size))
+  if (params?.request_kind) search.set("request_kind", params.request_kind)
   const query = search.size > 0 ? `?${search.toString()}` : ""
   const res = await fetch(`/api/traces${query}`)
   if (!res.ok) throw new Error(`GET /api/traces failed: ${res.status}`)
@@ -143,10 +146,31 @@ export async function fetchTrace(id: string): Promise<TraceRecord> {
   return (await res.json()) as Promise<TraceRecord>
 }
 
-export async function fetchTraceSummary(): Promise<TraceSummary> {
-  const res = await fetch("/api/traces/summary")
+export async function fetchTraceSummary(params?: {
+  request_kind?: string
+}): Promise<TraceSummary> {
+  const search = new URLSearchParams()
+  if (params?.request_kind) search.set("request_kind", params.request_kind)
+  const query = search.size > 0 ? `?${search.toString()}` : ""
+  const res = await fetch(`/api/traces/summary${query}`)
   if (!res.ok) throw new Error(`GET /api/traces/summary failed: ${res.status}`)
   return (await res.json()) as Promise<TraceSummary>
+}
+
+export async function fetchTraceOverview(params?: {
+  page?: number
+  page_size?: number
+  request_kind?: string
+}): Promise<TraceOverview> {
+  const search = new URLSearchParams()
+  if (params?.page != null) search.set("page", String(params.page))
+  if (params?.page_size != null)
+    search.set("page_size", String(params.page_size))
+  if (params?.request_kind) search.set("request_kind", params.request_kind)
+  const query = search.size > 0 ? `?${search.toString()}` : ""
+  const res = await fetch(`/api/traces/overview${query}`)
+  if (!res.ok) throw new Error(`GET /api/traces/overview failed: ${res.status}`)
+  return (await res.json()) as Promise<TraceOverview>
 }
 
 export async function createProvider(body: {

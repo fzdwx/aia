@@ -45,6 +45,18 @@ impl AiaStore {
                 );
                 CREATE INDEX IF NOT EXISTS idx_llm_request_traces_started_at_ms
                     ON llm_request_traces(started_at_ms DESC);
+                CREATE INDEX IF NOT EXISTS idx_llm_request_traces_client_kind_trace_started
+                    ON llm_request_traces(span_kind, request_kind, trace_id, started_at_ms DESC);
+                CREATE INDEX IF NOT EXISTS idx_llm_request_traces_trace_id_started_at_ms
+                    ON llm_request_traces(trace_id, started_at_ms DESC);
+                CREATE INDEX IF NOT EXISTS idx_llm_request_traces_client_kind_duration_ms
+                    ON llm_request_traces(span_kind, request_kind, duration_ms);
+                CREATE INDEX IF NOT EXISTS idx_llm_request_traces_client_request_trace_started_partial
+                    ON llm_request_traces(request_kind, trace_id, started_at_ms DESC)
+                    WHERE span_kind = 'CLIENT';
+                CREATE INDEX IF NOT EXISTS idx_llm_request_traces_client_request_duration_partial
+                    ON llm_request_traces(request_kind, duration_ms)
+                    WHERE span_kind = 'CLIENT';
                 ",
             )?;
 

@@ -132,6 +132,7 @@ async fn run() -> Result<(), ServerInitError> {
     let app = Router::new()
         .route("/api/providers", get(routes::get_providers))
         .route("/api/providers/list", get(routes::list_providers))
+        .route("/api/traces/overview", get(routes::get_trace_overview))
         .route("/api/traces", get(routes::list_traces))
         .route("/api/traces/summary", get(routes::get_trace_summary))
         .route("/api/traces/{id}", get(routes::get_trace))

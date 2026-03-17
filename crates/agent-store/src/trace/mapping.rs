@@ -5,7 +5,7 @@ use serde_json::Value;
 use super::{LlmTraceEvent, LlmTraceListItem, LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus};
 
 pub(super) fn read_trace_list_item(row: &Row<'_>) -> rusqlite::Result<LlmTraceListItem> {
-    let provider_request = json_column::<Value>(row, 22)?;
+    let request_summary = json_column::<Value>(row, 22)?;
     Ok(LlmTraceListItem {
         id: row.get(0)?,
         trace_id: row.get(1)?,
@@ -29,7 +29,7 @@ pub(super) fn read_trace_list_item(row: &Row<'_>) -> rusqlite::Result<LlmTraceLi
         duration_ms: row.get::<_, Option<u64>>(19)?,
         total_tokens: row.get::<_, Option<u64>>(20)?,
         cached_tokens: row.get::<_, Option<u64>>(21)?,
-        user_message: extract_user_message(&provider_request),
+        user_message: extract_user_message_from_request_summary(&request_summary),
         error: row.get(23)?,
     })
 }
@@ -79,61 +79,11 @@ fn json_column<T: DeserializeOwned>(row: &Row<'_>, index: usize) -> rusqlite::Re
     })
 }
 
-fn extract_user_message(value: &Value) -> Option<String> {
-    extract_chat_completion_user_message(value)
-        .or_else(|| extract_responses_user_message(value))
-        .map(|text| text.trim().to_string())
+fn extract_user_message_from_request_summary(value: &Value) -> Option<String> {
+    value
+        .get("user_message")
+        .and_then(Value::as_str)
+        .map(str::trim)
         .filter(|text| !text.is_empty())
-}
-
-fn extract_chat_completion_user_message(value: &Value) -> Option<String> {
-    value.get("messages").and_then(Value::as_array).and_then(|messages| {
-        messages.iter().rev().find_map(|message| {
-            let role = message.get("role").and_then(Value::as_str)?;
-            if role != "user" {
-                return None;
-            }
-            extract_text_content(message.get("content")?)
-        })
-    })
-}
-
-fn extract_responses_user_message(value: &Value) -> Option<String> {
-    value.get("input").and_then(Value::as_array).and_then(|items| {
-        items.iter().rev().find_map(|item| {
-            let role = item.get("role").and_then(Value::as_str)?;
-            if role != "user" {
-                return None;
-            }
-            extract_text_content(item.get("content")?)
-        })
-    })
-}
-
-fn extract_text_content(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => Some(text.clone()),
-        Value::Array(items) => {
-            let text = items
-                .iter()
-                .filter_map(|item| match item {
-                    Value::String(text) => Some(text.clone()),
-                    Value::Object(map) => {
-                        map.get("text").and_then(Value::as_str).map(ToOwned::to_owned).or_else(
-                            || map.get("content").and_then(Value::as_str).map(ToOwned::to_owned),
-                        )
-                    }
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join("");
-            if text.is_empty() { None } else { Some(text) }
-        }
-        Value::Object(map) => map
-            .get("text")
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned)
-            .or_else(|| map.get("content").and_then(Value::as_str).map(ToOwned::to_owned)),
-        _ => None,
-    }
+        .map(ToOwned::to_owned)
 }

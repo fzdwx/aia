@@ -3,7 +3,7 @@ import { describe, expect, test } from "vite-plus/test"
 import { toolRendererRegistry } from "./index"
 
 describe("tool renderer registry", () => {
-  test("renders read tool title from arguments", () => {
+  test("renders read tool title as file path only", () => {
     const title = toolRendererRegistry.renderTitle({
       toolName: "functions.read",
       arguments: {
@@ -15,9 +15,119 @@ describe("tool renderer registry", () => {
       succeeded: true,
     })
 
+    expect(title).toBe("apps/web/src/components/chat-messages.tsx")
+  })
+
+  test("renders read tool meta as requested range and actual line count", () => {
+    const meta = toolRendererRegistry.renderMeta({
+      toolName: "functions.read",
+      arguments: {
+        file_path: "apps/web/src/components/chat-messages.tsx",
+        offset: 120,
+        limit: 40,
+      },
+      details: {
+        lines_read: 40,
+        total_lines: 120,
+      },
+      outputContent: "",
+      succeeded: true,
+    })
+
+    expect(meta).not.toBe(null)
+  })
+
+  test("renders grep tool title as pattern only", () => {
+    const title = toolRendererRegistry.renderTitle({
+      toolName: "functions.grep",
+      arguments: {
+        pattern: "renderMeta",
+        path: "apps/web/src",
+        glob: "*.ts",
+      },
+      outputContent: "",
+      succeeded: true,
+    })
+
+    expect(title).toBe("renderMeta")
+  })
+
+  test("renders grep tool meta from details", () => {
+    const meta = toolRendererRegistry.renderMeta({
+      toolName: "functions.grep",
+      arguments: {
+        pattern: "renderMeta",
+      },
+      details: {
+        matches: 12,
+        returned: 5,
+        truncated: true,
+      },
+      outputContent: "",
+      succeeded: true,
+    })
+
+    expect(meta).not.toBe(null)
+  })
+
+  test("renders write tool title with compacted path", () => {
+    const title = toolRendererRegistry.renderTitle({
+      toolName: "functions.write",
+      arguments: {
+        file_path:
+          "apps/web/src/features/chat/tool-rendering/renderers/file-tools.tsx",
+        content: "new content",
+      },
+      details: {
+        file_path:
+          "apps/web/src/features/chat/tool-rendering/renderers/file-tools.tsx",
+      },
+      outputContent:
+        "Wrote apps/web/src/features/chat/tool-rendering/renderers/file-tools.tsx",
+      succeeded: true,
+    })
+
     expect(title).toBe(
-      "apps/web/src/components/chat-messages.tsx — from 120 · limit 40"
+      ".../src/features/chat/tool-rendering/renderers/file-tools.tsx"
     )
+  })
+
+  test("renders edit tool title with compacted path", () => {
+    const title = toolRendererRegistry.renderTitle({
+      toolName: "functions.edit",
+      arguments: {
+        file_path:
+          "apps/web/src/features/chat/tool-rendering/renderers/file-tools.tsx",
+        old_string: "old value",
+        new_string: "new value",
+      },
+      details: {
+        file_path:
+          "apps/web/src/features/chat/tool-rendering/renderers/file-tools.tsx",
+      },
+      outputContent:
+        "Edited apps/web/src/features/chat/tool-rendering/renderers/file-tools.tsx",
+      succeeded: true,
+    })
+
+    expect(title).toBe(
+      ".../src/features/chat/tool-rendering/renderers/file-tools.tsx"
+    )
+  })
+
+  test("renders edit tool failure title from error message", () => {
+    const title = toolRendererRegistry.renderTitle({
+      toolName: "functions.edit",
+      arguments: {
+        file_path: "apps/web/src/lib/tool-display.ts",
+        old_string: "missing",
+        new_string: "new value",
+      },
+      outputContent: "old_string not found in file",
+      succeeded: false,
+    })
+
+    expect(title).toBe("old_string not found in file")
   })
 
   test("renders shell tool title from command", () => {

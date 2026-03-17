@@ -2,7 +2,7 @@ import { normalizeToolArguments } from "@/lib/tool-display"
 
 import type { ToolRenderer } from "../types"
 import { getNumberValue, getStringValue, truncateInline } from "../helpers"
-import { DetailList, ExpandableOutput, ToolDetailSection } from "../ui"
+import { ExpandableOutput, ToolDetailSection } from "../ui"
 
 export function createTapeInfoRenderer(): ToolRenderer {
   return {
@@ -14,57 +14,15 @@ export function createTapeInfoRenderer(): ToolRenderer {
         : "context usage"
     },
     renderDetails(data) {
+      if (!data.outputContent) return null
+
       return (
-        <div className="space-y-2.5">
-          <ToolDetailSection title="Context">
-            <DetailList
-              entries={[
-                {
-                  label: "Entries",
-                  value: getNumberValue(data.details, "entries"),
-                },
-                {
-                  label: "Anchors",
-                  value: getNumberValue(data.details, "anchors"),
-                },
-                {
-                  label: "Since last anchor",
-                  value: getNumberValue(
-                    data.details,
-                    "entries_since_last_anchor"
-                  ),
-                },
-                {
-                  label: "Last input tokens",
-                  value: getNumberValue(data.details, "last_input_tokens"),
-                },
-                {
-                  label: "Context limit",
-                  value: getNumberValue(data.details, "context_limit"),
-                },
-                {
-                  label: "Output limit",
-                  value: getNumberValue(data.details, "output_limit"),
-                },
-                {
-                  label: "Pressure",
-                  value:
-                    typeof data.details?.pressure_ratio === "number"
-                      ? `${(data.details.pressure_ratio * 100).toFixed(1)}%`
-                      : undefined,
-                },
-              ]}
-            />
-          </ToolDetailSection>
-          {data.outputContent ? (
-            <ToolDetailSection title="Payload">
-              <ExpandableOutput
-                value={data.outputContent}
-                failed={!data.succeeded}
-              />
-            </ToolDetailSection>
-          ) : null}
-        </div>
+        <ToolDetailSection title={data.succeeded ? "Content" : "Failure"}>
+          <ExpandableOutput
+            value={data.outputContent}
+            failed={!data.succeeded}
+          />
+        </ToolDetailSection>
       )
     },
   }
@@ -85,7 +43,7 @@ export function createTapeHandoffRenderer(): ToolRenderer {
     },
     renderDetails(data) {
       return data.outputContent ? (
-        <ToolDetailSection title="Outcome">
+        <ToolDetailSection title={data.succeeded ? "Content" : "Failure"}>
           <ExpandableOutput
             value={data.outputContent}
             failed={!data.succeeded}

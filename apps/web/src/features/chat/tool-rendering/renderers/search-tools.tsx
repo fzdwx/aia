@@ -2,12 +2,30 @@ import { normalizeToolArguments } from "@/lib/tool-display"
 
 import type { ToolRenderer } from "../types"
 import {
+  createMetaBadge,
   getBooleanValue,
   getNumberValue,
   getStringValue,
   truncateInline,
 } from "../helpers"
-import { DetailList, ExpandableOutput, ToolDetailSection } from "../ui"
+import { ExpandableOutput, ToolDetailSection } from "../ui"
+
+function renderSearchMeta(data: {
+  details?: Record<string, unknown>
+}): ReturnType<ToolRenderer["renderMeta"]> {
+  const matches = getNumberValue(data.details, "matches")
+  const returned = getNumberValue(data.details, "returned")
+  const truncated = getBooleanValue(data.details, "truncated")
+
+  if (matches == null) return null
+  if (truncated && returned != null) {
+    return createMetaBadge(
+      `${matches} matches (showing ${returned})`,
+      "text-amber-600/80"
+    )
+  }
+  return createMetaBadge(`${matches} matches`)
+}
 
 export function createGlobRenderer(): ToolRenderer {
   return {
@@ -18,46 +36,19 @@ export function createGlobRenderer(): ToolRenderer {
       const path = getStringValue(args, "path")
       return [pattern, path ? `in ${path}` : ""].filter(Boolean).join(" — ")
     },
+    renderMeta(data) {
+      return renderSearchMeta(data)
+    },
     renderDetails(data) {
+      if (!data.outputContent) return null
+
       return (
-        <div className="space-y-2.5">
-          <ToolDetailSection title="Matches">
-            <DetailList
-              entries={[
-                {
-                  label: "Pattern",
-                  value: getStringValue(data.details, "pattern"),
-                },
-                {
-                  label: "Matches",
-                  value: getNumberValue(data.details, "matches"),
-                },
-                {
-                  label: "Returned",
-                  value: getNumberValue(data.details, "returned"),
-                },
-                {
-                  label: "Limit",
-                  value: getNumberValue(data.details, "limit"),
-                },
-                {
-                  label: "Aborted",
-                  value: getBooleanValue(data.details, "aborted")
-                    ? "yes"
-                    : undefined,
-                },
-              ]}
-            />
-          </ToolDetailSection>
-          {data.outputContent ? (
-            <ToolDetailSection title="Results">
-              <ExpandableOutput
-                value={data.outputContent}
-                failed={!data.succeeded}
-              />
-            </ToolDetailSection>
-          ) : null}
-        </div>
+        <ToolDetailSection title={data.succeeded ? "Content" : "Failure"}>
+          <ExpandableOutput
+            value={data.outputContent}
+            failed={!data.succeeded}
+          />
+        </ToolDetailSection>
       )
     },
   }
@@ -69,56 +60,21 @@ export function createGrepRenderer(): ToolRenderer {
     renderTitle(data) {
       const args = normalizeToolArguments(data.arguments)
       const pattern = getStringValue(args, "pattern")
-      const path = getStringValue(args, "path")
-      const glob = getStringValue(args, "glob")
-      return [
-        pattern ? truncateInline(pattern, 48) : "",
-        path ? `in ${path}` : "",
-        glob ? `glob ${glob}` : "",
-      ]
-        .filter(Boolean)
-        .join(" — ")
+      return pattern ? truncateInline(pattern, 48) : ""
+    },
+    renderMeta(data) {
+      return renderSearchMeta(data)
     },
     renderDetails(data) {
+      if (!data.outputContent) return null
+
       return (
-        <div className="space-y-2.5">
-          <ToolDetailSection title="Search">
-            <DetailList
-              entries={[
-                {
-                  label: "Pattern",
-                  value: getStringValue(data.details, "pattern"),
-                },
-                {
-                  label: "Matches",
-                  value: getNumberValue(data.details, "matches"),
-                },
-                {
-                  label: "Returned",
-                  value: getNumberValue(data.details, "returned"),
-                },
-                {
-                  label: "Limit",
-                  value: getNumberValue(data.details, "limit"),
-                },
-                {
-                  label: "Aborted",
-                  value: getBooleanValue(data.details, "aborted")
-                    ? "yes"
-                    : undefined,
-                },
-              ]}
-            />
-          </ToolDetailSection>
-          {data.outputContent ? (
-            <ToolDetailSection title="Results">
-              <ExpandableOutput
-                value={data.outputContent}
-                failed={!data.succeeded}
-              />
-            </ToolDetailSection>
-          ) : null}
-        </div>
+        <ToolDetailSection title={data.succeeded ? "Content" : "Failure"}>
+          <ExpandableOutput
+            value={data.outputContent}
+            failed={!data.succeeded}
+          />
+        </ToolDetailSection>
       )
     },
   }

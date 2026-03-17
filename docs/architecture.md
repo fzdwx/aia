@@ -55,7 +55,7 @@ README 里真正难的是这些能力：
 - 模型能力与人格标签
 - `LanguageModel` 已收口为单一流式入口：`complete_streaming(request, abort, sink)`；同步/非流式消费方通过空 sink 消费最终 `Completion`，避免 `complete` / `complete_streaming_with_abort` 三套入口长期并存
 - 工具定义、工具调用、统一工具规范
-- `ToolDefinition` 参数 schema 既支持手写 JSON 构造，也支持基于 `schemars::JsonSchema` 的共享生成 helper；当前内建工具与 runtime tools 对模型暴露的生产 schema 已优先收口为手写裸 JSON，以保证外部工具契约稳定、可读且不泄漏 Rust 内部联合类型细节；真实工具调用继续经由共享 `ToolCall::parse_arguments()` 做结构化取参，避免 schema 与运行时取参长期漂移
+- `ToolDefinition` 参数 schema 既支持手写 JSON 构造，也支持基于 `agent-core` 内部最小 `ToolArgsSchema` trait 的共享生成 helper；当前内建工具与 runtime tools 对模型暴露的生产 schema 已优先收口为手写裸 JSON，以保证外部工具契约稳定、可读且不泄漏内部类型细节；真实工具调用继续经由共享 `ToolCall::parse_arguments()` 做结构化取参，避免 schema 与运行时取参长期漂移
 - 运行时需要的请求与响应载荷
 - 结构化会话条目：普通消息、工具调用、工具结果
 
@@ -163,6 +163,7 @@ README 里真正难的是这些能力：
 - `AiaStore` 现同时提供共享 async façade：server 与 model 层通过 async store API 访问 session / trace 数据，内部再由共享 `spawn_blocking` 边界桥接 `rusqlite`，避免 async 路由和 turn 路径直接阻塞 Tokio worker
 - session 侧也已开始承接 server 共享样板：`SessionRecord::new(...)` 统一了新 session 的时间戳/字段构造，`AiaStore::first_session_id()` 让 app 壳在解析默认 session 时不必为了取第一条记录而整表加载
 - trace 列表页现在优先读取 `request_summary.user_message` 这类轻量摘要字段，不再为列表每一行都反序列化整份 `provider_request`，把大 payload 留给详情接口按需读取
+- trace 诊断读路径又进一步拆成“单次 overview 读取 + 明确过滤”的控制面：`apps/agent-server` 新增按 `request_kind` 过滤的 overview 读接口，`agent-store` 则通过匹配 `span_kind/request_kind/trace_id/started_at_ms` 的复合索引与 `trace_id`/`duration_ms` 辅助索引压低列表页与汇总页的扫描成本
 - 为 server 与 trace 诊断页提供本地存储支撑，而不把 SQLite 细节扩散到更多边界
 
 ### `apps/web`

@@ -45,6 +45,13 @@ pub(super) fn next_turn_id() -> String {
     format!("turn-{now_ms}-{id}")
 }
 
+pub(super) fn next_compression_id() -> String {
+    static NEXT_COMPRESSION_ID: AtomicU64 = AtomicU64::new(1);
+    let id = NEXT_COMPRESSION_ID.fetch_add(1, Ordering::Relaxed);
+    let now_ms = duration_since_unix_epoch(SystemTime::now()).as_millis();
+    format!("compression-{now_ms}-{id}")
+}
+
 pub(super) fn now_timestamp_ms() -> u64 {
     duration_since_unix_epoch(SystemTime::now()).as_millis() as u64
 }

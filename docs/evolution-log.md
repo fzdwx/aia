@@ -1,5 +1,59 @@
 # 演进日志
 
+## 2026-03-18 Session 51
+
+**Diagnosis**：虽然生产工具 schema 已经大多改成手写裸 JSON，但 `agent-core` 仍保留对 `schemars` 的依赖来支撑 `with_parameters_schema::<T>()`，测试链路也仍靠 `JsonSchema derive` 才能覆盖 typed helper；这让工具 schema 能力继续绑在外部反射式库上，不符合“最小共享抽象优先”的当前方向。
+**Decision**：彻底移除 `schemars`，并在 `agent-core` 内实现一个极简自研 schema helper：`ToolArgsSchema` trait 只负责返回当前 tool parameters 真实需要的 object schema 子集，`ToolSchema` / `ToolSchemaProperty` 只覆盖 object/properties/required/additionalProperties/description/minimum 这些当前真实用到的能力；生产工具仍优先用手写裸 JSON，typed helper 只作为共享辅助能力保留。
+**Changes**：
+- `crates/agent-core/src/{tooling.rs,lib.rs,tests.rs}`：移除 `schemars` 依赖与 `JsonSchema` 绑定；新增 `ToolArgsSchema`、`ToolSchema`、`ToolSchemaProperty` 最小抽象；`with_parameters_schema::<T>()` 改为依赖自研 trait；相关回归测试同步改为验证自研 helper。
+- `crates/openai-adapter/src/tests.rs`：适配器链路测试改为基于自研 `ToolArgsSchema`，继续锁住“tool.parameters 会被透传且不会带 `$schema` 元字段”。
+- `crates/{agent-core,agent-runtime,builtin-tools,openai-adapter}/Cargo.toml`：移除直接 `schemars` 依赖。
+- `docs/architecture.md`、`docs/status.md`：同步更新为“共享 typed schema helper 现由 `agent-core` 内部最小 trait 提供”。
+**Verification**：先把测试改成依赖 `ToolArgsSchema` 并确认红灯，再实现最小 helper；随后 `cargo fmt --all`、`cargo test -p agent-core`、`cargo test -p builtin-tools`、`cargo test -p agent-runtime`、`cargo test -p openai-adapter`、`cargo check` 全部通过；最终搜索确认代码与依赖声明中已无 `schemars` 残留，仓库里仅在历史演进记录中保留该词。
+**Commit**：未提交。
+**Next direction**：如果后续 typed helper 真正开始在多个真实工具上重复扩展，再评估是否补更细的 property helper；在那之前，坚持它只服务当前最小工具 schema 子集，避免再次演化成通用 schema 系统。
+
+## 2026-03-17 Session 50
+
+**Diagnosis**：压缩日志独立视图虽然已经拆出来了，但 trace 页仍然很慢。直接观察代码和 SQLite 查询计划后发现有两个根因同时存在：前端在 `StrictMode` 下会对同一视图触发重复刷新，而后端 trace 列表/汇总又仍然走全表扫描与临时排序，导致单连接 SQLite 把多个慢查询串行放大。
+**Decision**：同时修这两个根因，而不是只补一个表层优化：后端新增单次 `overview` 读取接口，把 trace 页首屏的分页与汇总合并到同一条请求；前端 store 对同一视图/分页的刷新做并发合并；SQLite 侧为 `span_kind/request_kind/trace_id/started_at_ms`、`trace_id` 与 `duration_ms` 热路径补复合索引。这样既消掉重复请求，也把真正的扫描热区压下去。
+**Changes**：
+- `crates/agent-store/src/trace/{schema.rs,store.rs,tests.rs}`、`crates/agent-store/src/{trace.rs,lib.rs}`：新增 trace overview 类型与单次 overview 读取 API；为 trace 列表/汇总热点查询补索引；补回归测试锁住 compression/completion 过滤与 overview 语义。
+- `apps/agent-server/src/{main.rs,routes.rs}`、`apps/agent-server/src/routes/{trace.rs,tests.rs}`：新增 `GET /api/traces/overview`，并补路由测试锁住 overview 会一次返回 summary + page。
+- `apps/web/src/lib/{api.ts,types.ts}`、`apps/web/src/stores/{trace-store.ts,trace-store.test.ts}`：前端改用单次 overview 请求加载 trace 页，store 会合并同一视图/分页的并发刷新，避免 `StrictMode` 挂载时重复打接口。
+- `README.md`、`docs/requirements.md`、`docs/architecture.md`、`docs/status.md`：同步记录单次 overview 读路径、请求合并与索引提速。
+**Verification**：`cargo fmt --all`、`cargo test -p agent-store`、`cargo test -p agent-server`、`cargo check` 通过；前端 `./node_modules/.bin/vp test`、`./node_modules/.bin/tsc --noEmit`、`./node_modules/.bin/vp build`、`./node_modules/.bin/vp check` 通过；文件级 `lsp_diagnostics` 对 `trace-store.ts`、`trace-store.test.ts`、`api.ts` 为 0 错误。SQLite 查询计划在改前已明确显示 `SCAN llm_request_traces` 与 `USE TEMP B-TREE`，本次索引即针对这些热点形状落地。
+**Commit**：未提交。
+**Next direction**：如果后续 trace 数据继续增长，可继续把 loop 列表从 `OFFSET` 翻页收口成游标式分页，并考虑对详情页的 events / payload 做按需加载，继续压低 trace 工作台的尾延迟。
+
+## 2026-03-17 Session 49
+
+**Diagnosis**：上一轮虽然已经把上下文压缩调用写进 trace store，但仍然把它们混进现有 trace 工作台里展示；这样会污染普通对话 trace 的分页、统计和浏览语义，不符合“压缩调用与压缩摘要日志单独查看”的真实需求。
+**Decision**：保持压缩调用继续复用同一套本地 trace 存储模型，但在查询与展示层明确拆开：`apps/agent-server` 的 trace 列表/汇总按 `request_kind` 独立过滤，`apps/web` 则提供 conversation trace / compression logs 两个独立视图。这样既不新造第二套日志基础设施，也不会再把压缩日志混入常规 trace 工作流。
+**Changes**：
+- `crates/agent-store/src/trace/{store.rs,tests.rs}`：新增按 `request_kind` 过滤的 trace 列表/汇总 async API，并补回归测试锁住 compression / completion 可独立分页与统计。
+- `apps/agent-server/src/routes/{trace.rs,tests.rs}`：`/api/traces` 与 `/api/traces/summary` 新增 `request_kind` 查询过滤；补路由测试覆盖 compression 日志独立查询。
+- `apps/web/src/stores/trace-store.ts`、`apps/web/src/lib/api.ts`：trace store 新增 `traceView` 与 `switchTraceView()`，请求 `/api/traces` / `/api/traces/summary` 时会按视图自动带上 `request_kind`。
+- `apps/web/src/lib/trace-presentation{,.test}.ts`、`apps/web/src/components/trace-panel.tsx`：新增 trace group 分区 helper，UI 侧提供 conversation trace / compression logs 切换，不再把压缩日志和普通 trace 混在同一列表里。
+- `README.md`、`docs/requirements.md`、`docs/architecture.md`、`docs/status.md`：同步把“压缩日志可查看”更新为“压缩日志独立查看”。
+**Verification**：`cargo fmt --all` 通过；`cargo test -p agent-store` 通过；`cargo test -p agent-server list_traces_can_filter_compression_logs -- --nocapture` 通过；前端 `./node_modules/.bin/vp test`、`./node_modules/.bin/vp test src/lib/trace-presentation.test.ts`、`./node_modules/.bin/tsc --noEmit`、`./node_modules/.bin/vp build` 通过。
+**Commit**：未提交。
+**Next direction**：下一步可继续把 compression 视图里的摘要、事件和原始 payload 再分成“概览 / 详情按需展开”，避免压缩日志详情也一次性把重 payload 全渲染出来。
+
+## 2026-03-17 Session 48
+
+**Diagnosis**：当历史消息很多时，trace 列表接口仍会为每一条记录读取并反序列化完整 `provider_request` 大 JSON，只为了提取用户消息预览；与此同时，手动 / 空闲上下文压缩只会发 SSE 通知，不会落成可查看的 trace 记录，导致“查看压缩日志”这条需求缺口仍在。
+**Decision**：把 trace 列表的用户消息预览收口到轻量 `request_summary.user_message`，让列表页不再过度取数；同时让 `agent-runtime::auto_compress_now()` 生成独立压缩 trace context，并在 Web trace 面板里显式标出 compression activity。这样既修性能瓶颈，也把压缩调用接入现有 trace 体系，而不是再造第二套日志入口。
+**Changes**：
+- `apps/agent-server/src/model/trace.rs`、`apps/agent-server/src/model/tests.rs`：`request_summary` 新增 `user_message` 预览字段，并补充 server model 回归测试，锁住真实 trace 记录会带上该摘要。
+- `crates/agent-store/src/trace/{store.rs,mapping.rs,tests.rs}`：trace 列表查询改为读取 `request_summary` 而不是 `provider_request`，列表项用户消息预览直接来自 `request_summary.user_message`；同步补齐与更新相关存储层回归测试。
+- `crates/agent-runtime/src/runtime/{helpers.rs,rs,tests.rs}`：新增压缩调用稳定 id，`auto_compress_now()` 触发的压缩请求现在会携带 `compression` trace context，并补测试锁住该行为。
+- `apps/web/src/lib/trace-presentation{,.test}.ts`、`apps/web/src/components/trace-panel.tsx`：trace 分组新增 `requestKind`，压缩请求在 trace 面板中会以 compression activity 明确展示，前端回归测试同步覆盖。
+- `README.md`、`docs/requirements.md`、`docs/architecture.md`、`docs/status.md`：同步记录 trace 列表瘦身与压缩日志可查看能力。
+**Verification**：`cargo fmt --all` 通过；`cargo test -p agent-store`、`cargo test -p agent-runtime --lib`、`cargo test -p agent-server`、`cargo check` 通过；前端 `./node_modules/.bin/vp test`、`./node_modules/.bin/tsc --noEmit`、`./node_modules/.bin/vp build` 通过；文件级 `lsp_diagnostics` 对本次修改的 `trace-panel.tsx`、`trace-presentation.ts`、`trace-presentation.test.ts` 为 0 错误。`./node_modules/.bin/vp check` 仍被仓库内既有的无关格式问题 `apps/web/src/features/chat/tool-timeline.tsx` 阻塞。
+**Commit**：未提交。
+**Next direction**：下一步可继续把 trace 详情拆成“轻摘要 + 重 payload 按需加载”，并为事件列表补虚拟滚动或分类过滤，进一步降低大量历史/大 payload 下的诊断开销。
+
 ## 2026-03-17 Session 47
 
 **Diagnosis**：虽然真实工具的参数 schema 和 typed args 已开始共享 Rust 类型，但顶层 `ToolDefinition.description` 仍散落在 `builtin-tools`、`agent-runtime` 以及相关测试里，继续让工具文本描述在多个 crate 各自维护。

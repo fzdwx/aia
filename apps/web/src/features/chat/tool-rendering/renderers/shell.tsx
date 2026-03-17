@@ -1,8 +1,8 @@
 import { getToolDisplayPath, normalizeToolArguments } from "@/lib/tool-display"
 
 import type { ToolRenderer } from "../types"
-import { getNumberValue, getStringValue, truncateInline } from "../helpers"
-import { DetailList, ExpandableOutput, ToolDetailSection } from "../ui"
+import { getStringValue, truncateInline } from "../helpers"
+import { ExpandableOutput, ToolDetailSection } from "../ui"
 
 export function createShellRenderer(): ToolRenderer {
   return {
@@ -16,33 +16,16 @@ export function createShellRenderer(): ToolRenderer {
       )
     },
     renderDetails(data) {
-      const stdout = getStringValue(data.details, "stdout")
-      const stderr = getStringValue(data.details, "stderr")
-      const exitCode = getNumberValue(data.details, "exit_code")
+      const content = data.succeeded
+        ? (getStringValue(data.details, "stdout") ?? data.outputContent)
+        : (getStringValue(data.details, "stderr") ?? data.outputContent)
+
+      if (!content) return null
+
       return (
-        <div className="space-y-2.5">
-          <ToolDetailSection title="Execution">
-            <DetailList entries={[{ label: "Exit code", value: exitCode }]} />
-          </ToolDetailSection>
-          {stdout ? (
-            <ToolDetailSection title="Stdout">
-              <ExpandableOutput value={stdout} failed={false} />
-            </ToolDetailSection>
-          ) : null}
-          {stderr ? (
-            <ToolDetailSection title="Stderr">
-              <ExpandableOutput value={stderr} failed />
-            </ToolDetailSection>
-          ) : null}
-          {!stdout && !stderr && data.outputContent ? (
-            <ToolDetailSection title="Outcome">
-              <ExpandableOutput
-                value={data.outputContent}
-                failed={!data.succeeded}
-              />
-            </ToolDetailSection>
-          ) : null}
-        </div>
+        <ToolDetailSection title={data.succeeded ? "Content" : "Failure"}>
+          <ExpandableOutput value={content} failed={!data.succeeded} />
+        </ToolDetailSection>
       )
     },
   }

@@ -21,5 +21,7 @@ pub use streaming::{
     AbortSignal, RuntimeToolContext, RuntimeToolContextStats, StreamEvent, ToolExecutionContext,
     ToolOutputDelta, ToolOutputStream,
 };
-pub use tooling::{ToolCall, ToolDefinition, ToolResult};
+pub use tooling::{
+    ToolArgsSchema, ToolCall, ToolDefinition, ToolResult, ToolSchema, ToolSchemaProperty,
+};
 pub use traits::{LanguageModel, Tool, ToolExecutor};

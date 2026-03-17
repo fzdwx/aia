@@ -157,7 +157,9 @@ fn list_extracts_user_message_from_chat_completions_request() {
             status: LlmTraceStatus::Succeeded,
             stop_reason: Some("stop".into()),
             error: None,
-            request_summary: json!({}),
+            request_summary: json!({
+                "user_message": "summarize this repo",
+            }),
             provider_request: json!({
                 "messages": [
                     {"role": "system", "content": "keep it short"},
@@ -208,7 +210,9 @@ fn list_extracts_user_message_from_responses_request() {
             status: LlmTraceStatus::Succeeded,
             stop_reason: Some("stop".into()),
             error: None,
-            request_summary: json!({}),
+            request_summary: json!({
+                "user_message": "explain the failing test",
+            }),
             provider_request: json!({
                 "input": [
                     {"role": "system", "content": "keep it short"},
@@ -228,6 +232,60 @@ fn list_extracts_user_message_from_responses_request() {
 
     let list = store.list(10).expect("list should succeed");
     assert_eq!(list[0].user_message.as_deref(), Some("explain the failing test"));
+}
+
+#[test]
+fn list_page_prefers_request_summary_user_message() {
+    let store = AiaStore::in_memory().expect("store should initialize");
+    store
+        .record(&LlmTraceRecord {
+            id: "trace-summary-user-message".into(),
+            trace_id: "trace-summary-group".into(),
+            span_id: "trace-summary-user-message".into(),
+            parent_span_id: Some("trace-summary-root".into()),
+            root_span_id: "trace-summary-root".into(),
+            operation_name: "chat".into(),
+            span_kind: LlmTraceSpanKind::Client,
+            turn_id: "turn-summary".into(),
+            run_id: "turn-summary".into(),
+            request_kind: "completion".into(),
+            step_index: 0,
+            provider: "openai".into(),
+            protocol: "openai-responses".into(),
+            model: "gpt-5.4".into(),
+            base_url: "https://api.example.com".into(),
+            endpoint_path: "/responses".into(),
+            streaming: false,
+            started_at_ms: 100,
+            finished_at_ms: Some(180),
+            duration_ms: Some(80),
+            status_code: Some(200),
+            status: LlmTraceStatus::Succeeded,
+            stop_reason: Some("stop".into()),
+            error: None,
+            request_summary: json!({
+                "conversation_items": 8,
+                "user_message": "summary user message",
+            }),
+            provider_request: json!({
+                "input": [
+                    {"role": "system", "content": "keep it short"}
+                ]
+            }),
+            response_summary: json!({}),
+            response_body: None,
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            cached_tokens: None,
+            otel_attributes: json!({"gen_ai.operation.name": "chat"}),
+            events: vec![],
+        })
+        .expect("record should persist");
+
+    let page = store.list_page(10, 0).expect("page query should succeed");
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.items[0].user_message.as_deref(), Some("summary user message"));
 }
 
 #[test]
@@ -349,4 +407,90 @@ async fn async_trace_methods_work() {
 
     let summary = store.summary_async().await.expect("summary async");
     assert_eq!(summary.total_requests, 1);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn async_trace_filters_can_separate_compression_logs() {
+    let store = Arc::new(AiaStore::in_memory().expect("store should initialize"));
+
+    for (id, request_kind, started_at_ms) in
+        [("trace-chat", "completion", 100_u64), ("trace-compression", "compression", 200_u64)]
+    {
+        store
+            .record_async(LlmTraceRecord {
+                id: id.into(),
+                trace_id: format!("{id}-group"),
+                span_id: id.into(),
+                parent_span_id: Some(format!("{id}-root")),
+                root_span_id: format!("{id}-root"),
+                operation_name: if request_kind == "compression" {
+                    "summarize".into()
+                } else {
+                    "chat".into()
+                },
+                span_kind: LlmTraceSpanKind::Client,
+                turn_id: format!("turn-{id}"),
+                run_id: format!("run-{id}"),
+                request_kind: request_kind.into(),
+                step_index: 0,
+                provider: "openai".into(),
+                protocol: "openai-responses".into(),
+                model: "gpt-5.4".into(),
+                base_url: "https://api.example.com".into(),
+                endpoint_path: "/responses".into(),
+                streaming: false,
+                started_at_ms,
+                finished_at_ms: Some(started_at_ms + 25),
+                duration_ms: Some(25),
+                status_code: Some(200),
+                status: LlmTraceStatus::Succeeded,
+                stop_reason: Some("stop".into()),
+                error: None,
+                request_summary: json!({
+                    "user_message": if request_kind == "compression" {
+                        serde_json::Value::Null
+                    } else {
+                        json!("hello")
+                    }
+                }),
+                provider_request: json!({"model": "gpt-5.4"}),
+                response_summary: json!({}),
+                response_body: Some(if request_kind == "compression" {
+                    "压缩摘要：旧历史已压缩。".into()
+                } else {
+                    "普通回复".into()
+                }),
+                input_tokens: Some(10),
+                output_tokens: Some(5),
+                total_tokens: Some(15),
+                cached_tokens: Some(0),
+                otel_attributes: json!({}),
+                events: vec![],
+            })
+            .await
+            .expect("record async");
+    }
+
+    let compression_page = store
+        .list_page_by_request_kind_async(10, 0, "compression")
+        .await
+        .expect("compression page async");
+    assert_eq!(compression_page.total_loops, 1);
+    assert_eq!(compression_page.items.len(), 1);
+    assert_eq!(compression_page.items[0].request_kind, "compression");
+
+    let conversation_page = store
+        .list_page_by_request_kind_async(10, 0, "completion")
+        .await
+        .expect("conversation page async");
+    assert_eq!(conversation_page.total_loops, 1);
+    assert_eq!(conversation_page.items.len(), 1);
+    assert_eq!(conversation_page.items[0].request_kind, "completion");
+
+    let compression_summary = store
+        .summary_by_request_kind_async("compression")
+        .await
+        .expect("compression summary async");
+    assert_eq!(compression_summary.total_requests, 1);
+    assert_eq!(compression_summary.total_tokens, 15);
 }

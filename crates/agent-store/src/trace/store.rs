@@ -5,7 +5,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::{AiaStore, AiaStoreError};
 
 use super::{
-    LlmTraceListItem, LlmTraceListPage, LlmTraceRecord, LlmTraceStore, LlmTraceSummary,
+    LlmTraceListItem, LlmTraceListPage, LlmTraceOverview, LlmTraceRecord, LlmTraceStore,
+    LlmTraceSummary,
     mapping::{read_trace_list_item, read_trace_record},
 };
 
@@ -19,7 +20,7 @@ impl LlmTraceStore for AiaStore {
     }
 
     fn list_page(&self, limit: usize, offset: usize) -> Result<LlmTraceListPage, AiaStoreError> {
-        self.with_conn(|conn| list_page_with_conn(conn, limit, offset))
+        self.with_conn(|conn| list_page_with_conn(conn, limit, offset, None))
     }
 
     fn get(&self, id: &str) -> Result<Option<LlmTraceRecord>, AiaStoreError> {
@@ -27,7 +28,7 @@ impl LlmTraceStore for AiaStore {
     }
 
     fn summary(&self) -> Result<LlmTraceSummary, AiaStoreError> {
-        self.with_conn(summary_with_conn)
+        self.with_conn(|conn| summary_with_conn(conn, None))
     }
 }
 
@@ -44,7 +45,20 @@ impl AiaStore {
         limit: usize,
         offset: usize,
     ) -> Result<LlmTraceListPage, AiaStoreError> {
-        self.with_conn_async(move |conn| list_page_with_conn(conn, limit, offset)).await
+        self.with_conn_async(move |conn| list_page_with_conn(conn, limit, offset, None)).await
+    }
+
+    pub async fn list_page_by_request_kind_async(
+        self: &Arc<Self>,
+        limit: usize,
+        offset: usize,
+        request_kind: impl Into<String>,
+    ) -> Result<LlmTraceListPage, AiaStoreError> {
+        let request_kind = request_kind.into();
+        self.with_conn_async(move |conn| {
+            list_page_with_conn(conn, limit, offset, Some(request_kind.as_str()))
+        })
+        .await
     }
 
     pub async fn get_async(
@@ -56,7 +70,30 @@ impl AiaStore {
     }
 
     pub async fn summary_async(self: &Arc<Self>) -> Result<LlmTraceSummary, AiaStoreError> {
-        self.with_conn_async(summary_with_conn).await
+        self.with_conn_async(|conn| summary_with_conn(conn, None)).await
+    }
+
+    pub async fn summary_by_request_kind_async(
+        self: &Arc<Self>,
+        request_kind: impl Into<String>,
+    ) -> Result<LlmTraceSummary, AiaStoreError> {
+        let request_kind = request_kind.into();
+        self.with_conn_async(move |conn| summary_with_conn(conn, Some(request_kind.as_str()))).await
+    }
+
+    pub async fn overview_by_request_kind_async(
+        self: &Arc<Self>,
+        limit: usize,
+        offset: usize,
+        request_kind: impl Into<String>,
+    ) -> Result<LlmTraceOverview, AiaStoreError> {
+        let request_kind = request_kind.into();
+        self.with_conn_async(move |conn| {
+            let page = list_page_with_conn(conn, limit, offset, Some(request_kind.as_str()))?;
+            let summary = summary_with_conn(conn, Some(request_kind.as_str()))?;
+            Ok(LlmTraceOverview { summary, page })
+        })
+        .await
     }
 }
 
@@ -125,31 +162,73 @@ fn list_page_with_conn(
     conn: &Connection,
     limit: usize,
     offset: usize,
+    request_kind: Option<&str>,
 ) -> Result<LlmTraceListPage, AiaStoreError> {
-    let total_loops =
-        conn.query_row("SELECT COUNT(DISTINCT trace_id) FROM llm_request_traces", [], |row| {
-            row.get::<_, u64>(0)
-        })?;
-    let mut stmt = conn.prepare(
-        "
-        WITH paged_loops AS (
-            SELECT trace_id, MAX(started_at_ms) AS latest_started_at_ms
+    let total_loops = if let Some(request_kind) = request_kind {
+        conn.query_row(
+            "
+            SELECT COUNT(DISTINCT trace_id)
             FROM llm_request_traces
-            GROUP BY trace_id
-            ORDER BY latest_started_at_ms DESC, trace_id DESC
-            LIMIT ?1 OFFSET ?2
-        )
-        SELECT t.id, t.trace_id, t.span_id, t.parent_span_id, t.root_span_id,
-               t.operation_name, t.span_kind, t.turn_id, t.run_id, t.request_kind,
-               t.step_index, t.provider, t.protocol, t.model, t.endpoint_path,
-               t.status, t.stop_reason, t.status_code, t.started_at_ms, t.duration_ms,
-               t.total_tokens, t.cached_tokens, t.provider_request, t.error
-        FROM llm_request_traces t
-        JOIN paged_loops p ON p.trace_id = t.trace_id
-        ORDER BY p.latest_started_at_ms DESC, t.started_at_ms DESC, t.id DESC
-        ",
-    )?;
-    let rows = stmt.query_map(params![limit as i64, offset as i64], read_trace_list_item)?;
+            WHERE span_kind = 'CLIENT' AND request_kind = ?1
+            ",
+            [request_kind],
+            |row| row.get::<_, u64>(0),
+        )?
+    } else {
+        conn.query_row(
+            "SELECT COUNT(DISTINCT trace_id) FROM llm_request_traces WHERE span_kind = 'CLIENT'",
+            [],
+            |row| row.get::<_, u64>(0),
+        )?
+    };
+    let mut stmt = if request_kind.is_some() {
+        conn.prepare(
+            "
+            WITH paged_loops AS (
+                SELECT trace_id, MAX(started_at_ms) AS latest_started_at_ms
+                FROM llm_request_traces
+                WHERE span_kind = 'CLIENT' AND request_kind = ?1
+                GROUP BY trace_id
+                ORDER BY latest_started_at_ms DESC, trace_id DESC
+                LIMIT ?2 OFFSET ?3
+            )
+            SELECT t.id, t.trace_id, t.span_id, t.parent_span_id, t.root_span_id,
+                   t.operation_name, t.span_kind, t.turn_id, t.run_id, t.request_kind,
+                   t.step_index, t.provider, t.protocol, t.model, t.endpoint_path,
+                   t.status, t.stop_reason, t.status_code, t.started_at_ms, t.duration_ms,
+                   t.total_tokens, t.cached_tokens, t.request_summary, t.error
+            FROM llm_request_traces t
+            JOIN paged_loops p ON p.trace_id = t.trace_id
+            ORDER BY p.latest_started_at_ms DESC, t.started_at_ms DESC, t.id DESC
+            ",
+        )?
+    } else {
+        conn.prepare(
+            "
+            WITH paged_loops AS (
+                SELECT trace_id, MAX(started_at_ms) AS latest_started_at_ms
+                FROM llm_request_traces
+                WHERE span_kind = 'CLIENT'
+                GROUP BY trace_id
+                ORDER BY latest_started_at_ms DESC, trace_id DESC
+                LIMIT ?1 OFFSET ?2
+            )
+            SELECT t.id, t.trace_id, t.span_id, t.parent_span_id, t.root_span_id,
+                   t.operation_name, t.span_kind, t.turn_id, t.run_id, t.request_kind,
+                   t.step_index, t.provider, t.protocol, t.model, t.endpoint_path,
+                   t.status, t.stop_reason, t.status_code, t.started_at_ms, t.duration_ms,
+                   t.total_tokens, t.cached_tokens, t.request_summary, t.error
+            FROM llm_request_traces t
+            JOIN paged_loops p ON p.trace_id = t.trace_id
+            ORDER BY p.latest_started_at_ms DESC, t.started_at_ms DESC, t.id DESC
+            ",
+        )?
+    };
+    let rows = if let Some(request_kind) = request_kind {
+        stmt.query_map(params![request_kind, limit as i64, offset as i64], read_trace_list_item)?
+    } else {
+        stmt.query_map(params![limit as i64, offset as i64], read_trace_list_item)?
+    };
 
     Ok(LlmTraceListPage {
         items: rows.collect::<Result<Vec<_>, _>>().map_err(AiaStoreError::from)?,
@@ -177,7 +256,10 @@ fn get_with_conn(conn: &Connection, id: &str) -> Result<Option<LlmTraceRecord>, 
     stmt.query_row([id], read_trace_record).optional().map_err(AiaStoreError::from)
 }
 
-fn summary_with_conn(conn: &Connection) -> Result<LlmTraceSummary, AiaStoreError> {
+fn summary_with_conn(
+    conn: &Connection,
+    request_kind: Option<&str>,
+) -> Result<LlmTraceSummary, AiaStoreError> {
     let (
         total_requests,
         failed_requests,
@@ -185,32 +267,59 @@ fn summary_with_conn(conn: &Connection) -> Result<LlmTraceSummary, AiaStoreError
         total_output_tokens,
         total_tokens,
         total_cached_tokens,
-    ): (u64, u64, u64, u64, u64, u64) = conn.query_row(
-        "
-            SELECT
-                COUNT(*),
-                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END),
-                SUM(COALESCE(input_tokens, 0)),
-                SUM(COALESCE(output_tokens, 0)),
-                SUM(COALESCE(total_tokens, 0)),
-                SUM(COALESCE(cached_tokens, 0))
-            FROM llm_request_traces
-            WHERE span_kind = 'CLIENT'
-            ",
-        [],
-        |row| {
-            Ok((
-                row.get::<_, u64>(0)?,
-                row.get::<_, Option<u64>>(1)?.unwrap_or(0),
-                row.get::<_, Option<u64>>(2)?.unwrap_or(0),
-                row.get::<_, Option<u64>>(3)?.unwrap_or(0),
-                row.get::<_, Option<u64>>(4)?.unwrap_or(0),
-                row.get::<_, Option<u64>>(5)?.unwrap_or(0),
-            ))
-        },
-    )?;
+    ): (u64, u64, u64, u64, u64, u64) = if let Some(request_kind) = request_kind {
+        conn.query_row(
+            "
+                SELECT
+                    COUNT(*),
+                    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END),
+                    SUM(COALESCE(input_tokens, 0)),
+                    SUM(COALESCE(output_tokens, 0)),
+                    SUM(COALESCE(total_tokens, 0)),
+                    SUM(COALESCE(cached_tokens, 0))
+                FROM llm_request_traces
+                WHERE span_kind = 'CLIENT' AND request_kind = ?1
+                ",
+            [request_kind],
+            |row| {
+                Ok((
+                    row.get::<_, u64>(0)?,
+                    row.get::<_, Option<u64>>(1)?.unwrap_or(0),
+                    row.get::<_, Option<u64>>(2)?.unwrap_or(0),
+                    row.get::<_, Option<u64>>(3)?.unwrap_or(0),
+                    row.get::<_, Option<u64>>(4)?.unwrap_or(0),
+                    row.get::<_, Option<u64>>(5)?.unwrap_or(0),
+                ))
+            },
+        )?
+    } else {
+        conn.query_row(
+            "
+                SELECT
+                    COUNT(*),
+                    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END),
+                    SUM(COALESCE(input_tokens, 0)),
+                    SUM(COALESCE(output_tokens, 0)),
+                    SUM(COALESCE(total_tokens, 0)),
+                    SUM(COALESCE(cached_tokens, 0))
+                FROM llm_request_traces
+                WHERE span_kind = 'CLIENT'
+                ",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, u64>(0)?,
+                    row.get::<_, Option<u64>>(1)?.unwrap_or(0),
+                    row.get::<_, Option<u64>>(2)?.unwrap_or(0),
+                    row.get::<_, Option<u64>>(3)?.unwrap_or(0),
+                    row.get::<_, Option<u64>>(4)?.unwrap_or(0),
+                    row.get::<_, Option<u64>>(5)?.unwrap_or(0),
+                ))
+            },
+        )?
+    };
 
-    let durations = load_client_durations(conn)?;
+    let durations = load_client_durations(conn, request_kind)?;
     let avg_duration_ms = if durations.is_empty() {
         None
     } else {
@@ -235,11 +344,33 @@ fn summary_with_conn(conn: &Connection) -> Result<LlmTraceSummary, AiaStoreError
     })
 }
 
-fn load_client_durations(conn: &rusqlite::Connection) -> Result<Vec<u64>, AiaStoreError> {
-    let mut stmt = conn.prepare(
-        "SELECT duration_ms FROM llm_request_traces WHERE span_kind = 'CLIENT' AND duration_ms IS NOT NULL ORDER BY duration_ms ASC",
-    )?;
-    stmt.query_map([], |row| row.get::<_, u64>(0))?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(AiaStoreError::from)
+fn load_client_durations(
+    conn: &rusqlite::Connection,
+    request_kind: Option<&str>,
+) -> Result<Vec<u64>, AiaStoreError> {
+    if let Some(request_kind) = request_kind {
+        let mut stmt = conn.prepare(
+            "
+            SELECT duration_ms
+            FROM llm_request_traces
+            WHERE span_kind = 'CLIENT' AND request_kind = ?1 AND duration_ms IS NOT NULL
+            ORDER BY duration_ms ASC
+            ",
+        )?;
+        stmt.query_map([request_kind], |row| row.get::<_, u64>(0))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(AiaStoreError::from)
+    } else {
+        let mut stmt = conn.prepare(
+            "
+            SELECT duration_ms
+            FROM llm_request_traces
+            WHERE span_kind = 'CLIENT' AND duration_ms IS NOT NULL
+            ORDER BY duration_ms ASC
+            ",
+        )?;
+        stmt.query_map([], |row| row.get::<_, u64>(0))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(AiaStoreError::from)
+    }
 }

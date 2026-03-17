@@ -47,6 +47,9 @@ this repository currently runs as a library-first rust workspace with a web-firs
 - runtime cancellation propagates from server → runtime → provider streaming / embedded shell execution
 - prompt caching is wired through the shared request path for OpenAI-compatible providers, with stable session-scoped cache keys and `24h` retention
 - trace data now follows an otel-shaped local model with stable trace/span ids, local events, and real tool spans
+- trace list loading now reads lightweight request summaries instead of deserializing full upstream request payloads for every row
+- context compression calls now emit their own trace records and can be inspected in a dedicated compression-log view instead of being mixed into the regular trace list
+- trace workbench now loads its filtered summary + page data through a single overview request and relies on SQLite composite indexes for trace list/summary hot paths
 
 ## web workspace
 
@@ -57,6 +60,7 @@ this repository currently runs as a library-first rust workspace with a web-firs
 - streaming assistant / thinking / tool output rendering
 - current turn recovery and cancellation
 - trace loop / span inspection
+- dedicated context compression log inspection
 - theme handling and frontend presentation only
 
 the web app currently uses Vite+ tooling and a `pnpm` lockfile. see `apps/web/AGENTS.md` for local frontend workflow constraints.
@@ -80,6 +84,7 @@ trace is currently “OTel-shaped local diagnostics”, not a complete OpenTelem
 - each llm request is treated as a client span
 - each runtime tool execution is persisted as an internal span
 - local event timelines are stored for request start, first reasoning/text delta, tool-call detection, completion, and failure
+- context compression requests are also persisted as inspectable trace entries and surfaced through a dedicated compression-log view instead of only surfacing as a transient SSE notice
 
 this keeps the semantic model clean now, while leaving exporter / collector work for later.
 

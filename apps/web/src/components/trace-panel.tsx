@@ -24,13 +24,14 @@ import {
 import type { TraceEvent, TraceRecord } from "@/lib/types"
 import {
   buildTraceLoopGroups,
+  partitionTraceLoopGroups,
   type LoopTimelineNode,
   type TraceLoopGroup,
 } from "@/lib/trace-presentation"
 import { getToolDisplayName } from "@/lib/tool-display"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat-store"
-import { useTraceStore } from "@/stores/trace-store"
+import { useTraceStore, type TraceView } from "@/stores/trace-store"
 
 type JsonRecord = Record<string, unknown>
 type InspectorTab = "content" | "overview" | "events"
@@ -135,6 +136,27 @@ function loopBadgeVariant(status: TraceLoopGroup["finalStatus"]) {
     default:
       return "secondary" as const
   }
+}
+
+function loopKindLabel(group: TraceLoopGroup) {
+  return group.requestKind === "compression" ? "compression" : "conversation"
+}
+
+function loopHeadline(group: TraceLoopGroup) {
+  if (group.requestKind === "compression") {
+    return "Context compression log"
+  }
+  return truncate(group.userMessage ?? "User message unavailable.", 180)
+}
+
+function traceViewLabel(view: TraceView) {
+  return view === "compression" ? "compression logs" : "conversation trace"
+}
+
+function traceViewDescription(view: TraceView) {
+  return view === "compression"
+    ? "view context compression calls and generated summaries separately"
+    : "waterfall view for agent loops and spans"
 }
 
 function findActiveNode(
@@ -821,6 +843,9 @@ function TraceActiveStrip({ group }: { group: TraceLoopGroup }) {
             <span className="text-lg font-semibold tracking-tight text-foreground">
               trace
             </span>
+            <Badge variant="outline" className="text-[10px]">
+              {loopKindLabel(group)}
+            </Badge>
             <Badge
               variant={loopBadgeVariant(group.finalStatus)}
               className="text-[10px]"
@@ -832,7 +857,7 @@ function TraceActiveStrip({ group }: { group: TraceLoopGroup }) {
             </span>
           </div>
           <p className="mt-2 max-w-[760px] text-[13px] leading-6 text-foreground/85">
-            {truncate(group.userMessage ?? "User message unavailable.", 180)}
+            {loopHeadline(group)}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
             <span>turn {group.turnId}</span>
@@ -898,6 +923,9 @@ function RecentLoopRow({
             <span className="truncate font-mono text-[10px] text-foreground/80">
               {compactId(group.key, 8, 5)}
             </span>
+            <Badge variant="outline" className="h-4 px-1.5 text-[9px]">
+              {loopKindLabel(group)}
+            </Badge>
             <Badge
               variant={loopBadgeVariant(group.finalStatus)}
               className="h-4 px-1.5 text-[9px]"
@@ -906,7 +934,7 @@ function RecentLoopRow({
             </Badge>
           </div>
           <p className="mt-1 line-clamp-2 text-[12px] leading-4.5 text-foreground/88">
-            {truncate(group.userMessage ?? "User message unavailable.", 72)}
+            {truncate(loopHeadline(group), 72)}
           </p>
         </div>
         <span className="shrink-0 text-[10px] text-muted-foreground">
@@ -1427,6 +1455,7 @@ export function TracePanel() {
   const setView = useChatStore((state) => state.setView)
   const turns = useChatStore((state) => state.turns)
   const traces = useTraceStore((state) => state.traces)
+  const traceView = useTraceStore((state) => state.traceView)
   const selectedTraceId = useTraceStore((state) => state.selectedTraceId)
   const selectedTrace = useTraceStore((state) => state.selectedTrace)
   const traceSummary = useTraceStore((state) => state.traceSummary)
@@ -1436,6 +1465,7 @@ export function TracePanel() {
   const tracePageSize = useTraceStore((state) => state.tracePageSize)
   const totalTraceLoops = useTraceStore((state) => state.totalTraceLoops)
   const refreshTraces = useTraceStore((state) => state.refreshTraces)
+  const switchTraceView = useTraceStore((state) => state.switchTraceView)
   const selectTrace = useTraceStore((state) => state.selectTrace)
 
   const [activeLoopKey, setActiveLoopKey] = useState<string | null>(null)
@@ -1451,6 +1481,14 @@ export function TracePanel() {
     () => buildTraceLoopGroups(traces, turns),
     [traces, turns]
   )
+  const partitionedGroups = useMemo(
+    () => partitionTraceLoopGroups(loopGroups),
+    [loopGroups]
+  )
+  const visibleLoopGroups =
+    traceView === "compression"
+      ? partitionedGroups.compression
+      : partitionedGroups.conversation
 
   const llmSpanCount = traceSummary?.total_requests ?? traces.length
   const toolSpanCount = loopGroups.reduce(
@@ -1466,16 +1504,17 @@ export function TracePanel() {
   )
 
   const resolvedActiveLoopKey =
-    activeLoopKey && loopGroups.some((group) => group.key === activeLoopKey)
+    activeLoopKey &&
+    visibleLoopGroups.some((group) => group.key === activeLoopKey)
       ? activeLoopKey
-      : (loopGroups[0]?.key ?? null)
+      : (visibleLoopGroups[0]?.key ?? null)
 
   const activeGroup = useMemo(
     () =>
-      loopGroups.find((group) => group.key === resolvedActiveLoopKey) ??
-      loopGroups[0] ??
+      visibleLoopGroups.find((group) => group.key === resolvedActiveLoopKey) ??
+      visibleLoopGroups[0] ??
       null,
-    [loopGroups, resolvedActiveLoopKey]
+    [visibleLoopGroups, resolvedActiveLoopKey]
   )
 
   const resolvedSelectedNodeId =
@@ -1522,21 +1561,42 @@ export function TracePanel() {
               <Badge variant="outline" className="text-[10px]">
                 local
               </Badge>
+              <Badge variant="outline" className="text-[10px]">
+                {traceViewLabel(traceView)}
+              </Badge>
             </div>
             <p className="mt-0.5 text-[12px] text-muted-foreground">
-              waterfall view for agent loops and spans
+              {traceViewDescription(traceView)}
             </p>
           </div>
         </div>
 
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => refreshTraces({ page: tracePage })}
-        >
-          <RefreshCw className="size-3.5" />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <div className="rounded-lg border border-border/35 bg-muted/20 p-1">
+            <div className="flex items-center gap-1">
+              <TabButton
+                active={traceView === "conversation"}
+                onClick={() => switchTraceView("conversation").catch(() => {})}
+              >
+                trace
+              </TabButton>
+              <TabButton
+                active={traceView === "compression"}
+                onClick={() => switchTraceView("compression").catch(() => {})}
+              >
+                compression
+              </TabButton>
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => refreshTraces({ page: tracePage, view: traceView })}
+          >
+            <RefreshCw className="size-3.5" />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
@@ -1581,21 +1641,25 @@ export function TracePanel() {
             </div>
           ) : null}
 
-          {loopGroups.length === 0 && !traceLoading ? (
+          {visibleLoopGroups.length === 0 && !traceLoading ? (
             <div className="flex flex-col items-center justify-center py-16 text-center">
               <Waypoints className="size-10 text-muted-foreground/30" />
               <p className="mt-4 text-sm font-medium text-foreground/70">
-                No traces yet
+                {traceView === "compression"
+                  ? "No compression logs yet"
+                  : "No traces yet"}
               </p>
               <p className="mt-1 text-[13px] text-muted-foreground">
-                Start a conversation to see agent loops and LLM spans here.
+                {traceView === "compression"
+                  ? "Trigger context compression to inspect compression calls and summaries here."
+                  : "Start a conversation to see agent loops and LLM spans here."}
               </p>
             </div>
           ) : null}
 
           {activeGroup ? <TraceActiveStrip group={activeGroup} /> : null}
 
-          {loopGroups.length > 0 ? (
+          {visibleLoopGroups.length > 0 ? (
             <div className="grid min-h-[700px] overflow-hidden rounded-xl border border-border/30 xl:grid-cols-[280px_minmax(0,1.15fr)_360px]">
               <div className="min-h-0 overflow-hidden">
                 <div className="border-b border-border/25 px-3 py-2">
@@ -1604,14 +1668,14 @@ export function TracePanel() {
                       Trace list
                     </p>
                     <span className="text-[11px] text-muted-foreground">
-                      {loopGroups.length === 0
+                      {visibleLoopGroups.length === 0
                         ? "0"
                         : `${tracePage}/${traceListPageCount}`}
                     </span>
                   </div>
                 </div>
                 <div className="min-h-0 space-y-1 overflow-auto p-1.5">
-                  {loopGroups.map((group) => (
+                  {visibleLoopGroups.map((group) => (
                     <RecentLoopRow
                       key={group.key}
                       group={group}

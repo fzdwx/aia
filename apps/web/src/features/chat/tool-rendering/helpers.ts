@@ -1,3 +1,5 @@
+import { createElement, type ReactNode } from "react"
+
 export function truncateInline(value: string, maxLength = 96): string {
   const compact = value.replace(/\s+/g, " ").trim()
   if (compact.length <= maxLength) return compact
@@ -61,4 +63,30 @@ export function getArrayValue(
 ): unknown[] {
   const value = record?.[key]
   return Array.isArray(value) ? value : []
+}
+
+export function createMetaBadge(
+  content: ReactNode,
+  className = "text-muted-foreground/50"
+): ReactNode {
+  return createElement("span", { className: `shrink-0 ${className}` }, content)
+}
+
+export function compactPath(value: string, maxLength = 48): string {
+  const compact = value.trim()
+  if (compact.length <= maxLength) return compact
+
+  const normalized = compact.replace(/\\/g, "/")
+  const segments = normalized.split("/").filter(Boolean)
+  if (segments.length <= 2) return truncateInline(compact, maxLength)
+
+  for (let keep = segments.length; keep >= 2; keep -= 1) {
+    const suffix = segments.slice(-keep).join("/")
+    const candidate = `.../${suffix}`
+    if (candidate.length <= maxLength) {
+      return candidate
+    }
+  }
+
+  return truncateInline(`.../${segments.slice(-1)[0] ?? compact}`, maxLength)
 }

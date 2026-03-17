@@ -189,6 +189,7 @@ fn responses_model_call_writes_llm_trace_record() {
         trace.otel_attributes.get("http.request.header.user_agent"),
         Some(&json!("aia-test/1.0"))
     );
+    assert_eq!(trace.request_summary.get("user_message"), Some(&json!("hi")));
     assert!(trace.response_body.as_deref().is_some_and(|body| body.contains("response.completed")));
 }
 
