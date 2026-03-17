@@ -26,6 +26,19 @@
 **Commit**：未提交。
 **Next direction**：如果后续真实参数类型开始出现 `bool`、数组、嵌套对象或更复杂的 serde 语义，再单独扩展 derive 宏；在那之前，继续把它限制在当前最小工具 schema 子集，不重新造一套通用 schema 系统。
 
+## 2026-03-18 Session 53
+
+**Diagnosis**：`tool_schema(...)` 的使用体验确实存在“括号内部键缺少提示”的问题，但进一步收敛后发现，根因主要不是宏功能缺失，而是 derive helper attribute 在编辑器里通常只能声明“属性名合法”，很难把内部允许键稳定暴露成可补全项。尝试把它拆成额外的独立属性名虽然能绕过一部分提示问题，但会把原本单一的 schema 配置接口切成多套语法，增加长期维护与理解成本。
+**Decision**：撤回额外属性名分叉，继续保持单一 `tool_schema(...)` 语法；把可发现性改进集中在两处：一是更明确的编译期错误文案，直接列出容器级与字段级当前支持的键；二是新增专门的短文档，把支持类型、结构边界、属性清单和示例集中放在一个稳定入口里。
+**Changes**：
+- `crates/agent-core-macros/src/lib.rs`：恢复只注册 `tool_schema` helper attribute，并把错误文案改成“当前支持键：min_properties / description”的形式，避免用户写错后仍不知道正确键名。
+- `crates/{agent-core,builtin-tools,agent-runtime,openai-adapter}/src/*.rs`：去掉临时引入的别名属性写法，统一回到 `#[tool_schema(...)]` 单一接口。
+- `docs/tool-schema-derive.md`：新增自研 derive 的用户态清单文档，明确支持类型、结构边界、`tool_schema(...)` 用法、`serde` 协作范围，以及为什么编辑器里看不到内部键补全。
+- `docs/architecture.md`、`docs/status.md`：补充该文档入口，明确当前策略是“单一语法 + 强诊断 + 文档清单”，而不是继续分叉新属性名。
+**Verification**：`cargo fmt --all`、`cargo test -p agent-core`、`cargo test -p builtin-tools`、`cargo test -p agent-runtime`、`cargo test -p openai-adapter`、`cargo check` 全部通过；同时搜索确认代码里已无 `tool_schema_description` / `tool_schema_min_properties` 残留。
+**Commit**：未提交。
+**Next direction**：如果后续 `tool_schema(...)` 的支持键明显增多，再考虑是否需要把语法进一步收窄或引入 compile-fail 测试锁住诊断文案；在此之前，优先维持接口单一稳定。
+
 ## 2026-03-17 Session 50
 
 **Diagnosis**：压缩日志独立视图虽然已经拆出来了，但 trace 页仍然很慢。直接观察代码和 SQLite 查询计划后发现有两个根因同时存在：前端在 `StrictMode` 下会对同一视图触发重复刷新，而后端 trace 列表/汇总又仍然走全表扫描与临时排序，导致单连接 SQLite 把多个慢查询串行放大。

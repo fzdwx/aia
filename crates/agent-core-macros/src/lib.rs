@@ -157,9 +157,12 @@ fn parse_container_min_properties(attrs: &[Attribute]) -> syn::Result<Option<u64
                 result = Some(literal.base10_parse()?);
                 return Ok(());
             }
-            Err(meta.error("仅支持 #[tool_schema(min_properties = N)]"))
+            Err(meta.error(
+                "容器级仅支持 #[tool_schema(min_properties = N)]；当前支持键：min_properties",
+            ))
         })?;
     }
+
     Ok(result)
 }
 
@@ -173,9 +176,12 @@ fn parse_field_description(attrs: &[Attribute]) -> syn::Result<Option<String>> {
                 result = Some(literal.value());
                 return Ok(());
             }
-            Err(meta.error("字段仅支持 #[tool_schema(description = \"...\")]"))
+            Err(meta.error(
+                "字段级仅支持 #[tool_schema(description = \"...\")]；当前支持键：description",
+            ))
         })?;
     }
+
     Ok(result)
 }
 
