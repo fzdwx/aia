@@ -152,6 +152,7 @@ README 里真正难的是这些能力：
 - 持久化本地 trace/span 记录、聚合统计与查询结果
 - trace store 内部已按 schema 初始化、store 查询/写入实现、row 映射与测试拆分子模块，避免 SQL、JSON 解码与提取 helper 继续堆在单个超大文件里
 - 统一封装 `Mutex<Connection>` 访问，poisoned mutex 场景下可恢复 guard 继续服务
+- `AiaStore` 现以 `with_conn(...)` 明确表达 SQLite 锁边界：session、trace、schema 初始化与 legacy 迁移都经由统一 helper 进入连接访问，避免各模块继续直接传播 `MutexGuard<Connection>`；这也为后续继续评估 store 边界是否需要再下沉或异步化留出单一入口
 - 为 server 与 trace 诊断页提供本地存储支撑，而不把 SQLite 细节扩散到更多边界
 
 ### `apps/web`

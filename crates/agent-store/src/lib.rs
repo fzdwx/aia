@@ -75,8 +75,16 @@ impl AiaStore {
         Ok(store)
     }
 
-    pub(crate) fn lock_conn(&self) -> MutexGuard<'_, Connection> {
+    fn lock_conn(&self) -> MutexGuard<'_, Connection> {
         self.conn.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    pub(crate) fn with_conn<R>(
+        &self,
+        action: impl FnOnce(&Connection) -> Result<R, AiaStoreError>,
+    ) -> Result<R, AiaStoreError> {
+        let conn = self.lock_conn();
+        action(&conn)
     }
 
     /// Migrate data from a legacy SQLite file by ATTACHing it and copying rows.
@@ -85,13 +93,14 @@ impl AiaStore {
         old_path: &Path,
         table_name: &str,
     ) -> Result<(), AiaStoreError> {
-        let conn = self.lock_conn();
         let path_str = old_path.to_string_lossy().replace('\'', "''");
-        conn.execute_batch(&format!(
-            "ATTACH DATABASE '{path_str}' AS legacy;
-             INSERT OR IGNORE INTO {table_name} SELECT * FROM legacy.{table_name};
-             DETACH DATABASE legacy;",
-        ))?;
-        Ok(())
+        self.with_conn(|conn| {
+            conn.execute_batch(&format!(
+                "ATTACH DATABASE '{path_str}' AS legacy;
+                 INSERT OR IGNORE INTO {table_name} SELECT * FROM legacy.{table_name};
+                 DETACH DATABASE legacy;",
+            ))?;
+            Ok(())
+        })
     }
 }

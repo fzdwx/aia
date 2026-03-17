@@ -569,3 +569,16 @@
 **Verification**：`cargo fmt --all`、`cargo check -p agent-runtime`、`cargo test -p agent-runtime --lib -- --nocapture` 通过。
 **Commit**：未提交
 **Next direction**：继续拆 `crates/agent-runtime/src/runtime/tool_calls.rs` 或转向共享 SQLite store 访问边界，优先清理仍带同步锁/重复 helper 的部分。
+
+## 2026-03-17 Session 31
+
+**Diagnosis**：`agent-store` 虽然已经能从 poisoned `Mutex<Connection>` 恢复，但 session、trace、schema 初始化和 legacy 迁移仍各自直接拿 `MutexGuard<Connection>` 操作数据库；`session::update_session()` 甚至还为了两个可选字段走了动态 SQL + `Box<dyn ToSql>`，让 SQLite 访问边界既分散又偏重。
+**Decision**：先把 `agent-store` 的共享 SQLite 边界显式收口到 `AiaStore::with_conn(...)`，并顺手把 `session::update_session()` 改成明确分支；这样不改变驱动模型，但能让后续继续收口 store 边界时只需要沿着一个入口推进。
+**Changes**：
+- `crates/agent-store/src/lib.rs`：新增 `AiaStore::with_conn(...)`，把 poisoned mutex 恢复与连接借用统一收口到单一 helper。
+- `crates/agent-store/src/session.rs`：session schema / CRUD 全部改走 `with_conn(...)`；抽出 `read_session_record(...)`；`update_session()` 去掉动态 SQL + `Box<dyn ToSql>`，改成按 `(title, model)` 显式分支，并新增 model-only / touch-only 回归测试。
+- `crates/agent-store/src/trace/schema.rs`、`crates/agent-store/src/trace/store.rs`：trace schema 初始化、list/get/summary/record 与 legacy 迁移改走统一连接入口，明确 store 的同步锁边界。
+- `docs/status.md`、`docs/architecture.md`：同步记录 `agent-store` 已把 SQLite 访问边界收口到共享 helper。
+**Verification**：`cargo fmt --all`、`cargo check -p agent-store`、`cargo test -p agent-store -- --nocapture` 通过。
+**Commit**：未提交
+**Next direction**：继续检查 `openai-adapter` 共享 streaming/helper，或继续评估 `agent-store` / `apps/agent-server` 之间仍适合下沉到共享层的查询与投影逻辑。

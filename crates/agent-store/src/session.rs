@@ -1,3 +1,4 @@
+use rusqlite::Row;
 use serde::{Deserialize, Serialize};
 
 use crate::{AiaStore, AiaStoreError};
@@ -13,63 +14,51 @@ pub struct SessionRecord {
 
 impl AiaStore {
     pub(crate) fn init_session_schema(&self) -> Result<(), AiaStoreError> {
-        let conn = self.lock_conn();
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS sessions (
-                id         TEXT PRIMARY KEY,
-                title      TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                model      TEXT NOT NULL DEFAULT ''
-            );",
-        )?;
-        Ok(())
+        self.with_conn(|conn| {
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS sessions (
+                    id         TEXT PRIMARY KEY,
+                    title      TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    model      TEXT NOT NULL DEFAULT ''
+                );",
+            )?;
+            Ok(())
+        })
     }
 
     pub fn create_session(&self, record: &SessionRecord) -> Result<(), AiaStoreError> {
-        let conn = self.lock_conn();
-        conn.execute(
-            "INSERT INTO sessions (id, title, created_at, updated_at, model) VALUES (?1, ?2, ?3, ?4, ?5)",
-            (&record.id, &record.title, &record.created_at, &record.updated_at, &record.model),
-        )?;
-        Ok(())
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO sessions (id, title, created_at, updated_at, model) VALUES (?1, ?2, ?3, ?4, ?5)",
+                (&record.id, &record.title, &record.created_at, &record.updated_at, &record.model),
+            )?;
+            Ok(())
+        })
     }
 
     pub fn list_sessions(&self) -> Result<Vec<SessionRecord>, AiaStoreError> {
-        let conn = self.lock_conn();
-        let mut stmt = conn.prepare(
-            "SELECT id, title, created_at, updated_at, model FROM sessions ORDER BY created_at ASC",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            Ok(SessionRecord {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                created_at: row.get(2)?,
-                updated_at: row.get(3)?,
-                model: row.get(4)?,
-            })
-        })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(AiaStoreError::from)
+        self.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, title, created_at, updated_at, model FROM sessions ORDER BY created_at ASC",
+            )?;
+            let rows = stmt.query_map([], read_session_record)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(AiaStoreError::from)
+        })
     }
 
     pub fn get_session(&self, id: &str) -> Result<Option<SessionRecord>, AiaStoreError> {
-        let conn = self.lock_conn();
-        let mut stmt = conn.prepare(
-            "SELECT id, title, created_at, updated_at, model FROM sessions WHERE id = ?1",
-        )?;
-        let mut rows = stmt.query_map([id], |row| {
-            Ok(SessionRecord {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                created_at: row.get(2)?,
-                updated_at: row.get(3)?,
-                model: row.get(4)?,
-            })
-        })?;
-        match rows.next() {
-            Some(row) => Ok(Some(row?)),
-            None => Ok(None),
-        }
+        self.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, title, created_at, updated_at, model FROM sessions WHERE id = ?1",
+            )?;
+            let mut rows = stmt.query_map([id], read_session_record)?;
+            match rows.next() {
+                Some(row) => Ok(Some(row?)),
+                None => Ok(None),
+            }
+        })
     }
 
     pub fn update_session(
@@ -78,37 +67,46 @@ impl AiaStore {
         title: Option<&str>,
         model: Option<&str>,
     ) -> Result<bool, AiaStoreError> {
-        let conn = self.lock_conn();
         let now = iso8601_now();
-        let mut parts = Vec::new();
-        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-
-        if let Some(t) = title {
-            parts.push("title = ?");
-            params.push(Box::new(t.to_string()));
-        }
-        if let Some(m) = model {
-            parts.push("model = ?");
-            params.push(Box::new(m.to_string()));
-        }
-        parts.push("updated_at = ?");
-        params.push(Box::new(now));
-        params.push(Box::new(id.to_string()));
-
-        let set_clause = parts.join(", ");
-        let sql = format!("UPDATE sessions SET {set_clause} WHERE id = ?");
-
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-            params.iter().map(|p| p.as_ref()).collect();
-        let changed = conn.execute(&sql, param_refs.as_slice())?;
-        Ok(changed > 0)
+        self.with_conn(|conn| {
+            let changed = match (title, model) {
+                (Some(title), Some(model)) => conn.execute(
+                    "UPDATE sessions SET title = ?1, model = ?2, updated_at = ?3 WHERE id = ?4",
+                    (title, model, now.as_str(), id),
+                )?,
+                (Some(title), None) => conn.execute(
+                    "UPDATE sessions SET title = ?1, updated_at = ?2 WHERE id = ?3",
+                    (title, now.as_str(), id),
+                )?,
+                (None, Some(model)) => conn.execute(
+                    "UPDATE sessions SET model = ?1, updated_at = ?2 WHERE id = ?3",
+                    (model, now.as_str(), id),
+                )?,
+                (None, None) => conn.execute(
+                    "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
+                    (now.as_str(), id),
+                )?,
+            };
+            Ok(changed > 0)
+        })
     }
 
     pub fn delete_session(&self, id: &str) -> Result<bool, AiaStoreError> {
-        let conn = self.lock_conn();
-        let changed = conn.execute("DELETE FROM sessions WHERE id = ?1", [id])?;
-        Ok(changed > 0)
+        self.with_conn(|conn| {
+            let changed = conn.execute("DELETE FROM sessions WHERE id = ?1", [id])?;
+            Ok(changed > 0)
+        })
     }
+}
+
+fn read_session_record(row: &Row<'_>) -> rusqlite::Result<SessionRecord> {
+    Ok(SessionRecord {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        created_at: row.get(2)?,
+        updated_at: row.get(3)?,
+        model: row.get(4)?,
+    })
 }
 
 /// Generate a session ID: `YYYYMMDD_8hexrandom`
@@ -229,6 +227,50 @@ mod tests {
         let store = AiaStore::in_memory().expect("store init");
         let deleted = store.delete_session("nonexistent").expect("delete");
         assert!(!deleted);
+    }
+
+    #[test]
+    fn update_session_model_only_updates_model_and_timestamp() {
+        let store = AiaStore::in_memory().expect("store init");
+        let record = SessionRecord {
+            id: "20260315_modelonly".to_string(),
+            title: "Model only".to_string(),
+            created_at: "2026-03-15T00:00:00Z".to_string(),
+            updated_at: "2026-03-15T00:00:00Z".to_string(),
+            model: "gpt-4.1".to_string(),
+        };
+        store.create_session(&record).expect("create");
+
+        let updated = store
+            .update_session("20260315_modelonly", None, Some("gpt-5"))
+            .expect("update model only");
+
+        assert!(updated);
+        let found = store.get_session("20260315_modelonly").expect("get").expect("some");
+        assert_eq!(found.title, "Model only");
+        assert_eq!(found.model, "gpt-5");
+        assert_ne!(found.updated_at, "2026-03-15T00:00:00Z");
+    }
+
+    #[test]
+    fn update_session_without_fields_still_touches_updated_at() {
+        let store = AiaStore::in_memory().expect("store init");
+        let record = SessionRecord {
+            id: "20260315_touch".to_string(),
+            title: "Touch only".to_string(),
+            created_at: "2026-03-15T00:00:00Z".to_string(),
+            updated_at: "2026-03-15T00:00:00Z".to_string(),
+            model: "gpt-4.1".to_string(),
+        };
+        store.create_session(&record).expect("create");
+
+        let updated = store.update_session("20260315_touch", None, None).expect("touch updated_at");
+
+        assert!(updated);
+        let found = store.get_session("20260315_touch").expect("get").expect("some");
+        assert_eq!(found.title, "Touch only");
+        assert_eq!(found.model, "gpt-4.1");
+        assert_ne!(found.updated_at, "2026-03-15T00:00:00Z");
     }
 
     #[test]
