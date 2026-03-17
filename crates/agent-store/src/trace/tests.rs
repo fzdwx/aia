@@ -298,3 +298,55 @@ fn list_page_paginates_by_loop_not_individual_span() {
     assert_eq!(second_page.items.len(), 2);
     assert!(second_page.items.iter().all(|item| item.trace_id == "loop-3"));
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn async_trace_methods_work() {
+    let store = Arc::new(AiaStore::in_memory().expect("store should initialize"));
+    let record = LlmTraceRecord {
+        id: "trace-async".into(),
+        trace_id: "trace-async-group".into(),
+        span_id: "trace-async".into(),
+        parent_span_id: Some("trace-async-root".into()),
+        root_span_id: "trace-async-root".into(),
+        operation_name: "chat".into(),
+        span_kind: LlmTraceSpanKind::Client,
+        turn_id: "turn-async".into(),
+        run_id: "turn-async".into(),
+        request_kind: "completion".into(),
+        step_index: 0,
+        provider: "openai".into(),
+        protocol: "openai-responses".into(),
+        model: "gpt-5.4".into(),
+        base_url: "https://api.example.com".into(),
+        endpoint_path: "/responses".into(),
+        streaming: true,
+        started_at_ms: 100,
+        finished_at_ms: Some(180),
+        duration_ms: Some(80),
+        status_code: Some(200),
+        status: LlmTraceStatus::Succeeded,
+        stop_reason: Some("stop".into()),
+        error: None,
+        request_summary: json!({"conversation_items": 1}),
+        provider_request: json!({"model": "gpt-5.4"}),
+        response_summary: json!({"assistant_text": "你好"}),
+        response_body: Some("你好".into()),
+        input_tokens: Some(12),
+        output_tokens: Some(6),
+        total_tokens: Some(18),
+        cached_tokens: Some(4),
+        otel_attributes: json!({}),
+        events: vec![],
+    };
+
+    store.record_async(record.clone()).await.expect("record async");
+
+    let page = store.list_page_async(10, 0).await.expect("list page async");
+    assert_eq!(page.items.len(), 1);
+
+    let loaded = store.get_async("trace-async").await.expect("get async").expect("trace exists");
+    assert_eq!(loaded, record);
+
+    let summary = store.summary_async().await.expect("summary async");
+    assert_eq!(summary.total_requests, 1);
+}
