@@ -10,7 +10,7 @@
 - `crates/agent-core/src/tests.rs`、`crates/builtin-tools/src/read.rs`、`crates/builtin-tools/src/write.rs`、`crates/builtin-tools/src/edit.rs`、`crates/builtin-tools/src/glob.rs`、`crates/builtin-tools/src/grep.rs`、`crates/builtin-tools/src/shell.rs`、`crates/agent-runtime/src/runtime.rs`、`crates/agent-runtime/src/runtime/helpers.rs`、`crates/agent-runtime/src/runtime/turn.rs`、`crates/agent-runtime/src/runtime/tests.rs`：补齐 async trait 测试迁移，并让 runtime 的同步包装入口在无当前 Tokio handle 时也能安全 fallback。
 - `docs/status.md`、`docs/architecture.md`、`docs/async-phases.md`：同步记录全异步主链 Phase 1 / 2 已完成，下一步转向工具原生 async、server 去 `spawn_blocking` 与工具协议 / MCP 优先级。
 **验证**：`cargo check` 通过；`cargo test -p agent-core -p builtin-tools -p openai-adapter -p agent-runtime -p agent-server` 通过。
-**提交**：待提交
+**提交**：`6bc5253` `refactor: switch openai adapter to async reqwest`
 **下次方向**：优先推进全异步主链 Phase 3 / 4：继续收口工具执行原生 async，并评估 `apps/agent-server` 如何移除 turn 执行上的 `spawn_blocking`；在共享工具边界稳定后，再优先推进统一工具协议映射与 MCP 接入。
 
 ## 2026-03-17 Session 9
