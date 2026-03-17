@@ -9,7 +9,7 @@
 - `apps/agent-server/src/session_manager.rs`：移除 turn 执行上的 `tokio::spawn_blocking`，改为为每个 turn 启动独立 current-thread Tokio worker thread 承载 async runtime turn，并在结束后通过 return channel 归还 runtime ownership；新增回归测试覆盖 bootstrap turn 的完整 worker 路径。
 - `docs/status.md`、`docs/requirements.md`、`docs/architecture.md`、`docs/async-phases.md`：同步记录 Phase 3 / 4 的这轮异步化进展与剩余收口方向。
 **验证**：`cargo check` 通过；`cargo test -p builtin-tools shell -- --nocapture` 通过；`cargo test -p agent-server session_manager -- --nocapture` 通过；`cargo test -p agent-server` 通过（因 localhost listener 测试需脱离沙箱执行）。
-**提交**：`caf5327` `refactor: asyncify shell worker and turn execution`
+**提交**：`2730d9c` `refactor: asyncify shell worker and turn execution`
 **下次方向**：继续把其余可能长时间占用线程的工具路径收口为更原生的 async / cancel 模型，并进一步减少 `apps/agent-server` 在运行中 `session/info` 上对 tape 快照回退和 runtime handoff 的依赖。
 
 ## 2026-03-17 Session 10
