@@ -98,7 +98,8 @@ async fn session_manager_loop(
                         let _ = reply.send(result);
                     }
                     SessionCommand::AutoCompressSession { session_id, reply } => {
-                        let result = handle_auto_compress_session(&mut slots, &config, &session_id);
+                        let result =
+                            handle_auto_compress_session(&mut slots, &config, &session_id).await;
                         let _ = reply.send(result);
                     }
                     SessionCommand::CreateProvider { input, reply } => {
@@ -554,7 +555,7 @@ fn handle_create_handoff(
     Ok(handoff.anchor.entry_id)
 }
 
-fn handle_auto_compress_session(
+async fn handle_auto_compress_session(
     slots: &mut HashMap<SessionId, SessionSlot>,
     config: &SessionManagerConfig,
     session_id: &str,
@@ -569,6 +570,7 @@ fn handle_auto_compress_session(
 
     let compressed = runtime
         .auto_compress_now()
+        .await
         .map_err(|error| RuntimeWorkerError::internal(format!("auto compress failed: {error}")))?;
     runtime
         .tape()

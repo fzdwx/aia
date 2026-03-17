@@ -545,3 +545,16 @@
 **Verification**：`cargo fmt --all`、`cargo check`、`cargo test -p agent-runtime --lib -- --nocapture`、`cargo test -p openai-adapter -- --nocapture`、`cargo test -p agent-server -- --nocapture` 通过。
 **Commit**：未提交（建议：`refactor: unify async runtime turn entrypoint`）
 **Next direction**：继续扫描 `crates/agent-runtime/src/runtime/tool_calls.rs`、共享 SQLite store 访问边界和 `crates/openai-adapter/src/streaming.rs`，优先清理剩余同步桥接与重复 helper。
+
+## 2026-03-17 Session 29
+
+**Diagnosis**：虽然 turn 主链已经收口成单一 async 入口，但 `agent-runtime` 仍保留 `auto_compress_now()` 同步包装，它内部靠 `block_on_sync(auto_compress_now_async())` 临时桥接；这和刚清掉的 turn 历史壳属于同一类遗留，会继续把同步调用方式泄漏进共享 runtime 边界。
+**Decision**：删除压缩路径上的同步包装，并把唯一公开入口统一为异步 `auto_compress_now()`；这样 `apps/agent-server` 的自动压缩也能直接 await 共享 runtime API，不再需要内部兜一层临时 runtime。
+**Changes**：
+- `crates/agent-runtime/src/runtime.rs`：删除同步 `auto_compress_now` 包装，并将异步实现收口为唯一公开入口 `auto_compress_now()`。
+- `crates/agent-runtime/src/runtime/helpers.rs`：移除仅供同步包装使用的 `block_on_sync` helper。
+- `apps/agent-server/src/session_manager.rs`：把 session 自动压缩路径改为直接 await `runtime.auto_compress_now()`。
+- `docs/status.md`、`docs/architecture.md`：同步记录 runtime 压缩入口已完成 async 收口。
+**Verification**：`cargo fmt --all`、`cargo check`、`cargo test -p agent-runtime --lib -- --nocapture`、`cargo test -p agent-server session_manager -- --nocapture` 通过。
+**Commit**：未提交
+**Next direction**：继续检查 `crates/agent-runtime/src/runtime/tool_calls.rs` 和共享 SQLite store 访问边界，优先清理剩余同步桥接与重复 helper。

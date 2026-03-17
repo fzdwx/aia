@@ -106,6 +106,7 @@ README 里真正难的是这些能力：
 - turn 主链内部已继续按职责拆为 `turn::{driver,segments,types}`：公开入口保持不变，流式 turn 驱动、completion segment 持久化与共享 turn buffer / success-failure context 分离，减少 runtime 单文件耦合与重复失败上下文拼装
 - `turn::driver` 已继续清理历史样板：重复的失败收尾路径已收口为共享 `fail_turn` helper，避免取消/stop_reason/模型错误分支继续各自拼接 `record_turn_failure + return Err(...)`
 - `agent-runtime` 对外 turn API 也已继续收口为单一异步入口 `handle_turn_streaming(user_input, control, sink)`：旧的同步 `handle_turn` 和历史命名 `handle_turn_streaming_with_control_async` 已移除，server 与测试消费方统一经由这条异步流式主链驱动 turn
+- `agent-runtime` 的上下文压缩入口也已只保留异步 `auto_compress_now()`：旧的同步包装和内部 `block_on_sync` helper 已移除，避免 runtime 在共享层继续暴露“同步外壳 + 内部临时 runtime”模式
 - 时间辅助函数不假设系统时间恒定晚于 `UNIX_EPOCH`，异常场景下会安全回退
 - `tape_info` / `tape_handoff` 已通过真正的 runtime tool registry 暴露，而不是字符串特判
 
@@ -187,7 +188,7 @@ README 里真正难的是这些能力：
 - 全局 `broadcast::channel` 向所有 SSE 客户端推送事件
 - 暴露 provider、session、turn、cancel、handoff、trace 等 HTTP API
 - `POST /api/turn` 仍保持 fire-and-forget，但真正的 turn 执行、事件回收与 session 条目追加都在 worker 内串行完成
-- turn 执行与 session manager 已切到原生 Tokio async task：`apps/agent-server` 不再依赖 `tokio::spawn_blocking`、`std::thread::Builder`、`LocalSet` 或 `spawn_local` 承载 turn 主链；worker 直接 await `AgentRuntime::handle_turn_streaming(...)`，运行中 `session/info` 通过 slot 内的 `ContextStats` 快照读取 live stats，turn 结束后仍沿用显式 runtime ownership 归还路径
+- turn 执行与 session manager 已切到原生 Tokio async task：`apps/agent-server` 不再依赖 `tokio::spawn_blocking`、`std::thread::Builder`、`LocalSet` 或 `spawn_local` 承载 turn 主链；worker 直接 await `AgentRuntime::handle_turn_streaming(...)`，压缩路径也直接 await `AgentRuntime::auto_compress_now()`，运行中 `session/info` 通过 slot 内的 `ContextStats` 快照读取 live stats，turn 结束后仍沿用显式 runtime ownership 归还路径
 - 运行中的条目会实时 append 到 `.aia/session.jsonl`
 - provider 变更采用事务式提交，避免 registry / runtime / tape 持久化分叉
 - 启动失败与 JSON 序列化失败都已收口为结构化错误路径，而不是 panic

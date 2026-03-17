@@ -1,5 +1,4 @@
 use std::{
-    future::Future,
     sync::atomic::{AtomicU64, Ordering},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -7,7 +6,7 @@ use std::{
 use agent_core::{LlmTraceRequestContext, Message, Role, ToolCall};
 use session_tape::Anchor;
 
-use crate::{RuntimeError, ToolInvocationOutcome, ToolTraceContext};
+use crate::{ToolInvocationOutcome, ToolTraceContext};
 
 pub(super) fn build_tool_source_entry_ids(
     assistant_entry_id: Option<u64>,
@@ -48,21 +47,6 @@ pub(super) fn next_turn_id() -> String {
 
 pub(super) fn now_timestamp_ms() -> u64 {
     duration_since_unix_epoch(SystemTime::now()).as_millis() as u64
-}
-
-pub(super) fn block_on_sync<T>(
-    future: impl Future<Output = Result<T, RuntimeError>>,
-) -> Result<T, RuntimeError> {
-    match tokio::runtime::Handle::try_current() {
-        Ok(handle) => handle.block_on(future),
-        Err(_) => {
-            let runtime =
-                tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(
-                    |error| RuntimeError::subscription(format!("构建同步包装运行时失败：{error}")),
-                )?;
-            runtime.block_on(future)
-        }
-    }
 }
 
 pub(super) fn anchor_state_message(anchor: &Anchor) -> Option<Message> {

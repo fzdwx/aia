@@ -163,11 +163,7 @@ where
         self.tape.handoff(name, state)
     }
 
-    pub fn auto_compress_now(&mut self) -> Result<bool, RuntimeError> {
-        helpers::block_on_sync(self.auto_compress_now_async())
-    }
-
-    pub async fn auto_compress_now_async(&mut self) -> Result<bool, RuntimeError> {
+    pub async fn auto_compress_now(&mut self) -> Result<bool, RuntimeError> {
         let before_anchor_count = self.tape.anchors().len();
         self.compress_context(None, 0).await?;
         Ok(self.tape.anchors().len() > before_anchor_count)
