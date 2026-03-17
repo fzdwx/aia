@@ -1,6 +1,8 @@
 use rusqlite::Row;
 use serde::{Deserialize, Serialize};
 
+use std::sync::Arc;
+
 use crate::{AiaStore, AiaStoreError};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -121,6 +123,108 @@ impl AiaStore {
             let changed = conn.execute("DELETE FROM sessions WHERE id = ?1", [id])?;
             Ok(changed > 0)
         })
+    }
+
+    pub async fn create_session_async(
+        self: &Arc<Self>,
+        record: SessionRecord,
+    ) -> Result<(), AiaStoreError> {
+        self.with_conn_async(move |conn| {
+            conn.execute(
+                "INSERT INTO sessions (id, title, created_at, updated_at, model) VALUES (?1, ?2, ?3, ?4, ?5)",
+                (&record.id, &record.title, &record.created_at, &record.updated_at, &record.model),
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn list_sessions_async(
+        self: &Arc<Self>,
+    ) -> Result<Vec<SessionRecord>, AiaStoreError> {
+        self.with_conn_async(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, title, created_at, updated_at, model FROM sessions ORDER BY created_at ASC",
+            )?;
+            let rows = stmt.query_map([], read_session_record)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(AiaStoreError::from)
+        })
+        .await
+    }
+
+    pub async fn get_session_async(
+        self: &Arc<Self>,
+        id: impl Into<String>,
+    ) -> Result<Option<SessionRecord>, AiaStoreError> {
+        let id = id.into();
+        self.with_conn_async(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, title, created_at, updated_at, model FROM sessions WHERE id = ?1",
+            )?;
+            let mut rows = stmt.query_map([id], read_session_record)?;
+            match rows.next() {
+                Some(row) => Ok(Some(row?)),
+                None => Ok(None),
+            }
+        })
+        .await
+    }
+
+    pub async fn first_session_id_async(self: &Arc<Self>) -> Result<Option<String>, AiaStoreError> {
+        self.with_conn_async(move |conn| {
+            let mut stmt =
+                conn.prepare("SELECT id FROM sessions ORDER BY created_at ASC LIMIT 1")?;
+            let mut rows = stmt.query([])?;
+            match rows.next()? {
+                Some(row) => Ok(Some(row.get(0)?)),
+                None => Ok(None),
+            }
+        })
+        .await
+    }
+
+    pub async fn update_session_async(
+        self: &Arc<Self>,
+        id: impl Into<String>,
+        title: Option<String>,
+        model: Option<String>,
+    ) -> Result<bool, AiaStoreError> {
+        let id = id.into();
+        let now = iso8601_now();
+        self.with_conn_async(move |conn| {
+            let changed = match (title.as_deref(), model.as_deref()) {
+                (Some(title), Some(model)) => conn.execute(
+                    "UPDATE sessions SET title = ?1, model = ?2, updated_at = ?3 WHERE id = ?4",
+                    (title, model, now.as_str(), id.as_str()),
+                )?,
+                (Some(title), None) => conn.execute(
+                    "UPDATE sessions SET title = ?1, updated_at = ?2 WHERE id = ?3",
+                    (title, now.as_str(), id.as_str()),
+                )?,
+                (None, Some(model)) => conn.execute(
+                    "UPDATE sessions SET model = ?1, updated_at = ?2 WHERE id = ?3",
+                    (model, now.as_str(), id.as_str()),
+                )?,
+                (None, None) => conn.execute(
+                    "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
+                    (now.as_str(), id.as_str()),
+                )?,
+            };
+            Ok(changed > 0)
+        })
+        .await
+    }
+
+    pub async fn delete_session_async(
+        self: &Arc<Self>,
+        id: impl Into<String>,
+    ) -> Result<bool, AiaStoreError> {
+        let id = id.into();
+        self.with_conn_async(move |conn| {
+            let changed = conn.execute("DELETE FROM sessions WHERE id = ?1", [id])?;
+            Ok(changed > 0)
+        })
+        .await
     }
 }
 
@@ -334,6 +438,20 @@ mod tests {
         let first = store.first_session_id().expect("first session");
 
         assert_eq!(first.as_deref(), Some("20260315_first"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn async_session_methods_work() {
+        let store = Arc::new(AiaStore::in_memory().expect("store init"));
+        let record = SessionRecord::new("20260317_async", "Async session", "gpt-5.4");
+
+        store.create_session_async(record.clone()).await.expect("create async");
+
+        let listed = store.list_sessions_async().await.expect("list async");
+        assert_eq!(listed, vec![record.clone()]);
+
+        let first = store.first_session_id_async().await.expect("first async");
+        assert_eq!(first.as_deref(), Some("20260317_async"));
     }
 
     #[test]
