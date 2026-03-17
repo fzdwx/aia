@@ -465,8 +465,12 @@ impl LanguageModel for ParallelToolModel {
         if step == 0 {
             Ok(Completion {
                 segments: vec![
-                    CompletionSegment::ToolUse(ToolCall::new("read").with_argument("path", "Cargo.toml")),
-                    CompletionSegment::ToolUse(ToolCall::new("glob").with_argument("pattern", "**/*.rs")),
+                    CompletionSegment::ToolUse(
+                        ToolCall::new("read").with_argument("file_path", "Cargo.toml"),
+                    ),
+                    CompletionSegment::ToolUse(
+                        ToolCall::new("glob").with_argument("pattern", "**/*.rs"),
+                    ),
                 ],
                 stop_reason: CompletionStopReason::ToolUse,
                 usage: None,
@@ -504,8 +508,12 @@ impl LanguageModel for SerialWriteToolModel {
         if step == 0 {
             Ok(Completion {
                 segments: vec![
-                    CompletionSegment::ToolUse(ToolCall::new("write").with_argument("path", "a.txt")),
-                    CompletionSegment::ToolUse(ToolCall::new("read").with_argument("path", "a.txt")),
+                    CompletionSegment::ToolUse(
+                        ToolCall::new("write").with_argument("file_path", "a.txt"),
+                    ),
+                    CompletionSegment::ToolUse(
+                        ToolCall::new("read").with_argument("file_path", "a.txt"),
+                    ),
                 ],
                 stop_reason: CompletionStopReason::ToolUse,
                 usage: None,
@@ -1050,8 +1058,10 @@ fn 纯读取类工具会在同一批次并行执行() {
 
     assert_eq!(output.assistant_text, "并行工具已完成");
     let events = mutex_lock(&events).clone();
-    let start_read = events.iter().position(|item| item == "start:read").expect("应记录 read start");
-    let start_glob = events.iter().position(|item| item == "start:glob").expect("应记录 glob start");
+    let start_read =
+        events.iter().position(|item| item == "start:read").expect("应记录 read start");
+    let start_glob =
+        events.iter().position(|item| item == "start:glob").expect("应记录 glob start");
     let end_read = events.iter().position(|item| item == "end:read").expect("应记录 read end");
     let end_glob = events.iter().position(|item| item == "end:glob").expect("应记录 glob end");
     assert!(start_read < end_read);
@@ -1071,9 +1081,11 @@ fn 写入类工具会保持串行执行() {
 
     assert_eq!(output.assistant_text, "串行工具已完成");
     let events = mutex_lock(&events).clone();
-    let start_write = events.iter().position(|item| item == "start:write").expect("应记录 write start");
+    let start_write =
+        events.iter().position(|item| item == "start:write").expect("应记录 write start");
     let end_write = events.iter().position(|item| item == "end:write").expect("应记录 write end");
-    let start_read = events.iter().position(|item| item == "start:read").expect("应记录 read start");
+    let start_read =
+        events.iter().position(|item| item == "start:read").expect("应记录 read start");
     assert!(start_write < end_write);
     assert!(end_write < start_read, "read 应在 write 完成后才开始");
 }

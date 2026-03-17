@@ -104,6 +104,7 @@ README 里真正难的是这些能力：
 - stop/cancel 已贯穿 server → runtime → provider streaming / embedded shell
 - `openai-adapter` 已改为原生 async `reqwest`：单次请求不再依赖 blocking client，流式读取改为 async chunk streaming + abort 轮询，避免 provider I/O 把后续 server 原生 async 化继续卡在边缘层
 - 全异步主链已完成 Phase 1-4：`agent-core` 的模型/工具 trait、`agent-runtime` turn 主链、`openai-adapter` provider I/O、`builtin-tools`、`agent-store` async façade 与 `apps/agent-server` turn/session/store 主路径都已切到 async 调用面；当前后续重点转为内部实现简化与共享层继续抽象，而不再是异步化阶段本身
+- `agent-prompts` 现除提示模板与阈值常量外，也集中承接真实工具的共享 description Markdown 文件，并通过薄加载入口暴露给 `builtin-tools` 与 runtime tools，避免多个 crate 继续各自维护工具描述字面量
 - turn 主链内部已继续按职责拆为 `turn::{driver,segments,types}`：公开入口保持不变，流式 turn 驱动、completion segment 持久化与共享 turn buffer / success-failure context 分离，减少 runtime 单文件耦合与重复失败上下文拼装
 - `turn::driver` 已继续清理历史样板：重复的失败收尾路径已收口为共享 `fail_turn` helper，避免取消/stop_reason/模型错误分支继续各自拼接 `record_turn_failure + return Err(...)`
 - `agent-runtime` 对外 turn API 也已继续收口为单一异步入口 `handle_turn_streaming(user_input, control, sink)`：旧的同步 `handle_turn` 和历史命名 `handle_turn_streaming_with_control_async` 已移除，server 与测试消费方统一经由这条异步流式主链驱动 turn

@@ -1,5 +1,18 @@
 # 演进日志
 
+## 2026-03-17 Session 47
+
+**Diagnosis**：虽然真实工具的参数 schema 和 typed args 已开始共享 Rust 类型，但顶层 `ToolDefinition.description` 仍散落在 `builtin-tools`、`agent-runtime` 以及相关测试里，继续让工具文本描述在多个 crate 各自维护。
+**Decision**：按用户要求把真实工具 description 集中收到 `agent-prompts`，并落到单独的 `prompts/tool/` Markdown 目录里管理；Rust 侧只保留一个很薄的加载模块，由 `builtin-tools` 与 runtime tools 的真实 `definition()` 统一引用，避免再次散落字面量。
+**Changes**：
+- `crates/agent-prompts/src/{lib.rs,tool_descriptions.rs}`、`crates/agent-prompts/prompts/tool/*.md`：新增共享工具描述加载模块与 Markdown 目录，集中管理 shell/read/write/edit/glob/grep/apply_patch/tape_info/tape_handoff 的 description 文本。
+- `crates/builtin-tools/Cargo.toml`、`crates/builtin-tools/src/{shell,read,write,edit,glob,grep,apply_patch}.rs`：`builtin-tools` 新增对 `agent-prompts` 的依赖，真实工具 definition 改为引用共享 description 常量。
+- `crates/builtin-tools/src/lib.rs`、`crates/agent-runtime/src/runtime/tape_tools.rs`：相关测试改为用 `agent-prompts` 常量构造期望值，去掉测试内的描述字面量复制。
+- `docs/architecture.md`、`docs/status.md`：同步记录 `agent-prompts` 现在也承载真实工具 description 的 Markdown 文件与共享加载入口。
+**Verification**：先让 `builtin-tools` / `agent-runtime` 测试在 `agent_prompts::tool_descriptions` 缺失时红灯；随后 `cargo test -p builtin-tools builtin_tool_definitions_match_schemars_output`、`cargo test -p agent-runtime runtime_tool_definitions_match_schemars_output`、`cargo test -p agent-prompts`、`cargo check -p builtin-tools` 通过；后续继续跑格式化与相关 crate 校验做收尾验证。
+**Commit**：未提交。
+**Next direction**：如果后续继续收口，可评估是否把参数字段 description 也通过共享 helper 管理，或反过来把 `agent-prompts` 里与工具协议无关的文本再细分子模块，避免单 crate 继续膨胀。
+
 ## 2026-03-17 Session 45
 
 **Diagnosis**：异步化主链虽然已经完成到 provider/tool/runtime/server turn loop，但 `agent-store` 仍以同步 `rusqlite` API 直接暴露给 `apps/agent-server`；trace/session 路由、session manager 初始化、turn 开始时的 session touch，以及 trace/tool trace 落盘都还会在 async 路径里直接调用同步 store。
