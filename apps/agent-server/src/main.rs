@@ -74,7 +74,8 @@ async fn run() -> Result<(), ServerInitError> {
         .map_err(|error| ServerInitError::new("sessions 目录创建", error.to_string()))?;
 
     let first_session_id = store
-        .first_session_id()
+        .first_session_id_async()
+        .await
         .map_err(|error| ServerInitError::new("session 首条记录加载", error.to_string()))?;
     if first_session_id.is_none() {
         let session_id = generate_session_id();
@@ -88,7 +89,8 @@ async fn run() -> Result<(), ServerInitError> {
             model_name,
         );
         store
-            .create_session(&record)
+            .create_session_async(record)
+            .await
             .map_err(|error| ServerInitError::new("默认 session 创建", error.to_string()))?;
     }
 
