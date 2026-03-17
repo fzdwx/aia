@@ -10,6 +10,8 @@ use agent_core::{
     LanguageModel, Message, ModelDisposition, ModelIdentity, PromptCacheConfig,
     PromptCacheRetention, Role, StreamEvent, ToolCall, ToolDefinition, ToolResult,
 };
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::{
@@ -37,6 +39,13 @@ fn sample_request() -> CompletionRequest {
         timeout: None,
         trace_context: None,
     }
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SearchToolArgs {
+    /// 要搜索的关键字
+    query: String,
 }
 
 fn run_async<T>(future: impl Future<Output = T>) -> T {
@@ -73,6 +82,26 @@ fn 请求体会映射模型指令消息与工具() {
     assert_eq!(body["tools"][0]["parameters"]["required"], json!(["query"]));
     assert_eq!(body["parallel_tool_calls"], json!(true));
     assert!(body.get("reasoning").is_none() || body["reasoning"].is_null());
+}
+
+#[test]
+fn responses_请求体会透传_schemars_工具参数且不包含_schema_元字段() {
+    let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
+        "http://127.0.0.1:1",
+        "test-key",
+        "gpt-4.1-mini",
+    ))
+    .expect("模型创建成功");
+
+    let mut request = sample_request();
+    request.available_tools = vec![
+        ToolDefinition::new("search_code", "搜索代码").with_parameters_schema::<SearchToolArgs>(),
+    ];
+
+    let body = model.build_request_body(&request);
+
+    assert!(body["tools"][0]["parameters"].get("$schema").is_none());
+    assert_eq!(body["tools"][0]["parameters"]["properties"]["query"]["type"], "string");
 }
 
 #[test]
