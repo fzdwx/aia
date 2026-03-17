@@ -30,7 +30,7 @@ pub(super) struct ExecuteToolCallContext<'a> {
     pub abort_signal: AbortSignal,
 }
 
-struct FailedToolCallContext<'a> {
+struct ToolCallLifecycleContext<'a> {
     turn_id: &'a str,
     assistant_entry_id: Option<u64>,
     tool_call_entry_id: u64,
@@ -38,6 +38,10 @@ struct FailedToolCallContext<'a> {
     started_at_ms: u64,
     tool_trace_context: Option<ToolTraceContext>,
     source_entry_ids: &'a mut Vec<u64>,
+}
+
+struct FailedToolCallContext<'a> {
+    lifecycle: ToolCallLifecycleContext<'a>,
     event_name: &'a str,
 }
 
@@ -62,54 +66,9 @@ where
         let call_signature = tool_call_signature(context.call);
 
         if context.abort_signal.is_aborted() {
-            let runtime_error = RuntimeError::cancelled();
-            let lifecycle = self.record_failed_tool_call(
+            let lifecycle = self.record_and_remember_failed_tool_call(
                 FailedToolCallContext {
-                    turn_id: context.turn_id,
-                    assistant_entry_id: context.assistant_entry_id,
-                    tool_call_entry_id: context.tool_call_entry_id,
-                    call: context.call,
-                    started_at_ms,
-                    tool_trace_context: tool_trace_context.clone(),
-                    source_entry_ids: context.source_entry_ids,
-                    event_name: "tool_call_cancelled",
-                },
-                runtime_error,
-                on_delta,
-            )?;
-            context
-                .seen_tool_calls
-                .insert(call_signature, PreviousToolCall::from_outcome(&lifecycle.outcome));
-            return Ok(lifecycle);
-        }
-
-        if !available_tool_names.contains(&context.call.tool_name) {
-            let runtime_error = RuntimeError::tool_unavailable(context.call.tool_name.clone());
-            let lifecycle = self.record_failed_tool_call(
-                FailedToolCallContext {
-                    turn_id: context.turn_id,
-                    assistant_entry_id: context.assistant_entry_id,
-                    tool_call_entry_id: context.tool_call_entry_id,
-                    call: context.call,
-                    started_at_ms,
-                    tool_trace_context: tool_trace_context.clone(),
-                    source_entry_ids: context.source_entry_ids,
-                    event_name: "tool_call_rejected",
-                },
-                runtime_error,
-                on_delta,
-            )?;
-            context
-                .seen_tool_calls
-                .insert(call_signature, PreviousToolCall::from_outcome(&lifecycle.outcome));
-            return Ok(lifecycle);
-        }
-
-        if tape_tools::is_runtime_tool(&context.call.tool_name) {
-            if context.abort_signal.is_aborted() {
-                let runtime_error = RuntimeError::cancelled();
-                let lifecycle = self.record_failed_tool_call(
-                    FailedToolCallContext {
+                    lifecycle: ToolCallLifecycleContext {
                         turn_id: context.turn_id,
                         assistant_entry_id: context.assistant_entry_id,
                         tool_call_entry_id: context.tool_call_entry_id,
@@ -117,14 +76,59 @@ where
                         started_at_ms,
                         tool_trace_context: tool_trace_context.clone(),
                         source_entry_ids: context.source_entry_ids,
+                    },
+                    event_name: "tool_call_cancelled",
+                },
+                RuntimeError::cancelled(),
+                &call_signature,
+                context.seen_tool_calls,
+                on_delta,
+            )?;
+            return Ok(lifecycle);
+        }
+
+        if !available_tool_names.contains(&context.call.tool_name) {
+            let lifecycle = self.record_and_remember_failed_tool_call(
+                FailedToolCallContext {
+                    lifecycle: ToolCallLifecycleContext {
+                        turn_id: context.turn_id,
+                        assistant_entry_id: context.assistant_entry_id,
+                        tool_call_entry_id: context.tool_call_entry_id,
+                        call: context.call,
+                        started_at_ms,
+                        tool_trace_context: tool_trace_context.clone(),
+                        source_entry_ids: context.source_entry_ids,
+                    },
+                    event_name: "tool_call_rejected",
+                },
+                RuntimeError::tool_unavailable(context.call.tool_name.clone()),
+                &call_signature,
+                context.seen_tool_calls,
+                on_delta,
+            )?;
+            return Ok(lifecycle);
+        }
+
+        if tape_tools::is_runtime_tool(&context.call.tool_name) {
+            if context.abort_signal.is_aborted() {
+                let lifecycle = self.record_and_remember_failed_tool_call(
+                    FailedToolCallContext {
+                        lifecycle: ToolCallLifecycleContext {
+                            turn_id: context.turn_id,
+                            assistant_entry_id: context.assistant_entry_id,
+                            tool_call_entry_id: context.tool_call_entry_id,
+                            call: context.call,
+                            started_at_ms,
+                            tool_trace_context: tool_trace_context.clone(),
+                            source_entry_ids: context.source_entry_ids,
+                        },
                         event_name: "tool_call_cancelled",
                     },
-                    runtime_error,
+                    RuntimeError::cancelled(),
+                    &call_signature,
+                    context.seen_tool_calls,
                     on_delta,
                 )?;
-                context
-                    .seen_tool_calls
-                    .insert(call_signature, PreviousToolCall::from_outcome(&lifecycle.outcome));
                 return Ok(lifecycle);
             }
 
@@ -134,72 +138,26 @@ where
                 arguments: context.call.arguments.clone(),
             });
 
-            let runtime_tools = tape_tools::build_runtime_tool_registry();
-            let runtime_bridge = tape_tools::RuntimeToolContextBridge::new(self);
-            let runtime_context: Arc<dyn RuntimeToolContext> = runtime_bridge.clone();
-            let result = runtime_tools
-                .call(
-                    context.call,
-                    &mut |_| {},
-                    &ToolExecutionContext {
-                        run_id: context.turn_id.to_string(),
-                        workspace_root: self.workspace_root.clone(),
-                        abort: context.abort_signal.clone(),
-                        runtime: Some(runtime_context),
-                    },
-                )
-                .await
-                .map_err(RuntimeError::tool)?;
-            self.apply_runtime_tool_handoffs(context.turn_id, &runtime_bridge)?;
-
-            let failed = context.abort_signal.is_aborted();
-            let tool_result_entry_id = self
-                .append_tape_entry(TapeEntry::tool_result(&result).with_run_id(context.turn_id))?;
-            context.source_entry_ids.push(tool_result_entry_id);
-            let tool_result_event_id = self.append_tape_entry(
-                TapeEntry::event(
-                    if failed { "tool_result_cancelled" } else { "tool_result_recorded" },
-                    Some(json!({"tool_name": result.tool_name.clone(), "status": if failed { "cancelled" } else { "ok" }})),
-                )
-                .with_run_id(context.turn_id)
-                .with_meta(
-                    "source_entry_ids",
-                    json!(build_tool_source_entry_ids(
-                        context.assistant_entry_id,
-                        context.tool_call_entry_id,
-                        tool_result_entry_id,
-                    )),
-                ),
+            let result = self.invoke_runtime_tool(&context).await?;
+            let lifecycle = self.record_completed_tool_call(
+                ToolCallLifecycleContext {
+                    turn_id: context.turn_id,
+                    assistant_entry_id: context.assistant_entry_id,
+                    tool_call_entry_id: context.tool_call_entry_id,
+                    call: context.call,
+                    started_at_ms,
+                    tool_trace_context,
+                    source_entry_ids: context.source_entry_ids,
+                },
+                result,
+                context.abort_signal.is_aborted(),
+                on_delta,
             )?;
-            context.source_entry_ids.push(tool_result_event_id);
-
-            on_delta(StreamEvent::ToolCallCompleted {
-                invocation_id: context.call.invocation_id.clone(),
-                tool_name: context.call.tool_name.clone(),
-                content: result.content.clone(),
-                details: result.details.clone(),
-                failed,
-            });
-
-            let outcome = if failed {
-                ToolInvocationOutcome::Failed { message: RuntimeError::cancelled().to_string() }
-            } else {
-                ToolInvocationOutcome::Succeeded { result: result.clone() }
-            };
-            self.publish_event(RuntimeEvent::ToolInvocation {
-                call: context.call.clone(),
-                outcome: outcome.clone(),
-            });
-            let lifecycle = ToolInvocationLifecycle {
-                call: context.call.clone(),
-                started_at_ms,
-                finished_at_ms: now_timestamp_ms(),
-                trace_context: tool_trace_context,
-                outcome,
-            };
-            context
-                .seen_tool_calls
-                .insert(call_signature, PreviousToolCall::from_outcome(&lifecycle.outcome));
+            Self::remember_tool_call_outcome(
+                context.seen_tool_calls,
+                &call_signature,
+                &lifecycle.outcome,
+            );
             return Ok(lifecycle);
         }
 
@@ -233,81 +191,51 @@ where
                 if result.invocation_id != context.call.invocation_id
                     || result.tool_name != context.call.tool_name
                 {
-                    let runtime_error = RuntimeError::tool_result_mismatch(context.call, &result);
-                    let lifecycle = self.record_failed_tool_call(
+                    let lifecycle = self.record_and_remember_failed_tool_call(
                         FailedToolCallContext {
-                            turn_id: context.turn_id,
-                            assistant_entry_id: context.assistant_entry_id,
-                            tool_call_entry_id: context.tool_call_entry_id,
-                            call: context.call,
-                            started_at_ms,
-                            tool_trace_context: tool_trace_context.clone(),
-                            source_entry_ids: context.source_entry_ids,
+                            lifecycle: ToolCallLifecycleContext {
+                                turn_id: context.turn_id,
+                                assistant_entry_id: context.assistant_entry_id,
+                                tool_call_entry_id: context.tool_call_entry_id,
+                                call: context.call,
+                                started_at_ms,
+                                tool_trace_context: tool_trace_context.clone(),
+                                source_entry_ids: context.source_entry_ids,
+                            },
                             event_name: "tool_result_rejected",
                         },
-                        runtime_error,
+                        RuntimeError::tool_result_mismatch(context.call, &result),
+                        &call_signature,
+                        context.seen_tool_calls,
                         on_delta,
                     )?;
-                    context
-                        .seen_tool_calls
-                        .insert(call_signature, PreviousToolCall::from_outcome(&lifecycle.outcome));
                     return Ok(lifecycle);
                 }
 
-                let failed = context.abort_signal.is_aborted();
-                let tool_result_entry_id = self.append_tape_entry(
-                    TapeEntry::tool_result(&result).with_run_id(context.turn_id),
+                let lifecycle = self.record_completed_tool_call(
+                    ToolCallLifecycleContext {
+                        turn_id: context.turn_id,
+                        assistant_entry_id: context.assistant_entry_id,
+                        tool_call_entry_id: context.tool_call_entry_id,
+                        call: context.call,
+                        started_at_ms,
+                        tool_trace_context,
+                        source_entry_ids: context.source_entry_ids,
+                    },
+                    result,
+                    context.abort_signal.is_aborted(),
+                    on_delta,
                 )?;
-                context.source_entry_ids.push(tool_result_entry_id);
-                let tool_result_event_id = self.append_tape_entry(
-                    TapeEntry::event(
-                        if failed { "tool_result_cancelled" } else { "tool_result_recorded" },
-                        Some(json!({"tool_name": result.tool_name.clone(), "status": if failed { "cancelled" } else { "ok" }})),
-                    )
-                    .with_run_id(context.turn_id)
-                    .with_meta(
-                        "source_entry_ids",
-                        json!(build_tool_source_entry_ids(
-                            context.assistant_entry_id,
-                            context.tool_call_entry_id,
-                            tool_result_entry_id,
-                        )),
-                    ),
-                )?;
-                context.source_entry_ids.push(tool_result_event_id);
-
-                on_delta(StreamEvent::ToolCallCompleted {
-                    invocation_id: context.call.invocation_id.clone(),
-                    tool_name: context.call.tool_name.clone(),
-                    content: result.content.clone(),
-                    details: result.details.clone(),
-                    failed,
-                });
-
-                let outcome = if failed {
-                    ToolInvocationOutcome::Failed { message: RuntimeError::cancelled().to_string() }
-                } else {
-                    ToolInvocationOutcome::Succeeded { result: result.clone() }
-                };
-                self.publish_event(RuntimeEvent::ToolInvocation {
-                    call: context.call.clone(),
-                    outcome: outcome.clone(),
-                });
-                let lifecycle = ToolInvocationLifecycle {
-                    call: context.call.clone(),
-                    started_at_ms,
-                    finished_at_ms: now_timestamp_ms(),
-                    trace_context: tool_trace_context,
-                    outcome,
-                };
-                context
-                    .seen_tool_calls
-                    .insert(call_signature, PreviousToolCall::from_outcome(&lifecycle.outcome));
+                Self::remember_tool_call_outcome(
+                    context.seen_tool_calls,
+                    &call_signature,
+                    &lifecycle.outcome,
+                );
                 Ok(lifecycle)
             }
-            Err(error) => {
-                let lifecycle = self.record_failed_tool_call(
-                    FailedToolCallContext {
+            Err(error) => self.record_and_remember_failed_tool_call(
+                FailedToolCallContext {
+                    lifecycle: ToolCallLifecycleContext {
                         turn_id: context.turn_id,
                         assistant_entry_id: context.assistant_entry_id,
                         tool_call_entry_id: context.tool_call_entry_id,
@@ -315,17 +243,39 @@ where
                         started_at_ms,
                         tool_trace_context: tool_trace_context.clone(),
                         source_entry_ids: context.source_entry_ids,
-                        event_name: "tool_call_failed",
                     },
-                    RuntimeError::tool(error),
-                    on_delta,
-                )?;
-                context
-                    .seen_tool_calls
-                    .insert(call_signature, PreviousToolCall::from_outcome(&lifecycle.outcome));
-                Ok(lifecycle)
-            }
+                    event_name: "tool_call_failed",
+                },
+                RuntimeError::tool(error),
+                &call_signature,
+                context.seen_tool_calls,
+                on_delta,
+            ),
         }
+    }
+
+    async fn invoke_runtime_tool(
+        &mut self,
+        context: &ExecuteToolCallContext<'_>,
+    ) -> Result<ToolResult, RuntimeError> {
+        let runtime_tools = tape_tools::build_runtime_tool_registry();
+        let runtime_bridge = tape_tools::RuntimeToolContextBridge::new(self);
+        let runtime_context: Arc<dyn RuntimeToolContext> = runtime_bridge.clone();
+        let result = runtime_tools
+            .call(
+                context.call,
+                &mut |_| {},
+                &ToolExecutionContext {
+                    run_id: context.turn_id.to_string(),
+                    workspace_root: self.workspace_root.clone(),
+                    abort: context.abort_signal.clone(),
+                    runtime: Some(runtime_context),
+                },
+            )
+            .await
+            .map_err(RuntimeError::tool)?;
+        self.apply_runtime_tool_handoffs(context.turn_id, &runtime_bridge)?;
+        Ok(result)
     }
 
     fn apply_runtime_tool_handoffs(
@@ -339,22 +289,31 @@ where
         Ok(())
     }
 
-    fn record_failed_tool_call(
+    fn remember_tool_call_outcome(
+        seen_tool_calls: &mut BTreeMap<String, PreviousToolCall>,
+        call_signature: &str,
+        outcome: &ToolInvocationOutcome,
+    ) {
+        seen_tool_calls.insert(call_signature.to_string(), PreviousToolCall::from_outcome(outcome));
+    }
+
+    fn record_completed_tool_call(
         &mut self,
-        context: FailedToolCallContext<'_>,
-        runtime_error: RuntimeError,
+        context: ToolCallLifecycleContext<'_>,
+        result: ToolResult,
+        failed: bool,
         on_delta: &mut (dyn FnMut(StreamEvent) + Send),
     ) -> Result<ToolInvocationLifecycle, RuntimeError> {
-        let failure_message = runtime_error.to_string();
-        let failed_result = ToolResult::from_call(context.call, failure_message.clone());
-        let tool_result_entry_id = self.append_tape_entry(
-            TapeEntry::tool_result(&failed_result).with_run_id(context.turn_id),
-        )?;
+        let tool_result_entry_id =
+            self.append_tape_entry(TapeEntry::tool_result(&result).with_run_id(context.turn_id))?;
         context.source_entry_ids.push(tool_result_entry_id);
-        let failure_event_id = self.append_tape_entry(
+        let tool_result_event_id = self.append_tape_entry(
             TapeEntry::event(
-                context.event_name,
-                Some(json!({"message": failure_message, "tool_name": context.call.tool_name.clone()})),
+                if failed { "tool_result_cancelled" } else { "tool_result_recorded" },
+                Some(json!({
+                    "tool_name": result.tool_name.clone(),
+                    "status": if failed { "cancelled" } else { "ok" },
+                })),
             )
             .with_run_id(context.turn_id)
             .with_meta(
@@ -366,25 +325,96 @@ where
                 )),
             ),
         )?;
-        context.source_entry_ids.push(failure_event_id);
+        context.source_entry_ids.push(tool_result_event_id);
 
-        let outcome = ToolInvocationOutcome::Failed { message: runtime_error.to_string() };
-        self.publish_event(RuntimeEvent::ToolInvocation {
-            call: context.call.clone(),
-            outcome: outcome.clone(),
-        });
         on_delta(StreamEvent::ToolCallCompleted {
             invocation_id: context.call.invocation_id.clone(),
             tool_name: context.call.tool_name.clone(),
-            content: failure_message.clone(),
-            details: None,
-            failed: true,
+            content: result.content.clone(),
+            details: result.details.clone(),
+            failed,
+        });
+
+        let outcome = if failed {
+            ToolInvocationOutcome::Failed { message: RuntimeError::cancelled().to_string() }
+        } else {
+            ToolInvocationOutcome::Succeeded { result: result.clone() }
+        };
+        self.publish_event(RuntimeEvent::ToolInvocation {
+            call: context.call.clone(),
+            outcome: outcome.clone(),
         });
         Ok(ToolInvocationLifecycle {
             call: context.call.clone(),
             started_at_ms: context.started_at_ms,
             finished_at_ms: now_timestamp_ms(),
             trace_context: context.tool_trace_context,
+            outcome,
+        })
+    }
+
+    fn record_and_remember_failed_tool_call(
+        &mut self,
+        context: FailedToolCallContext<'_>,
+        runtime_error: RuntimeError,
+        call_signature: &str,
+        seen_tool_calls: &mut BTreeMap<String, PreviousToolCall>,
+        on_delta: &mut (dyn FnMut(StreamEvent) + Send),
+    ) -> Result<ToolInvocationLifecycle, RuntimeError> {
+        let lifecycle = self.record_failed_tool_call(context, runtime_error, on_delta)?;
+        Self::remember_tool_call_outcome(seen_tool_calls, call_signature, &lifecycle.outcome);
+        Ok(lifecycle)
+    }
+
+    fn record_failed_tool_call(
+        &mut self,
+        context: FailedToolCallContext<'_>,
+        runtime_error: RuntimeError,
+        on_delta: &mut (dyn FnMut(StreamEvent) + Send),
+    ) -> Result<ToolInvocationLifecycle, RuntimeError> {
+        let failure_message = runtime_error.to_string();
+        let failed_result = ToolResult::from_call(context.lifecycle.call, failure_message.clone());
+        let tool_result_entry_id = self.append_tape_entry(
+            TapeEntry::tool_result(&failed_result).with_run_id(context.lifecycle.turn_id),
+        )?;
+        context.lifecycle.source_entry_ids.push(tool_result_entry_id);
+        let failure_event_id = self.append_tape_entry(
+            TapeEntry::event(
+                context.event_name,
+                Some(json!({
+                    "message": failure_message,
+                    "tool_name": context.lifecycle.call.tool_name.clone(),
+                })),
+            )
+            .with_run_id(context.lifecycle.turn_id)
+            .with_meta(
+                "source_entry_ids",
+                json!(build_tool_source_entry_ids(
+                    context.lifecycle.assistant_entry_id,
+                    context.lifecycle.tool_call_entry_id,
+                    tool_result_entry_id,
+                )),
+            ),
+        )?;
+        context.lifecycle.source_entry_ids.push(failure_event_id);
+
+        let outcome = ToolInvocationOutcome::Failed { message: runtime_error.to_string() };
+        self.publish_event(RuntimeEvent::ToolInvocation {
+            call: context.lifecycle.call.clone(),
+            outcome: outcome.clone(),
+        });
+        on_delta(StreamEvent::ToolCallCompleted {
+            invocation_id: context.lifecycle.call.invocation_id.clone(),
+            tool_name: context.lifecycle.call.tool_name.clone(),
+            content: failure_message.clone(),
+            details: None,
+            failed: true,
+        });
+        Ok(ToolInvocationLifecycle {
+            call: context.lifecycle.call.clone(),
+            started_at_ms: context.lifecycle.started_at_ms,
+            finished_at_ms: now_timestamp_ms(),
+            trace_context: context.lifecycle.tool_trace_context,
             outcome,
         })
     }

@@ -558,3 +558,14 @@
 **Verification**：`cargo fmt --all`、`cargo check`、`cargo test -p agent-runtime --lib -- --nocapture`、`cargo test -p agent-server session_manager -- --nocapture` 通过。
 **Commit**：未提交
 **Next direction**：继续检查 `crates/agent-runtime/src/runtime/tool_calls.rs` 和共享 SQLite store 访问边界，优先清理剩余同步桥接与重复 helper。
+
+## 2026-03-17 Session 30
+
+**Diagnosis**：`crates/agent-runtime/src/runtime/tool_calls.rs` 仍把 runtime tool 和普通 tool 的成功/失败记账逻辑各写了一份：结果条目落盘、完成事件发布、`ToolInvocationLifecycle` 组装以及 `seen_tool_calls` 更新在多条分支里重复，后续一旦再改取消/失败语义很容易分叉。
+**Decision**：先不动对外协议和运行时语义，只把 `tool_calls` 内部重复路径收口到共享 helper，并把 runtime tool 实际调用提取成独立 helper；这样能在不扩散改动面的前提下，把后续继续拆分 `tool_calls` 的基础铺平。
+**Changes**：
+- `crates/agent-runtime/src/runtime/tool_calls.rs`：新增共享 lifecycle context / completed-failed record helper / runtime-tool invoke helper，把 runtime tool 与普通 tool 的结果记录、事件发布和历史调用缓存更新收口到同一套内部实现。
+- `docs/status.md`、`docs/architecture.md`：同步记录 `tool_calls` 生命周期记账已完成内部收口，下一步热点转回 SQLite store 访问边界与 OpenAI adapter 共享 helper。
+**Verification**：`cargo fmt --all`、`cargo check -p agent-runtime`、`cargo test -p agent-runtime --lib -- --nocapture` 通过。
+**Commit**：未提交
+**Next direction**：继续拆 `crates/agent-runtime/src/runtime/tool_calls.rs` 或转向共享 SQLite store 访问边界，优先清理仍带同步锁/重复 helper 的部分。
