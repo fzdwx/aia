@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::thread;
 
 use agent_core::{
     ModelIdentity, PromptCacheConfig, PromptCacheRetention as RuntimePromptCacheRetention,
@@ -44,9 +45,14 @@ struct SessionSlot {
     status: SlotStatus,
 }
 
-/// Sent back from spawn_blocking when a turn completes.
+/// Sent back from the turn worker when a turn completes.
 struct RuntimeReturn {
     session_id: SessionId,
+    runtime: AgentRuntime<ServerModel, ToolRegistry>,
+    subscriber: RuntimeSubscriberId,
+}
+
+struct PendingRuntime {
     runtime: AgentRuntime<ServerModel, ToolRegistry>,
     subscriber: RuntimeSubscriberId,
 }
@@ -300,6 +306,13 @@ pub(crate) fn read_lock<T>(lock: &RwLock<T>) -> RwLockReadGuard<'_, T> {
 
 pub(crate) fn write_lock<T>(lock: &RwLock<T>) -> RwLockWriteGuard<'_, T> {
     match lock.write() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
+fn mutex_lock<T>(lock: &Mutex<T>) -> MutexGuard<'_, T> {
+    match lock.lock() {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
     }
@@ -564,7 +577,7 @@ fn handle_submit_turn(
         return Err(RuntimeWorkerError::bad_request("a turn is already running in this session"));
     }
 
-    let mut runtime =
+    let runtime =
         slot.runtime.take().ok_or_else(|| RuntimeWorkerError::internal("runtime not available"))?;
     let subscriber = slot.subscriber;
     let turn_control = runtime.turn_control();
@@ -592,13 +605,77 @@ fn handle_submit_turn(
     let _ = broadcast_tx
         .send(SsePayload::Status { session_id: sid.clone(), status: TurnStatus::Waiting });
 
-    tokio::task::spawn_blocking(move || {
-        let mut current_status = CurrentStatusInner::Waiting;
-        let btx = broadcast_tx.clone();
-        let sid2 = sid.clone();
-        let cts = current_turn_snapshot.clone();
+    let pending_runtime = Arc::new(Mutex::new(Some(PendingRuntime { runtime, subscriber })));
+    let worker_runtime = pending_runtime.clone();
+    let worker_name = format!("aia-turn-{session_id}");
 
-        let result = runtime.handle_turn_streaming_with_control(prompt, turn_control, |event| {
+    let spawn_result = thread::Builder::new().name(worker_name).spawn(move || {
+        let Some(PendingRuntime { runtime, subscriber }) = mutex_lock(&worker_runtime).take()
+        else {
+            let _ = broadcast_tx.send(SsePayload::Error {
+                session_id: sid.clone(),
+                message: "turn worker runtime missing".into(),
+            });
+            return;
+        };
+
+        let runtime_return =
+            match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                Ok(local_runtime) => local_runtime.block_on(run_turn_worker(
+                    runtime,
+                    subscriber,
+                    prompt,
+                    turn_control,
+                    broadcast_tx,
+                    current_turn_snapshot,
+                    history_snapshot,
+                    trace_store,
+                    sid,
+                )),
+                Err(error) => {
+                    *write_lock(&current_turn_snapshot) = None;
+                    let message = format!("turn worker runtime build failed: {error}");
+                    let _ =
+                        broadcast_tx.send(SsePayload::Error { session_id: sid.clone(), message });
+                    RuntimeReturn { session_id: sid, runtime, subscriber }
+                }
+            };
+
+        let _ = return_tx.blocking_send(runtime_return);
+    });
+
+    if let Err(error) = spawn_result {
+        if let Some(PendingRuntime { runtime, subscriber }) = mutex_lock(&pending_runtime).take() {
+            slot.runtime = Some(runtime);
+            slot.subscriber = subscriber;
+        }
+        slot.running_turn = None;
+        slot.status = SlotStatus::Idle;
+        *write_lock(&slot.current_turn) = None;
+        return Err(RuntimeWorkerError::internal(format!("turn worker spawn failed: {error}")));
+    }
+
+    Ok(())
+}
+
+async fn run_turn_worker(
+    mut runtime: AgentRuntime<ServerModel, ToolRegistry>,
+    subscriber: RuntimeSubscriberId,
+    prompt: String,
+    turn_control: agent_runtime::TurnControl,
+    broadcast_tx: broadcast::Sender<SsePayload>,
+    current_turn_snapshot: Arc<RwLock<Option<CurrentTurnSnapshot>>>,
+    history_snapshot: Arc<RwLock<Vec<TurnLifecycle>>>,
+    trace_store: Arc<AiaStore>,
+    session_id: SessionId,
+) -> RuntimeReturn {
+    let mut current_status = CurrentStatusInner::Waiting;
+    let status_broadcast = broadcast_tx.clone();
+    let stream_session_id = session_id.clone();
+    let stream_snapshot = current_turn_snapshot.clone();
+
+    let result = runtime
+        .handle_turn_streaming_with_control_async(prompt, turn_control, |event| {
             let new_status = match &event {
                 StreamEvent::ThinkingDelta { .. } => CurrentStatusInner::Thinking,
                 StreamEvent::TextDelta { .. } => CurrentStatusInner::Generating,
@@ -610,79 +687,80 @@ fn handle_submit_turn(
 
             if new_status != current_status {
                 current_status = new_status.clone();
-                update_current_turn_status(&cts, new_status.to_turn_status());
-                let _ = btx.send(SsePayload::Status {
-                    session_id: sid2.clone(),
+                update_current_turn_status(&stream_snapshot, new_status.to_turn_status());
+                let _ = status_broadcast.send(SsePayload::Status {
+                    session_id: stream_session_id.clone(),
                     status: new_status.to_turn_status(),
                 });
             }
 
-            update_current_turn_from_stream(&cts, &event);
-            let _ = btx.send(SsePayload::Stream { session_id: sid2.clone(), event });
-        });
+            update_current_turn_from_stream(&stream_snapshot, &event);
+            let _ = status_broadcast
+                .send(SsePayload::Stream { session_id: stream_session_id.clone(), event });
+        })
+        .await;
 
-        match result {
-            Ok(_) => match collect_runtime_events(&mut runtime, subscriber) {
+    match result {
+        Ok(_) => match collect_runtime_events(&mut runtime, subscriber) {
+            Ok(events) => {
+                let turn =
+                    broadcast_runtime_events_with_session(events, &broadcast_tx, &session_id);
+                if let Some(turn) = turn {
+                    persist_tool_trace_spans(&turn, trace_store.as_ref());
+                    write_lock(&history_snapshot).push(turn.clone());
+                    let _ = broadcast_tx
+                        .send(SsePayload::TurnCompleted { session_id: session_id.clone(), turn });
+                }
+                *write_lock(&current_turn_snapshot) = None;
+            }
+            Err(error) => {
+                *write_lock(&current_turn_snapshot) = None;
+                let _ = broadcast_tx.send(SsePayload::Error {
+                    session_id: session_id.clone(),
+                    message: error.message.clone(),
+                });
+            }
+        },
+        Err(error) => {
+            let was_cancelled = error.is_cancelled();
+            match collect_runtime_events(&mut runtime, subscriber) {
                 Ok(events) => {
-                    let turn = broadcast_runtime_events_with_session(events, &broadcast_tx, &sid);
+                    let turn =
+                        broadcast_runtime_events_with_session(events, &broadcast_tx, &session_id);
                     if let Some(turn) = turn {
                         persist_tool_trace_spans(&turn, trace_store.as_ref());
                         write_lock(&history_snapshot).push(turn.clone());
-                        let _ = broadcast_tx
-                            .send(SsePayload::TurnCompleted { session_id: sid.clone(), turn });
-                    }
-                    *write_lock(&current_turn_snapshot) = None;
-                }
-                Err(error) => {
-                    *write_lock(&current_turn_snapshot) = None;
-                    let _ = broadcast_tx.send(SsePayload::Error {
-                        session_id: sid.clone(),
-                        message: error.message.clone(),
-                    });
-                }
-            },
-            Err(error) => {
-                let was_cancelled = error.is_cancelled();
-                match collect_runtime_events(&mut runtime, subscriber) {
-                    Ok(events) => {
-                        let turn =
-                            broadcast_runtime_events_with_session(events, &broadcast_tx, &sid);
-                        if let Some(turn) = turn {
-                            persist_tool_trace_spans(&turn, trace_store.as_ref());
-                            write_lock(&history_snapshot).push(turn.clone());
-                            let _ = broadcast_tx
-                                .send(SsePayload::TurnCompleted { session_id: sid.clone(), turn });
-                        }
-                    }
-                    Err(collection_error) => {
-                        let _ = broadcast_tx.send(SsePayload::Error {
-                            session_id: sid.clone(),
-                            message: collection_error.message.clone(),
+                        let _ = broadcast_tx.send(SsePayload::TurnCompleted {
+                            session_id: session_id.clone(),
+                            turn,
                         });
                     }
                 }
-                if was_cancelled {
-                    update_current_turn_status(&current_turn_snapshot, TurnStatus::Cancelled);
-                    let _ = broadcast_tx.send(SsePayload::Status {
-                        session_id: sid.clone(),
-                        status: TurnStatus::Cancelled,
+                Err(collection_error) => {
+                    let _ = broadcast_tx.send(SsePayload::Error {
+                        session_id: session_id.clone(),
+                        message: collection_error.message.clone(),
                     });
-                    let _ =
-                        broadcast_tx.send(SsePayload::TurnCancelled { session_id: sid.clone() });
                 }
-                *write_lock(&current_turn_snapshot) = None;
-                let _ = broadcast_tx.send(SsePayload::Error {
-                    session_id: sid.clone(),
-                    message: error.to_string(),
-                });
             }
+            if was_cancelled {
+                update_current_turn_status(&current_turn_snapshot, TurnStatus::Cancelled);
+                let _ = broadcast_tx.send(SsePayload::Status {
+                    session_id: session_id.clone(),
+                    status: TurnStatus::Cancelled,
+                });
+                let _ =
+                    broadcast_tx.send(SsePayload::TurnCancelled { session_id: session_id.clone() });
+            }
+            *write_lock(&current_turn_snapshot) = None;
+            let _ = broadcast_tx.send(SsePayload::Error {
+                session_id: session_id.clone(),
+                message: error.to_string(),
+            });
         }
+    }
 
-        // Return runtime to the session manager
-        let _ = return_tx.blocking_send(RuntimeReturn { session_id: sid, runtime, subscriber });
-    });
-
-    Ok(())
+    RuntimeReturn { session_id, runtime, subscriber }
 }
 
 fn handle_cancel_turn(
@@ -1249,6 +1327,7 @@ impl CurrentStatusInner {
 
 #[cfg(test)]
 mod tests {
+    use std::future::Future;
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::sync::{Arc, RwLock};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1260,9 +1339,18 @@ mod tests {
     use crate::sse::TurnStatus;
 
     use super::{
-        CurrentTurnSnapshot, collect_runtime_events, handle_cancel_turn, handle_get_session_info,
-        read_lock, update_current_turn_status, write_lock,
+        CurrentTurnSnapshot, SessionManagerConfig, collect_runtime_events, handle_cancel_turn,
+        handle_get_session_info, read_lock, spawn_session_manager, update_current_turn_status,
+        write_lock,
     };
+
+    fn run_async<T>(future: impl Future<Output = T>) -> T {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime should build");
+        runtime.block_on(future)
+    }
 
     fn poison_lock<T>(lock: &RwLock<T>) {
         let _ = catch_unwind(AssertUnwindSafe(|| {
@@ -1274,6 +1362,11 @@ mod tests {
     fn temp_session_path(name: &str) -> std::path::PathBuf {
         let suffix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
         std::env::temp_dir().join(format!("aia-session-manager-{name}-{suffix}.jsonl"))
+    }
+
+    fn temp_session_dir(name: &str) -> std::path::PathBuf {
+        let suffix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+        std::env::temp_dir().join(format!("aia-session-manager-{name}-{suffix}"))
     }
 
     #[test]
@@ -1416,5 +1509,75 @@ mod tests {
         let guard = read_lock(&current_turn);
         let current = guard.as_ref().expect("snapshot should still exist");
         assert_eq!(current.status, TurnStatus::Cancelled);
+    }
+
+    #[test]
+    fn spawned_turn_worker_completes_bootstrap_turn() {
+        let temp_root = temp_session_dir("turn-worker");
+        let cleanup_root = temp_root.clone();
+        let sessions_dir = temp_root.join("sessions");
+        std::fs::create_dir_all(&sessions_dir).expect("sessions dir should exist");
+        let store = Arc::new(
+            agent_store::AiaStore::new(temp_root.join("store.sqlite3"))
+                .expect("sqlite store should initialize"),
+        );
+        let registry = provider_registry::ProviderRegistry::default();
+        let (broadcast_tx, _broadcast_rx) = tokio::sync::broadcast::channel(32);
+
+        run_async(async {
+            let handle = spawn_session_manager(SessionManagerConfig {
+                sessions_dir,
+                store,
+                registry: registry.clone(),
+                store_path: temp_root.join("providers.json"),
+                broadcast_tx,
+                provider_registry_snapshot: Arc::new(RwLock::new(registry)),
+                provider_info_snapshot: Arc::new(RwLock::new(super::ProviderInfoSnapshot {
+                    name: "bootstrap".into(),
+                    model: "bootstrap".into(),
+                    connected: true,
+                })),
+                workspace_root: temp_root.clone(),
+                user_agent: "test-agent".into(),
+            });
+
+            let session = handle
+                .create_session(Some("Async worker".into()))
+                .await
+                .expect("session should be created");
+            handle
+                .submit_turn(session.id.clone(), "hello from async worker".into())
+                .expect("turn should be accepted");
+
+            let mut completed_turn = None;
+            for _ in 0..200 {
+                let history = handle
+                    .get_history(session.id.clone())
+                    .await
+                    .expect("history should be readable");
+                if let Some(history_turn) = history.last().cloned() {
+                    completed_turn = Some(history_turn);
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+            let turn = completed_turn.expect("turn should complete");
+
+            assert_eq!(turn.user_message, "hello from async worker");
+            assert_eq!(turn.outcome, agent_runtime::TurnOutcome::Succeeded);
+            assert!(
+                turn.assistant_message
+                    .as_deref()
+                    .is_some_and(|text: &str| text.contains("Bootstrap 模式收到"))
+            );
+
+            let current = handle
+                .get_current_turn(session.id.clone())
+                .await
+                .expect("current turn should be readable");
+            assert!(current.is_none());
+        });
+
+        let _ = std::fs::remove_dir_all(cleanup_root);
     }
 }

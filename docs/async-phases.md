@@ -186,15 +186,17 @@
 
 ## 当前状态
 
-当前仓库已完成 **Phase 1** 与 **Phase 2**：
+当前仓库已完成 **Phase 1** 与 **Phase 2**，并对 **Phase 3 / 4** 做了第一轮收口：
 
 - `agent-core` / `agent-runtime` / `builtin-tools` / `openai-adapter` / `apps/agent-server` 已全部接到 async trait 边界
 - 相关 mock / 测试实现已完成迁移，当前 `cargo check` 与受影响 crate `cargo test` 已通过
 - `openai-adapter` 已从 `reqwest::blocking` 切到 async `reqwest`
 - Responses / Chat Completions 的 SSE 读取已改为 async chunk streaming，并继续保留 abort 轮询与取消语义
+- `builtin-tools::shell` 已把输出聚合与 abort 轮询改为 async 事件泵，避免 async tool 调用卡在同步 `recv_timeout`
+- `apps/agent-server` 的 turn 执行已去掉 `tokio::spawn_blocking`，当前通过独立 current-thread Tokio worker thread 承载 async runtime turn，并在结束后归还 runtime ownership
 
 因此，下一步最高优先级变为：
 
-1. 进入 Phase 3，继续把工具执行主链收口为真正原生 async
-2. 为 Phase 4 做准备，评估如何去掉 `apps/agent-server` turn 执行上的 `spawn_blocking`
+1. 继续完成 Phase 3，优先把剩余可能长时间占用线程的工具路径进一步收口为更原生的 async / cancel 模型
+2. 继续完成 Phase 4，把 `apps/agent-server` 从“async turn worker thread + runtime handoff”推进到更原生的 live runtime stats / ownership 方案
 3. 在 async 主链与工具边界进一步稳定后，再优先推进统一工具协议映射与 MCP 接入，而不是继续堆厚客户端界面

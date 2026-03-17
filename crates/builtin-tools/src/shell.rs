@@ -1,6 +1,5 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::Duration;
 
@@ -55,7 +54,7 @@ impl Tool for ShellTool {
             return Ok(ToolResult::from_call(call, "[aborted]"));
         }
 
-        let execution = run_embedded_brush(&command, cwd, &context.abort, output)?;
+        let execution = run_embedded_brush(&command, cwd, &context.abort, output).await?;
 
         let mut result_text = execution.stdout.clone();
         if !execution.stderr.is_empty() {
@@ -93,7 +92,7 @@ enum ShellControlMessage {
     Abort,
 }
 
-fn run_embedded_brush(
+async fn run_embedded_brush(
     command: &str,
     cwd: &Path,
     abort: &agent_core::AbortSignal,
@@ -104,7 +103,7 @@ fn run_embedded_brush(
     let (stderr_reader, stderr_writer) = std::io::pipe()
         .map_err(|e| CoreError::new(format!("failed to create stderr pipe: {e}")))?;
 
-    let (event_tx, event_rx) = mpsc::channel();
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
     let stdout_handle =
         spawn_pipe_reader(stdout_reader, ToolOutputStream::Stdout, event_tx.clone());
     let stderr_handle =
@@ -141,26 +140,26 @@ fn run_embedded_brush(
             abort_sent = true;
         }
 
-        match event_rx.recv_timeout(SHELL_EVENT_POLL_INTERVAL) {
-            Ok(ShellEvent::Output(delta)) => {
+        match tokio::time::timeout(SHELL_EVENT_POLL_INTERVAL, event_rx.recv()).await {
+            Ok(Some(ShellEvent::Output(delta))) => {
                 match delta.stream {
                     ToolOutputStream::Stdout => stdout.push_str(&delta.text),
                     ToolOutputStream::Stderr => stderr.push_str(&delta.text),
                 }
                 output(delta);
             }
-            Ok(ShellEvent::StreamClosed(stream)) => match stream {
+            Ok(Some(ShellEvent::StreamClosed(stream))) => match stream {
                 ToolOutputStream::Stdout => stdout_closed = true,
                 ToolOutputStream::Stderr => stderr_closed = true,
             },
-            Ok(ShellEvent::Finished(result)) => {
+            Ok(Some(ShellEvent::Finished(result))) => {
                 finished = Some(result);
             }
-            Ok(ShellEvent::ShellReady(control_tx)) => {
+            Ok(Some(ShellEvent::ShellReady(control_tx))) => {
                 control = Some(control_tx);
             }
-            Err(RecvTimeoutError::Timeout) => continue,
-            Err(RecvTimeoutError::Disconnected) => break,
+            Ok(None) => break,
+            Err(_) => continue,
         }
     }
 
@@ -179,7 +178,7 @@ fn run_embedded_brush_in_runtime(
     cwd: PathBuf,
     stdout_writer: std::io::PipeWriter,
     stderr_writer: std::io::PipeWriter,
-    shell_tx: mpsc::Sender<ShellEvent>,
+    shell_tx: tokio::sync::mpsc::UnboundedSender<ShellEvent>,
 ) -> Result<i32, CoreError> {
     let runtime =
         tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| {
@@ -238,7 +237,7 @@ fn run_embedded_brush_in_runtime(
 fn spawn_pipe_reader(
     mut reader: std::io::PipeReader,
     stream: ToolOutputStream,
-    sender: mpsc::Sender<ShellEvent>,
+    sender: tokio::sync::mpsc::UnboundedSender<ShellEvent>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let mut buffer = [0_u8; 4096];
@@ -265,20 +264,32 @@ fn spawn_pipe_reader(
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::{future::Future, path::Path};
 
     use agent_core::{AbortSignal, Tool, ToolCall, ToolExecutionContext, ToolOutputStream};
 
     use super::{ShellTool, run_embedded_brush};
 
+    fn run_async<T>(future: impl Future<Output = T>) -> T {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime should build");
+        runtime.block_on(future)
+    }
+
     #[test]
     fn embedded_brush_runtime_executes_shell_command() {
         let mut deltas = Vec::new();
-        let execution =
-            run_embedded_brush("printf 'ok'", Path::new("."), &AbortSignal::new(), &mut |delta| {
+        let execution = run_async(run_embedded_brush(
+            "printf 'ok'",
+            Path::new("."),
+            &AbortSignal::new(),
+            &mut |delta| {
                 deltas.push(delta);
-            })
-            .expect("embedded brush execution should succeed");
+            },
+        ))
+        .expect("embedded brush execution should succeed");
 
         assert_eq!(execution.stdout, "ok");
         assert_eq!(execution.stderr, "");
@@ -347,11 +358,13 @@ mod tests {
         });
 
         let mut deltas = Vec::new();
-        let execution =
-            run_embedded_brush("sleep 5; printf 'done'", Path::new("."), &abort, &mut |delta| {
-                deltas.push(delta)
-            })
-            .expect("embedded brush should return after abort");
+        let execution = run_async(run_embedded_brush(
+            "sleep 5; printf 'done'",
+            Path::new("."),
+            &abort,
+            &mut |delta| deltas.push(delta),
+        ))
+        .expect("embedded brush should return after abort");
 
         assert_eq!(execution.exit_code, 130);
         let stdout = deltas

@@ -60,6 +60,7 @@
 - `apps/web` 已建立为实际主工作台，而不是仅布局骨架
 - Web 客户端当前已接入 provider 管理、session 列表 / 历史 / 当前轮次恢复、流式消息展示、trace 诊断视图
 - 内建基础编码工具名已收口为 `shell`、`read`、`write`、`edit`、`glob`、`grep`，其中 `shell` 当前以内嵌 `brush` 库执行
+- `builtin-tools` 的 `shell` 已把输出聚合与 abort 轮询改为 async 事件泵，长命令等待不再依赖同步 `recv_timeout` 循环
 - 运行时事件已统一通过共享事件模型暴露，并支持多个订阅者独立消费
 - 默认上下文已改为从最新锚点之后重建，而不是无条件带上全量历史
 - `agent-runtime` 已从单次模型调用收敛为单轮内多步执行：模型 → 工具 → 再回模型
@@ -67,6 +68,7 @@
 - Web 流式 turn 已与共享运行时失败语义对齐：当前轮失败会通过 SSE 发出错误事件，但不会直接结束整个交互会话
 - cached prompt usage 已贯通到 `completion.usage`、trace 存储、trace 汇总与 Web 聊天/诊断展示
 - `apps/agent-server` 当前由后台 runtime worker 独占运行时，provider / history / current-turn 读取走共享快照
+- `apps/agent-server` 的 turn 执行已去掉 `tokio::spawn_blocking`，当前由独立 current-thread Tokio worker thread 承载 async runtime 主链
 - provider 变更已采用事务式提交：候选 registry 校验、registry 落盘、session tape 落盘全部成功后才更新内存 runtime / tape
 - 已完成完整 stop/cancel 基线，并继续打通到 OpenAI streaming 与 embedded shell `TERM` 中断
 - 本地 trace 当前已形成 OTel-shaped 诊断模型：agent loop root span、LLM client spans、tool internal spans 与本地 event timeline

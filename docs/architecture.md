@@ -101,7 +101,7 @@ README 里真正难的是这些能力：
 - trace context 生成已统一通过共享 helper 收口，不再由不同路径各自手写 trace/span 标识
 - stop/cancel 已贯穿 server → runtime → provider streaming / embedded shell
 - `openai-adapter` 已改为原生 async `reqwest`：单次请求不再依赖 blocking client，流式读取改为 async chunk streaming + abort 轮询，避免 provider I/O 把后续 server 原生 async 化继续卡在边缘层
-- 全异步主链已完成 Phase 1 / 2：`agent-core` 的模型/工具 trait、`agent-runtime` turn 主链、`openai-adapter` provider I/O 都已切到 async；当前仍在 server 层保留同步包装入口与 worker ownership，以便分阶段推进后续 Phase 3 / 4
+- 全异步主链已完成 Phase 1 / 2，并继续推进 Phase 3 / 4：`agent-core` 的模型/工具 trait、`agent-runtime` turn 主链、`openai-adapter` provider I/O 都已切到 async；`builtin-tools::shell` 的输出聚合与 abort 轮询也已改为 async 事件泵，但其余工具与 server ownership 仍在继续分阶段收口
 - 时间辅助函数不假设系统时间恒定晚于 `UNIX_EPOCH`，异常场景下会安全回退
 - `tape_info` / `tape_handoff` 已通过真正的 runtime tool registry 暴露，而不是字符串特判
 
@@ -174,6 +174,7 @@ README 里真正难的是这些能力：
 - 全局 `broadcast::channel` 向所有 SSE 客户端推送事件
 - 暴露 provider、session、turn、cancel、handoff、trace 等 HTTP API
 - `POST /api/turn` 仍保持 fire-and-forget，但真正的 turn 执行、事件回收与 session 条目追加都在 worker 内串行完成
+- turn 执行已不再依赖 `tokio::spawn_blocking`：session manager 会把运行中的 turn 交给独立 current-thread Tokio worker thread 承载 async runtime 主链，结束后再把 runtime ownership 归还 slot
 - 运行中的条目会实时 append 到 `.aia/session.jsonl`
 - provider 变更采用事务式提交，避免 registry / runtime / tape 持久化分叉
 - 启动失败与 JSON 序列化失败都已收口为结构化错误路径，而不是 panic

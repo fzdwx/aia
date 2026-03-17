@@ -1,5 +1,17 @@
 # 演进日志
 
+## 2026-03-17 Session 11
+
+**诊断**：虽然 Phase 1 / 2 已完成，但 `apps/agent-server` 的 turn 执行仍依赖 `tokio::spawn_blocking`，同时 `builtin-tools::shell` 还在 async tool 调用里用同步 `recv_timeout` 等待事件，这会拖住“全部改成异步”的 Phase 3 / 4 收口。
+**决策**：先同时收口这两个最高杠杆缝隙：把 `shell` 的等待循环改成 async 事件泵，并把 server turn worker 从 `spawn_blocking` 换成独立 current-thread Tokio worker thread；这样既继续推进原生 async 主链，又不强行打破当前 `?Send` 模型 / 工具边界。
+**变更**：
+- `crates/builtin-tools/src/shell.rs`：将 embedded `brush` 的 stdout/stderr 聚合与 abort 轮询改为 async channel + timeout 事件泵，`shell` 工具调用不再在 async 路径里同步阻塞等待事件；同步更新测试 helper 与回归测试。
+- `apps/agent-server/src/session_manager.rs`：移除 turn 执行上的 `tokio::spawn_blocking`，改为为每个 turn 启动独立 current-thread Tokio worker thread 承载 async runtime turn，并在结束后通过 return channel 归还 runtime ownership；新增回归测试覆盖 bootstrap turn 的完整 worker 路径。
+- `docs/status.md`、`docs/requirements.md`、`docs/architecture.md`、`docs/async-phases.md`：同步记录 Phase 3 / 4 的这轮异步化进展与剩余收口方向。
+**验证**：`cargo check` 通过；`cargo test -p builtin-tools shell -- --nocapture` 通过；`cargo test -p agent-server session_manager -- --nocapture` 通过；`cargo test -p agent-server` 通过（因 localhost listener 测试需脱离沙箱执行）。
+**提交**：`caf5327` `refactor: asyncify shell worker and turn execution`
+**下次方向**：继续把其余可能长时间占用线程的工具路径收口为更原生的 async / cancel 模型，并进一步减少 `apps/agent-server` 在运行中 `session/info` 上对 tape 快照回退和 runtime handoff 的依赖。
+
 ## 2026-03-17 Session 10
 
 **诊断**：全异步主链 Phase 1 已把 trait 与 runtime 主链切到 async，但 `openai-adapter` 仍停留在 `reqwest::blocking`；这既违背“全部改成异步”的目标，也会继续阻塞后续 server 去 `spawn_blocking` 的 Phase 4 收口。
