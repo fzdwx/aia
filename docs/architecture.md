@@ -144,6 +144,7 @@ README 里真正难的是这些能力：
 - `responses` 内部已进一步按职责拆分：根模块只保留配置与模型入口，请求构造/HTTP helper、响应体解析、流式状态累积与 `LanguageModel` 客户端入口分别下沉到 `responses::{request,parsing,streaming,client}`，避免边缘层协议映射、SSE 状态机与 HTTP 细节继续堆在单个超大文件里
 - `chat_completions` 内部也已按相同模式拆分：根模块只保留配置与模型入口，请求构造/HTTP helper、响应体解析、流式状态累积与 `LanguageModel` 客户端入口分别下沉到 `chat_completions::{request,parsing,streaming,client}`，让两条 OpenAI 协议适配栈保持边界对称，便于后续继续收口共享 helper
 - 两条协议共享的 HTTP/request helper 现已进一步收口到顶层共享模块：model 校验、HTTP client 构建、user-agent 注入、失败响应错误组装与 prompt-cache 请求体字段写入不再在 Responses / Chat Completions 两边各复制一份
+- 协议专属 payload 类型也已拆回各自子模块：Responses 的反序列化载体位于 `responses::payloads`，Chat Completions 的反序列化载体位于 `chat_completions::payloads`；顶层不再保留跨协议混装的 `payloads.rs`，避免边缘层数据结构继续形成“共享垃圾桶”
 
 ### `agent-store`
 

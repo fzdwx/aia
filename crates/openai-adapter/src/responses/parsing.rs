@@ -1,11 +1,11 @@
 use agent_core::{Completion, CompletionSegment, ToolCall};
 
-use crate::{
-    OpenAiAdapterError, ReasoningSummaryPart, ResponsesContent, ResponsesOutput, ResponsesResponse,
-    parse_tool_arguments,
-};
+use crate::{OpenAiAdapterError, parse_tool_arguments};
 
-use super::OpenAiResponsesModel;
+use super::{
+    OpenAiResponsesModel,
+    payloads::{ReasoningSummaryPart, ResponsesContent, ResponsesOutput, ResponsesResponse},
+};
 
 impl OpenAiResponsesModel {
     pub(crate) fn parse_response_body(&self, body: &str) -> Result<Completion, OpenAiAdapterError> {

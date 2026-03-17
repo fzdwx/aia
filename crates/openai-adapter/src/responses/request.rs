@@ -2,12 +2,11 @@ use agent_core::{CompletionRequest, CompletionStopReason, CompletionUsage};
 use serde_json::{Value, json};
 
 use crate::{
-    ResponsesUsage,
     http::{apply_prompt_cache, endpoint_url},
     responses_input_item,
 };
 
-use super::OpenAiResponsesModel;
+use super::{OpenAiResponsesModel, payloads::ResponsesUsage};
 
 impl OpenAiResponsesModel {
     pub(super) fn map_usage(usage: Option<ResponsesUsage>) -> Option<CompletionUsage> {

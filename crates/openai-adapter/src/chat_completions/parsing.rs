@@ -1,8 +1,8 @@
 use agent_core::{Completion, CompletionSegment, ToolCall};
 
-use crate::{ChatCompletionsResponse, OpenAiAdapterError, parse_tool_arguments};
+use crate::{OpenAiAdapterError, parse_tool_arguments};
 
-use super::OpenAiChatCompletionsModel;
+use super::{OpenAiChatCompletionsModel, payloads::ChatCompletionsResponse};
 
 impl OpenAiChatCompletionsModel {
     pub(crate) fn parse_response_body(&self, body: &str) -> Result<Completion, OpenAiAdapterError> {

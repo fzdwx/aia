@@ -2,11 +2,11 @@ use agent_core::{CompletionRequest, CompletionStopReason, CompletionUsage};
 use serde_json::{Value, json};
 
 use crate::{
-    ChatCompletionsUsage, chat_completion_messages,
+    chat_completion_messages,
     http::{apply_prompt_cache, endpoint_url},
 };
 
-use super::OpenAiChatCompletionsModel;
+use super::{OpenAiChatCompletionsModel, payloads::ChatCompletionsUsage};
 
 impl OpenAiChatCompletionsModel {
     pub(super) fn map_usage(usage: Option<ChatCompletionsUsage>) -> Option<CompletionUsage> {

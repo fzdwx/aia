@@ -1,6 +1,7 @@
 mod client;
 #[cfg(test)]
 mod parsing;
+mod payloads;
 mod request;
 mod streaming;
 
