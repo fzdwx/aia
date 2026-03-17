@@ -5,6 +5,7 @@ use std::{
 
 use async_trait::async_trait;
 use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use super::*;
@@ -124,6 +125,36 @@ fn opt_usize_arg_解析整数参数() {
     let call = ToolCall::new("t").with_arguments_value(serde_json::json!({"limit": 100}));
     assert_eq!(call.opt_usize_arg("limit"), Some(100));
     assert_eq!(call.opt_usize_arg("missing"), None);
+}
+
+#[derive(Deserialize, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct TypedToolArgs {
+    name: String,
+    limit: Option<usize>,
+}
+
+fn parse_args<T: DeserializeOwned>(call: &ToolCall) -> Result<T, CoreError> {
+    call.parse_arguments()
+}
+
+#[test]
+fn parse_arguments_可解析_typed_args() {
+    let call =
+        ToolCall::new("t").with_arguments_value(serde_json::json!({"name": "hello", "limit": 3}));
+
+    let args: TypedToolArgs = parse_args(&call).unwrap();
+
+    assert_eq!(args, TypedToolArgs { name: "hello".into(), limit: Some(3) });
+}
+
+#[test]
+fn parse_arguments_类型不匹配时返回错误() {
+    let call = ToolCall::new("t").with_arguments_value(serde_json::json!({"name": 3}));
+
+    let error = parse_args::<TypedToolArgs>(&call).unwrap_err();
+
+    assert!(error.to_string().contains("invalid tool arguments"));
 }
 
 #[test]

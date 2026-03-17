@@ -4,6 +4,7 @@ use std::{
 };
 
 use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -107,6 +108,11 @@ impl ToolCall {
     pub fn with_response_id(mut self, response_id: impl Into<String>) -> Self {
         self.response_id = Some(response_id.into());
         self
+    }
+
+    pub fn parse_arguments<T: DeserializeOwned>(&self) -> Result<T, CoreError> {
+        serde_json::from_value(self.arguments.clone())
+            .map_err(|error| CoreError::new(format!("invalid tool arguments: {error}")))
     }
 
     pub fn str_arg(&self, name: &str) -> Result<String, CoreError> {
