@@ -8,7 +8,7 @@
 - `crates/builtin-tools/src/shell.rs`：移除 embedded shell 的专用 `std::thread::spawn` 和 `runtime.block_on(...)` 包装，改为直接 `tokio::spawn(async move { ... })` 执行 `brush`；stdout/stderr pipe reader 改为 Tokio blocking 池任务，避免再显式手工管理线程。
 - `docs/status.md`、`docs/architecture.md`、`docs/async-phases.md`：同步记录 `shell` 已不再自建 thread/runtime，当前仅剩 pipe 读取与搜索/SQLite 等同步 I/O 仍通过 Tokio blocking 池桥接。
 **验证**：`cargo check -p builtin-tools` 通过；`cargo test -p builtin-tools shell -- --nocapture` 通过。
-**Commit**：待提交
+**Commit**：`5988a75` `refactor: run embedded shell on tokio runtime`
 **Next direction**：优先继续清理生产路径里剩余的 blocking 池桥接点，尤其评估 `glob` / `grep`、trace/SQLite 查询路由与 embedded shell pipe 读取的后续 async 化空间。
 
 ## 2026-03-17 Session 13
