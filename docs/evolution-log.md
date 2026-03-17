@@ -1,5 +1,19 @@
 # 演进日志
 
+## 2026-03-17 Session 37
+
+**Diagnosis**：`apps/agent-server` 的 current-turn 语义仍残着一层历史重复：live stream 更新和 tape→snapshot 重建分别各自维护 `CurrentTurnBlock` / `CurrentToolOutput` 的对象归一化、tool block 构造与状态推断，后续一旦继续改工具输出语义很容易漂移。
+**Decision**：把 current-turn 投影 helper 收口到共享 `runtime_worker::projection` 模块，只保留一套 `TurnLifecycle` / `TurnBlock` → `CurrentTurn*` 的映射逻辑，并让 `session_manager` 与 `runtime_worker` 共同复用；这样既不改变对外 API，也能继续清理 app 壳里的历史样板。
+**Changes**：
+- `apps/agent-server/src/runtime_worker/projection.rs`：新增共享 current-turn projection helper，统一对象归一化、live tool block 构造、tool block 查找和 turn status / block 映射。
+- `apps/agent-server/src/runtime_worker.rs`、`apps/agent-server/src/runtime_worker/snapshots.rs`：导出并复用共享 projection helper，让 tape 快照重建不再手写重复投影逻辑。
+- `apps/agent-server/src/session_manager/current_turn.rs`：live stream 更新改走共享 projection helper，删除本地重复的 `find_tool_output_mut` / `tool_block` / `object_value`。
+- `apps/agent-server/src/runtime_worker/tests.rs`：补充已完成 tool block 的 snapshot 投影回归测试，覆盖 `result_content` / `result_details` / `failed` 语义。
+- `docs/status.md`、`docs/architecture.md`：同步记录 current-turn 投影 helper 已完成收口。
+**Verification**：`cargo check -p agent-server` 通过；`cargo test -p agent-server runtime_worker -- --nocapture` 通过；`cargo test -p agent-server session_manager -- --nocapture` 通过。
+**Commit**：`eff4b19` `refactor: share current turn projection helpers`
+**Next direction**：优先继续拆 `apps/agent-server/src/session_manager.rs` 这类仍偏大的壳层文件，或继续检查 `openai-adapter` 剩余协议特有 delta / tool-call 累积 helper 的重复逻辑。
+
 ## 2026-03-17 Session 36
 
 **Diagnosis**：`agent-store` 与 `apps/agent-server` 在 session 相关路径上还残着一层低价值样板：server 为解析默认 session 需要整表 `list_sessions()` 只取第一条记录，启动与 `create_session` 路径也都在 app 壳里重复手拼 `SessionRecord` 时间戳字段。
