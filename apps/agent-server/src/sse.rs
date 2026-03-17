@@ -20,6 +20,7 @@ pub enum SsePayload {
     Status { session_id: String, status: TurnStatus },
     TurnCompleted { session_id: String, turn: TurnLifecycle },
     ContextCompressed { session_id: String, summary: String },
+    SyncRequired { reason: String, skipped_messages: u64 },
     Error { session_id: String, message: String },
     SessionCreated { session_id: String, title: String },
     SessionDeleted { session_id: String },
@@ -42,6 +43,12 @@ struct ErrorData {
 struct ContextCompressedData {
     session_id: String,
     summary: String,
+}
+
+#[derive(Serialize)]
+struct SyncRequiredData {
+    reason: String,
+    skipped_messages: u64,
 }
 
 #[derive(Serialize)]
@@ -102,6 +109,12 @@ impl SsePayload {
                 Ok(Event::default().event("context_compressed").data(serialize_sse_data(
                     "context_compressed",
                     &ContextCompressedData { session_id, summary },
+                )))
+            }
+            Self::SyncRequired { reason, skipped_messages } => {
+                Ok(Event::default().event("sync_required").data(serialize_sse_data(
+                    "sync_required",
+                    &SyncRequiredData { reason, skipped_messages },
                 )))
             }
             Self::Error { session_id, message } => Ok(Event::default()
@@ -190,6 +203,13 @@ mod tests {
             event: StreamEvent::TextDelta { text: "增量".into() },
         }
         .into_axum_event();
+        assert!(event.is_ok());
+    }
+
+    #[test]
+    fn sync_required_payload_can_convert_to_event() {
+        let event = SsePayload::SyncRequired { reason: "lagged".into(), skipped_messages: 3 }
+            .into_axum_event();
         assert!(event.is_ok());
     }
 
