@@ -1,5 +1,17 @@
 # 演进日志
 
+## 2026-03-17 Session 16
+
+**Diagnosis**：`apps/agent-server` 的 trace 读路由虽然不在 turn 热路径上，但仍为每次 `/api/traces` / `/api/traces/{id}` / `/api/traces/summary` 请求额外包了一层 `spawn_blocking`；在 session manager 和 turn worker 都已改成原生 Tokio task 后，这里成了 server 控制面的一个明显异步化缺口。
+**Decision**：先把 trace 控制面收口到和其他 store 读取路径一致：直接复用共享 `AiaStore` 读取，并补齐路由级回归测试，而不是继续保留每请求一次的 blocking 池切换。这样能减少控制面复杂度，也让剩余真正还未收口的同步边界更清晰地暴露出来。
+**Changes**：
+- `apps/agent-server/src/routes.rs`：移除 trace 列表、详情、summary 路由里的 per-request `spawn_blocking` 包装，改为直接复用共享 store 读取路径。
+- `apps/agent-server/src/routes.rs`：新增 trace 路由回归测试，覆盖列表排序、缺失 trace 的 `404` 返回，以及 summary 聚合统计。
+- `docs/status.md`、`docs/architecture.md`、`docs/async-phases.md`、`docs/requirements.md`：同步更新当前异步化状态，把“剩余同步桥接点”收紧到 `shell` pipe 读取与共享 SQLite store 访问边界。
+**Verification**：`cargo fmt --all` 通过；`cargo test -p agent-server routes::tests::list_traces_reads_trace_page_from_store -- --nocapture` 通过；`cargo test -p agent-server routes::tests::get_trace_returns_not_found_for_missing_id -- --nocapture` 通过；`cargo test -p agent-server routes::tests::get_trace_summary_returns_aggregate_counts -- --nocapture` 通过；`cargo check` 通过。
+**Commit**：`920b8c5` `refactor: remove blocking trace route reads`
+**Next direction**：优先继续清理 `builtin-tools::shell` pipe 读取与共享 SQLite store 访问边界上的剩余同步桥接，再评估哪些 store/driver 辅助应该上移到更统一的共享层。
+
 ## 2026-03-17 Session 15
 
 **Diagnosis**：`builtin-tools::glob` / `grep` 虽然已经接入 async trait，但内部仍通过 `spawn_blocking` + `ignore::WalkBuilder` 做同步仓库遍历；这让搜索工具仍保留一段显眼的阻塞池桥接路径，也继续拖慢“全异步主链”的尾部收口。
