@@ -1,6 +1,7 @@
 use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
+use agent_prompts::tool_descriptions::apply_patch_tool_description;
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -127,11 +128,8 @@ impl Tool for ApplyPatchTool {
     }
 
     fn definition(&self) -> ToolDefinition {
-        ToolDefinition::new(
-            self.name(),
-            "Apply a patch in apply_patch format (supports Update File, Add File, Delete File, Move to)",
-        )
-        .with_parameters_schema::<ApplyPatchToolArgs>()
+        ToolDefinition::new(self.name(), apply_patch_tool_description())
+            .with_parameters_schema::<ApplyPatchToolArgs>()
     }
 
     async fn call(

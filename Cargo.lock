@@ -420,6 +420,7 @@ name = "builtin-tools"
 version = "0.1.0"
 dependencies = [
  "agent-core",
+ "agent-prompts",
  "async-trait",
  "brush-builtins",
  "brush-core",

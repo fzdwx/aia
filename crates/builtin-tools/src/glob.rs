@@ -4,6 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
+use agent_prompts::tool_descriptions::glob_tool_description;
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -44,11 +45,8 @@ impl Tool for GlobTool {
     }
 
     fn definition(&self) -> ToolDefinition {
-        ToolDefinition::new(
-            self.name(),
-            "Find files matching a glob pattern (respects .gitignore and skips .git/node_modules/target)",
-        )
-        .with_parameters_schema::<GlobToolArgs>()
+        ToolDefinition::new(self.name(), glob_tool_description())
+            .with_parameters_schema::<GlobToolArgs>()
     }
 
     async fn call(

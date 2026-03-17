@@ -3,6 +3,7 @@ use std::io::ErrorKind;
 use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
+use agent_prompts::tool_descriptions::read_tool_description;
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -27,7 +28,7 @@ impl Tool for ReadTool {
     }
 
     fn definition(&self) -> ToolDefinition {
-        ToolDefinition::new(self.name(), "Read a file with line numbers")
+        ToolDefinition::new(self.name(), read_tool_description())
             .with_parameters_schema::<ReadToolArgs>()
     }
 

@@ -8,6 +8,7 @@ use std::path::Path;
 use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
+use agent_prompts::tool_descriptions::shell_tool_description;
 use async_trait::async_trait;
 use execution::run_embedded_brush;
 use schemars::JsonSchema;
@@ -29,7 +30,7 @@ impl Tool for ShellTool {
     }
 
     fn definition(&self) -> ToolDefinition {
-        ToolDefinition::new(self.name(), "Execute a shell command with the embedded brush runtime")
+        ToolDefinition::new(self.name(), shell_tool_description())
             .with_parameters_schema::<ShellToolArgs>()
     }
 

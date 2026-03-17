@@ -35,9 +35,13 @@ pub fn build_tool_registry() -> ToolRegistry {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
     use agent_core::{Tool, ToolDefinition, ToolExecutor};
+    use agent_prompts::tool_descriptions::{
+        apply_patch_tool_description, edit_tool_description, glob_tool_description,
+        grep_tool_description, read_tool_description, shell_tool_description,
+        write_tool_description,
+    };
+    use std::collections::BTreeSet;
 
     use super::{
         ApplyPatchTool, EditTool, GlobTool, GrepTool, ReadTool, ShellTool, WriteTool,
@@ -77,10 +81,7 @@ mod tests {
         let definition = ShellTool.definition();
 
         assert_eq!(definition.name, "shell");
-        assert_eq!(
-            definition.description,
-            "Execute a shell command with the embedded brush runtime"
-        );
+        assert_eq!(definition.description, shell_tool_description());
         assert_eq!(
             definition.parameters["properties"]["command"]["description"],
             "The shell command to execute"
@@ -92,7 +93,7 @@ mod tests {
         let shell = ShellTool.definition();
         assert_eq!(
             shell.parameters,
-            ToolDefinition::new("shell", "Execute a shell command with the embedded brush runtime")
+            ToolDefinition::new("shell", shell_tool_description())
                 .with_parameters_schema::<ShellToolArgs>()
                 .parameters
         );
@@ -100,7 +101,7 @@ mod tests {
         let read = ReadTool.definition();
         assert_eq!(
             read.parameters,
-            ToolDefinition::new("read", "Read a file with line numbers")
+            ToolDefinition::new("read", read_tool_description())
                 .with_parameters_schema::<ReadToolArgs>()
                 .parameters
         );
@@ -108,7 +109,7 @@ mod tests {
         let write = WriteTool.definition();
         assert_eq!(
             write.parameters,
-            ToolDefinition::new("write", "Create or overwrite a file")
+            ToolDefinition::new("write", write_tool_description())
                 .with_parameters_schema::<WriteToolArgs>()
                 .parameters
         );
@@ -116,7 +117,7 @@ mod tests {
         let edit = EditTool.definition();
         assert_eq!(
             edit.parameters,
-            ToolDefinition::new("edit", "Replace exact text in a file (must match uniquely)")
+            ToolDefinition::new("edit", edit_tool_description())
                 .with_parameters_schema::<EditToolArgs>()
                 .parameters
         );
@@ -124,34 +125,25 @@ mod tests {
         let apply_patch = ApplyPatchTool.definition();
         assert_eq!(
             apply_patch.parameters,
-            ToolDefinition::new(
-                "apply_patch",
-                "Apply a patch in apply_patch format (supports Update File, Add File, Delete File, Move to)",
-            )
-            .with_parameters_schema::<ApplyPatchToolArgs>()
-            .parameters
+            ToolDefinition::new("apply_patch", apply_patch_tool_description())
+                .with_parameters_schema::<ApplyPatchToolArgs>()
+                .parameters
         );
 
         let glob = GlobTool.definition();
         assert_eq!(
             glob.parameters,
-            ToolDefinition::new(
-                "glob",
-                "Find files matching a glob pattern (respects .gitignore and skips .git/node_modules/target)",
-            )
-            .with_parameters_schema::<GlobToolArgs>()
-            .parameters
+            ToolDefinition::new("glob", glob_tool_description())
+                .with_parameters_schema::<GlobToolArgs>()
+                .parameters
         );
 
         let grep = GrepTool.definition();
         assert_eq!(
             grep.parameters,
-            ToolDefinition::new(
-                "grep",
-                "Search file contents with regex (respects .gitignore and skips .git/node_modules/target)",
-            )
-            .with_parameters_schema::<GrepToolArgs>()
-            .parameters
+            ToolDefinition::new("grep", grep_tool_description())
+                .with_parameters_schema::<GrepToolArgs>()
+                .parameters
         );
     }
 }

@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 agent-core = { path = "../agent-core" }
+agent-prompts = { path = "../agent-prompts" }
 async-trait = "0.1"
 brush-builtins = "0.1"
 brush-core = "0.4"

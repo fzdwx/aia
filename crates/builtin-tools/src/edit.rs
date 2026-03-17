@@ -1,6 +1,7 @@
 use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
+use agent_prompts::tool_descriptions::edit_tool_description;
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -25,7 +26,7 @@ impl Tool for EditTool {
     }
 
     fn definition(&self) -> ToolDefinition {
-        ToolDefinition::new(self.name(), "Replace exact text in a file (must match uniquely)")
+        ToolDefinition::new(self.name(), edit_tool_description())
             .with_parameters_schema::<EditToolArgs>()
     }
 

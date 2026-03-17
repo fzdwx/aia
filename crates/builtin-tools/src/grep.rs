@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
+use agent_prompts::tool_descriptions::grep_tool_description;
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -45,11 +46,8 @@ impl Tool for GrepTool {
     }
 
     fn definition(&self) -> ToolDefinition {
-        ToolDefinition::new(
-            self.name(),
-            "Search file contents with regex (respects .gitignore and skips .git/node_modules/target)",
-        )
-        .with_parameters_schema::<GrepToolArgs>()
+        ToolDefinition::new(self.name(), grep_tool_description())
+            .with_parameters_schema::<GrepToolArgs>()
     }
 
     async fn call(
