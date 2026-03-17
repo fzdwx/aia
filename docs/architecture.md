@@ -194,6 +194,7 @@ README 里真正难的是这些能力：
 - `runtime_worker::projection` 现承接 current-turn 共享投影语义：live stream 更新与 tape→snapshot 重建共用对象归一化、tool block 构造与 `TurnLifecycle` / `TurnBlock` → `CurrentTurn*` 映射 helper，避免 `session_manager` 与 `runtime_worker` 分别维护两套 `CurrentTurnBlock` / `CurrentToolOutput` 投影逻辑
 - provider 当前信息、history 与 current turn 通过共享快照读取，避免长时间 turn 把所有路由一起锁住
 - 全局 `broadcast::channel` 向所有 SSE 客户端推送事件
+- SSE 在线分发层显式暴露“需要重同步”语义：当 `broadcast` 接收端因慢客户端而 `Lagged` 时，`/api/events` 不再静默吞掉错误，而是发出 `sync_required` 事件；Web 侧据此补拉 session 列表，并重拉当前 session 的历史、当前 turn 与上下文压力，把实时分发层与持久化恢复边界连接起来
 - 暴露 provider、session、turn、cancel、handoff、trace 等 HTTP API
 - `POST /api/turn` 仍保持 fire-and-forget，但真正的 turn 执行、事件回收与 session 条目追加都在 worker 内串行完成
 - turn 执行与 session manager 已切到原生 Tokio async task：`apps/agent-server` 不再依赖 `tokio::spawn_blocking`、`std::thread::Builder`、`LocalSet` 或 `spawn_local` 承载 turn 主链；worker 直接 await `AgentRuntime::handle_turn_streaming(...)`，压缩路径也直接 await `AgentRuntime::auto_compress_now()`，运行中 `session/info` 通过 slot 内的 `ContextStats` 快照读取 live stats，turn 结束后仍沿用显式 runtime ownership 归还路径

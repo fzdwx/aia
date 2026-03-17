@@ -1,5 +1,18 @@
 # 演进日志
 
+## 2026-03-17 Session 39
+
+**Diagnosis**：`apps/agent-server` 的 `/api/events` 目前把 `tokio::broadcast` 的 `Lagged` 错误直接吞掉；一旦 SSE 客户端落后，事件会静默丢失，Web 本地 `streamingTurn` 与真实 session tape / snapshot 可能无声漂移。
+**Decision**：沿用“实时分发只做桥接、真实状态以持久化/快照恢复为准”的边界：server 在检测到 `Lagged` 时显式发出 `sync_required` 事件，而 `apps/web` 收到后立即补拉 session 列表，并重拉当前 session 的 `history/current-turn/info`，不再假装在线事件流是可靠日志。
+**Changes**：
+- `apps/agent-server/src/routes/turn.rs`、`apps/agent-server/src/sse.rs`：为 SSE 桥接新增 `sync_required` 事件；`BroadcastStream` 遇到 `Lagged` 不再静默忽略，而是转成显式重同步信号，并补了对应 Rust 回归测试。
+- `apps/web/src/lib/types.ts`、`apps/web/src/lib/api.ts`：补齐前端 `sync_required` SSE 事件类型与监听注册。
+- `apps/web/src/stores/chat-store.ts`、`apps/web/src/stores/chat-store.test.ts`：chat store 收到 `sync_required` 后会先补拉 session 列表，再重用既有 `hydrateSession(...)` 流程重拉当前 session 的历史、当前 turn 与上下文压力，并新增回归测试覆盖这一恢复路径。
+- `docs/status.md`、`docs/architecture.md`：同步记录 SSE 落后客户端不再静默丢事件，而会显式触发重同步。
+**Verification**：`cargo clean` 后 `cargo check` 通过；`cargo test -p agent-server sync_required` 通过（2 passed）；`vp install` 通过；`vp exec tsc --noEmit` 通过；`vp test src/stores/chat-store.test.ts` 的 Node 子用例全绿（12 passed），但 Vite+ 单文件执行仍额外报已有的 `No test suite found` 噪音；`vp fmt` / `vp check` 受现有 `apps/web/vite.config.ts` 配置加载错误阻塞，未在本轮修复。
+**Commit**：未提交（当前会话未执行 `git commit`）；建议提交信息：`fix: resync lagged sse clients`
+**Next direction**：优先继续把 `sync_required` 的客户端恢复从“重拉当前 session”推进到更细粒度的 session/trace 双通道恢复，或进一步补 `/api/events` 的 keep-alive / 断连测试，验证桥接层在长连接下的真实鲁棒性。
+
 ## 2026-03-17 Session 38
 
 **Diagnosis**：内部工具协议已经稳定，但 `agent-core` 请求模型、`openai-adapter` 的 OpenAI 请求映射与 `agent-runtime` 的工具执行主链之间还没有真正把“模型可并行发起独立工具调用”闭环打通；即使模型一次返回多个互不依赖的只读工具调用，runtime 仍会全部串行执行。
