@@ -194,12 +194,12 @@
 - 相关 mock / 测试实现已完成迁移，当前 `cargo check` 与受影响 crate `cargo test` 已通过
 - `openai-adapter` 已从 `reqwest::blocking` 切到 async `reqwest`
 - Responses / Chat Completions 的 SSE 读取已改为 async chunk streaming，并继续保留 abort 轮询与取消语义
-- `builtin-tools::shell` 已把输出聚合与 abort 轮询改为 async 事件泵，并移除自建 thread + current-thread runtime；当前 `brush` 执行直接挂在 Tokio task 上，仅 pipe 读取仍暂通过 Tokio blocking 池桥接同步 I/O
+- `builtin-tools::shell` 已把输出聚合、abort 轮询与输出捕获都改为 async 事件泵，并移除自建 thread + current-thread runtime；当前 `brush` 执行直接挂在 Tokio task 上，stdout/stderr 通过异步 tail capture 文件收口，不再依赖 `spawn_blocking`
 - `builtin-tools::read` / `write` / `edit` 已切到 `tokio::fs`，`glob` / `grep` 也已改为共享的 async `.gitignore` 感知仓库遍历 + async 文件读取，不再依赖 `spawn_blocking` / `ignore::WalkBuilder` 扫描大仓库
 - `apps/agent-server` 的 session manager 与 turn 执行都已切到原生 Tokio async task：不再使用 `tokio::spawn_blocking`、`std::thread::Builder`、`LocalSet` 或 `spawn_local` 承载 turn 主链；运行中 `session/info` 也改为直接读取内存中的 `ContextStats` 快照
-- `apps/agent-server` 的 trace 查询路由也已去掉 per-request `spawn_blocking` 包装；当前剩余尾部主要是 `shell` pipe 读取与共享 SQLite store 的同步访问边界
+- `apps/agent-server` 的 trace 查询路由也已去掉 per-request `spawn_blocking` 包装；当前剩余尾部主要是共享 SQLite store 的同步访问边界
 
 因此，下一步最高优先级变为：
 
-1. 继续完成 Phase 4 的剩余收口：进一步压缩 `apps/agent-server` 内部的 runtime ownership / return-path 复杂度，并继续收口 `shell` pipe 读取与共享 SQLite store 边界上的同步访问
+1. 继续完成 Phase 4 的剩余收口：进一步压缩 `apps/agent-server` 内部的 runtime ownership / return-path 复杂度，并继续收口共享 SQLite store 边界上的同步访问
 2. 在 async 主链与工具边界进一步稳定后，再优先推进统一工具协议映射与 MCP 接入，而不是继续堆厚客户端界面

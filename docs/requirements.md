@@ -60,7 +60,7 @@
 - `apps/web` 已建立为实际主工作台，而不是仅布局骨架
 - Web 客户端当前已接入 provider 管理、session 列表 / 历史 / 当前轮次恢复、流式消息展示、trace 诊断视图
 - 内建基础编码工具名已收口为 `shell`、`read`、`write`、`edit`、`glob`、`grep`，其中 `shell` 当前以内嵌 `brush` 库执行
-- `builtin-tools` 的 `shell` 已把输出聚合与 abort 轮询改为 async 事件泵，长命令等待不再依赖同步 `recv_timeout` 循环
+- `builtin-tools` 的 `shell` 已把输出聚合、abort 轮询与输出捕获改为 async 事件泵，长命令等待不再依赖同步 `recv_timeout` 循环，也不再依赖 `spawn_blocking` pipe reader 桥接
 - `builtin-tools` 的 `read` / `write` / `edit` 已切到 `tokio::fs`，`glob` / `grep` 也已改为共享的 async `.gitignore` 感知仓库遍历 + async 文件读取，不再依赖 `spawn_blocking` / `ignore::WalkBuilder`
 - 运行时事件已统一通过共享事件模型暴露，并支持多个订阅者独立消费
 - 默认上下文已改为从最新锚点之后重建，而不是无条件带上全量历史

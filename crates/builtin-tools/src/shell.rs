@@ -1,6 +1,7 @@
-use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+use std::{fs::OpenOptions, io::SeekFrom};
 
 use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta,
@@ -10,9 +11,11 @@ use async_trait::async_trait;
 use brush_builtins::{BuiltinSet, ShellBuilderExt};
 use brush_core::openfiles::OpenFiles;
 use brush_core::traps::TrapSignal;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 const EMBEDDED_SHELL_NAME: &str = "brush";
 const SHELL_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(25);
+static NEXT_CAPTURE_FILE_ID: AtomicU64 = AtomicU64::new(1);
 
 pub struct ShellTool;
 
@@ -79,6 +82,11 @@ struct EmbeddedShellExecution {
     exit_code: i32,
 }
 
+struct OutputCapture {
+    path: PathBuf,
+    writer: std::fs::File,
+}
+
 enum ShellEvent {
     Output(ToolOutputDelta),
     StreamClosed(ToolOutputStream),
@@ -91,32 +99,58 @@ enum ShellControlMessage {
     Abort,
 }
 
+struct SignalOnDrop(Option<tokio::sync::watch::Sender<bool>>);
+
+impl SignalOnDrop {
+    fn new(sender: tokio::sync::watch::Sender<bool>) -> Self {
+        Self(Some(sender))
+    }
+}
+
+impl Drop for SignalOnDrop {
+    fn drop(&mut self) {
+        if let Some(sender) = self.0.take() {
+            let _ = sender.send(true);
+        }
+    }
+}
+
 async fn run_embedded_brush(
     command: &str,
     cwd: &Path,
     abort: &agent_core::AbortSignal,
     output: &mut (dyn FnMut(ToolOutputDelta) + Send),
 ) -> Result<EmbeddedShellExecution, CoreError> {
-    let (stdout_reader, stdout_writer) = std::io::pipe()
-        .map_err(|e| CoreError::new(format!("failed to create stdout pipe: {e}")))?;
-    let (stderr_reader, stderr_writer) = std::io::pipe()
-        .map_err(|e| CoreError::new(format!("failed to create stderr pipe: {e}")))?;
+    let stdout_capture = create_output_capture(ToolOutputStream::Stdout)?;
+    let stderr_capture = create_output_capture(ToolOutputStream::Stderr)?;
+    let stdout_path = stdout_capture.path.clone();
+    let stderr_path = stderr_capture.path.clone();
+    let (capture_done_tx, capture_done_rx) = tokio::sync::watch::channel(false);
 
     let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
-    let stdout_handle =
-        spawn_pipe_reader(stdout_reader, ToolOutputStream::Stdout, event_tx.clone());
-    let stderr_handle =
-        spawn_pipe_reader(stderr_reader, ToolOutputStream::Stderr, event_tx.clone());
+    let stdout_handle = spawn_capture_reader(
+        stdout_capture.path.clone(),
+        ToolOutputStream::Stdout,
+        event_tx.clone(),
+        capture_done_rx.clone(),
+    );
+    let stderr_handle = spawn_capture_reader(
+        stderr_capture.path.clone(),
+        ToolOutputStream::Stderr,
+        event_tx.clone(),
+        capture_done_rx,
+    );
 
     let shell_command = command.to_owned();
     let shell_cwd = cwd.to_path_buf();
     let shell_tx = event_tx.clone();
     let shell_handle = tokio::spawn(async move {
+        let _capture_done_signal = SignalOnDrop::new(capture_done_tx);
         let result = run_embedded_brush_in_task(
             shell_command,
             shell_cwd,
-            stdout_writer,
-            stderr_writer,
+            stdout_capture.writer,
+            stderr_capture.writer,
             shell_tx.clone(),
         )
         .await;
@@ -166,6 +200,8 @@ async fn run_embedded_brush(
     stdout_handle.await.map_err(|_| CoreError::new("stdout capture task panicked"))?;
     stderr_handle.await.map_err(|_| CoreError::new("stderr capture task panicked"))?;
     shell_handle.await.map_err(|_| CoreError::new("embedded shell task panicked"))?;
+    cleanup_capture_file(&stdout_path);
+    cleanup_capture_file(&stderr_path);
 
     let exit_code =
         finished.unwrap_or_else(|| Err(CoreError::new("embedded shell exited without status")))?;
@@ -176,8 +212,8 @@ async fn run_embedded_brush(
 async fn run_embedded_brush_in_task(
     command: String,
     cwd: PathBuf,
-    stdout_writer: std::io::PipeWriter,
-    stderr_writer: std::io::PipeWriter,
+    stdout_writer: std::fs::File,
+    stderr_writer: std::fs::File,
     shell_tx: tokio::sync::mpsc::UnboundedSender<ShellEvent>,
 ) -> Result<i32, CoreError> {
     let mut shell = brush_core::Shell::builder()
@@ -227,32 +263,110 @@ async fn run_embedded_brush_in_task(
     Ok(i32::from(shell.last_result()))
 }
 
-fn spawn_pipe_reader(
-    mut reader: std::io::PipeReader,
+fn spawn_capture_reader(
+    path: PathBuf,
     stream: ToolOutputStream,
     sender: tokio::sync::mpsc::UnboundedSender<ShellEvent>,
+    mut done: tokio::sync::watch::Receiver<bool>,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::task::spawn_blocking(move || {
-        let mut buffer = [0_u8; 4096];
+    tokio::spawn(async move {
+        let mut offset = 0_u64;
 
         loop {
-            match reader.read(&mut buffer) {
-                Ok(0) => break,
-                Ok(size) => {
-                    let text = String::from_utf8_lossy(&buffer[..size]).into_owned();
-                    if sender
-                        .send(ShellEvent::Output(ToolOutputDelta { stream: stream.clone(), text }))
-                        .is_err()
-                    {
-                        return;
+            let mut read_any = false;
+            match tokio::fs::File::open(&path).await {
+                Ok(mut reader) => {
+                    if reader.seek(SeekFrom::Start(offset)).await.is_err() {
+                        break;
+                    }
+
+                    let mut buffer = Vec::new();
+                    match reader.read_to_end(&mut buffer).await {
+                        Ok(size) if size > 0 => {
+                            let delta_len = match u64::try_from(size) {
+                                Ok(size) => size,
+                                Err(_) => break,
+                            };
+                            offset = offset.saturating_add(delta_len);
+                            read_any = true;
+
+                            let text = String::from_utf8_lossy(&buffer).into_owned();
+                            if sender
+                                .send(ShellEvent::Output(ToolOutputDelta {
+                                    stream: stream.clone(),
+                                    text,
+                                }))
+                                .is_err()
+                            {
+                                return;
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(_) => break,
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    if *done.borrow() {
+                        break;
                     }
                 }
                 Err(_) => break,
+            }
+
+            if *done.borrow() && !read_any {
+                break;
+            }
+
+            tokio::select! {
+                result = done.changed() => {
+                    if result.is_err() && *done.borrow() {
+                        break;
+                    }
+                }
+                _ = tokio::time::sleep(SHELL_EVENT_POLL_INTERVAL) => {}
             }
         }
 
         let _ = sender.send(ShellEvent::StreamClosed(stream));
     })
+}
+
+fn create_output_capture(stream: ToolOutputStream) -> Result<OutputCapture, CoreError> {
+    let stream_name = stream_label(&stream);
+    for _ in 0..32 {
+        let path = create_capture_file_path(stream_name);
+        match OpenOptions::new().create_new(true).write(true).open(&path) {
+            Ok(writer) => {
+                return Ok(OutputCapture { path, writer });
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(CoreError::new(format!(
+                    "failed to create {stream_name} capture file {}: {error}",
+                    path.display()
+                )));
+            }
+        }
+    }
+
+    Err(CoreError::new(format!("failed to allocate unique {stream_name} capture file")))
+}
+
+fn create_capture_file_path(stream_name: &str) -> PathBuf {
+    let file_id = NEXT_CAPTURE_FILE_ID.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir()
+        .join(format!("aia-shell-{stream_name}-{}-{file_id}.log", std::process::id()))
+}
+
+fn stream_label(stream: &ToolOutputStream) -> &'static str {
+    match stream {
+        ToolOutputStream::Stdout => "stdout",
+        ToolOutputStream::Stderr => "stderr",
+    }
+}
+
+fn cleanup_capture_file(path: &Path) {
+    let _ = std::fs::remove_file(path);
 }
 
 #[cfg(test)]
