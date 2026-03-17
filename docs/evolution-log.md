@@ -1,5 +1,120 @@
 # 演进日志
 
+## 2026-03-17 Session 25
+
+**Diagnosis**：`crates/openai-adapter/src/responses.rs` 仍把配置、请求构造、HTTP helper、响应体解析、流式 SSE 状态机和 `LanguageModel` 实现全部塞在一个 400+ 行单文件里，已经成为 provider 边缘层当前最明显的大文件热点。
+**Decision**：保持 Responses 对外配置、请求/响应语义和 async 行为不变，只把实现按“入口模型 / 请求构造 / 响应解析 / 流式状态 / 客户端实现”拆成 `responses::{mod,request,parsing,streaming,client}`；同时顺手用共享 `validate_request_model` 收口同步/流式路径里的重复模型校验。
+**Changes**：
+- `crates/openai-adapter/src/responses/mod.rs`：收缩为薄入口，仅保留 `OpenAiResponsesConfig`、`OpenAiResponsesModel` 和基础构造。
+- `crates/openai-adapter/src/responses/request.rs`：抽出请求体构造、HTTP client/user-agent helper、usage/stop reason 映射与模型标识校验。
+- `crates/openai-adapter/src/responses/parsing.rs`：抽出非流式响应体解析与 tool call 组装。
+- `crates/openai-adapter/src/responses/streaming.rs`：抽出 Responses SSE 流式状态累积、事件处理和最终 completion 组装。
+- `crates/openai-adapter/src/responses/client.rs`：抽出 `LanguageModel` 实现，复用新的请求/解析/流式辅助模块。
+- `docs/status.md`、`docs/architecture.md`：同步记录 `openai-adapter::responses` 已完成模块化，并把下一批热点顺延到 `agent-runtime::runtime::tool_calls`、`openai-adapter::chat_completions` 与共享 SQLite store 访问边界。
+**Verification**：`cargo fmt --all` 通过；`cargo check -p openai-adapter` 通过；`cargo test -p openai-adapter -- --nocapture` 通过（29 passed，需脱离沙箱以允许本地测试 listener 绑定）；`cargo check` 通过。
+**Commit**：未提交（当前 CLI 运行约束禁止自动 `git commit`）；建议提交信息：`refactor: split responses adapter modules`
+**Next direction**：优先继续处理 `crates/agent-runtime/src/runtime/tool_calls.rs`；如果想先把 OpenAI 两条协议栈保持对称，也可以接着拆 `crates/openai-adapter/src/chat_completions.rs`。
+
+## 2026-03-17 Session 24
+
+**Diagnosis**：`crates/builtin-tools/src/shell.rs` 虽然已经完成 async 化，但 `ShellTool` 契约、capture 文件管理、事件泵、embedded brush 执行主流程与测试仍混在一个 400+ 行单文件里，成为内建工具层当前最明显的大文件热点。
+**Decision**：保持 `shell` 的对外工具名、返回结构和 async 执行语义不变，只把实现按“工具契约 / capture 与事件 / 执行主流程 / 测试”拆成 `shell::{capture,execution,tests}`；这样能继续收口大文件而不引入第二套机制。
+**Changes**：
+- `crates/builtin-tools/src/shell.rs`：收缩为薄入口，仅保留 `ShellTool` 契约与结果组装。
+- `crates/builtin-tools/src/shell/capture.rs`：抽出 capture 文件分配、tail reader、事件类型与 drop 信号逻辑。
+- `crates/builtin-tools/src/shell/execution.rs`：抽出 embedded brush 执行主流程、abort 控制和 stdout/stderr 聚合。
+- `crates/builtin-tools/src/shell/tests.rs`：独立承接 shell 回归测试。
+- `docs/status.md`、`docs/architecture.md`：同步记录 `builtin-tools::shell` 已完成模块化，并把下一批热点顺延到 `openai-adapter` 与 `agent-runtime::runtime::tool_calls`。
+**Verification**：`cargo fmt --all` 通过；`cargo check -p builtin-tools` 通过；`cargo test -p builtin-tools shell -- --nocapture` 通过（4 passed）；`cargo check` 通过。
+**Commit**：未提交（当前 CLI 运行约束禁止自动 `git commit`）；建议提交信息：`refactor: split shell tool modules`
+**Next direction**：优先继续处理 `crates/openai-adapter/src/responses.rs` 或 `crates/agent-runtime/src/runtime/tool_calls.rs`；如果希望先把 OpenAI 边缘层整形成对，也可以接着拆 `crates/openai-adapter/src/chat_completions.rs`。
+
+## 2026-03-17 Session 23
+
+**Diagnosis**：`crates/agent-runtime/src/runtime/turn.rs` 仍把 turn 入口、主循环、completion segment 持久化、streaming partial flush 与 success/failure 上下文全塞在 500+ 行单文件里，已经成为共享运行时层当前最明显的大文件与重复 helper 热点。
+**Decision**：保持对外 turn API 和运行时行为不变，只把 `turn` 按“驱动主循环 / segment 处理 / 共享类型”拆成 `turn::{driver,segments,types}`，并顺手用 `TurnBuffers::failure_context` 收口重复的失败上下文拼装；这样能在不冒险改语义的前提下继续把共享层边界理顺。
+**Changes**：
+- `crates/agent-runtime/src/runtime/turn.rs`：收缩为薄入口，统一声明并 re-export `turn` 子模块。
+- `crates/agent-runtime/src/runtime/turn/driver.rs`：抽出 turn 公开入口、主循环与自动压缩前后置逻辑。
+- `crates/agent-runtime/src/runtime/turn/segments.rs`：抽出 stop reason 校验、completion segment 落盘与 streaming partial flush。
+- `crates/agent-runtime/src/runtime/turn/types.rs`：抽出 `TurnBuffers`、success/failure context，并新增共享 `failure_context` / `into_success_context` helper 减少重复样板。
+- `docs/status.md`、`docs/architecture.md`：同步记录 `agent-runtime::runtime::turn` 已完成模块化，以及下一批热点转向 `builtin-tools::shell`、`openai-adapter::responses`、`agent-runtime::runtime::tool_calls`。
+**Verification**：`cargo fmt --all` 通过；`cargo check -p agent-runtime` 通过；`cargo test -p agent-runtime --lib -- --nocapture` 通过（61 passed）；`cargo check` 通过。
+**Commit**：未提交（当前 CLI 运行约束禁止自动 `git commit`）；建议提交信息：`refactor: split runtime turn modules`
+**Next direction**：优先继续处理 `crates/builtin-tools/src/shell.rs` 或 `crates/openai-adapter/src/responses.rs` 的大文件与重复辅助逻辑；如果想继续沿 runtime 主链收口，也可以转向 `crates/agent-runtime/src/runtime/tool_calls.rs`。
+
+## 2026-03-17 Session 18
+
+**Diagnosis**：`apps/agent-server/src/routes.rs` 已涨到 819 行，provider/session/trace/turn handler、session 解析、错误响应与测试都堆在一个文件里，成为当前最明显的重复逻辑与 app 壳结构热点。
+**Decision**：先不冒险直接拆 `session_manager` 主编排，而是把路由控制面按领域切成 `routes::{provider,session,trace,turn,common}`，并把重复的 session 解析、`json/error/ok` 响应 helper 收口到共享模块；这样能先降低 app 壳耦合和文件体积，再为后续继续拆 `session_manager`、`model`、`agent-store::trace` 铺路。
+**Changes**：
+- `apps/agent-server/src/routes.rs`：收缩为薄 façade，只 re-export 领域路由模块。
+- `apps/agent-server/src/routes/common.rs`：新增共享 JSON/error/ok/session-resolve helper，去掉重复逻辑。
+- `apps/agent-server/src/routes/provider.rs`、`apps/agent-server/src/routes/session.rs`、`apps/agent-server/src/routes/trace.rs`、`apps/agent-server/src/routes/turn.rs`：按领域拆分 handler 与 DTO。
+- `apps/agent-server/src/routes/tests.rs`：保留并适配既有路由回归测试。
+- `docs/status.md`、`docs/architecture.md`：同步记录 agent-server 路由已完成模块化以及下一批大文件热点。
+**Verification**：`cargo fmt --all` 通过；`cargo check` 通过；`cargo test -p agent-server routes::tests -- --nocapture` 通过。
+**Commit**：未提交（当前 CLI 运行约束禁止自动 `git commit`）；建议提交信息：`refactor: split agent-server routes by domain`
+**Next direction**：继续按“先收口控制面大文件，再处理共享层抽取”的顺序，优先评估 `apps/agent-server/src/session_manager.rs` 与 `crates/agent-store/src/trace.rs` 的模块切分机会。
+
+## 2026-03-17 Session 19
+
+**Diagnosis**：`apps/agent-server/src/session_manager.rs` 仍然把 command handle 模板、slot/command 类型、current-turn 流式投影、tool trace 持久化、测试与主 session loop 全塞在 1545 行单文件里，是当前 app 壳里最大的结构热点。
+**Decision**：保持 session loop、slot 生命周期和 provider/runtime 同步逻辑不动，先把重复命令发送模板和几个天然独立的辅助块拆成 `session_manager::{handle,types,current_turn,tool_trace,tests}` 子模块；这样既能显著缩小主文件，又不会冒险改动运行时行为。
+**Changes**：
+- `apps/agent-server/src/session_manager.rs`：收缩为主编排入口，保留 session loop、slot 生命周期、turn worker 和 provider/runtime 同步主流程。
+- `apps/agent-server/src/session_manager/handle.rs`：抽出 `SessionManagerHandle`，并用泛型 `request/try_request` helper 消除重复的 oneshot 发送模板。
+- `apps/agent-server/src/session_manager/types.rs`：抽出 `SessionSlot`、`SessionCommand`、`RuntimeReturn`、`SessionManagerConfig` 与 poisoned-lock helper。
+- `apps/agent-server/src/session_manager/current_turn.rs`：抽出 current-turn 状态切换与流式 block 投影逻辑，并收口重复的 tool block 查找/构造。
+- `apps/agent-server/src/session_manager/tool_trace.rs`、`apps/agent-server/src/session_manager/tests.rs`：分别承接 tool trace 持久化与 session manager 测试。
+- `docs/status.md`、`docs/architecture.md`：同步记录 `session_manager` 已完成模块化，下一批热点转向 `model` 与 `agent-store::trace`。
+**Verification**：`cargo fmt --all` 通过；`cargo check` 通过；`cargo test -p agent-server session_manager -- --nocapture` 通过。
+**Commit**：未提交（当前 CLI 运行约束禁止自动 `git commit`）；建议提交信息：`refactor: split session manager modules`
+**Next direction**：继续按同样策略处理 `apps/agent-server/src/model.rs` 的 provider/trace 混合职责，或 `crates/agent-store/src/trace.rs` 的 schema/query/mapping 混合职责。
+
+## 2026-03-17 Session 20
+
+**Diagnosis**：`apps/agent-server/src/model.rs` 仍把 bootstrap mock、trace 事件收集、trace 摘要 helper、provider 选择与完整测试都塞在 914 行单文件里，属于 app 壳里第二个明显的大文件热点。
+**Decision**：延续前两轮的低风险做法：不改变 `ServerModel` 的 provider 选择和 trace 落盘主流程，只把 bootstrap mock、trace helper 与测试拆成 `model::{bootstrap,trace,tests}` 子模块，先把文件切薄、边界拉清，再评估后续是否值得进一步合并 OpenAI provider 分支重复逻辑。
+**Changes**：
+- `apps/agent-server/src/model.rs`：收缩为 `ServerModel`、`ServerModelError`、provider 选择和 trace 持久化主流程。
+- `apps/agent-server/src/model/bootstrap.rs`：抽出 bootstrap mock model。
+- `apps/agent-server/src/model/trace.rs`：抽出 trace 事件收集、摘要构造、状态码解析、时间/preview helper。
+- `apps/agent-server/src/model/tests.rs`：独立承接模型回归测试。
+- `docs/status.md`、`docs/architecture.md`：同步记录 `model` 已完成模块化，下一批热点转向 `crates/agent-store/src/trace.rs`。
+**Verification**：`cargo fmt --all` 通过；`cargo check` 通过；`cargo test -p agent-server model -- --nocapture` 通过（需要脱离沙箱运行以绑定本地测试 listener）。
+**Commit**：未提交（当前 CLI 运行约束禁止自动 `git commit`）；建议提交信息：`refactor: split server model modules`
+**Next direction**：优先处理 `crates/agent-store/src/trace.rs`，把 schema 初始化、列表/详情查询和 JSON/preview 映射 helper 继续按职责拆开。
+
+## 2026-03-17 Session 21
+
+**Diagnosis**：`crates/agent-store/src/trace.rs` 仍把 trace 类型、SQLite schema 初始化、查询/写入实现、row 映射、JSON 解码与测试全塞在 896 行单文件里，是当前共享存储层最明显的大文件与重复 helper 热点。
+**Decision**：继续沿用“先结构收口、再评估更深抽象”的低风险做法：根文件只保留稳定公共类型与 trait，把 schema 初始化、store 实现、row 映射/JSON 解码与测试分别拆到 `trace::{schema,store,mapping,tests}`，顺手用共享 `json_column` helper 消掉重复的 JSON 列反序列化模板。
+**Changes**：
+- `crates/agent-store/src/trace.rs`：收缩为公共 trace 类型与 `LlmTraceStore` trait 薄入口。
+- `crates/agent-store/src/trace/schema.rs`：抽出 SQLite trace schema 初始化与缺列补齐逻辑。
+- `crates/agent-store/src/trace/store.rs`：抽出 `LlmTraceStore for AiaStore` 的查询/写入实现与 duration 聚合。
+- `crates/agent-store/src/trace/mapping.rs`：抽出 `LlmTraceRecord` / `LlmTraceListItem` row 映射、用户消息提取与共享 `json_column` helper。
+- `crates/agent-store/src/trace/tests.rs`：独立承接 trace store 回归测试。
+- `docs/status.md`、`docs/architecture.md`：同步记录 `agent-store::trace` 已完成模块化，下一批热点转向 `runtime_worker`、`agent-runtime::runtime::turn` 与 `builtin-tools::shell`。
+**Verification**：`cargo fmt --all` 通过；`cargo check -p agent-store` 通过；`cargo test -p agent-store -- --nocapture` 通过；`cargo check` 通过。
+**Commit**：未提交（当前 CLI 运行约束禁止自动 `git commit`）；建议提交信息：`refactor: split trace store modules`
+**Next direction**：优先处理 `apps/agent-server/src/runtime_worker.rs`，评估把历史重建、decode 告警和快照组装继续拆成子模块，或者转而收口 `builtin-tools::shell` 内的状态/事件泵辅助逻辑。
+
+## 2026-03-17 Session 22
+
+**Diagnosis**：`apps/agent-server/src/runtime_worker.rs` 虽然全是共享辅助逻辑，但仍把当前 turn 快照类型、provider/runtime worker 错误类型、tape 快照重建、legacy decode helper 与测试塞在 629 行单文件里，继续拖慢 app 壳边界的可读性。
+**Decision**：保持外部接口不变，只把 `runtime_worker` 按“稳定类型 / 快照重建 / 测试”三块拆成 `runtime_worker::{types,snapshots,tests}`，根文件只保留 re-export façade；这样不碰行为，却能继续把 app 壳内部模块边界理顺。
+**Changes**：
+- `apps/agent-server/src/runtime_worker.rs`：收缩为薄 façade，统一 re-export 对外稳定类型与 helper。
+- `apps/agent-server/src/runtime_worker/types.rs`：抽出 current-turn/provider/runtime worker 的共享类型。
+- `apps/agent-server/src/runtime_worker/snapshots.rs`：抽出 tape 快照重建、legacy `turn_record` / invalid `usage` 解码与 `TurnHistoryBuilder`。
+- `apps/agent-server/src/runtime_worker/tests.rs`：独立承接 runtime worker 快照回归测试。
+- `docs/status.md`、`docs/architecture.md`：同步记录 `runtime_worker` 已完成模块化，下一批热点转向 `agent-runtime::runtime::turn`、`builtin-tools::shell` 与 `openai-adapter::responses`。
+**Verification**：`cargo fmt --all` 通过；`cargo check -p agent-server` 通过；`cargo test -p agent-server runtime_worker -- --nocapture` 通过；`cargo check` 通过。
+**Commit**：未提交（当前 CLI 运行约束禁止自动 `git commit`）；建议提交信息：`refactor: split runtime worker modules`
+**Next direction**：优先处理 `crates/agent-runtime/src/runtime/turn.rs`，评估把 turn 主流程、收尾/取消与 trace/tool bookkeeping 继续拆开；如果想优先继续 app 壳之外的低风险热点，也可以先收口 `crates/builtin-tools/src/shell.rs` 的状态/事件泵辅助逻辑。
+
 ## 2026-03-17 Session 17
 
 **Diagnosis**：虽然 `shell` 已不再自建线程/runtime，但 stdout/stderr 读取仍通过 `std::io::PipeReader` + `tokio::spawn_blocking` 桥接；在搜索工具和 trace 路由都已完成原生 async 收口后，这成了 `builtin-tools` 主路径上最后一个显眼的显式 blocking 池依赖。

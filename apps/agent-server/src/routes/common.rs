@@ -1,0 +1,68 @@
+use agent_store::LlmTraceStoreError;
+use axum::{Json, http::StatusCode};
+use serde::Serialize;
+use serde_json::{Value, json};
+
+use crate::{session_manager::RuntimeWorkerError, state::AppState};
+
+pub(crate) type JsonResponse = (StatusCode, Json<Value>);
+
+pub(crate) fn error_response(status: StatusCode, message: impl Into<String>) -> JsonResponse {
+    (status, Json(json!({ "error": message.into() })))
+}
+
+pub(crate) fn ok_response() -> JsonResponse {
+    (StatusCode::OK, Json(json!({ "ok": true })))
+}
+
+pub(crate) fn runtime_worker_error_response(error: RuntimeWorkerError) -> JsonResponse {
+    error_response(error.status, error.message)
+}
+
+pub(crate) fn trace_store_error_response(error: LlmTraceStoreError) -> JsonResponse {
+    error_response(StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
+}
+
+pub(crate) fn json_response<T: Serialize>(status: StatusCode, payload: T) -> JsonResponse {
+    match serde_json::to_value(payload) {
+        Ok(value) => (status, Json(value)),
+        Err(error) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("response serialization failed: {error}"),
+        ),
+    }
+}
+
+pub(crate) fn session_resolution_error_response(error: RuntimeWorkerError) -> JsonResponse {
+    runtime_worker_error_response(error)
+}
+
+pub(crate) fn no_session_available_response() -> JsonResponse {
+    error_response(StatusCode::BAD_REQUEST, "no session available")
+}
+
+pub(crate) fn require_session_id(
+    state: &AppState,
+    session_id: Option<String>,
+) -> Result<String, JsonResponse> {
+    match resolve_session_id(state, session_id) {
+        Ok(Some(session_id)) => Ok(session_id),
+        Ok(None) => Err(no_session_available_response()),
+        Err(error) => Err(session_resolution_error_response(error)),
+    }
+}
+
+pub(crate) fn resolve_session_id(
+    state: &AppState,
+    session_id: Option<String>,
+) -> Result<Option<String>, RuntimeWorkerError> {
+    if let Some(id) = session_id {
+        return Ok(Some(id));
+    }
+
+    state
+        .store
+        .list_sessions()
+        .map(|sessions| sessions.first().map(|session| session.id.clone()))
+        .map_err(|error| RuntimeWorkerError::internal(format!("session lookup failed: {error}")))
+}

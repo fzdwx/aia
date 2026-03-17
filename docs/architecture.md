@@ -102,10 +102,13 @@ README 里真正难的是这些能力：
 - stop/cancel 已贯穿 server → runtime → provider streaming / embedded shell
 - `openai-adapter` 已改为原生 async `reqwest`：单次请求不再依赖 blocking client，流式读取改为 async chunk streaming + abort 轮询，避免 provider I/O 把后续 server 原生 async 化继续卡在边缘层
 - 全异步主链已完成 Phase 1 / 2，并继续推进 Phase 3 / 4：`agent-core` 的模型/工具 trait、`agent-runtime` turn 主链、`openai-adapter` provider I/O 都已切到 async；`builtin-tools::shell` 已改为直接挂在 Tokio task 上的 async 事件泵，不再自建专用 thread/runtime，stdout/stderr 捕获也已改为异步 tail 临时 capture 文件，不再依赖 `spawn_blocking`；`read` / `write` / `edit` 已切到 `tokio::fs`，`glob` / `grep` 也已改为共享的 async `.gitignore` 感知仓库遍历 + async 文件读取，不再依赖 `spawn_blocking` / `ignore::WalkBuilder`，trace 查询路由也已去掉 per-request `spawn_blocking` 包装；当前剩余尾部主要是共享 SQLite store 的同步访问边界
+- turn 主链内部已继续按职责拆为 `turn::{driver,segments,types}`：公开入口保持不变，流式 turn 驱动、completion segment 持久化与共享 turn buffer / success-failure context 分离，减少 runtime 单文件耦合与重复失败上下文拼装
 - 时间辅助函数不假设系统时间恒定晚于 `UNIX_EPOCH`，异常场景下会安全回退
 - `tape_info` / `tape_handoff` 已通过真正的 runtime tool registry 暴露，而不是字符串特判
 
 当前内建编码工具契约维持短名集合：`shell`、`read`、`write`、`edit`、`glob`、`grep`。其中 `shell` 是模型可见的稳定工具名，底层执行器可在边缘实现中替换；当前实现使用 `brush` 作为 shell 运行时，而不是把具体 shell 名称泄漏进统一工具协议。
+
+`builtin-tools::shell` 内部也已进一步按职责拆分：根模块只保留 `ShellTool` 契约与结果组装，capture 文件/事件泵与 embedded brush 执行主流程分别下沉到 `shell::{capture,execution}`，避免异步执行细节继续堆在单个超大文件里。
 
 ### `provider-registry`
 
@@ -133,6 +136,7 @@ README 里真正难的是这些能力：
 - 支持把共享层的 prompt cache 配置映射为 OpenAI `prompt_cache_key` / `prompt_cache_retention`
 - 解析 Responses / Chat Completions usage 中的 `cached_tokens`，回填到共享 `CompletionUsage`
 - 保持提供商细节停留在边缘层，不把外部协议泄漏进 `agent-core`
+- `responses` 内部已进一步按职责拆分：根模块只保留配置与模型入口，请求构造/HTTP helper、响应体解析、流式状态累积与 `LanguageModel` 客户端入口分别下沉到 `responses::{request,parsing,streaming,client}`，避免边缘层协议映射、SSE 状态机与 HTTP 细节继续堆在单个超大文件里
 
 ### `agent-store`
 
@@ -140,6 +144,7 @@ README 里真正难的是这些能力：
 
 - 持久化 session 列表与基础 session 元信息
 - 持久化本地 trace/span 记录、聚合统计与查询结果
+- trace store 内部已按 schema 初始化、store 查询/写入实现、row 映射与测试拆分子模块，避免 SQL、JSON 解码与提取 helper 继续堆在单个超大文件里
 - 统一封装 `Mutex<Connection>` 访问，poisoned mutex 场景下可恢复 guard 继续服务
 - 为 server 与 trace 诊断页提供本地存储支撑，而不把 SQLite 细节扩散到更多边界
 
@@ -170,6 +175,10 @@ README 里真正难的是这些能力：
 - 基于 axum 构建 HTTP + SSE 服务器，监听端口 3434
 - 启动时从 `.aia/providers.json`、`.aia/session.jsonl`、`.aia/store.sqlite3` 恢复本地状态
 - 通过后台 runtime worker 独占 `AgentRuntime`、provider registry 与 session 落盘状态
+- HTTP 路由已按 `provider`、`session`、`trace`、`turn` 领域模块拆分，共享错误响应、session 解析与 JSON helper 收口到 `routes::common`，避免 app 壳控制面继续堆在单个超大入口文件里
+- `session_manager` 已进一步按职责拆成子模块：命令发送 handle、共享 slot/command 类型、current-turn 流式投影、tool trace 持久化与测试辅助分别独立，主文件只保留 session loop、slot 生命周期与 provider/runtime 同步主流程
+- `model` 也已按职责拆成子模块：bootstrap mock、trace 事件收集/摘要/helper 与测试分别独立，主文件只保留 provider 选择、`ServerModel` 适配与 trace 落盘主流程
+- `runtime_worker` 已按职责拆成子模块：共享类型、tape 快照重建/legacy decode helper 与测试分别独立，主文件只保留稳定 re-export 入口
 - provider 当前信息、history 与 current turn 通过共享快照读取，避免长时间 turn 把所有路由一起锁住
 - 全局 `broadcast::channel` 向所有 SSE 客户端推送事件
 - 暴露 provider、session、turn、cancel、handoff、trace 等 HTTP API
