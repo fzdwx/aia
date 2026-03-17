@@ -1,8 +1,9 @@
 use agent_runtime::{ToolInvocationOutcome, TurnLifecycle};
-use agent_store::{LlmTraceEvent, LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus, LlmTraceStore};
+use agent_store::{AiaStore, LlmTraceEvent, LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus};
 use serde_json::json;
+use std::sync::Arc;
 
-pub(crate) fn persist_tool_trace_spans(turn: &TurnLifecycle, store: &dyn LlmTraceStore) {
+pub(crate) async fn persist_tool_trace_spans(turn: &TurnLifecycle, store: Arc<AiaStore>) {
     for invocation in &turn.tool_invocations {
         let Some(context) = invocation.trace_context.as_ref() else {
             continue;
@@ -133,7 +134,7 @@ pub(crate) fn persist_tool_trace_spans(turn: &TurnLifecycle, store: &dyn LlmTrac
             events,
         };
 
-        if let Err(error) = store.record(&record) {
+        if let Err(error) = store.record_async(record).await {
             eprintln!("tool trace record failed: {error}");
         }
     }

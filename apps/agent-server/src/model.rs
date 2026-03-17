@@ -7,7 +7,7 @@ use agent_core::{
     AbortSignal, Completion, CompletionRequest, CoreError, LanguageModel, ModelDisposition,
     ModelIdentity, ModelLimit, StreamEvent,
 };
-use agent_store::{LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus, LlmTraceStore};
+use agent_store::{AiaStore, LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus};
 use async_trait::async_trait;
 use openai_adapter::{
     OpenAiAdapterError, OpenAiChatCompletionsConfig, OpenAiChatCompletionsModel,
@@ -32,7 +32,7 @@ pub enum ProviderLaunchChoice {
 
 pub struct ServerModel {
     inner: ServerModelInner,
-    trace_store: Option<Arc<dyn LlmTraceStore>>,
+    trace_store: Option<Arc<AiaStore>>,
 }
 
 enum ServerModelInner {
@@ -122,7 +122,8 @@ impl ServerModel {
                 .map_err(ServerModelError::OpenAi),
         };
 
-        self.persist_trace(trace_seed, started_at_ms, started.elapsed(), &result, event_collector);
+        self.persist_trace(trace_seed, started_at_ms, started.elapsed(), &result, event_collector)
+            .await;
         result
     }
 
@@ -203,7 +204,7 @@ impl ServerModel {
         })
     }
 
-    fn persist_trace(
+    async fn persist_trace(
         &self,
         trace_seed: Option<LlmTraceRecord>,
         started_at_ms: u64,
@@ -251,7 +252,7 @@ impl ServerModel {
             }
         }
 
-        if let Err(error) = store.record(&record) {
+        if let Err(error) = store.record_async(record).await {
             eprintln!("trace record failed: {error}");
         }
     }
@@ -274,7 +275,7 @@ impl std::error::Error for ServerSetupError {}
 
 pub fn build_model_from_selection(
     selection: ProviderLaunchChoice,
-    trace_store: Option<Arc<dyn LlmTraceStore>>,
+    trace_store: Option<Arc<AiaStore>>,
 ) -> Result<(ModelIdentity, ServerModel), ServerSetupError> {
     match selection {
         ProviderLaunchChoice::Bootstrap => Ok((
