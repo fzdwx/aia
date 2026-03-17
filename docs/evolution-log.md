@@ -1,5 +1,17 @@
 # 演进日志
 
+## 2026-03-17 Session 9
+
+**诊断**：动态测量窗口化与锚定补偿虽然改善了部分长历史场景，但在产品优先级上，“流式阶段绝不出现额外闪动/抖动”比极端长列表下的滚动精细度更重要；这套机制也额外增加了测量、补偿和调试复杂度。
+**决策**：移除动态测量窗口化与锚定补偿，回到更稳定、可预测的消息列表渲染路径；继续保留前面已经证明有价值的 session 首屏瘦身、后台补页、memo 等优化，而不让测量机制影响流式体验。
+**变更**：
+- `apps/web/src/components/chat-messages.tsx`：删除动态高度测量、窗口化与锚点补偿逻辑，消息列表改回直接渲染可见历史 turns。
+- `apps/web/src/lib/chat-virtualization.ts`、`apps/web/src/lib/chat-virtualization.test.ts`：删除不再使用的窗口化 helper 与测试。
+- `docs/status.md`、`docs/architecture.md`：同步记录该机制已移除，当前优先选择稳定渲染路径。
+**验证**：`bun test`（`apps/web`）通过；`bun run typecheck`（`apps/web`）通过。
+**提交**：`09e1a69` `refactor: remove measured chat virtualization`
+**下次方向**：如果后续仍需处理超长历史性能，优先考虑更低风险的方案，例如只对 session 列表或历史分页策略做优化，而不是重新引入会影响流式观感的复杂测量补偿。
+
 ## 2026-03-17 Session 8
 
 **诊断**：后台补历史虽然已经改成 idle/可取消，但 idle 策略仍硬编码在 store 里用 `setTimeout` 模拟，既不够贴近浏览器真实空闲调度，也让测试注入和后续调度策略演进不够干净。
@@ -263,18 +275,17 @@
 **提交**：待提交
 **下次方向**：继续补 Web 测试入口，并让前端取消态回归真正纳入标准验证链路；之后再回到 provider / shell 的真实取消覆盖率诊断。
 
-## 2026-03-16 Session 28
+## 2026-03-16 Session 29
 
-**诊断**：OpenAI provider 的流式取消虽然已能在读到下一行 SSE 时识别 abort，但底层仍使用阻塞式 `BufRead::lines()`；一旦上游长时间不再刷出新行，取消会卡在阻塞读里，stop/cancel 仍不够“真中断”。
-**决策**：先把 `openai-adapter` 的流式读流改成“后台按行泵送 + 前台 abort 轮询”的最小可落地模型，并补 Responses / Chat Completions 两条取消回归测试；这能在不重写 provider 接口的前提下，显著缩短真实取消迟滞窗口。
+**诊断**：当前 session 执行模型之所以还依赖 `spawn_blocking`，根因不是 server 壳层本身，而是 `agent-core` 到 `agent-runtime` 的模型/工具 trait 仍是同步接口；在不先改 trait 边界的情况下，server 无法稳妥切到原生 async turn loop。
+**决策**：先落全异步主链的 Phase 1：把 `LanguageModel` / `ToolExecutor` / `Tool` 改成 async trait，给 `agent-runtime` 增加 async turn 主链，并让 `openai-adapter`、`builtin-tools`、`apps/agent-server` 的生产代码先全部接上新的 async trait；同时保留同步包装入口，避免一次性推倒当前 session manager。这样既开始了 async 重构，也保持当前工作树可编译。
 **变更**：
-- `crates/openai-adapter/src/streaming.rs`：新增共享流式读流 helper，把阻塞读取移到后台线程，通过 channel 向前台泵送行事件，让主线程能持续轮询 abort。
-- `crates/openai-adapter/src/responses.rs`：Responses streaming 改用新的 abort-aware 读流 helper，保留原有 SSE 解析与事件发射语义。
-- `crates/openai-adapter/src/chat_completions.rs`：Chat Completions streaming 改用新的 abort-aware 读流 helper，保留原有 delta/tool-call 聚合逻辑。
-- `crates/openai-adapter/src/lib.rs`：注册新的内部 `streaming` 模块导出。
-- `crates/openai-adapter/src/tests.rs`：新增 Chat Completions 阻塞读流取消回归测试，并保留/验证 Responses 同类测试。
-- `docs/status.md`、`docs/architecture.md`：同步记录 OpenAI 流式取消已收口到阻塞读期间也可响应 abort。
-**验证**：`cargo test -p openai-adapter responses_流式调用在_abort_后返回取消错误 -- --nocapture` 通过；`cargo test -p openai-adapter chat_completions_流式调用在_abort_后返回取消错误 -- --nocapture` 通过；`cargo check -p openai-adapter` 通过；`cargo test -p agent-runtime provider_取消错误前的流式_partial_output_会进入最终轮次 -- --nocapture` 通过；`cargo check` 通过。
-**提交**：`3cf8c15` `fix: tighten openai streaming cancellation`
-**下次方向**：继续观察不同 OpenAI 兼容上游在连接建立、代理缓冲和长时间不 flush 场景下的剩余取消迟滞；如果还不够，再评估把取消继续下推到更底层的 HTTP transport 级控制。
-
+- `crates/agent-core/src/traits.rs`、`crates/agent-core/src/registry.rs`、`crates/agent-core/src/lib.rs`、`crates/agent-core/Cargo.toml`：引入 `async-trait`，把模型/工具 trait 改为 async，并让 `ToolRegistry` 支持 async 调用。
+- `crates/agent-runtime/src/runtime.rs`、`crates/agent-runtime/src/runtime/turn.rs`、`crates/agent-runtime/src/runtime/tool_calls.rs`、`crates/agent-runtime/src/runtime/compress.rs`、`crates/agent-runtime/src/runtime/tape_tools.rs`、`crates/agent-runtime/Cargo.toml`：新增 async turn / tool / compression 主链，同时保留同步包装入口，生产代码继续可用。
+- `crates/openai-adapter/src/responses.rs`、`crates/openai-adapter/src/chat_completions.rs`、`crates/openai-adapter/Cargo.toml`：将 provider 适配实现接到新的 async `LanguageModel` trait，但内部网络实现暂仍保留现有阻塞模型，作为后续 Phase 2 的切入点。
+- `crates/builtin-tools/src/read.rs`、`crates/builtin-tools/src/write.rs`、`crates/builtin-tools/src/edit.rs`、`crates/builtin-tools/src/glob.rs`、`crates/builtin-tools/src/grep.rs`、`crates/builtin-tools/src/shell.rs`、`crates/builtin-tools/Cargo.toml`：将内建工具实现接到新的 async `Tool` trait，内部逻辑暂保持原样。
+- `apps/agent-server/src/model.rs`、`apps/agent-server/Cargo.toml`：将 server model 接到 async `LanguageModel` trait，保留现有 trace 记录逻辑。
+- `docs/status.md`、`docs/architecture.md`：同步记录 async 主链 Phase 1 已开始、当前仍保留同步包装与测试迁移待续。
+**验证**：`cargo check -p agent-core` 通过；`cargo check -p agent-runtime` 通过；`cargo check -p builtin-tools` 通过；`cargo check -p openai-adapter` 通过；`cargo check -p agent-server` 通过；`cargo check` 通过。`cargo test -p agent-runtime --no-run` 当前仍因旧测试实现未迁到 async trait 而失败。
+**提交**：待提交
+**下次方向**：继续完成 Phase 1 的测试迁移，把 `agent-runtime` / `agent-server` 的 mock model/tool 全部改成 async trait 宏与 `Handle::block_on` 辅助；完成后再进入 Phase 2，把 `openai-adapter` 从 blocking reqwest 切到真正 async HTTP。 

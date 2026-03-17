@@ -69,7 +69,7 @@
 - 完成 Web session 切换流畅度收口：store 维护按 session 的本地快照缓存，切换时保留上一帧内容并显示轻量 loading 提示，不再先清空消息区造成闪烁
 - 完成 Web 聊天列表首轮渲染减载：消息项引入 memo，长历史列表改为轻量窗口化渲染，并按 session 恢复滚动位置；历史分页加载时不再意外强制滚到底部
 - 完成 Web 聊天列表第二轮滚动/窗口化收口：窗口化从估算高度升级为动态测量高度，切换 session 时明确滚动到最新消息底部，避免旧会话中段位置残留带来困惑
-- 完成 Web 聊天列表第三轮锚定稳定性收口：动态测量窗口化在超长工具输出展开/收起时会锚定当前首个可见 turn，减少视口跳动
+- 完成 Web 聊天列表第三轮锚定稳定性收口：已移除动态测量窗口化与锚定补偿机制，优先选择更稳定、可预测的消息渲染路径，避免流式与展开/收起场景下的潜在抖动
 - 完成 Web session 切换首屏收口：切换前仅同步保存旧 session 的最后一个 turn 快照；切入新 session 时先展示/拉取最后一个 turn，再后台补齐其余历史，减少主线程阻塞与首屏等待
 - 完成 Web session 快照瘦身：`_sessionSnapshots` 退化为最小 UI snapshot，只保留最后一个 turn 与 streaming/UI 状态，不再长期缓存历史页副本
 - 完成 Web session 后台补历史收口：首屏只进最后一个 turn，其余历史改为空闲时增量补页，并在切走 session 时取消后台补页，减少与滚动/streaming 的竞争
@@ -79,6 +79,7 @@
 - 完成完整的 stop/cancel 基线：server 暴露 `POST /api/turn/cancel`，session manager 能中断运行中 turn，runtime 把取消信号传到工具执行上下文，Web 输入区提供 stop 按钮并显示 cancelled 状态
 - 完成 stop/cancel 第二阶段基线：runtime 会把 abort 继续传到 OpenAI streaming 调用；embedded `brush` shell 在收到取消后会向当前作业发送 `TERM` 并尽快收尾；`TurnLifecycle` 新增共享 `outcome` 字段；server 取消 API 只负责触发 abort，真正的 cancelled SSE 由 worker 在轮次结束时统一发出一次
 - 完成 OpenAI 流式读流中断收口：`openai-adapter` 不再只在 `BufRead::lines()` 的逐行循环间隙检查 abort，而是通过后台按行泵送 + 主线程轮询 abort 的方式让 Responses / Chat Completions 的阻塞读流也能及时响应取消
+- 开始全异步主链 Phase 1：`agent-core` 的 `LanguageModel` / `ToolExecutor` / `Tool` 已切换为 async trait，`agent-runtime` 新增 async turn 主链并保留同步包装入口，`openai-adapter` / `builtin-tools` / `agent-server` 生产代码已接上新的 async trait 边界
 - 完成 `agent-store` SQLite 锁中毒恢复：trace/session 读写与 schema 初始化不再因 `Mutex<Connection>` poisoned 而 panic
 - 完成 `aia-config` 共享配置 crate：把 `.aia` 路径、默认 session 标题、server 默认地址 / 事件缓冲 / 请求超时、统一 user agent 组装，以及 trace / span / prompt-cache 稳定前缀从 `apps/agent-server` 与相关共享 crate 中收口
 - 完成 `aia-config` 内部模块化：拆为 `paths`、`server`、`identifiers` 三类共享配置模块，`lib.rs` 保持薄 façade
@@ -96,6 +97,7 @@
 - 继续把 trace 数据模型从“本地 span store + event timeline”推进到更完整的 resources / richer events 模型，但暂不抢在工具协议映射与 MCP 之前做 exporter / collector 集成
 - 验证 stop/cancel 目前对长时间 shell / 外部 provider streaming 的实际覆盖率；当前已打通 server→runtime→tool context，并进一步补上 OpenAI streaming 读取中的取消检查与 shell 作业 `TERM` 中断，后续仍需继续观察 provider/运行时在不同上游和复杂 shell pipeline 下的真实中断覆盖率
 - 当前 OpenAI adapter 已把 SSE 读流取消从“逐行检查”推进到“阻塞读期间也能轮询 abort”；后续观察重点转为不同上游是否仍在连接建立、TLS、代理缓冲或服务端长时间不刷新的窗口里残留取消迟滞
+- 全异步主链 Phase 1 正在推进：生产代码已完成 async trait 边界接线并保持 `cargo check` 通过，下一步需要把 `agent-runtime` / `agent-server` 的测试实现统一迁到 async trait 宏与 `block_on` 辅助
 - 持续校准哪些跨 crate 应用级常量应该进入 `aia-config`，哪些应继续留在协议层、运行时或算法层
 
 ## 下一步

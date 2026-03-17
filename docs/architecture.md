@@ -101,6 +101,7 @@ README 里真正难的是这些能力：
 - trace context 生成已统一通过共享 helper 收口，不再由不同路径各自手写 trace/span 标识
 - stop/cancel 已贯穿 server → runtime → provider streaming / embedded shell
 - `openai-adapter` 的流式读取已从单线程阻塞 `BufRead::lines()` 轮询升级为“后台按行泵送 + 前台 abort 轮询”，避免 SSE 长时间不出新行时取消被卡在阻塞读里
+- 全异步主链已开始按阶段推进：当前 Phase 1 先把 `agent-core` 的模型/工具 trait 与 `agent-runtime` turn 主链改成 async，并在 server 层保留同步包装入口，避免一次性推倒现有 session manager 执行模型
 - 时间辅助函数不假设系统时间恒定晚于 `UNIX_EPOCH`，异常场景下会安全回退
 - `tape_info` / `tape_handoff` 已通过真正的 runtime tool registry 暴露，而不是字符串特判
 
@@ -152,7 +153,7 @@ README 里真正难的是这些能力：
 - session 切换采用按 session 的本地 snapshot 缓存：切换时先显示已有快照并后台水合 history/current turn，减少消息区清空造成的闪烁与布局跳动
 - 聊天消息区已做首轮渲染减载：turn 视图按引用 memo，长历史启用轻量窗口化渲染，并按 session 维持独立滚动位置，避免分页加载或切换会话时频繁强制跳到底部
 - 聊天消息区窗口化已进一步升级为动态高度测量版；session 切换时明确回到底部看最新消息，而同一 session 内的历史分页仍保持当前阅读位置稳定
-- 动态高度窗口化已增加“首个可见 turn 锚定补偿”：当工具输出详情展开/收起、Markdown 高度变化等导致已测高度更新时，会尽量保持当前视口锚点稳定，减少内容突然上跳/下跳
+- 聊天消息区当前优先选择稳定渲染路径：已移除动态高度测量窗口化与锚定补偿，避免工具输出展开/收起或流式阶段因测量/补偿带来的额外抖动；列表性能继续依赖 memo、轻量历史首屏与后台补页控制
 - session 切换首屏已改为“两阶段 hydrate”：切换前只同步保存旧 session 的最后一个 turn 快照；进入新 session 时先请求并展示最新一条历史 / 当前 turn，再后台补齐初始历史页，降低切换前后的主线程压力
 - `_sessionSnapshots` 已收缩为最小 UI snapshot：仅保存最后一个 turn、`streamingTurn`、`chatState`、`contextPressure`、`lastCompression`，不再把历史页副本长期保留在前端内存中
 - session 的后台补历史已改为空闲时增量补页，并支持在切走会话时中断，避免首屏切换后的非关键历史拉取继续和滚动/streaming 抢主线程与网络

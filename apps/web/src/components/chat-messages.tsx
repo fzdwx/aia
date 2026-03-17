@@ -1,12 +1,8 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react"
+import { memo, useEffect, useRef, useState } from "react"
 import { Check, X as XIcon } from "lucide-react"
 import { MarkdownContent } from "@/components/markdown-content"
 import { Shimmer } from "@/components/ai-elements/shimmer"
 import { getToolDisplayName, getToolDisplayPath } from "@/lib/tool-display"
-import {
-  buildMeasuredWindow,
-  calculateAnchorScrollTop,
-} from "@/lib/chat-virtualization"
 import { useChatStore } from "@/stores/chat-store"
 import type {
   StreamingToolOutput,
@@ -755,64 +751,6 @@ type VirtualizedTurns = {
   bottomSpacerHeight: number
 }
 
-const VIRTUALIZATION_OVERSCAN = 4
-const VIRTUALIZATION_MIN_TURNS = 40
-const DEFAULT_TURN_ROW_HEIGHT = 280
-
-function useMeasuredWindowedTurns(
-  turns: TurnLifecycle[],
-  containerHeight: number,
-  scrollTop: number,
-  measuredHeights: Record<string, number>,
-  version: number
-): VirtualizedTurns {
-  void version
-  const window = buildMeasuredWindow({
-    itemIds: turns.map((turn) => turn.turn_id),
-    containerHeight,
-    scrollTop,
-    measuredHeights,
-    overscan: VIRTUALIZATION_OVERSCAN,
-    minItems: VIRTUALIZATION_MIN_TURNS,
-    defaultItemHeight: DEFAULT_TURN_ROW_HEIGHT,
-  })
-
-  return {
-    visibleTurns: turns.slice(window.startIndex, window.endIndex),
-    topSpacerHeight: window.topSpacerHeight,
-    bottomSpacerHeight: window.bottomSpacerHeight,
-  }
-}
-
-function TurnMeasurement({
-  turnId,
-  onHeightChange,
-  children,
-}: {
-  turnId: string
-  onHeightChange: (turnId: string, height: number) => void
-  children: ReactNode
-}) {
-  const wrapperRef = useRef<HTMLDivElement>(null)
-
-  useLayoutEffect(() => {
-    const element = wrapperRef.current
-    if (!element) return
-
-    const report = () => onHeightChange(turnId, element.offsetHeight)
-    report()
-
-    const resizeObserver = new ResizeObserver(() => {
-      report()
-    })
-    resizeObserver.observe(element)
-
-    return () => resizeObserver.disconnect()
-  }, [onHeightChange, turnId])
-
-  return <div ref={wrapperRef} data-turn-id={turnId}>{children}</div>
-}
-
 function SessionHydratingIndicator() {
   return (
     <div className="pointer-events-none sticky top-0 z-10 mb-3">
@@ -843,46 +781,12 @@ export function ChatMessages() {
   const restoreSessionScrollRef = useRef(false)
   const skipNextAutoScrollRef = useRef(false)
   const scrollPositionsRef = useRef<Record<string, number>>({})
-  const measuredTurnHeightsRef = useRef<Record<string, number>>({})
-  const anchorTurnRef = useRef<{ turnId: string; offset: number } | null>(null)
-  const pendingAnchorCompensationRef = useRef(false)
   const [scrollTop, setScrollTop] = useState(0)
   const [containerHeight, setContainerHeight] = useState(0)
-  const [heightVersion, setHeightVersion] = useState(0)
 
-  const { visibleTurns, topSpacerHeight, bottomSpacerHeight } =
-    useMeasuredWindowedTurns(
-      turns,
-      containerHeight,
-      scrollTop,
-      measuredTurnHeightsRef.current,
-      heightVersion
-    )
-
-  const handleTurnHeightChange = (turnId: string, height: number) => {
-    if (measuredTurnHeightsRef.current[turnId] === height) return
-
-    const container = containerRef.current
-    if (container && !shouldStickToBottomRef.current) {
-      const anchorElement = container.querySelector<HTMLElement>(
-        "[data-turn-id]"
-      )
-      if (anchorElement?.dataset.turnId) {
-        const containerTop = container.getBoundingClientRect().top
-        anchorTurnRef.current = {
-          turnId: anchorElement.dataset.turnId,
-          offset: anchorElement.getBoundingClientRect().top - containerTop,
-        }
-        pendingAnchorCompensationRef.current = true
-      }
-    }
-
-    measuredTurnHeightsRef.current = {
-      ...measuredTurnHeightsRef.current,
-      [turnId]: height,
-    }
-    setHeightVersion((value) => value + 1)
-  }
+  const visibleTurns = turns
+  const topSpacerHeight = 0
+  const bottomSpacerHeight = 0
 
 
   useEffect(() => {
@@ -912,45 +816,6 @@ export function ChatMessages() {
       resizeObserver.disconnect()
     }
   }, [activeSessionId])
-
-  useLayoutEffect(() => {
-    if (!pendingAnchorCompensationRef.current) return
-
-    const container = containerRef.current
-    const anchor = anchorTurnRef.current
-    if (!container || !anchor) {
-      pendingAnchorCompensationRef.current = false
-      anchorTurnRef.current = null
-      return
-    }
-
-    const anchorElement = container.querySelector<HTMLElement>(
-      `[data-turn-id="${anchor.turnId}"]`
-    )
-    if (!anchorElement) {
-      pendingAnchorCompensationRef.current = false
-      anchorTurnRef.current = null
-      return
-    }
-
-    const containerTop = container.getBoundingClientRect().top
-    const desiredOffset = anchorElement.getBoundingClientRect().top - containerTop
-    const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight)
-    const nextScrollTop = calculateAnchorScrollTop({
-      currentScrollTop: container.scrollTop,
-      currentOffset: anchor.offset,
-      desiredOffset,
-      maxScrollTop,
-    })
-
-    container.scrollTop = nextScrollTop
-    setScrollTop(nextScrollTop)
-    if (activeSessionId) {
-      scrollPositionsRef.current[activeSessionId] = nextScrollTop
-    }
-    pendingAnchorCompensationRef.current = false
-    anchorTurnRef.current = null
-  }, [activeSessionId, heightVersion])
 
   useEffect(() => {
     const previousSessionId = previousSessionIdRef.current
@@ -1076,13 +941,7 @@ export function ChatMessages() {
         >
           {topSpacerHeight > 0 && <div style={{ height: topSpacerHeight }} />}
           {visibleTurns.map((turn) => (
-            <TurnMeasurement
-              key={turn.turn_id}
-              turnId={turn.turn_id}
-              onHeightChange={handleTurnHeightChange}
-            >
-              <MemoizedTurnView turn={turn} />
-            </TurnMeasurement>
+            <MemoizedTurnView key={turn.turn_id} turn={turn} />
           ))}
           {bottomSpacerHeight > 0 && <div style={{ height: bottomSpacerHeight }} />}
           {lastCompression && !streamingTurn && (
