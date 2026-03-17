@@ -2,9 +2,7 @@ use agent_core::{AbortSignal, Completion, CompletionRequest, LanguageModel, Stre
 use async_trait::async_trait;
 
 use crate::{
-    OpenAiAdapterError,
-    http::{apply_user_agent, http_client, request_failure, validate_request_model},
-    stream_lines_with_abort,
+    OpenAiAdapterError, http::validate_request_model, streaming::complete_streaming_request,
 };
 
 use super::{OpenAiResponsesModel, streaming::ResponsesStreamingState};
@@ -21,34 +19,17 @@ impl LanguageModel for OpenAiResponsesModel {
     ) -> Result<Completion, Self::Error> {
         validate_request_model(&self.config().model, &request)?;
 
-        let client = http_client(&request)?;
-        let request_builder = apply_user_agent(
-            client
-                .post(self.endpoint_url())
-                .bearer_auth(&self.config.api_key)
-                .json(&self.build_streaming_request_body(&request)),
-            request.user_agent.as_deref(),
-        );
-        let response = request_builder
-            .send()
-            .await
-            .map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let body = response
-                .text()
-                .await
-                .map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
-            return Err(request_failure(&self.endpoint_url(), status, &body));
-        }
-
-        let mut state = ResponsesStreamingState::default();
-        stream_lines_with_abort(response, abort, sink, |line, sink| state.handle_line(line, sink))
-            .await?;
-
-        sink(StreamEvent::Done);
-        Ok(state.into_completion(status.as_u16()))
+        let endpoint_url = self.endpoint_url();
+        let request_body = self.build_streaming_request_body(&request);
+        complete_streaming_request::<ResponsesStreamingState>(
+            &endpoint_url,
+            &self.config.api_key,
+            &request,
+            request_body,
+            abort,
+            sink,
+        )
+        .await
     }
 
     fn is_cancelled_error(error: &Self::Error) -> bool {

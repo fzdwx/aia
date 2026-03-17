@@ -3,6 +3,7 @@ use serde_json::Value;
 
 use crate::{
     OpenAiAdapterError, extract_reasoning_stream_text, extract_stream_text, parse_tool_arguments,
+    streaming::{StreamingState, StreamingTranscript},
 };
 
 use super::OpenAiResponsesModel;
@@ -38,65 +39,39 @@ pub(super) struct ResponsesStreamingState {
     response_status: Option<String>,
     incomplete_reason: Option<String>,
     usage: Option<CompletionUsage>,
-    response_events: Vec<String>,
+    transcript: StreamingTranscript,
 }
 
 impl ResponsesStreamingState {
-    pub(super) fn handle_line(
-        &mut self,
-        line: &str,
-        sink: &mut (dyn FnMut(StreamEvent) + Send),
-    ) -> Result<bool, OpenAiAdapterError> {
-        let Some(data) = line.strip_prefix("data: ") else {
-            return Ok(false);
-        };
-        self.response_events.push(line.to_string());
-        if data == "[DONE]" {
-            return Ok(true);
+    fn finish_current_tool_call(&mut self, sink: &mut (dyn FnMut(StreamEvent) + Send)) {
+        if self.current_tool.is_empty() {
+            self.current_tool.clear();
+            return;
         }
-        let event: Value = match serde_json::from_str(data) {
-            Ok(value) => value,
-            Err(_) => return Ok(false),
-        };
 
-        self.handle_event(&event, sink)?;
-        Ok(false)
+        let id = if self.current_tool.id.is_empty() {
+            format!("openai-stream-call-{}", self.tool_calls.len() + 1)
+        } else {
+            self.current_tool.id.clone()
+        };
+        let arguments = parse_tool_arguments(&self.current_tool.arguments).unwrap_or_default();
+        sink(StreamEvent::ToolCallDetected {
+            invocation_id: id.clone(),
+            tool_name: self.current_tool.name.clone(),
+            arguments,
+        });
+        self.tool_calls.push((
+            id,
+            self.current_tool.name.clone(),
+            self.current_tool.arguments.clone(),
+        ));
+        self.current_tool.clear();
     }
+}
 
-    pub(super) fn into_completion(self, status_code: u16) -> Completion {
-        let mut segments = Vec::new();
-        if !self.thinking_buf.is_empty() {
-            segments.push(CompletionSegment::Thinking(self.thinking_buf));
-        }
-        if !self.text_buf.is_empty() {
-            segments.push(CompletionSegment::Text(self.text_buf));
-        }
-        for (id, name, args) in self.tool_calls {
-            let arguments = parse_tool_arguments(&args).unwrap_or_default();
-            segments.push(CompletionSegment::ToolUse({
-                let mut call =
-                    ToolCall::new(name).with_invocation_id(id).with_arguments_value(arguments);
-                if let Some(response_id) = self.response_id.clone() {
-                    call = call.with_response_id(response_id);
-                }
-                call
-            }));
-        }
-
-        let has_tool_calls =
-            segments.iter().any(|segment| matches!(segment, CompletionSegment::ToolUse(_)));
-
-        Completion {
-            segments,
-            stop_reason: OpenAiResponsesModel::map_stop_reason(
-                self.response_status.as_deref(),
-                self.incomplete_reason.as_deref(),
-                has_tool_calls,
-            ),
-            usage: self.usage,
-            response_body: Some(self.response_events.join("\n")),
-            http_status_code: Some(status_code),
-        }
+impl StreamingState for ResponsesStreamingState {
+    fn transcript_mut(&mut self) -> &mut StreamingTranscript {
+        &mut self.transcript
     }
 
     fn handle_event(
@@ -185,28 +160,39 @@ impl ResponsesStreamingState {
         Ok(())
     }
 
-    fn finish_current_tool_call(&mut self, sink: &mut (dyn FnMut(StreamEvent) + Send)) {
-        if self.current_tool.is_empty() {
-            self.current_tool.clear();
-            return;
+    fn into_completion(self, status_code: u16) -> Completion {
+        let mut segments = Vec::new();
+        if !self.thinking_buf.is_empty() {
+            segments.push(CompletionSegment::Thinking(self.thinking_buf));
+        }
+        if !self.text_buf.is_empty() {
+            segments.push(CompletionSegment::Text(self.text_buf));
+        }
+        for (id, name, args) in self.tool_calls {
+            let arguments = parse_tool_arguments(&args).unwrap_or_default();
+            segments.push(CompletionSegment::ToolUse({
+                let mut call =
+                    ToolCall::new(name).with_invocation_id(id).with_arguments_value(arguments);
+                if let Some(response_id) = self.response_id.clone() {
+                    call = call.with_response_id(response_id);
+                }
+                call
+            }));
         }
 
-        let id = if self.current_tool.id.is_empty() {
-            format!("openai-stream-call-{}", self.tool_calls.len() + 1)
-        } else {
-            self.current_tool.id.clone()
-        };
-        let arguments = parse_tool_arguments(&self.current_tool.arguments).unwrap_or_default();
-        sink(StreamEvent::ToolCallDetected {
-            invocation_id: id.clone(),
-            tool_name: self.current_tool.name.clone(),
-            arguments,
-        });
-        self.tool_calls.push((
-            id,
-            self.current_tool.name.clone(),
-            self.current_tool.arguments.clone(),
-        ));
-        self.current_tool.clear();
+        let has_tool_calls =
+            segments.iter().any(|segment| matches!(segment, CompletionSegment::ToolUse(_)));
+
+        Completion {
+            segments,
+            stop_reason: OpenAiResponsesModel::map_stop_reason(
+                self.response_status.as_deref(),
+                self.incomplete_reason.as_deref(),
+                has_tool_calls,
+            ),
+            usage: self.usage,
+            response_body: self.transcript.into_response_body(),
+            http_status_code: Some(status_code),
+        }
     }
 }

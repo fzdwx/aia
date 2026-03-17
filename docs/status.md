@@ -3,7 +3,7 @@
 ## 当前阶段
 
 - 阶段：核心工作区搭建之后的当前细分步骤：Web 界面 ↔ 运行时桥接收口
-- 当前步骤：在 Web + server 主路径稳定的基础上，继续收口“可作为其他客户端驱动接口”的 server 形态，并把全异步主链推进到 Phase 4 的原生 async 收口态：`builtin-tools` 的文件/搜索工具、`agent-core` / `agent-runtime` 的 async + `Send` 边界，以及 `apps/agent-server` 的 session manager / turn 执行都已切到 Tokio async task；当前又完成了一轮历史接口清理：`LanguageModel` 已收口为单一 `complete_streaming(request, abort, sink)` 入口，`agent-runtime` 对外 turn 入口也已收口为单一异步 `handle_turn_streaming(user_input, control, sink)`，上下文压缩入口也已只保留异步 `auto_compress_now()`，`runtime::tool_calls` 里的 runtime-tool / 普通 tool 生命周期记账逻辑也已收口到共享 helper，`agent-store` 的 SQLite 访问也已统一经由 `AiaStore::with_conn(...)` 显式包住锁边界，`openai-adapter` 里两条协议共享的 HTTP/request helper 与协议专属 payload 类型也已分别收口到共享模块和各自协议子模块；旧的 `complete` / `complete_streaming_with_abort` / `handle_turn*` / `block_on_sync(auto_compress_now_async)` 同步包装已移除，跨协议共用的 `payloads.rs` 也已拆散；下一批热点集中在 `crates/openai-adapter/src/streaming.rs` / 共享协议适配 helper，以及 `agent-store` / `apps/agent-server` 之间还能继续下沉的共享查询/投影逻辑
+- 当前步骤：在 Web + server 主路径稳定的基础上，继续收口“可作为其他客户端驱动接口”的 server 形态，并把全异步主链推进到 Phase 4 的原生 async 收口态：`builtin-tools` 的文件/搜索工具、`agent-core` / `agent-runtime` 的 async + `Send` 边界，以及 `apps/agent-server` 的 session manager / turn 执行都已切到 Tokio async task；当前又完成了一轮历史接口清理：`LanguageModel` 已收口为单一 `complete_streaming(request, abort, sink)` 入口，`agent-runtime` 对外 turn 入口也已收口为单一异步 `handle_turn_streaming(user_input, control, sink)`，上下文压缩入口也已只保留异步 `auto_compress_now()`，`runtime::tool_calls` 里的 runtime-tool / 普通 tool 生命周期记账逻辑也已收口到共享 helper，`agent-store` 的 SQLite 访问也已统一经由 `AiaStore::with_conn(...)` 显式包住锁边界，`openai-adapter` 里两条协议共享的 HTTP/request helper、协议专属 payload 类型，以及流式请求驱动 / SSE transcript 解析也已分别收口到共享模块与协议子模块；旧的 `complete` / `complete_streaming_with_abort` / `handle_turn*` / `block_on_sync(auto_compress_now_async)` 同步包装已移除，跨协议共用的 `payloads.rs` 也已拆散；下一批热点集中在 `openai-adapter` 剩余协议特有的 delta/tool-call 累积细节，以及 `agent-store` / `apps/agent-server` 之间还能继续下沉的共享查询/投影逻辑
 
 ## 已完成
 
@@ -94,6 +94,7 @@
 - 完成 `openai-adapter::responses` 模块化：根模块只保留 Responses 配置与模型入口；请求构造/HTTP helper、响应体解析、流式状态累积与 `LanguageModel` 客户端入口分别拆到 `responses::{request,parsing,streaming,client}`
 - 完成 `openai-adapter::chat_completions` 模块化：根模块只保留 Chat Completions 配置与模型入口；请求构造/HTTP helper、响应体解析、流式状态累积与 `LanguageModel` 客户端入口分别拆到 `chat_completions::{request,parsing,streaming,client}`
 - 完成 `openai-adapter` payload 类型按协议归位：原先跨协议共用的 `payloads.rs` 已拆成 `responses::payloads` 与 `chat_completions::payloads`，避免 Responses / Chat Completions 继续共存于同一组边缘层数据结构里
+- 完成 `openai-adapter` 共享流式驱动收口：Responses / Chat Completions 的 `complete_streaming` 已共用顶层 streaming request driver、SSE transcript 记录与 `data:` JSON 行解析 helper，不再在两条协议里重复维护请求发送、状态码失败处理和 `[DONE]`/JSON 解析模板
 - 完成 `LanguageModel` 历史入口清理：共享 trait 已收口为单一 `complete_streaming(request, abort, sink)`，runtime 压缩、server trace 桥接、OpenAI 适配器与相关测试/mocks 都已改走统一流式入口
 - 完成 `agent-runtime::runtime::turn::driver` 失败路径收口：重复的 `record_turn_failure + return Err(...)` 样板已压缩为共享 `fail_turn` helper
 - 完成 `agent-runtime` turn 公开入口清理：同步 `handle_turn` 与历史命名 `handle_turn_streaming_with_control_async` 已移除，对外统一为异步 `handle_turn_streaming(user_input, control, sink)`；`apps/agent-server` 与 runtime 测试已改走同一条异步入口
@@ -119,12 +120,12 @@
 - 验证 stop/cancel 目前对长时间 shell / 外部 provider streaming 的实际覆盖率；当前已打通 server→runtime→tool context，并进一步补上 OpenAI streaming 读取中的取消检查与 shell 作业 `TERM` 中断，后续仍需继续观察 provider/运行时在不同上游和复杂 shell pipeline 下的真实中断覆盖率
 - 当前 OpenAI adapter 已切到 async `reqwest` + async chunk streaming；后续观察重点转为不同上游是否仍在连接建立、TLS、代理缓冲或服务端长时间不刷新的窗口里残留取消迟滞
 - 全异步主链已完成 Phase 1 / 2，并继续推进完成了 Phase 3 / 4 的当前高优先级主路径：`shell`、文件工具、搜索工具都已从当前线程阻塞路径中收口，session manager / turn worker 也已改为 Tokio async task，runtime 公共 turn / 压缩 API 也已去掉同步包装并统一到 async 入口，tool 调用生命周期记账也已收口到共享 helper，trace 查询路由也已去掉 per-request `spawn_blocking` 包装；当前剩余的生产路径同步桥接点已大多缩到 SQLite 驱动本身，而 `agent-store` 的共享锁边界和 `openai-adapter` 的通用 HTTP helper 也已先后收口，重点转向这些尾部收口以及 runtime ownership、return-path 简化与共享层抽取
-- 继续盘点跨 crate 的超大文件与重复逻辑热点；在 `routes`、`session_manager`、`model`、`runtime_worker`、`agent-store::trace`、`agent-runtime::runtime::turn`、`builtin-tools::shell`、`openai-adapter::responses` 与 `openai-adapter::chat_completions` 完成拆分后，`openai-adapter` 里跨协议共用的 payload 定义也已拆回各自协议模块；下一批优先候选集中在 `crates/agent-runtime/src/runtime/tool_calls.rs`、共享 SQLite store 的同步访问边界，以及 `crates/openai-adapter/src/streaming.rs` / 共享协议适配 helper 的进一步收口
+- 继续盘点跨 crate 的超大文件与重复逻辑热点；在 `routes`、`session_manager`、`model`、`runtime_worker`、`agent-store::trace`、`agent-runtime::runtime::turn`、`builtin-tools::shell`、`openai-adapter::responses` 与 `openai-adapter::chat_completions` 完成拆分后，`openai-adapter` 里跨协议共用的 payload 定义、流式请求驱动和 SSE transcript 解析也已先后收口；下一批优先候选集中在 `crates/agent-runtime/src/runtime/tool_calls.rs`、共享 SQLite store 的同步访问边界，以及 `openai-adapter` 剩余协议特有 delta / tool-call 累积 helper 的进一步收口
 - 持续校准哪些跨 crate 应用级常量应该进入 `aia-config`，哪些应继续留在协议层、运行时或算法层
 
 ## 下一步
 
-1. 继续推进全异步主链的后续收口，并配合按领域继续拆分 app 壳 / store 中的超大文件：优先清理共享 SQLite store 访问边界上的剩余同步桥接，并优先评估 `agent-runtime::runtime::tool_calls`、`openai-adapter::streaming` / 共享协议适配 helper 与 store 访问层中适合继续下沉或拆分的辅助逻辑
+1. 继续推进全异步主链的后续收口，并配合按领域继续拆分 app 壳 / store 中的超大文件：优先清理共享 SQLite store 访问边界上的剩余同步桥接，并优先评估 `agent-runtime::runtime::tool_calls`、`openai-adapter` 剩余协议特有 delta / tool-call 累积 helper 与 store 访问层中适合继续下沉或拆分的辅助逻辑
 2. 在 async 主链与共享工具边界进一步稳定后，优先推进统一工具协议映射与 MCP 接入，而不是继续堆厚客户端界面
 3. runtime 驱动辅助从 `apps/agent-server` 继续抽到共享层
 4. 在工具协议边界进一步收稳后，把本地 trace 从当前 span record + event timeline 继续推进到更完整的 resources / richer events 形态

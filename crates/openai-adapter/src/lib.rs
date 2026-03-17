@@ -15,4 +15,3 @@ pub(crate) use mapping::{
     parse_tool_arguments, responses_input_item,
 };
 pub use responses::{OpenAiResponsesConfig, OpenAiResponsesModel};
-pub(crate) use streaming::stream_lines_with_abort;
