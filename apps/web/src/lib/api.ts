@@ -230,6 +230,7 @@ export function connectEvents(onEvent: (event: SseEvent) => void): () => void {
   es.addEventListener("status", handle("status"))
   es.addEventListener("turn_completed", handle("turn_completed"))
   es.addEventListener("context_compressed", handle("context_compressed"))
+  es.addEventListener("sync_required", handle("sync_required"))
   es.addEventListener("error", handle("error"))
   es.addEventListener("session_created", handle("session_created"))
   es.addEventListener("session_deleted", handle("session_deleted"))

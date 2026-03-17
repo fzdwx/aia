@@ -834,6 +834,12 @@ export const useChatStore = create<ChatStore>((set, get) => {
             .catch(() => {})
           break
         }
+        case "sync_required": {
+          if (!activeId) break
+          void get().fetchSessions().catch(() => {})
+          void hydrateSession(activeId)
+          break
+        }
         case "error": {
           if (event.data.session_id !== activeId) break
           const latestTurn = get().turns[get().turns.length - 1]

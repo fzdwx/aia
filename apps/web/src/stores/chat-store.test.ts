@@ -223,6 +223,184 @@ describe("chat store submitTurn", () => {
     assert.deepEqual(state.lastCompression, compressionEvent.data)
   })
 
+  test("sync_required 会主动重拉当前会话状态", async () => {
+    const originalFetchImpl = globalThis.fetch
+
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString()
+      if (url.includes("/api/sessions")) {
+        return new Response(
+          JSON.stringify([
+            {
+              id: "session-1",
+              title: "当前会话",
+              created_at: "2026-03-17T00:00:00Z",
+              updated_at: "2026-03-17T00:00:00Z",
+              model: "gpt-4.1-mini",
+            },
+            {
+              id: "session-2",
+              title: "补拉回来的新会话",
+              created_at: "2026-03-17T00:01:00Z",
+              updated_at: "2026-03-17T00:01:00Z",
+              model: "gpt-4.1-mini",
+            },
+          ]),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
+      }
+      if (url.includes("/api/session/info")) {
+        return new Response(
+          JSON.stringify({
+            total_entries: 12,
+            anchor_count: 1,
+            entries_since_last_anchor: 4,
+            last_input_tokens: 320,
+            context_limit: 128000,
+            output_limit: 4096,
+            pressure_ratio: 0.7,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
+      }
+      if (url.includes("/api/session/current-turn")) {
+        return new Response(
+          JSON.stringify({
+            started_at_ms: 30,
+            user_message: "继续执行",
+            status: "working",
+            blocks: [{ kind: "text", content: "已恢复中的输出" }],
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
+      }
+      if (url.includes("/api/session/history")) {
+        return new Response(
+          JSON.stringify({
+            turns: [
+              {
+                turn_id: "turn-resynced",
+                started_at_ms: 10,
+                finished_at_ms: 20,
+                source_entry_ids: [1, 2],
+                user_message: "上一轮问题",
+                blocks: [{ kind: "assistant", content: "上一轮答案" }],
+                assistant_message: "上一轮答案",
+                thinking: null,
+                tool_invocations: [],
+                usage: null,
+                failure_message: null,
+                outcome: "succeeded",
+              },
+            ],
+            has_more: false,
+            next_before_turn_id: null,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }) as FetchMock
+
+    useChatStore.setState({
+      activeSessionId: "session-1",
+      sessions: [
+        {
+          id: "session-1",
+          title: "当前会话",
+          created_at: "2026-03-17T00:00:00Z",
+          updated_at: "2026-03-17T00:00:00Z",
+          model: "gpt-4.1-mini",
+        },
+      ],
+      turns: [
+        {
+          turn_id: "turn-stale",
+          started_at_ms: 1,
+          finished_at_ms: 2,
+          source_entry_ids: [9],
+          user_message: "过期问题",
+          blocks: [{ kind: "assistant", content: "过期答案" }],
+          assistant_message: "过期答案",
+          thinking: null,
+          tool_invocations: [],
+          usage: null,
+          failure_message: null,
+          outcome: "succeeded",
+        },
+      ],
+      streamingTurn: {
+        userMessage: "旧中的执行",
+        status: "thinking",
+        blocks: [{ type: "text", content: "旧中的输出" }],
+      },
+      _sessionSnapshots: {
+        "session-1": {
+          latestTurn: {
+            turn_id: "turn-stale",
+            started_at_ms: 1,
+            finished_at_ms: 2,
+            source_entry_ids: [9],
+            user_message: "过期问题",
+            blocks: [{ kind: "assistant", content: "过期答案" }],
+            assistant_message: "过期答案",
+            thinking: null,
+            tool_invocations: [],
+            usage: null,
+            failure_message: null,
+            outcome: "succeeded",
+          },
+          streamingTurn: {
+            userMessage: "旧中的执行",
+            status: "thinking",
+            blocks: [{ type: "text", content: "旧中的输出" }],
+          },
+          chatState: "active",
+          contextPressure: 0.1,
+          lastCompression: null,
+        },
+      },
+    })
+
+    useChatStore
+      .getState()
+      .handleSseEvent(
+        {
+          type: "sync_required",
+          data: { reason: "lagged", skipped_messages: 3 },
+        } as unknown as SseEvent
+      )
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const state = useChatStore.getState()
+    assert.equal(state.turns[0]?.turn_id, "turn-resynced")
+    assert.deepEqual(state.streamingTurn, {
+      userMessage: "继续执行",
+      status: "working",
+      blocks: [{ type: "text", content: "已恢复中的输出" }],
+    })
+    assert.equal(state.contextPressure, 0.7)
+    assert.deepEqual(
+      state.sessions.map((session) => session.id),
+      ["session-1", "session-2"]
+    )
+
+    globalThis.fetch = originalFetchImpl
+  })
+
   test("turn_completed with cancelled outcome replaces streaming turn with preserved history", () => {
     useChatStore.setState({
       chatState: "active",

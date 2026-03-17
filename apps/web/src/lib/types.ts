@@ -130,6 +130,10 @@ export type SseEvent =
       data: TurnLifecycle & { session_id: string }
     }
   | { type: "context_compressed"; data: ContextCompressionNotice }
+  | {
+      type: "sync_required"
+      data: { reason: "lagged" | string; skipped_messages: number }
+    }
   | { type: "error"; data: { session_id: string; message: string } }
   | {
       type: "session_created"
