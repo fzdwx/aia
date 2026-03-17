@@ -15,6 +15,7 @@ import {
   updateProvider as apiUpdateProvider,
   deleteProvider as apiDeleteProvider,
 } from "@/lib/api"
+import { createIdleScheduler, type IdleCanceller, type IdleScheduler } from "@/lib/idle"
 import { normalizeToolArguments } from "@/lib/tool-display"
 import type {
   AppView,
@@ -34,6 +35,8 @@ import type {
 const SESSION_HISTORY_PAGE_SIZE = 5
 const INITIAL_SESSION_HISTORY_PAGE_SIZE = 1
 const MAX_CACHED_SESSION_SNAPSHOTS = 24
+
+const defaultIdleScheduler = createIdleScheduler()
 
 type IdleHandle = number
 
@@ -246,20 +249,31 @@ type ChatStore = {
 let latestSessionLoadId = 0
 let pendingHistoryHydrationAbort: AbortController | null = null
 let pendingHistoryHydrationIdleHandle: IdleHandle | null = null
-let scheduleIdleWork: (callback: () => void) => IdleHandle = (callback) =>
-  window.setTimeout(callback, 120)
+let scheduleIdleWork: IdleScheduler = defaultIdleScheduler.schedule
+let cancelIdleWork: IdleCanceller = defaultIdleScheduler.cancel
 
-export function __setScheduleIdleWorkForTests(
-  scheduler: ((callback: () => void) => IdleHandle) | null
+export function __setIdleSchedulerForTests(
+  scheduler:
+    | {
+        schedule: IdleScheduler
+        cancel: IdleCanceller
+      }
+    | null
 ) {
-  scheduleIdleWork = scheduler ?? ((callback) => window.setTimeout(callback, 120))
+  if (scheduler) {
+    scheduleIdleWork = scheduler.schedule
+    cancelIdleWork = scheduler.cancel
+    return
+  }
+  scheduleIdleWork = defaultIdleScheduler.schedule
+  cancelIdleWork = defaultIdleScheduler.cancel
 }
 
 function cancelPendingHistoryHydration() {
   pendingHistoryHydrationAbort?.abort()
   pendingHistoryHydrationAbort = null
   if (pendingHistoryHydrationIdleHandle != null) {
-    clearTimeout(pendingHistoryHydrationIdleHandle)
+    cancelIdleWork(pendingHistoryHydrationIdleHandle)
     pendingHistoryHydrationIdleHandle = null
   }
 }

@@ -1,5 +1,19 @@
 # 演进日志
 
+## 2026-03-17 Session 8
+
+**诊断**：后台补历史虽然已经改成 idle/可取消，但 idle 策略仍硬编码在 store 里用 `setTimeout` 模拟，既不够贴近浏览器真实空闲调度，也让测试注入和后续调度策略演进不够干净。
+**决策**：把空闲调度正式收口成独立 helper：浏览器里优先使用 `requestIdleCallback`，不支持时再 fallback 到 `setTimeout`；store 只依赖抽象调度接口，测试继续用可注入 scheduler。这样策略更清晰，也更方便后续升级到优先级调度。
+**变更**：
+- `apps/web/src/lib/idle.ts`：新增独立 idle scheduler helper，统一封装 `requestIdleCallback` / `cancelIdleCallback` 与 `setTimeout` fallback。
+- `apps/web/src/lib/idle.test.ts`：新增 idle helper 测试，覆盖原生 idle 与 fallback 两条路径。
+- `apps/web/src/stores/chat-store.ts`：改为依赖 idle helper，并把测试注入接口升级为 `schedule/cancel` 成对调度器。
+- `apps/web/src/stores/chat-store.test.ts`：同步接入新的可控 idle scheduler。
+- `docs/status.md`、`docs/architecture.md`：补充 idle 调度抽象已独立化的说明。
+**验证**：`bun test`（`apps/web`）通过；`bun run typecheck`（`apps/web`）通过。
+**提交**：`5a30167` `refactor: extract web idle scheduler`
+**下次方向**：如果继续推进这条线，优先把“后台补几页”做成动态策略，例如根据当前 session 历史长度、最近切换频率和是否正在 streaming 来决定补页力度，而不是固定页数。
+
 ## 2026-03-17 Session 7
 
 **诊断**：session 切换虽然已经做成“最后一个 turn 先显示、其余历史后台补”，但后台补页仍会立即发起且不可取消；这会在用户快速切会话时制造无效请求，也会让非关键历史拉取继续和滚动/streaming 抢主线程与网络。

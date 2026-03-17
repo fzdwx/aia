@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, test } from "node:test"
 import assert from "node:assert/strict"
 
-import { __setScheduleIdleWorkForTests, useChatStore } from "./chat-store"
+import { __setIdleSchedulerForTests, useChatStore } from "./chat-store"
 import type { SseEvent } from "@/lib/types"
 
 type FetchMock = typeof fetch
@@ -30,15 +30,18 @@ describe("chat store submitTurn", () => {
 
   beforeEach(() => {
     useChatStore.setState(initialState)
-    __setScheduleIdleWorkForTests((callback) => {
-      callback()
-      return 0
+    __setIdleSchedulerForTests({
+      schedule: (callback) => {
+        callback()
+        return 0
+      },
+      cancel: () => {},
     })
   })
 
   afterEach(() => {
     globalThis.fetch = originalFetch
-    __setScheduleIdleWorkForTests(null)
+    __setIdleSchedulerForTests(null)
   })
 
   test("shows user message immediately after submit", () => {

@@ -73,6 +73,7 @@
 - 完成 Web session 切换首屏收口：切换前仅同步保存旧 session 的最后一个 turn 快照；切入新 session 时先展示/拉取最后一个 turn，再后台补齐其余历史，减少主线程阻塞与首屏等待
 - 完成 Web session 快照瘦身：`_sessionSnapshots` 退化为最小 UI snapshot，只保留最后一个 turn 与 streaming/UI 状态，不再长期缓存历史页副本
 - 完成 Web session 后台补历史收口：首屏只进最后一个 turn，其余历史改为空闲时增量补页，并在切走 session 时取消后台补页，减少与滚动/streaming 的竞争
+- 完成 Web idle 调度抽象：session 后台补历史不再写死 `setTimeout`，优先使用浏览器 `requestIdleCallback`，并保留 fallback 与测试可控注入
 - 完成 Web 端 turn 提交请求的 `keepalive` 加固
 - 完成 provider 注册表加载的旧路径兼容：当 `.aia/providers.json` 缺失时，自动回退读取 `.aia/sessions/providers.json`
 - 完成完整的 stop/cancel 基线：server 暴露 `POST /api/turn/cancel`，session manager 能中断运行中 turn，runtime 把取消信号传到工具执行上下文，Web 输入区提供 stop 按钮并显示 cancelled 状态
