@@ -1,3 +1,4 @@
+mod apply_patch;
 mod edit;
 mod glob;
 mod grep;
@@ -6,6 +7,7 @@ mod shell;
 mod walk;
 mod write;
 
+pub use apply_patch::ApplyPatchTool;
 pub use edit::EditTool;
 pub use glob::GlobTool;
 pub use grep::GrepTool;
@@ -25,6 +27,7 @@ pub fn build_tool_registry() -> ToolRegistry {
     registry.register(Box::new(ReadTool));
     registry.register(Box::new(WriteTool));
     registry.register(Box::new(EditTool));
+    registry.register(Box::new(ApplyPatchTool));
     registry.register(Box::new(GlobTool));
     registry.register(Box::new(GrepTool));
     registry
@@ -34,9 +37,109 @@ pub fn build_tool_registry() -> ToolRegistry {
 mod tests {
     use std::collections::BTreeSet;
 
-    use agent_core::{Tool, ToolExecutor};
+    use agent_core::{Tool, ToolDefinition, ToolExecutor};
+    use schemars::JsonSchema;
+    use serde::{Deserialize, Serialize};
 
-    use super::{ShellTool, build_tool_registry};
+    use super::{
+        ApplyPatchTool, EditTool, GlobTool, GrepTool, ReadTool, ShellTool, WriteTool,
+        build_tool_registry,
+    };
+
+    #[derive(Serialize, Deserialize, JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    struct ShellToolArgs {
+        #[schemars(description = "The shell command to execute")]
+        command: String,
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    struct ReadToolArgs {
+        #[schemars(description = "Path to the file to read")]
+        file_path: String,
+        #[schemars(description = "Starting line number (0-based, default 0)")]
+        offset: Option<usize>,
+        #[schemars(description = "Maximum lines to read (default 2000)")]
+        limit: Option<usize>,
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    struct WriteToolArgs {
+        #[schemars(description = "Path to write to")]
+        file_path: String,
+        #[schemars(description = "Content to write")]
+        content: String,
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    struct EditToolArgs {
+        #[schemars(description = "Path to the file to edit")]
+        file_path: String,
+        #[schemars(description = "Exact text to find (must match uniquely)")]
+        old_string: String,
+        #[schemars(description = "Replacement text")]
+        new_string: String,
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    struct ApplyPatchToolPatchArgs {
+        #[schemars(description = "The full patch text in apply_patch format")]
+        patch: String,
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    struct ApplyPatchToolPatchTextArgs {
+        #[schemars(description = "Alias for patch; the full patch text in apply_patch format")]
+        #[serde(rename = "patchText")]
+        patch_text: String,
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    struct ApplyPatchToolCombinedArgs {
+        #[schemars(description = "The full patch text in apply_patch format")]
+        patch: String,
+        #[schemars(description = "Alias for patch; the full patch text in apply_patch format")]
+        #[serde(rename = "patchText")]
+        patch_text: String,
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema)]
+    #[serde(untagged)]
+    enum ApplyPatchToolArgs {
+        Patch(ApplyPatchToolPatchArgs),
+        PatchText(ApplyPatchToolPatchTextArgs),
+        Combined(ApplyPatchToolCombinedArgs),
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    struct GlobToolArgs {
+        #[schemars(description = "Glob pattern (e.g. **/*.rs)")]
+        pattern: String,
+        #[schemars(description = "Base directory to search in")]
+        path: Option<String>,
+        #[schemars(description = "Maximum matched files to return (default 200, max 1000)")]
+        limit: Option<usize>,
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    struct GrepToolArgs {
+        #[schemars(description = "Regex pattern to search for")]
+        pattern: String,
+        #[schemars(description = "Directory or file to search in")]
+        path: Option<String>,
+        #[schemars(description = "File glob filter (e.g. *.rs)")]
+        glob: Option<String>,
+        #[schemars(description = "Maximum matched files to return (default 200, max 1000)")]
+        limit: Option<usize>,
+    }
 
     #[test]
     fn registry_exposes_only_new_tool_names() {
@@ -47,7 +150,7 @@ mod tests {
             .map(|definition| definition.name)
             .collect::<BTreeSet<_>>();
 
-        let expected = ["shell", "read", "write", "edit", "glob", "grep"]
+        let expected = ["shell", "read", "write", "edit", "apply_patch", "glob", "grep"]
             .into_iter()
             .map(str::to_owned)
             .collect::<BTreeSet<_>>();
@@ -71,6 +174,74 @@ mod tests {
         assert_eq!(
             definition.parameters["properties"]["command"]["description"],
             "The shell command to execute"
+        );
+    }
+
+    #[test]
+    fn builtin_tool_definitions_match_schemars_output() {
+        let shell = ShellTool.definition();
+        assert_eq!(
+            shell.parameters,
+            ToolDefinition::new("shell", "Execute a shell command with the embedded brush runtime")
+                .with_parameters_schema::<ShellToolArgs>()
+                .parameters
+        );
+
+        let read = ReadTool.definition();
+        assert_eq!(
+            read.parameters,
+            ToolDefinition::new("read", "Read a file with line numbers")
+                .with_parameters_schema::<ReadToolArgs>()
+                .parameters
+        );
+
+        let write = WriteTool.definition();
+        assert_eq!(
+            write.parameters,
+            ToolDefinition::new("write", "Create or overwrite a file")
+                .with_parameters_schema::<WriteToolArgs>()
+                .parameters
+        );
+
+        let edit = EditTool.definition();
+        assert_eq!(
+            edit.parameters,
+            ToolDefinition::new("edit", "Replace exact text in a file (must match uniquely)")
+                .with_parameters_schema::<EditToolArgs>()
+                .parameters
+        );
+
+        let apply_patch = ApplyPatchTool.definition();
+        assert_eq!(
+            apply_patch.parameters,
+            ToolDefinition::new(
+                "apply_patch",
+                "Apply a patch in apply_patch format (supports Update File, Add File, Delete File, Move to)",
+            )
+            .with_parameters_schema::<ApplyPatchToolArgs>()
+            .parameters
+        );
+
+        let glob = GlobTool.definition();
+        assert_eq!(
+            glob.parameters,
+            ToolDefinition::new(
+                "glob",
+                "Find files matching a glob pattern (respects .gitignore and skips .git/node_modules/target)",
+            )
+            .with_parameters_schema::<GlobToolArgs>()
+            .parameters
+        );
+
+        let grep = GrepTool.definition();
+        assert_eq!(
+            grep.parameters,
+            ToolDefinition::new(
+                "grep",
+                "Search file contents with regex (respects .gitignore and skips .git/node_modules/target)",
+            )
+            .with_parameters_schema::<GrepToolArgs>()
+            .parameters
         );
     }
 }

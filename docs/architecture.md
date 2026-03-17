@@ -55,6 +55,7 @@ README 里真正难的是这些能力：
 - 模型能力与人格标签
 - `LanguageModel` 已收口为单一流式入口：`complete_streaming(request, abort, sink)`；同步/非流式消费方通过空 sink 消费最终 `Completion`，避免 `complete` / `complete_streaming_with_abort` 三套入口长期并存
 - 工具定义、工具调用、统一工具规范
+- `ToolDefinition` 参数 schema 既支持手写 JSON 构造，也支持基于 `schemars::JsonSchema` 的共享生成 helper；当前内建工具与 runtime tools 已统一切到该 helper，避免工具层重复手拼 JSON Schema
 - 运行时需要的请求与响应载荷
 - 结构化会话条目：普通消息、工具调用、工具结果
 
@@ -112,7 +113,7 @@ README 里真正难的是这些能力：
 - 时间辅助函数不假设系统时间恒定晚于 `UNIX_EPOCH`，异常场景下会安全回退
 - `tape_info` / `tape_handoff` 已通过真正的 runtime tool registry 暴露，而不是字符串特判
 
-当前内建编码工具契约维持短名集合：`shell`、`read`、`write`、`edit`、`glob`、`grep`。其中 `shell` 是模型可见的稳定工具名，底层执行器可在边缘实现中替换；当前实现使用 `brush` 作为 shell 运行时，而不是把具体 shell 名称泄漏进统一工具协议。
+当前内建编码工具契约维持短名集合：`shell`、`read`、`write`、`edit`、`apply_patch`、`glob`、`grep`。其中 `shell` 是模型可见的稳定工具名，底层执行器可在边缘实现中替换；当前实现使用 `brush` 作为 shell 运行时，而不是把具体 shell 名称泄漏进统一工具协议。`edit` 继续只承担“精确唯一字符串替换”这一单文件编辑语义，而多文件补丁编辑则由独立的 `apply_patch` 工具承接，支持 `apply_patch` 风格的 `Update File` / `Add File` / `Delete File`，让外部 Codex/Claude 风格补丁映射不必再借道 shell。
 
 `builtin-tools::shell` 内部也已进一步按职责拆分：根模块只保留 `ShellTool` 契约与结果组装，capture 文件/事件泵与 embedded brush 执行主流程分别下沉到 `shell::{capture,execution}`，避免异步执行细节继续堆在单个超大文件里。
 

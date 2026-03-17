@@ -1,5 +1,46 @@
 # 演进日志
 
+## 2026-03-17 Session 41
+
+**Diagnosis**：内建 `edit` 工具目前只支持单文件的精确字符串替换；当外部客户端或模型按 Codex/Claude 常见习惯生成 `apply_patch` 风格补丁时，核心短名工具协议无法直接承接，仍需要绕回 `shell` 或边缘层私有映射。
+**Decision**：保持 `edit` 的单文件唯一替换职责不变，改为在 `builtin-tools` 内新增独立 `apply_patch` 工具承接多文件补丁语义，并把它纳入内建工具注册表和 runtime 串行写工具策略；这样既不混淆两种编辑接口，也让补丁编辑能力停留在共享工具层，而不是泄漏成 shell 级 patch 执行依赖。随后继续补齐 `*** Move to:` rename 语义、`patchText` 参数别名与更丰富的 per-file 结果元数据，并把 `files` 从 `Vec<serde_json::Value>` 收口为强类型结构，减少后续继续手写 JSON key 的漂移风险。
+**Changes**：
+- `crates/builtin-tools/src/apply_patch.rs`：新增独立 `apply_patch` 工具，支持 `*** Begin Patch` / `*** End Patch`、`Update File`、`Add File`、`Delete File`、`Move to`；兼容 `patch` / `patchText` 两种入参名，并在结果 details 中补齐每个文件的 `before` / `after` / `patch` / `move_to` 元数据；update hunk 匹配仍坚持“唯一命中才允许修改”的安全语义；本轮又把 per-file 结果收口成 `PatchFileDetail` / `PatchFileKind` 强类型。
+- `crates/builtin-tools/src/edit.rs`、`crates/builtin-tools/src/lib.rs`：`edit` 回到单文件精确替换职责；工具注册表新增 `apply_patch`，稳定短名集合扩展为 `shell` / `read` / `write` / `edit` / `apply_patch` / `glob` / `grep`。
+- `crates/agent-runtime/src/runtime/tool_calls/policy.rs`：把 `apply_patch` 归入串行工具，避免与其他文件写工具并发修改同一工作区。
+- `docs/status.md`、`docs/architecture.md`：同步记录独立 `apply_patch` 工具已落地。
+**Verification**：`cargo test -p builtin-tools edit -- --nocapture` 通过；`cargo test -p builtin-tools apply_patch -- --nocapture` 通过（含 move/alias/per-file metadata 回归）；`cargo fmt --all` 通过；`cargo check` 通过。
+**Commit**：未提交（当前会话未执行 `git commit`）；建议提交信息：`feat: add standalone apply_patch tool`
+**Next direction**：优先继续检查内建工具协议里还缺哪些 Codex/Claude 兼容细节（例如更完整的 patch 验证、权限元数据与 UI 可直接消费的 diff 摘要），或继续把这层兼容元数据下沉到共享工具定义，而不是散落在边缘适配层。
+
+## 2026-03-17 Session 40
+
+**Diagnosis**：工具参数 schema 目前主要靠各个工具实现手写 `serde_json::json!`，虽然能用，但重复度高，也不利于让 Rust 参数类型与对外 JSON Schema 保持单一来源。
+**Decision**：把 `schemars` 支持收口到 `agent-core::ToolDefinition`，提供统一 helper 直接从 `JsonSchema` 类型生成 `parameters`，而不是把 schema 生成细节散落到每个工具实现里。
+**Changes**：
+- `crates/agent-core/Cargo.toml`：引入 `schemars` 依赖。
+- `crates/agent-core/src/tooling.rs`：为 `ToolDefinition` 新增 `with_parameters_schema::<T>()` helper，把 `schemars::schema_for!(T)` 转成现有 `serde_json::Value` 参数 schema，并在共享层去掉根级 `$schema` 元字段。
+- `crates/agent-core/src/tests.rs`：新增 `JsonSchema` 回归测试，验证字段描述、必填项、`additionalProperties` 与 `$schema` 归一化。
+- `crates/openai-adapter/Cargo.toml`、`crates/openai-adapter/src/tests.rs`：补一条适配器链路回归测试，确认 `schemars` 生成的工具参数会被请求体透传，且不会把 `$schema` 带给上游。
+- `docs/architecture.md`、`docs/status.md`：补记 `ToolDefinition` 现在支持基于 `schemars` 的共享 schema 生成。
+**Verification**：先写失败测试并确认缺少 `with_parameters_schema` 且 `$schema` 会泄漏；随后 `cargo test -p agent-core 工具定义可用_schemars_生成参数` 与 `cargo test -p openai-adapter responses_请求体会透传_schemars_工具参数且不包含_schema_元字段` 通过；后续继续跑 `cargo fmt --all`、`cargo test -p agent-core`、`cargo check` 做收尾验证。
+**Commit**：未提交。
+**Next direction**：如果后续继续收口，可把 `builtin-tools` 中至少一个手写 schema 的工具改成 `schemars` 定义，作为共享 helper 的真实示例。
+
+## 2026-03-17 Session 42
+
+**Diagnosis**：虽然 `agent-core::ToolDefinition` 已支持 `schemars` helper，但真实工具实现仍大多停留在手写 `serde_json::json!` 参数 schema，导致共享能力没有真正落到内建工具与 runtime tools 上。
+**Decision**：把当前所有真实工具实现统一迁到 `with_parameters_schema::<T>()`，包括 `builtin-tools` 与 runtime tools；复杂兼容形态（如 `apply_patch` 的 `patch` / `patchText` 双入口）则用 `schemars` 的 `untagged enum` 保留原有协议。
+**Changes**：
+- `crates/builtin-tools/Cargo.toml`、`crates/agent-runtime/Cargo.toml`：补齐 `schemars` 依赖，并在 `builtin-tools` 中显式补齐 `serde` derive 依赖。
+- `crates/builtin-tools/src/{shell,read,write,edit,glob,grep,apply_patch}.rs`：为每个真实工具定义参数类型，统一改用 `ToolDefinition::with_parameters_schema::<...>()`；`apply_patch` 通过 `untagged enum` 保留 `patch` / `patchText` 双入口兼容。
+- `crates/agent-runtime/src/runtime/tape_tools.rs`：`tape_info` 与 `tape_handoff` 的 `definition()` 统一改用 `schemars` 参数类型。
+- `crates/builtin-tools/src/lib.rs`、`crates/agent-runtime/src/runtime/tape_tools.rs`：新增回归测试，锁住“真实工具 definition 必须等于共享 `schemars` helper 生成结果”的约束。
+- `docs/architecture.md`、`docs/status.md`：同步记录当前真实工具实现已经统一切到 `schemars` 参数 schema。
+**Verification**：先写失败测试并确认 builtin tools / runtime tools 的 definition 仍是手写 JSON；随后 `cargo test -p builtin-tools builtin_tool_definitions_match_schemars_output` 与 `cargo test -p agent-runtime runtime_tool_definitions_match_schemars_output` 通过；后续继续跑 `cargo fmt --all`、`cargo test -p builtin-tools`、`cargo test -p agent-runtime`、`cargo test -p agent-core`、`cargo test -p openai-adapter`、`cargo check` 做收尾验证。
+**Commit**：未提交。
+**Next direction**：下一步可继续收口工具调用解析本身，把部分 `ToolCall` 手工取参逻辑也逐步迁到共享 typed-args helper，让 schema 与运行时验证进一步共源。
+
 ## 2026-03-17 Session 39
 
 **Diagnosis**：`apps/agent-server` 的 `/api/events` 目前把 `tokio::broadcast` 的 `Lagged` 错误直接吞掉；一旦 SSE 客户端落后，事件会静默丢失，Web 本地 `streamingTurn` 与真实 session tape / snapshot 可能无声漂移。

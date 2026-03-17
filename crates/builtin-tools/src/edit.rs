@@ -2,8 +2,21 @@ use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 pub struct EditTool;
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct EditToolArgs {
+    #[schemars(description = "Path to the file to edit")]
+    file_path: String,
+    #[schemars(description = "Exact text to find (must match uniquely)")]
+    old_string: String,
+    #[schemars(description = "Replacement text")]
+    new_string: String,
+}
 
 #[async_trait]
 impl Tool for EditTool {
@@ -12,29 +25,8 @@ impl Tool for EditTool {
     }
 
     fn definition(&self) -> ToolDefinition {
-        ToolDefinition {
-            name: "edit".into(),
-            description: "Replace exact text in a file (must match uniquely)".into(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "file_path": {
-                        "type": "string",
-                        "description": "Path to the file to edit"
-                    },
-                    "old_string": {
-                        "type": "string",
-                        "description": "Exact text to find (must appear exactly once)"
-                    },
-                    "new_string": {
-                        "type": "string",
-                        "description": "Replacement text"
-                    }
-                },
-                "required": ["file_path", "old_string", "new_string"],
-                "additionalProperties": false
-            }),
-        }
+        ToolDefinition::new("edit", "Replace exact text in a file (must match uniquely)")
+            .with_parameters_schema::<EditToolArgs>()
     }
 
     async fn call(

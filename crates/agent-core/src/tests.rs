@@ -4,6 +4,8 @@ use std::{
 };
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use super::*;
 use crate::tooling::duration_since_unix_epoch;
@@ -17,6 +19,28 @@ fn 工具定义用_json_schema_构建参数() {
     assert_eq!(definition.parameters["properties"]["query"]["type"], "string");
     assert_eq!(definition.parameters["properties"]["path"]["description"], "限定路径");
     assert_eq!(definition.parameters["required"], serde_json::json!(["query"]));
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SearchArgsSchema {
+    /// 要搜索的关键字
+    query: String,
+    /// 限定返回数量
+    limit: Option<u32>,
+}
+
+#[test]
+fn 工具定义可用_schemars_生成参数() {
+    let definition =
+        ToolDefinition::new("search", "搜索代码").with_parameters_schema::<SearchArgsSchema>();
+
+    assert!(definition.parameters.get("$schema").is_none());
+    assert_eq!(definition.parameters["type"], "object");
+    assert_eq!(definition.parameters["properties"]["query"]["type"], "string");
+    assert_eq!(definition.parameters["properties"]["query"]["description"], "要搜索的关键字");
+    assert_eq!(definition.parameters["required"], serde_json::json!(["query"]));
+    assert_eq!(definition.parameters["additionalProperties"], false);
 }
 
 #[test]

@@ -3,6 +3,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -53,6 +54,18 @@ impl ToolDefinition {
         }
         self
     }
+
+    pub fn with_parameters_schema<T: JsonSchema>(mut self) -> Self {
+        self.parameters = normalize_schema_parameters(schemars::schema_for!(T).into());
+        self
+    }
+}
+
+fn normalize_schema_parameters(mut schema: Value) -> Value {
+    if let Some(object) = schema.as_object_mut() {
+        object.remove("$schema");
+    }
+    schema
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
