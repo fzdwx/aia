@@ -1,5 +1,18 @@
 # 演进日志
 
+## 2026-03-17 Session 34
+
+**Diagnosis**：`openai-adapter` 虽然已经拆开 Responses / Chat Completions 两条协议栈，但两边的 `complete_streaming` 仍重复维护同一套流式请求发送、状态码失败处理、SSE transcript 累积、`data:` JSON 行解析和 `[DONE]` 终止判断；协议 streaming state 里也各自带着同构的 `handle_line` 壳。
+**Decision**：把流式请求驱动与 SSE transcript 解析继续下沉到顶层 `streaming` 模块：共享 request→response→line stream 主链和 `data:` JSON 行解码，只把协议特有的 event 语义、delta/tool-call 累积和最终 completion 组装留在 `responses::streaming` / `chat_completions::streaming`。这样能继续减少历史重复，同时不把协议细节重新混回共享层。
+**Changes**：
+- `crates/openai-adapter/src/streaming.rs`：新增共享 `StreamingState` trait、`StreamingTranscript`、`ParsedSseLine` 与 `complete_streaming_request(...)`，统一处理流式请求发送、失败响应组装、SSE transcript 记录和 `data:` JSON 行解析；并补了 3 个 transcript 单测。
+- `crates/openai-adapter/src/responses/client.rs`、`crates/openai-adapter/src/chat_completions/client.rs`：`complete_streaming` 改为直接复用共享 streaming driver，去掉重复的请求发送与状态码检查模板。
+- `crates/openai-adapter/src/responses/streaming.rs`、`crates/openai-adapter/src/chat_completions/streaming.rs`：删除各自重复的 `handle_line` 壳，改为实现共享 `StreamingState`，只保留协议特有事件处理、delta 聚合和 completion 组装。
+- `crates/openai-adapter/src/lib.rs`、`docs/status.md`、`docs/architecture.md`：移除不再需要的旧 re-export，并同步记录 adapter 共享流式驱动已收口。
+**Verification**：`cargo fmt --all --check` 通过；`cargo check -p openai-adapter` 通过；`cargo test -p openai-adapter -- --nocapture` 通过（32 passed，需脱离沙箱以允许本地测试 listener 绑定）。
+**Commit**：`5598f1e` `refactor: share adapter streaming driver`
+**Next direction**：优先继续看 `openai-adapter` 剩余协议特有的 delta / tool-call 累积 helper，或转去收口 `agent-runtime::runtime::tool_calls`、`agent-store` / `apps/agent-server` 之间还能继续下沉的共享查询/投影逻辑。
+
 ## 2026-03-17 Session 33
 
 **Diagnosis**：`crates/openai-adapter/src/payloads.rs` 仍同时承载 Responses 与 Chat Completions 两条协议的反序列化载体；虽然文件还在使用，但它已经成为协议边界重新混杂的“共享垃圾桶”。
