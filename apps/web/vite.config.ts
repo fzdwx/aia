@@ -3,30 +3,23 @@ import tailwindcss from "@tailwindcss/vite"
 import react from "@vitejs/plugin-react"
 import { defineConfig } from "vite-plus"
 
-// https://vite.dev/config/
 export default defineConfig({
+  test: {
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+  },
   lint: {
-    "plugins": [
-      "oxc",
-      "typescript",
-      "unicorn",
-      "react"
-    ],
-    "categories": {
-      "correctness": "warn"
+    plugins: ["oxc", "typescript", "unicorn", "react"],
+    categories: {
+      correctness: "warn",
     },
-    "env": {
-      "builtin": true
+    env: {
+      builtin: true,
     },
-    "ignorePatterns": [
-      "dist"
-    ],
-    "overrides": [
+    ignorePatterns: ["dist"],
+    overrides: [
       {
-        "files": [
-          "**/*.{ts,tsx}"
-        ],
-        "rules": {
+        files: ["**/*.{ts,tsx}"],
+        rules: {
           "constructor-super": "error",
           "for-direction": "error",
           "getter-return": "error",
@@ -110,43 +103,40 @@ export default defineConfig({
           "react/only-export-components": [
             "error",
             {
-              "allowConstantExport": true
-            }
-          ]
+              allowConstantExport: true,
+            },
+          ],
         },
-        "env": {
-          "es2020": true,
-          "browser": true
+        env: {
+          es2020: true,
+          browser: true,
         },
-        "globals": {
-          "AudioWorkletGlobalScope": "readonly",
-          "AudioWorkletProcessor": "readonly",
-          "currentFrame": "readonly",
-          "currentTime": "readonly",
-          "registerProcessor": "readonly",
-          "sampleRate": "readonly",
-          "WorkletGlobalScope": "readonly"
-        }
-      }
+        globals: {
+          AudioWorkletGlobalScope: "readonly",
+          AudioWorkletProcessor: "readonly",
+          currentFrame: "readonly",
+          currentTime: "readonly",
+          registerProcessor: "readonly",
+          sampleRate: "readonly",
+          WorkletGlobalScope: "readonly",
+        },
+      },
     ],
-    "options": {}
+    options: {},
   },
   fmt: {
-    "endOfLine": "lf",
-    "semi": false,
-    "singleQuote": false,
-    "tabWidth": 2,
-    "trailingComma": "es5",
-    "printWidth": 80,
-    "sortTailwindcss": {
-      "stylesheet": "src/index.css",
-      "functions": [
-        "cn",
-        "cva"
-      ]
+    endOfLine: "lf",
+    semi: false,
+    singleQuote: false,
+    tabWidth: 2,
+    trailingComma: "es5",
+    printWidth: 80,
+    sortTailwindcss: {
+      stylesheet: "src/index.css",
+      functions: ["cn", "cva"],
     },
-    "sortPackageJson": false,
-    "ignorePatterns": [
+    sortPackageJson: false,
+    ignorePatterns: [
       "node_modules/",
       "coverage/",
       ".pnpm-store/",
