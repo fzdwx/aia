@@ -9,7 +9,7 @@
 - `crates/builtin-tools/src/glob.rs`、`crates/builtin-tools/src/grep.rs`：把仓库扫描 / 内容搜索移到 async 入口下的 `spawn_blocking` 执行，并在遍历过程中轮询 abort；新增 pre-cancel 回归测试，验证工具会返回 `[aborted]`。
 - `docs/status.md`、`docs/requirements.md`、`docs/architecture.md`、`docs/async-phases.md`：同步记录 builtin 文件/搜索工具异步化已完成，当前优先级转向 Phase 4 的 live runtime stats / ownership 收口。
 **验证**：`cargo check` 通过；`cargo test -p builtin-tools -- --nocapture` 通过。
-**提交**：待补
+**提交**：`e38b9e3` `refactor: asyncify builtin file and search tools`
 **下次方向**：优先继续减少 `apps/agent-server` 在运行中 `session/info` 上对 tape / 快照回退的依赖，并评估如何把当前 turn worker thread handoff 进一步收口为更自然的 runtime ownership 模型。
 
 ## 2026-03-17 Session 11
