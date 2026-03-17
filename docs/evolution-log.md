@@ -1,5 +1,18 @@
 # 演进日志
 
+## 2026-03-17 Session 15
+
+**Diagnosis**：`builtin-tools::glob` / `grep` 虽然已经接入 async trait，但内部仍通过 `spawn_blocking` + `ignore::WalkBuilder` 做同步仓库遍历；这让搜索工具仍保留一段显眼的阻塞池桥接路径，也继续拖慢“全异步主链”的尾部收口。
+**Decision**：继续把搜索工具本体收口到原生 async：抽出共享的 async 候选文件遍历 helper，用 `tokio::fs` 递归读取目录、异步加载每级 `.gitignore`，并让 `glob` / `grep` 直接在 async 路径里完成匹配与文件读取。这样既去掉 `spawn_blocking`，也避免再为同一套仓库遍历逻辑维护两份实现。
+**Changes**：
+- `crates/builtin-tools/src/walk.rs`：新增共享 async 仓库遍历 helper，使用 `tokio::fs` 递归读取目录、异步加载 `.gitignore`，并继续跳过 `.git`、`node_modules`、`target`。
+- `crates/builtin-tools/src/glob.rs`：移除 `spawn_blocking` / `ignore::WalkBuilder`，改为复用共享 async walker，并用 async metadata 读取维持按修改时间排序。
+- `crates/builtin-tools/src/grep.rs`：移除 `spawn_blocking` / `ignore::WalkBuilder`，改为复用共享 async walker，并用 `tokio::fs::read` + `grep_searcher::search_slice` 做内容搜索。
+- `crates/builtin-tools/src/lib.rs`、`docs/status.md`、`docs/architecture.md`、`docs/async-phases.md`、`docs/requirements.md`：导出共享 walker 模块并同步更新异步化当前状态说明。
+**Verification**：`cargo fmt --all` 通过；`cargo check -p builtin-tools` 通过；`cargo test -p builtin-tools glob_tool -- --nocapture` 通过；`cargo test -p builtin-tools grep_tool -- --nocapture` 通过。
+**Commit**：`0a66556` `refactor: asyncify builtin search traversal`
+**Next direction**：优先继续清理生产路径里剩余的同步桥接点，尤其是 `apps/agent-server` trace/SQLite 查询路由与 `builtin-tools::shell` 的 pipe 读取。
+
 ## 2026-03-17 Session 14
 
 **诊断**：虽然 session manager / turn worker 已经切到纯 Tokio task，但 `builtin-tools::shell` 仍保留一个自建执行线程和内部 `current_thread` runtime 来承载 `brush`；这让“runtime 主链已经全异步”在 shell 路径上仍有一个显眼例外，也继续增加了线程与 runtime 嵌套复杂度。
