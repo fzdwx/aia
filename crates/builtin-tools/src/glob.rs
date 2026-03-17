@@ -6,7 +6,7 @@ use agent_core::{
 };
 use async_trait::async_trait;
 
-use crate::should_skip_directory;
+use crate::walk::collect_candidate_files;
 
 pub struct GlobTool;
 const DEFAULT_MATCH_LIMIT: usize = 200;
@@ -84,19 +84,16 @@ impl Tool for GlobTool {
             })));
         }
 
-        match tokio::task::spawn_blocking(move || run_glob_search(pattern, base, limit, abort))
-            .await
-        {
-            Ok(Ok(GlobSearchOutcome::Completed(result))) => {
-                Ok(ToolResult::from_call(call, result.content).with_details(serde_json::json!({
+        match run_glob_search(pattern, base, limit, abort).await? {
+            GlobSearchOutcome::Completed(result) => Ok(ToolResult::from_call(call, result.content)
+                .with_details(serde_json::json!({
                     "pattern": call.str_arg("pattern")?,
                     "matches": result.match_count,
                     "returned": result.returned,
                     "limit": limit,
                     "truncated": result.truncated,
-                })))
-            }
-            Ok(Ok(GlobSearchOutcome::Cancelled)) => Ok(ToolResult::from_call(call, "[aborted]")
+                }))),
+            GlobSearchOutcome::Cancelled => Ok(ToolResult::from_call(call, "[aborted]")
                 .with_details(serde_json::json!({
                     "pattern": call.str_arg("pattern")?,
                     "matches": 0,
@@ -105,13 +102,11 @@ impl Tool for GlobTool {
                     "truncated": false,
                     "aborted": true,
                 }))),
-            Ok(Err(error)) => Err(error),
-            Err(error) => Err(CoreError::new(format!("glob search task failed: {error}"))),
         }
     }
 }
 
-fn run_glob_search(
+async fn run_glob_search(
     pattern: String,
     base: PathBuf,
     limit: usize,
@@ -121,29 +116,26 @@ fn run_glob_search(
         .map_err(|e| CoreError::new(format!("invalid glob pattern: {e}")))?
         .compile_matcher();
 
-    let mut builder = ignore::WalkBuilder::new(&base);
-    builder.filter_entry(|entry| !should_skip_directory(entry));
-    let walker = builder.build();
+    let candidates = match collect_candidate_files(&base, &abort, |relative, path| {
+        glob.is_match(relative) || glob.is_match(path)
+    })
+    .await?
+    {
+        crate::walk::CandidateCollection::Completed(paths) => paths,
+        crate::walk::CandidateCollection::Cancelled => return Ok(GlobSearchOutcome::Cancelled),
+    };
 
     let mut entries: Vec<(PathBuf, SystemTime)> = Vec::new();
-    for entry in walker {
+    for path in candidates {
         if abort.is_aborted() {
             return Ok(GlobSearchOutcome::Cancelled);
         }
-        let entry = match entry {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-        if !entry.file_type().is_some_and(|ft| ft.is_file()) {
-            continue;
-        }
-        let path = entry.path();
-        let relative = path.strip_prefix(&base).unwrap_or(path);
-        if !glob.is_match(relative) && !glob.is_match(path) {
-            continue;
-        }
-        let mtime = entry.metadata().ok().and_then(|m| m.modified().ok()).unwrap_or(UNIX_EPOCH);
-        entries.push((path.to_path_buf(), mtime));
+        let mtime = tokio::fs::metadata(&path)
+            .await
+            .ok()
+            .and_then(|metadata| metadata.modified().ok())
+            .unwrap_or(UNIX_EPOCH);
+        entries.push((path, mtime));
     }
 
     entries.sort_by(|a, b| b.1.cmp(&a.1));

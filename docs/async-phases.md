@@ -195,7 +195,7 @@
 - `openai-adapter` 已从 `reqwest::blocking` 切到 async `reqwest`
 - Responses / Chat Completions 的 SSE 读取已改为 async chunk streaming，并继续保留 abort 轮询与取消语义
 - `builtin-tools::shell` 已把输出聚合与 abort 轮询改为 async 事件泵，并移除自建 thread + current-thread runtime；当前 `brush` 执行直接挂在 Tokio task 上，仅 pipe 读取仍暂通过 Tokio blocking 池桥接同步 I/O
-- `builtin-tools::read` / `write` / `edit` 已切到 `tokio::fs`，`glob` / `grep` 已改为 async 入口 + abort 感知的阻塞池搜索，避免大仓库文件/搜索工具继续直接阻塞 current-thread runtime
+- `builtin-tools::read` / `write` / `edit` 已切到 `tokio::fs`，`glob` / `grep` 也已改为共享的 async `.gitignore` 感知仓库遍历 + async 文件读取，不再依赖 `spawn_blocking` / `ignore::WalkBuilder` 扫描大仓库
 - `apps/agent-server` 的 session manager 与 turn 执行都已切到原生 Tokio async task：不再使用 `tokio::spawn_blocking`、`std::thread::Builder`、`LocalSet` 或 `spawn_local` 承载 turn 主链；运行中 `session/info` 也改为直接读取内存中的 `ContextStats` 快照
 
 因此，下一步最高优先级变为：

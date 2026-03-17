@@ -5,7 +5,7 @@ use agent_core::{
 };
 use async_trait::async_trait;
 
-use crate::should_skip_directory;
+use crate::walk::collect_candidate_files;
 
 pub struct GrepTool;
 const DEFAULT_MATCH_LIMIT: usize = 200;
@@ -88,21 +88,16 @@ impl Tool for GrepTool {
             })));
         }
 
-        match tokio::task::spawn_blocking(move || {
-            run_grep_search(pattern, base, glob_filter, limit, abort)
-        })
-        .await
-        {
-            Ok(Ok(GrepSearchOutcome::Completed(result))) => {
-                Ok(ToolResult::from_call(call, result.content).with_details(serde_json::json!({
+        match run_grep_search(pattern, base, glob_filter, limit, abort).await? {
+            GrepSearchOutcome::Completed(result) => Ok(ToolResult::from_call(call, result.content)
+                .with_details(serde_json::json!({
                     "pattern": call.str_arg("pattern")?,
                     "matches": result.match_count,
                     "returned": result.returned,
                     "limit": limit,
                     "truncated": result.truncated,
-                })))
-            }
-            Ok(Ok(GrepSearchOutcome::Cancelled)) => Ok(ToolResult::from_call(call, "[aborted]")
+                }))),
+            GrepSearchOutcome::Cancelled => Ok(ToolResult::from_call(call, "[aborted]")
                 .with_details(serde_json::json!({
                     "pattern": call.str_arg("pattern")?,
                     "matches": 0,
@@ -111,13 +106,11 @@ impl Tool for GrepTool {
                     "truncated": false,
                     "aborted": true,
                 }))),
-            Ok(Err(error)) => Err(error),
-            Err(error) => Err(CoreError::new(format!("grep search task failed: {error}"))),
         }
     }
 }
 
-fn run_grep_search(
+async fn run_grep_search(
     pattern: String,
     base: PathBuf,
     glob_filter: Option<String>,
@@ -133,36 +126,34 @@ fn run_grep_search(
         .map_err(|e| CoreError::new(format!("invalid glob filter: {e}")))?
         .map(|glob| glob.compile_matcher());
 
-    let mut walker_builder = ignore::WalkBuilder::new(&base);
-    walker_builder.filter_entry(|entry| !should_skip_directory(entry));
-
     let mut matched_files: Vec<String> = Vec::new();
     let mut searcher = grep_searcher::Searcher::new();
 
-    for entry in walker_builder.build() {
+    let candidates = match collect_candidate_files(&base, &abort, |relative, path| {
+        glob_matcher
+            .as_ref()
+            .is_none_or(|compiled| compiled.is_match(relative) || compiled.is_match(path))
+    })
+    .await?
+    {
+        crate::walk::CandidateCollection::Completed(paths) => paths,
+        crate::walk::CandidateCollection::Cancelled => return Ok(GrepSearchOutcome::Cancelled),
+    };
+
+    for path in candidates {
         if abort.is_aborted() {
             return Ok(GrepSearchOutcome::Cancelled);
         }
-        let entry = match entry {
-            Ok(e) => e,
+        let haystack = match tokio::fs::read(&path).await {
+            Ok(haystack) => haystack,
             Err(_) => continue,
         };
-        if !entry.file_type().is_some_and(|ft| ft.is_file()) {
-            continue;
-        }
-        let path = entry.into_path();
-        if let Some(glob_matcher) = &glob_matcher {
-            let relative = path.strip_prefix(&base).unwrap_or(&path);
-            if !glob_matcher.is_match(relative) && !glob_matcher.is_match(&path) {
-                continue;
-            }
-        }
         let mut found = false;
         let sink = grep_searcher::sinks::UTF8(|_line_num, _line| {
             found = true;
             Ok(false)
         });
-        let _ = searcher.search_path(&matcher, &path, sink);
+        let _ = searcher.search_slice(&matcher, &haystack, sink);
         if found {
             matched_files.push(path.display().to_string());
         }
