@@ -13,6 +13,8 @@ import type {
   TurnLifecycle,
 } from "@/lib/types"
 
+const HISTORY_LOAD_TRIGGER_PX = 80
+
 type ToolCategory = "read" | "search" | "edit" | "other"
 
 const TOOL_CATEGORIES: Record<string, ToolCategory> = {
@@ -28,7 +30,7 @@ const TOOL_CATEGORIES: Record<string, ToolCategory> = {
   shell: "other",
   edit: "edit",
   write: "edit",
-  patch: "edit",
+  apply_patch: "edit",
   replace: "edit",
   sed: "edit",
 }
@@ -745,12 +747,6 @@ function CompressionNotice({ summary }: { summary: string }) {
   )
 }
 
-type VirtualizedTurns = {
-  visibleTurns: TurnLifecycle[]
-  topSpacerHeight: number
-  bottomSpacerHeight: number
-}
-
 function SessionHydratingIndicator() {
   return (
     <div className="pointer-events-none sticky top-0 z-10 mb-3">
@@ -774,6 +770,7 @@ export function ChatMessages() {
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const containerRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const historyTriggerRef = useRef<HTMLDivElement>(null)
   const previousSessionIdRef = useRef<string | null>(null)
   const previousTurnCountRef = useRef(0)
   const previousStreamingBlockCountRef = useRef(0)
@@ -781,13 +778,23 @@ export function ChatMessages() {
   const restoreSessionScrollRef = useRef(false)
   const skipNextAutoScrollRef = useRef(false)
   const scrollPositionsRef = useRef<Record<string, number>>({})
+  const autoLoadingOlderTurnsRef = useRef(false)
+  const historyHasMoreRef = useRef(historyHasMore)
+  const historyLoadingMoreRef = useRef(historyLoadingMore)
+  const sessionHydratingRef = useRef(sessionHydrating)
   const [scrollTop, setScrollTop] = useState(0)
-  const [containerHeight, setContainerHeight] = useState(0)
+  const [, setContainerHeight] = useState(0)
 
   const visibleTurns = turns
   const topSpacerHeight = 0
   const bottomSpacerHeight = 0
+  const showHistoryHint = historyLoadingMore || scrollTop < 160
 
+  useEffect(() => {
+    historyHasMoreRef.current = historyHasMore
+    historyLoadingMoreRef.current = historyLoadingMore
+    sessionHydratingRef.current = sessionHydrating
+  }, [historyHasMore, historyLoadingMore, sessionHydrating])
 
   useEffect(() => {
     const container = containerRef.current
@@ -818,10 +825,43 @@ export function ChatMessages() {
   }, [activeSessionId])
 
   useEffect(() => {
+    const container = containerRef.current
+    const historyTrigger = historyTriggerRef.current
+    if (!container || !historyTrigger) {
+      return
+    }
+
+    if (typeof IntersectionObserver === "undefined") {
+      if (container.scrollTop <= HISTORY_LOAD_TRIGGER_PX) {
+        void handleLoadOlderTurns()
+      }
+      return
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0]
+        if (!entry?.isIntersecting) return
+        void handleLoadOlderTurns()
+      },
+      {
+        root: container,
+        rootMargin: "80px 0px 0px 0px",
+      }
+    )
+
+    observer.observe(historyTrigger)
+    return () => {
+      observer.disconnect()
+    }
+  }, [activeSessionId, turns.length, historyHasMore, historyLoadingMore, sessionHydrating])
+
+  useEffect(() => {
     const previousSessionId = previousSessionIdRef.current
     if (previousSessionId && previousSessionId !== activeSessionId) {
       restoreSessionScrollRef.current = true
       shouldStickToBottomRef.current = true
+      skipNextAutoScrollRef.current = false
     }
   }, [activeSessionId])
 
@@ -886,20 +926,38 @@ export function ChatMessages() {
   }, [activeSessionId, turns.length, streamingTurn?.blocks.length])
 
   async function handleLoadOlderTurns() {
+    if (
+      autoLoadingOlderTurnsRef.current ||
+      historyLoadingMoreRef.current ||
+      sessionHydratingRef.current ||
+      !historyHasMoreRef.current
+    ) {
+      return
+    }
+
+    autoLoadingOlderTurnsRef.current = true
     const container = containerRef.current
     const previousScrollHeight = container?.scrollHeight ?? 0
     skipNextAutoScrollRef.current = true
-    await loadOlderTurns()
-    requestAnimationFrame(() => {
-      const nextContainer = containerRef.current
-      if (!nextContainer) return
-      const nextScrollHeight = nextContainer.scrollHeight
-      nextContainer.scrollTop += nextScrollHeight - previousScrollHeight
-      setScrollTop(nextContainer.scrollTop)
-      if (activeSessionId) {
-        scrollPositionsRef.current[activeSessionId] = nextContainer.scrollTop
-      }
-    })
+    try {
+      await loadOlderTurns()
+      requestAnimationFrame(() => {
+        const nextContainer = containerRef.current
+        if (!nextContainer) {
+          autoLoadingOlderTurnsRef.current = false
+          return
+        }
+        const nextScrollHeight = nextContainer.scrollHeight
+        nextContainer.scrollTop += nextScrollHeight - previousScrollHeight
+        setScrollTop(nextContainer.scrollTop)
+        if (activeSessionId) {
+          scrollPositionsRef.current[activeSessionId] = nextContainer.scrollTop
+        }
+        autoLoadingOlderTurnsRef.current = false
+      })
+    } catch {
+      autoLoadingOlderTurnsRef.current = false
+    }
   }
 
   if (turns.length === 0 && !streamingTurn) {
@@ -925,15 +983,22 @@ export function ChatMessages() {
       <div className="mx-auto max-w-[720px] px-6 py-8">
         {sessionHydrating && <SessionHydratingIndicator />}
         {historyHasMore && (
-          <div className="mb-6 flex justify-center">
-            <button
-              onClick={() => void handleLoadOlderTurns()}
-              disabled={historyLoadingMore || sessionHydrating}
-              className="rounded-full border border-border/40 px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground disabled:cursor-default disabled:opacity-50"
+          <>
+            <div ref={historyTriggerRef} className="h-px w-full" aria-hidden="true" />
+            <div
+              className={showHistoryHint
+                ? "sticky top-0 z-10 -mx-6 mb-4 flex justify-center bg-gradient-to-b from-background via-background/95 to-transparent px-6 pt-2 pb-3 opacity-100 transition-opacity duration-150 pointer-events-none"
+                : "sticky top-0 z-10 -mx-6 mb-4 flex justify-center bg-gradient-to-b from-background via-background/95 to-transparent px-6 pt-2 pb-3 opacity-0 transition-opacity duration-150 pointer-events-none"
+              }
+              aria-hidden={!showHistoryHint}
             >
-              {historyLoadingMore ? "Loading…" : "Load older messages"}
-            </button>
-          </div>
+              <div className="rounded-full border border-border/30 bg-background/70 px-2.5 py-1 text-[11px] text-muted-foreground/85 shadow-sm backdrop-blur-sm">
+                {historyLoadingMore
+                  ? "Loading older messages…"
+                  : "Scroll up for older messages"}
+              </div>
+            </div>
+          </>
         )}
         <div
           className={sessionHydrating ? "transition-opacity duration-150 ease-out opacity-80" : "transition-opacity duration-150 ease-out opacity-100"}

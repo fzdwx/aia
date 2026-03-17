@@ -68,6 +68,7 @@
 - 完成 Web 历史消息体验优化：切换 session / 水合历史时直接跳到底部，历史按页加载
 - 完成 Web 历史分页交互收口：消息列表上滚接近顶部时自动加载前一页，替代显式点击按钮
 - 完成 Web session 切换流畅度收口：store 维护按 session 的本地快照缓存，切换时保留上一帧内容并显示轻量 loading 提示，不再先清空消息区造成闪烁
+- 完成 Web session 切换滚动收口：每次切换 session 时都强制跳到最新消息底部，不再保留旧会话的局部滚动位置
 - 完成 Web 聊天列表首轮渲染减载：消息项引入 memo，长历史列表改为轻量窗口化渲染，并按 session 恢复滚动位置；历史分页加载时不再意外强制滚到底部
 - 完成 Web 聊天列表第二轮滚动/窗口化收口：窗口化从估算高度升级为动态测量高度，切换 session 时明确滚动到最新消息底部，避免旧会话中段位置残留带来困惑
 - 完成 Web 聊天列表第三轮锚定稳定性收口：已移除动态测量窗口化与锚定补偿机制，优先选择更稳定、可预测的消息渲染路径，避免流式与展开/收起场景下的潜在抖动
@@ -106,7 +107,9 @@
 - 完成 `agent-store` / `agent-server` 的一轮 session helper 收口：`AiaStore::first_session_id()` 与 `SessionRecord::new(...)` 已下沉到共享 store/types 层，server 启动和路由默认 session 解析不再为“取第一条 session”整表加载，也不再在多个壳层重复手拼 `SessionRecord`
 - 完成 `apps/agent-server` current-turn 投影 helper 收口：live stream 更新与 tape 快照重建共享 `runtime_worker::projection` 中的 `CurrentTurnBlock` / `CurrentToolOutput` 投影 helper，不再在 `session_manager::current_turn` 与 `runtime_worker::snapshots` 各自维护一套对象归一化、tool block 构造和状态推断逻辑
 - 完成 `agent-runtime` / `openai-adapter` 的并行工具调用首轮落地：共享 `CompletionRequest` 新增 `parallel_tool_calls`，Responses / Chat Completions 请求会显式发送该字段；runtime 对同一批工具调用开始按策略执行——`read` / `glob` / `grep` 等只读类工具可并行准备与执行，而 `shell` / `write` / `edit` / runtime tools 继续保持串行，避免文件系统冲突与交互副作用
+- 完成独立内建 `apply_patch` 工具：`edit` 保持单文件精确唯一替换语义不变，同时新增短名稳定的 `apply_patch` 工具承接 `*** Begin Patch` / `*** End Patch` 风格多文件补丁，支持 `Update File`、`Add File`、`Delete File`，让 Codex/Claude 风格补丁映射无需借道 shell，也避免把两种编辑语义继续混在同一个工具里；其每文件结果元数据现也已收口为共享强类型结构，而不是继续在实现里手写 `serde_json::Value`
 - 完成 SSE 落后客户端显式重同步：`apps/agent-server` 的 `/api/events` 在 `broadcast` 消费者落后时会发出 `sync_required` 事件，而不是静默丢弃；`apps/web` 收到后会主动补拉 session 列表与当前 session 的历史、当前 turn、上下文压力，避免事件流与本地 UI 状态无声漂移
+- 完成真实工具实现到 `schemars` 参数 schema 的统一迁移：`agent-core::ToolDefinition` 除支持手写 JSON 外，也可直接从 `JsonSchema` 类型生成统一参数 schema；当前 `builtin-tools` 与 runtime tools 的 `definition()` 已切到共享 helper，减少工具实现重复手拼 JSON Schema
 - 完成 `agent-store` SQLite 锁中毒恢复：trace/session 读写与 schema 初始化不再因 `Mutex<Connection>` poisoned 而 panic
 - 完成 `aia-config` 共享配置 crate：把 `.aia` 路径、默认 session 标题、server 默认地址 / 事件缓冲 / 请求超时、统一 user agent 组装，以及 trace / span / prompt-cache 稳定前缀从 `apps/agent-server` 与相关共享 crate 中收口
 - 完成 `aia-config` 内部模块化：拆为 `paths`、`server`、`identifiers` 三类共享配置模块，`lib.rs` 保持薄 façade
