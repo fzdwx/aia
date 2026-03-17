@@ -209,22 +209,26 @@ where
             arguments: context.call.arguments.clone(),
         });
 
-        match self.tools.call(
-            context.call,
-            &mut |delta: ToolOutputDelta| {
-                on_delta(StreamEvent::ToolOutputDelta {
-                    invocation_id: context.call.invocation_id.clone(),
-                    stream: delta.stream,
-                    text: delta.text,
-                });
-            },
-            &ToolExecutionContext {
-                run_id: context.turn_id.to_string(),
-                workspace_root: self.workspace_root.clone(),
-                abort: context.abort_signal.clone(),
-                runtime: None,
-            },
-        ).await {
+        match self
+            .tools
+            .call(
+                context.call,
+                &mut |delta: ToolOutputDelta| {
+                    on_delta(StreamEvent::ToolOutputDelta {
+                        invocation_id: context.call.invocation_id.clone(),
+                        stream: delta.stream,
+                        text: delta.text,
+                    });
+                },
+                &ToolExecutionContext {
+                    run_id: context.turn_id.to_string(),
+                    workspace_root: self.workspace_root.clone(),
+                    abort: context.abort_signal.clone(),
+                    runtime: None,
+                },
+            )
+            .await
+        {
             Ok(result) => {
                 if result.invocation_id != context.call.invocation_id
                     || result.tool_name != context.call.tool_name

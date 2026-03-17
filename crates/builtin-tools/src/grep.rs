@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
-use async_trait::async_trait;
 use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
+use async_trait::async_trait;
 
 use crate::should_skip_directory;
 
@@ -184,8 +184,8 @@ mod tests {
         assert!(definition.description.contains("node_modules"));
     }
 
-    #[test]
-    fn grep_tool_respects_gitignore_and_glob_filter() -> Result<(), Box<dyn Error>> {
+    #[tokio::test(flavor = "current_thread")]
+    async fn grep_tool_respects_gitignore_and_glob_filter() -> Result<(), Box<dyn Error>> {
         let dir = TestDir::new()?;
         fs::create_dir_all(dir.path().join(".git"))?;
         fs::write(dir.path().join(".gitignore"), "ignored.rs\n")?;
@@ -204,6 +204,7 @@ mod tests {
         }));
         let result = tool
             .call(&call, &mut |_| {}, &test_context(dir.path()))
+            .await
             .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
 
         let paths = result_paths(&result.content);
@@ -222,8 +223,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn grep_tool_skips_binary_files_and_reports_truncation() -> Result<(), Box<dyn Error>> {
+    #[tokio::test(flavor = "current_thread")]
+    async fn grep_tool_skips_binary_files_and_reports_truncation() -> Result<(), Box<dyn Error>> {
         let dir = TestDir::new()?;
         fs::write(dir.path().join("match-a.txt"), "needle\n")?;
         fs::write(dir.path().join("match-b.txt"), "prefix needle suffix\n")?;
@@ -239,6 +240,7 @@ mod tests {
         }));
         let result = tool
             .call(&call, &mut |_| {}, &test_context(dir.path()))
+            .await
             .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
 
         let paths = result_paths(&result.content);

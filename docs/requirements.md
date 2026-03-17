@@ -42,6 +42,7 @@
 - `aia-config` 已承担跨 crate 复用的应用级路径、默认值、稳定标识与构造 helper
 - `provider-registry` 已承担本地 provider 管理与持久化
 - 首个真实模型适配库 `openai-adapter` 已建立，并已同时覆盖 Responses 与 OpenAI 兼容 Chat Completions 两条协议链路
+- `openai-adapter` 当前已改为原生 async `reqwest`：单次请求与流式 SSE 不再依赖 blocking client
 - OpenAI 请求当前已自动启用 prompt caching：server 会为同一 session 生成稳定 `prompt_cache_key`，并固定使用 `24h` retention
 - `apps/agent-server` 已可编译、测试并运行，作为 Web 主界面与其他客户端的共享运行时桥接壳
 - `apps/agent-server` 启动路径、路由序列化路径与本地 store 锁中毒路径都已收口为非 panic 错误路径

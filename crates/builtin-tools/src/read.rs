@@ -1,9 +1,9 @@
 use std::{fs, io::ErrorKind};
 
-use async_trait::async_trait;
 use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
+use async_trait::async_trait;
 
 pub struct ReadTool;
 
@@ -127,8 +127,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn read_tool_reads_large_file_window_with_line_numbers() -> Result<(), Box<dyn Error>> {
+    #[tokio::test(flavor = "current_thread")]
+    async fn read_tool_reads_large_file_window_with_line_numbers() -> Result<(), Box<dyn Error>> {
         let dir = TestDir::new()?;
         let path = dir.path().join("large.txt");
         let content =
@@ -143,6 +143,7 @@ mod tests {
         }));
         let result = tool
             .call(&call, &mut |_| {}, &test_context(dir.path()))
+            .await
             .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
 
         assert_eq!(result.content, "  1996\tline 1996\n  1997\tline 1997\n  1998\tline 1998");
@@ -157,8 +158,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn read_tool_reports_binary_file_as_non_utf8_text() -> Result<(), Box<dyn Error>> {
+    #[tokio::test(flavor = "current_thread")]
+    async fn read_tool_reports_binary_file_as_non_utf8_text() -> Result<(), Box<dyn Error>> {
         let dir = TestDir::new()?;
         let path = dir.path().join("binary.bin");
         fs::write(&path, [0xff_u8, 0xfe_u8, 0x00_u8, 0x61_u8])?;
@@ -166,7 +167,7 @@ mod tests {
         let tool = ReadTool;
         let call = ToolCall::new("read")
             .with_arguments_value(serde_json::json!({ "file_path": "binary.bin" }));
-        let error = match tool.call(&call, &mut |_| {}, &test_context(dir.path())) {
+        let error = match tool.call(&call, &mut |_| {}, &test_context(dir.path())).await {
             Ok(_) => return Err("read tool should reject non-UTF-8 files".into()),
             Err(error) => error,
         };
@@ -177,8 +178,8 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[test]
-    fn read_tool_surfaces_permission_denied_errors() -> Result<(), Box<dyn Error>> {
+    #[tokio::test(flavor = "current_thread")]
+    async fn read_tool_surfaces_permission_denied_errors() -> Result<(), Box<dyn Error>> {
         use std::{fs::Permissions, os::unix::fs::PermissionsExt};
 
         struct PermissionReset {
@@ -206,7 +207,7 @@ mod tests {
         let tool = ReadTool;
         let call = ToolCall::new("read")
             .with_arguments_value(serde_json::json!({ "file_path": "secret.txt" }));
-        let error = match tool.call(&call, &mut |_| {}, &test_context(dir.path())) {
+        let error = match tool.call(&call, &mut |_| {}, &test_context(dir.path())).await {
             Ok(_) => return Err("read tool should surface permission errors".into()),
             Err(error) => error,
         };

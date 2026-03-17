@@ -11,7 +11,7 @@ use crate::{RuntimeEvent, ToolInvocationLifecycle, TurnBlock, TurnControl, TurnO
 use super::{
     AgentRuntime, RuntimeError,
     compress::is_context_length_error,
-    helpers::{next_turn_id, now_timestamp_ms},
+    helpers::{block_on_sync, next_turn_id, now_timestamp_ms},
 };
 
 struct TurnBuffers {
@@ -101,7 +101,7 @@ where
         &mut self,
         user_input: impl Into<String>,
     ) -> Result<TurnOutput, RuntimeError> {
-        tokio::runtime::Handle::current().block_on(self.handle_turn_async(user_input))
+        block_on_sync(self.handle_turn_async(user_input))
     }
 
     pub async fn handle_turn_async(
@@ -116,7 +116,7 @@ where
         user_input: impl Into<String>,
         on_delta: impl FnMut(StreamEvent),
     ) -> Result<TurnOutput, RuntimeError> {
-        tokio::runtime::Handle::current().block_on(self.handle_turn_streaming_async(user_input, on_delta))
+        block_on_sync(self.handle_turn_streaming_async(user_input, on_delta))
     }
 
     pub async fn handle_turn_streaming_async(
@@ -138,8 +138,7 @@ where
         control: TurnControl,
         on_delta: impl FnMut(StreamEvent),
     ) -> Result<TurnOutput, RuntimeError> {
-        tokio::runtime::Handle::current()
-            .block_on(self.handle_turn_streaming_with_control_async(user_input, control, on_delta))
+        block_on_sync(self.handle_turn_streaming_with_control_async(user_input, control, on_delta))
     }
 
     pub async fn handle_turn_streaming_with_control_async(
@@ -195,14 +194,14 @@ where
             let request = self.build_completion_request(&turn_id, "completion", llm_step_index);
             let llm_trace_context = request.trace_context.clone();
             llm_step_index = llm_step_index.saturating_add(1);
-            let completion = match self.model.complete_streaming_with_abort(
-                request,
-                &abort_signal,
-                &mut |event| {
+            let completion = match self
+                .model
+                .complete_streaming_with_abort(request, &abort_signal, &mut |event| {
                     buffers.record_stream_event(&event);
                     on_delta(event);
-                },
-            ).await {
+                })
+                .await
+            {
                 Ok(completion) => {
                     self.last_input_tokens =
                         completion.usage.as_ref().map(|usage| usage.input_tokens as u64);
@@ -294,14 +293,17 @@ where
             {
                 self.flush_streamed_partial_segments(&turn_id, &mut buffers)?;
             }
-            let saw_tool_calls = match self.process_completion_segments(
-                &turn_id,
-                llm_trace_context.as_ref(),
-                &completion,
-                &mut buffers,
-                &abort_signal,
-                &mut on_delta,
-            ).await {
+            let saw_tool_calls = match self
+                .process_completion_segments(
+                    &turn_id,
+                    llm_trace_context.as_ref(),
+                    &completion,
+                    &mut buffers,
+                    &abort_signal,
+                    &mut on_delta,
+                )
+                .await
+            {
                 Ok(value) => value,
                 Err(runtime_error) => {
                     self.record_turn_failure(
@@ -465,19 +467,21 @@ where
                     let tool_call_entry_id =
                         self.append_tape_entry(TapeEntry::tool_call(call).with_run_id(turn_id))?;
                     buffers.source_entry_ids.push(tool_call_entry_id);
-                    let invocation = self.execute_tool_call(
-                        super::tool_calls::ExecuteToolCallContext {
-                            turn_id,
-                            parent_trace_context: llm_trace_context,
-                            assistant_entry_id,
-                            tool_call_entry_id,
-                            call,
-                            seen_tool_calls: &mut buffers.seen_tool_calls,
-                            source_entry_ids: &mut buffers.source_entry_ids,
-                            abort_signal: abort_signal.clone(),
-                        },
-                        on_delta,
-                    ).await?;
+                    let invocation = self
+                        .execute_tool_call(
+                            super::tool_calls::ExecuteToolCallContext {
+                                turn_id,
+                                parent_trace_context: llm_trace_context,
+                                assistant_entry_id,
+                                tool_call_entry_id,
+                                call,
+                                seen_tool_calls: &mut buffers.seen_tool_calls,
+                                source_entry_ids: &mut buffers.source_entry_ids,
+                                abort_signal: abort_signal.clone(),
+                            },
+                            on_delta,
+                        )
+                        .await?;
                     buffers.blocks.push(TurnBlock::ToolInvocation {
                         invocation: Box::new(invocation.clone()),
                     });

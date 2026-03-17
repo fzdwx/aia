@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use async_trait::async_trait;
 use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
+use async_trait::async_trait;
 
 use crate::should_skip_directory;
 
@@ -168,8 +168,9 @@ mod tests {
         assert!(definition.description.contains(".gitignore"));
     }
 
-    #[test]
-    fn glob_tool_respects_gitignore_and_skips_common_directories() -> Result<(), Box<dyn Error>> {
+    #[tokio::test(flavor = "current_thread")]
+    async fn glob_tool_respects_gitignore_and_skips_common_directories()
+    -> Result<(), Box<dyn Error>> {
         let dir = TestDir::new()?;
         fs::create_dir_all(dir.path().join(".git"))?;
         fs::write(dir.path().join(".gitignore"), "ignored.rs\n")?;
@@ -190,6 +191,7 @@ mod tests {
         }));
         let result = tool
             .call(&call, &mut |_| {}, &test_context(dir.path()))
+            .await
             .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
 
         let paths = result_paths(&result.content);
@@ -208,8 +210,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn glob_tool_reports_truncation_when_limit_is_smaller_than_matches()
+    #[tokio::test(flavor = "current_thread")]
+    async fn glob_tool_reports_truncation_when_limit_is_smaller_than_matches()
     -> Result<(), Box<dyn Error>> {
         let dir = TestDir::new()?;
         for index in 0..3 {
@@ -225,6 +227,7 @@ mod tests {
         }));
         let result = tool
             .call(&call, &mut |_| {}, &test_context(dir.path()))
+            .await
             .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
 
         assert_eq!(result.content.lines().count(), 2);

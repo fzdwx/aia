@@ -4,11 +4,11 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::Duration;
 
-use async_trait::async_trait;
 use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta,
     ToolOutputStream, ToolResult,
 };
+use async_trait::async_trait;
 use brush_builtins::{BuiltinSet, ShellBuilderExt};
 use brush_core::openfiles::OpenFiles;
 use brush_core::traps::TrapSignal;
@@ -299,8 +299,8 @@ mod tests {
         assert_eq!(stderr, "");
     }
 
-    #[test]
-    fn shell_call_keeps_stdout_stderr_and_exit_code_in_details() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn shell_call_keeps_stdout_stderr_and_exit_code_in_details() {
         let tool = ShellTool;
         let call = ToolCall::new("shell")
             .with_argument("command", "printf 'out'; printf 'err' >&2; exit 7");
@@ -314,6 +314,7 @@ mod tests {
 
         let result = tool
             .call(&call, &mut |delta| deltas.push(delta), &context)
+            .await
             .expect("shell tool should return a result");
 
         let details = result.details.expect("shell result should include details");

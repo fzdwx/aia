@@ -1,9 +1,9 @@
 use std::fs;
 
-use async_trait::async_trait;
 use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
+use async_trait::async_trait;
 
 pub struct WriteTool;
 
@@ -113,9 +113,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn write_tool_creates_parent_directories_and_reports_line_count() -> Result<(), Box<dyn Error>>
-    {
+    #[tokio::test(flavor = "current_thread")]
+    async fn write_tool_creates_parent_directories_and_reports_line_count()
+    -> Result<(), Box<dyn Error>> {
         let dir = TestDir::new()?;
         let tool = WriteTool;
         let call = ToolCall::new("write").with_arguments_value(serde_json::json!({
@@ -125,6 +125,7 @@ mod tests {
 
         let result = tool
             .call(&call, &mut |_| {}, &test_context(dir.path()))
+            .await
             .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
 
         let written_path = dir.path().join("nested/notes.txt");
@@ -141,8 +142,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn write_tool_writes_large_content_without_truncation() -> Result<(), Box<dyn Error>> {
+    #[tokio::test(flavor = "current_thread")]
+    async fn write_tool_writes_large_content_without_truncation() -> Result<(), Box<dyn Error>> {
         let dir = TestDir::new()?;
         let content = "abc123\n".repeat(4096);
         let expected_bytes = content.len();
@@ -153,6 +154,7 @@ mod tests {
         }));
 
         tool.call(&call, &mut |_| {}, &test_context(dir.path()))
+            .await
             .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
 
         let path = dir.path().join("large.txt");

@@ -186,14 +186,15 @@
 
 ## 当前状态
 
-当前仓库已开始进入 **Phase 1**：
+当前仓库已完成 **Phase 1** 与 **Phase 2**：
 
-- 共享 trait 正在向 async 边界迁移
-- 生产代码链路已能保持 `cargo check` 通过
-- 测试层仍需统一迁到 async trait 用法
+- `agent-core` / `agent-runtime` / `builtin-tools` / `openai-adapter` / `apps/agent-server` 已全部接到 async trait 边界
+- 相关 mock / 测试实现已完成迁移，当前 `cargo check` 与受影响 crate `cargo test` 已通过
+- `openai-adapter` 已从 `reqwest::blocking` 切到 async `reqwest`
+- Responses / Chat Completions 的 SSE 读取已改为 async chunk streaming，并继续保留 abort 轮询与取消语义
 
-因此，下一步最高优先级不是直接改 server 去掉 `spawn_blocking`，而是：
+因此，下一步最高优先级变为：
 
-1. 完成 Phase 1 测试迁移
-2. 提交 Phase 1
-3. 再进入 Phase 2 的 provider 原生 async 化
+1. 进入 Phase 3，继续把工具执行主链收口为真正原生 async
+2. 为 Phase 4 做准备，评估如何去掉 `apps/agent-server` turn 执行上的 `spawn_blocking`
+3. 在 async 主链与工具边界进一步稳定后，再优先推进统一工具协议映射与 MCP 接入，而不是继续堆厚客户端界面

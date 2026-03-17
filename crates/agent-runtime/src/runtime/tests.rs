@@ -9,6 +9,7 @@ use agent_core::{
     ModelIdentity, Role, ToolCall, ToolDefinition, ToolExecutionContext, ToolExecutor,
     ToolOutputDelta, ToolResult,
 };
+use async_trait::async_trait;
 use serde_json::json;
 use session_tape::SessionTape;
 
@@ -26,10 +27,11 @@ fn time_before_unix_epoch_falls_back_to_zero_duration() {
 
 struct StubModel;
 
+#[async_trait(?Send)]
 impl LanguageModel for StubModel {
     type Error = CoreError;
 
-    fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
         let last_user_index = request
             .conversation
             .iter()
@@ -84,20 +86,22 @@ impl LanguageModel for StubModel {
 
 struct FailingModel;
 
+#[async_trait(?Send)]
 impl LanguageModel for FailingModel {
     type Error = CoreError;
 
-    fn complete(&self, _request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete(&self, _request: CompletionRequest) -> Result<Completion, Self::Error> {
         Err(CoreError::new("模拟失败"))
     }
 }
 
 struct UsageModel;
 
+#[async_trait(?Send)]
 impl LanguageModel for UsageModel {
     type Error = CoreError;
 
-    fn complete(&self, _request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete(&self, _request: CompletionRequest) -> Result<Completion, Self::Error> {
         Ok(Completion {
             segments: vec![CompletionSegment::Text("带 usage 的回答".into())],
             stop_reason: CompletionStopReason::Stop,
@@ -133,10 +137,11 @@ impl ContinueAfterToolModel {
     }
 }
 
+#[async_trait(?Send)]
 impl LanguageModel for ContinueAfterToolModel {
     type Error = CoreError;
 
-    fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
         let step = self.seen_requests.borrow().len();
         self.seen_requests.borrow_mut().push(request.clone());
         if step == 0 {
@@ -165,14 +170,15 @@ impl LanguageModel for ContinueAfterToolModel {
 
 struct StreamingCancelledModel;
 
+#[async_trait(?Send)]
 impl LanguageModel for StreamingCancelledModel {
     type Error = CoreError;
 
-    fn complete(&self, _request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete(&self, _request: CompletionRequest) -> Result<Completion, Self::Error> {
         Err(CoreError::new("should use streaming path"))
     }
 
-    fn complete_streaming_with_abort(
+    async fn complete_streaming_with_abort(
         &self,
         _request: CompletionRequest,
         _abort: &AbortSignal,
@@ -208,10 +214,11 @@ impl ManyToolRoundsModel {
     }
 }
 
+#[async_trait(?Send)]
 impl LanguageModel for ManyToolRoundsModel {
     type Error = CoreError;
 
-    fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
         let step = self.seen_requests.borrow().len();
         self.seen_requests.borrow_mut().push(request.clone());
 
@@ -237,10 +244,11 @@ impl LanguageModel for ManyToolRoundsModel {
     }
 }
 
+#[async_trait(?Send)]
 impl LanguageModel for DuplicateToolLoopModel {
     type Error = CoreError;
 
-    fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
         self.seen_requests.borrow_mut().push(request.clone());
         let saw_duplicate_skip = request.conversation.iter().any(|item| {
             item.as_tool_result()
@@ -280,6 +288,7 @@ impl LanguageModel for DuplicateToolLoopModel {
 
 struct FailingTools;
 
+#[async_trait(?Send)]
 impl ToolExecutor for FailingTools {
     type Error = CoreError;
 
@@ -287,7 +296,7 @@ impl ToolExecutor for FailingTools {
         vec![ToolDefinition::new("search", "搜索代码")]
     }
 
-    fn call(
+    async fn call(
         &self,
         _call: &ToolCall,
         _output: &mut dyn FnMut(ToolOutputDelta),
@@ -297,10 +306,11 @@ impl ToolExecutor for FailingTools {
     }
 }
 
+#[async_trait(?Send)]
 impl LanguageModel for RecordingModel {
     type Error = CoreError;
 
-    fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
         self.seen_requests.borrow_mut().push(request);
         Ok(Completion::text("记录完成"))
     }
@@ -316,10 +326,11 @@ impl BudgetRecordingModel {
     }
 }
 
+#[async_trait(?Send)]
 impl LanguageModel for BudgetRecordingModel {
     type Error = CoreError;
 
-    fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
         self.seen_requests.borrow_mut().push(request);
         Ok(Completion::text("预算检查完成"))
     }
@@ -335,10 +346,11 @@ impl RequestRecordingModel {
     }
 }
 
+#[async_trait(?Send)]
 impl LanguageModel for RequestRecordingModel {
     type Error = CoreError;
 
-    fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
         let index = self.seen_requests.borrow().len();
         self.seen_requests.borrow_mut().push(request);
         Ok(Completion {
@@ -361,10 +373,11 @@ impl StopReasonDrivenModel {
     }
 }
 
+#[async_trait(?Send)]
 impl LanguageModel for StopReasonDrivenModel {
     type Error = CoreError;
 
-    fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
         let index = self.seen_requests.borrow().len();
         self.seen_requests.borrow_mut().push(request);
 
@@ -390,6 +403,7 @@ impl LanguageModel for StopReasonDrivenModel {
 
 struct StubTools;
 
+#[async_trait(?Send)]
 impl ToolExecutor for StubTools {
     type Error = CoreError;
 
@@ -397,7 +411,7 @@ impl ToolExecutor for StubTools {
         vec![ToolDefinition::new("search", "搜索代码")]
     }
 
-    fn call(
+    async fn call(
         &self,
         call: &ToolCall,
         _output: &mut dyn FnMut(ToolOutputDelta),
@@ -409,6 +423,7 @@ impl ToolExecutor for StubTools {
 
 struct MismatchedTools;
 
+#[async_trait(?Send)]
 impl ToolExecutor for MismatchedTools {
     type Error = CoreError;
 
@@ -416,7 +431,7 @@ impl ToolExecutor for MismatchedTools {
         vec![ToolDefinition::new("search", "搜索代码")]
     }
 
-    fn call(
+    async fn call(
         &self,
         _call: &ToolCall,
         _output: &mut dyn FnMut(ToolOutputDelta),
@@ -434,6 +449,7 @@ impl ToolExecutor for MismatchedTools {
 
 struct BlockingCancelAwareTools;
 
+#[async_trait(?Send)]
 impl ToolExecutor for BlockingCancelAwareTools {
     type Error = CoreError;
 
@@ -441,7 +457,7 @@ impl ToolExecutor for BlockingCancelAwareTools {
         vec![ToolDefinition::new("search", "搜索代码")]
     }
 
-    fn call(
+    async fn call(
         &self,
         call: &ToolCall,
         _output: &mut dyn FnMut(ToolOutputDelta),
@@ -601,14 +617,15 @@ fn provider_取消错误前的流式_partial_output_会进入最终轮次() {
 
 struct StreamingTextThenSameCompletionModel;
 
+#[async_trait(?Send)]
 impl LanguageModel for StreamingTextThenSameCompletionModel {
     type Error = CoreError;
 
-    fn complete(&self, _request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete(&self, _request: CompletionRequest) -> Result<Completion, Self::Error> {
         Err(CoreError::new("should use streaming path"))
     }
 
-    fn complete_streaming_with_abort(
+    async fn complete_streaming_with_abort(
         &self,
         _request: CompletionRequest,
         _abort: &AbortSignal,
@@ -621,14 +638,15 @@ impl LanguageModel for StreamingTextThenSameCompletionModel {
 
 struct StreamingThinkingThenSameCompletionModel;
 
+#[async_trait(?Send)]
 impl LanguageModel for StreamingThinkingThenSameCompletionModel {
     type Error = CoreError;
 
-    fn complete(&self, _request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete(&self, _request: CompletionRequest) -> Result<Completion, Self::Error> {
         Err(CoreError::new("should use streaming path"))
     }
 
-    fn complete_streaming_with_abort(
+    async fn complete_streaming_with_abort(
         &self,
         _request: CompletionRequest,
         _abort: &AbortSignal,
@@ -848,10 +866,11 @@ fn 运行时按_stop_reason_而非工具片段决定是否继续() {
 fn 工具片段与_stop_reason_不一致时会报错() {
     struct MismatchModel;
 
+    #[async_trait(?Send)]
     impl LanguageModel for MismatchModel {
         type Error = CoreError;
 
-        fn complete(&self, _request: CompletionRequest) -> Result<Completion, Self::Error> {
+        async fn complete(&self, _request: CompletionRequest) -> Result<Completion, Self::Error> {
             Ok(Completion {
                 segments: vec![CompletionSegment::ToolUse(ToolCall::new("search"))],
                 stop_reason: CompletionStopReason::Stop,
@@ -1351,10 +1370,11 @@ impl SummarizerModel {
     }
 }
 
+#[async_trait(?Send)]
 impl LanguageModel for SummarizerModel {
     type Error = CoreError;
 
-    fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
         self.seen_requests.borrow_mut().push(request.clone());
         // If instructions contain "Summarize", this is a compression call
         if request.instructions.as_ref().is_some_and(|i| i.contains("handoff summary")) {
@@ -1376,10 +1396,11 @@ impl ContextLengthErrorModel {
     }
 }
 
+#[async_trait(?Send)]
 impl LanguageModel for ContextLengthErrorModel {
     type Error = CoreError;
 
-    fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
         // Compression calls always succeed
         if request.instructions.as_ref().is_some_and(|i| i.contains("handoff summary")) {
             return Ok(Completion::text("压缩摘要：之前讨论了文件编辑。"));
@@ -1424,10 +1445,11 @@ impl CompressionInspectionModel {
     }
 }
 
+#[async_trait(?Send)]
 impl LanguageModel for CompressionInspectionModel {
     type Error = CoreError;
 
-    fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
         self.seen_requests.borrow_mut().push(request.clone());
         if request.instructions.as_ref().is_some_and(|i| i.contains("handoff summary")) {
             let combined = request
@@ -1760,10 +1782,11 @@ impl TapeInfoModel {
     }
 }
 
+#[async_trait(?Send)]
 impl LanguageModel for TapeInfoModel {
     type Error = CoreError;
 
-    fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
         let step = self.seen_requests.borrow().len();
         self.seen_requests.borrow_mut().push(request.clone());
         if step == 0 {
@@ -1840,10 +1863,11 @@ impl TapeHandoffModel {
     }
 }
 
+#[async_trait(?Send)]
 impl LanguageModel for TapeHandoffModel {
     type Error = CoreError;
 
-    fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
         let step = self.seen_requests.borrow().len();
         self.seen_requests.borrow_mut().push(request.clone());
         if step == 0 {

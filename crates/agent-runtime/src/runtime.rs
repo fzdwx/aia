@@ -164,7 +164,7 @@ where
     }
 
     pub fn auto_compress_now(&mut self) -> Result<bool, RuntimeError> {
-        tokio::runtime::Handle::current().block_on(self.auto_compress_now_async())
+        helpers::block_on_sync(self.auto_compress_now_async())
     }
 
     pub async fn auto_compress_now_async(&mut self) -> Result<bool, RuntimeError> {

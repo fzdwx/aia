@@ -1,12 +1,12 @@
 use std::time::Duration;
 
-use async_trait::async_trait;
 use agent_core::{
     AbortSignal, Completion, CompletionRequest, CompletionSegment, CompletionStopReason,
     CompletionUsage, LanguageModel, StreamEvent, ToolCall,
 };
+use async_trait::async_trait;
 use reqwest::{
-    blocking::Client,
+    Client,
     header::{HeaderValue, USER_AGENT},
 };
 use serde_json::{Value, json};
@@ -68,9 +68,9 @@ impl OpenAiResponsesModel {
 
     fn apply_user_agent(
         &self,
-        request: reqwest::blocking::RequestBuilder,
+        request: reqwest::RequestBuilder,
         user_agent: Option<&str>,
-    ) -> reqwest::blocking::RequestBuilder {
+    ) -> reqwest::RequestBuilder {
         let Some(user_agent) = user_agent.filter(|value| !value.is_empty()) else {
             return request;
         };
@@ -251,10 +251,12 @@ impl LanguageModel for OpenAiResponsesModel {
                 request.user_agent.as_deref(),
             )
             .send()
+            .await
             .map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
 
         let status = response.status();
-        let body = response.text().map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
+        let body =
+            response.text().await.map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
 
         if !status.is_success() {
             return Err(self.request_failure(status, &body));
@@ -288,12 +290,15 @@ impl LanguageModel for OpenAiResponsesModel {
                 request.user_agent.as_deref(),
             )
             .send()
+            .await
             .map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
 
         let status = response.status();
         if !status.is_success() {
-            let body =
-                response.text().map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
+            let body = response
+                .text()
+                .await
+                .map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
             return Err(self.request_failure(status, &body));
         }
 
@@ -416,7 +421,8 @@ impl LanguageModel for OpenAiResponsesModel {
                 None => {}
             }
             Ok(false)
-        })?;
+        })
+        .await?;
 
         let mut segments = Vec::new();
         if !thinking_buf.is_empty() {

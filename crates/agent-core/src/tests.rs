@@ -3,6 +3,8 @@ use std::{
     time::{Duration, UNIX_EPOCH},
 };
 
+use async_trait::async_trait;
+
 use super::*;
 use crate::tooling::duration_since_unix_epoch;
 
@@ -135,6 +137,7 @@ fn resolve_path_无_workspace_root_时返回原样() {
 
 struct EchoTool;
 
+#[async_trait(?Send)]
 impl Tool for EchoTool {
     fn name(&self) -> &str {
         "echo"
@@ -144,7 +147,7 @@ impl Tool for EchoTool {
         ToolDefinition::new("echo", "回显输入").with_parameter("text", "要回显的文本", true)
     }
 
-    fn call(
+    async fn call(
         &self,
         tool_call: &ToolCall,
         _output: &mut dyn FnMut(ToolOutputDelta),
@@ -164,8 +167,8 @@ fn 注册表收集工具定义() {
     assert_eq!(defs[0].name, "echo");
 }
 
-#[test]
-fn 注册表按名称分派工具调用() {
+#[tokio::test(flavor = "current_thread")]
+async fn 注册表按名称分派工具调用() {
     let mut registry = ToolRegistry::new();
     registry.register(Box::new(EchoTool));
 
@@ -176,12 +179,12 @@ fn 注册表按名称分派工具调用() {
         abort: AbortSignal::new(),
         runtime: None,
     };
-    let result = ToolExecutor::call(&registry, &call, &mut |_| {}, &ctx).unwrap();
+    let result = ToolExecutor::call(&registry, &call, &mut |_| {}, &ctx).await.unwrap();
     assert_eq!(result.content, "你好");
 }
 
-#[test]
-fn 注册表未知工具返回错误() {
+#[tokio::test(flavor = "current_thread")]
+async fn 注册表未知工具返回错误() {
     let registry = ToolRegistry::new();
     let call = ToolCall::new("nonexistent");
     let ctx = ToolExecutionContext {
@@ -190,7 +193,7 @@ fn 注册表未知工具返回错误() {
         abort: AbortSignal::new(),
         runtime: None,
     };
-    let err = ToolExecutor::call(&registry, &call, &mut |_| {}, &ctx).unwrap_err();
+    let err = ToolExecutor::call(&registry, &call, &mut |_| {}, &ctx).await.unwrap_err();
     assert!(err.to_string().contains("unknown tool"));
 }
 

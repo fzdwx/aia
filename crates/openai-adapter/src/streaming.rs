@@ -1,89 +1,79 @@
-use std::{
-    io::{self, BufRead},
-    sync::mpsc::{self, RecvTimeoutError},
-    thread,
-    time::Duration,
-};
+use std::time::Duration;
 
 use agent_core::{AbortSignal, StreamEvent};
+use futures_util::StreamExt;
+use reqwest::Response;
+use tokio::time::timeout;
 
 use crate::OpenAiAdapterError;
 
 const STREAM_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
-pub(crate) enum StreamingSourceEvent {
-    Line(String),
-    Finished(Result<(), OpenAiAdapterError>),
+fn drain_next_line(buffer: &mut Vec<u8>) -> Result<Option<String>, OpenAiAdapterError> {
+    let Some(line_end) = buffer.iter().position(|byte| *byte == b'\n') else {
+        return Ok(None);
+    };
+
+    let mut line = buffer.drain(..=line_end).collect::<Vec<_>>();
+    while line.ends_with(b"\n") || line.ends_with(b"\r") {
+        line.pop();
+    }
+
+    String::from_utf8(line).map(Some).map_err(|error| OpenAiAdapterError::new(error.to_string()))
 }
 
-pub(crate) fn stream_lines_with_abort<R, H>(
-    reader: R,
+fn drain_remaining_line(buffer: &mut Vec<u8>) -> Result<Option<String>, OpenAiAdapterError> {
+    if buffer.is_empty() {
+        return Ok(None);
+    }
+
+    let mut line = std::mem::take(buffer);
+    while line.ends_with(b"\n") || line.ends_with(b"\r") {
+        line.pop();
+    }
+
+    String::from_utf8(line).map(Some).map_err(|error| OpenAiAdapterError::new(error.to_string()))
+}
+
+pub(crate) async fn stream_lines_with_abort<H>(
+    response: Response,
     abort: &AbortSignal,
     sink: &mut dyn FnMut(StreamEvent),
     mut handle_line: H,
 ) -> Result<(), OpenAiAdapterError>
 where
-    R: io::Read + Send + 'static,
     H: FnMut(&str, &mut dyn FnMut(StreamEvent)) -> Result<bool, OpenAiAdapterError>,
 {
-    let (event_tx, event_rx) = mpsc::channel::<StreamingSourceEvent>();
-    let reader_thread = thread::spawn(move || {
-        let mut reader = io::BufReader::new(reader);
-        loop {
-            let mut line = String::new();
-            match reader.read_line(&mut line) {
-                Ok(0) => {
-                    let _ = event_tx.send(StreamingSourceEvent::Finished(Ok(())));
-                    break;
-                }
-                Ok(_) => {
-                    while line.ends_with(['\n', '\r']) {
-                        line.pop();
-                    }
-                    if event_tx.send(StreamingSourceEvent::Line(line)).is_err() {
-                        break;
-                    }
-                }
-                Err(error) => {
-                    let _ = event_tx.send(StreamingSourceEvent::Finished(Err(
-                        OpenAiAdapterError::new(error.to_string()),
-                    )));
-                    break;
-                }
-            }
-        }
-    });
+    let mut stream = response.bytes_stream();
+    let mut pending = Vec::new();
 
-    let mut reader_finished = false;
-    let result = loop {
+    loop {
         if abort.is_aborted() {
-            break Err(OpenAiAdapterError::cancelled("OpenAI 流式请求已取消"));
+            return Err(OpenAiAdapterError::cancelled("OpenAI 流式请求已取消"));
         }
 
-        match event_rx.recv_timeout(STREAM_POLL_INTERVAL) {
-            Ok(StreamingSourceEvent::Line(line)) => {
-                if handle_line(&line, sink)? {
-                    break Ok(());
+        match timeout(STREAM_POLL_INTERVAL, stream.next()).await {
+            Ok(Some(Ok(chunk))) => {
+                pending.extend_from_slice(&chunk);
+                while let Some(line) = drain_next_line(&mut pending)? {
+                    if handle_line(&line, sink)? {
+                        return Ok(());
+                    }
                 }
             }
-            Ok(StreamingSourceEvent::Finished(result)) => {
-                reader_finished = true;
-                break result;
-            }
-            Err(RecvTimeoutError::Timeout) => continue,
-            Err(RecvTimeoutError::Disconnected) => {
-                reader_finished = true;
-                break Ok(());
-            }
+            Ok(Some(Err(error))) => return Err(OpenAiAdapterError::new(error.to_string())),
+            Ok(None) => break,
+            Err(_) => continue,
         }
-    };
-
-    drop(event_rx);
-    let _ = reader_thread.join();
-
-    if !reader_finished && abort.is_aborted() {
-        return Err(OpenAiAdapterError::cancelled("OpenAI 流式请求已取消"));
     }
 
-    result
+    if let Some(line) = drain_remaining_line(&mut pending)? {
+        let _ = handle_line(&line, sink)?;
+    }
+
+    if abort.is_aborted() {
+        Err(OpenAiAdapterError::cancelled("OpenAI 流式请求已取消"))
+    } else {
+        Ok(())
+    }
 }

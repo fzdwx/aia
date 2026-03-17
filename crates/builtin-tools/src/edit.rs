@@ -1,9 +1,9 @@
 use std::fs;
 
-use async_trait::async_trait;
 use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
+use async_trait::async_trait;
 
 pub struct EditTool;
 
@@ -126,8 +126,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn edit_tool_replaces_unique_multiline_match() -> Result<(), Box<dyn Error>> {
+    #[tokio::test(flavor = "current_thread")]
+    async fn edit_tool_replaces_unique_multiline_match() -> Result<(), Box<dyn Error>> {
         let dir = TestDir::new()?;
         let path = dir.path().join("notes.txt");
         fs::write(&path, "before\nalpha\nbeta\nafter\n")?;
@@ -141,6 +141,7 @@ mod tests {
 
         let result = tool
             .call(&call, &mut |_| {}, &test_context(dir.path()))
+            .await
             .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
 
         let stored = fs::read_to_string(&path)?;
@@ -154,8 +155,9 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn edit_tool_rejects_non_unique_match_without_modifying_file() -> Result<(), Box<dyn Error>> {
+    #[tokio::test(flavor = "current_thread")]
+    async fn edit_tool_rejects_non_unique_match_without_modifying_file()
+    -> Result<(), Box<dyn Error>> {
         let dir = TestDir::new()?;
         let path = dir.path().join("duplicate.txt");
         fs::write(&path, "target\nother\ntarget\n")?;
@@ -167,7 +169,7 @@ mod tests {
             "new_string": "replacement"
         }));
 
-        let error = match tool.call(&call, &mut |_| {}, &test_context(dir.path())) {
+        let error = match tool.call(&call, &mut |_| {}, &test_context(dir.path())).await {
             Ok(_) => return Err("edit should reject non-unique matches".into()),
             Err(error) => error,
         };

@@ -1,10 +1,10 @@
 use std::{cell::RefCell, rc::Rc};
 
-use async_trait::async_trait;
 use agent_core::{
     CoreError, LanguageModel, RuntimeToolContext, RuntimeToolContextStats, Tool, ToolCall,
     ToolDefinition, ToolExecutionContext, ToolExecutor, ToolOutputDelta, ToolRegistry, ToolResult,
 };
+use async_trait::async_trait;
 use serde_json::json;
 
 use super::AgentRuntime;

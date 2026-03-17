@@ -1,5 +1,18 @@
 # 演进日志
 
+## 2026-03-17 Session 10
+
+**诊断**：全异步主链 Phase 1 已把 trait 与 runtime 主链切到 async，但 `openai-adapter` 仍停留在 `reqwest::blocking`；这既违背“全部改成异步”的目标，也会继续阻塞后续 server 去 `spawn_blocking` 的 Phase 4 收口。
+**决策**：直接推进 Phase 2：把 `openai-adapter` 的 Responses / Chat Completions 双协议都切到原生 async `reqwest`，流式读取改成 async chunk streaming；同时补齐测试与文档，让 Phase 1 / 2 一次收口。
+**变更**：
+- `crates/openai-adapter/src/responses.rs`、`crates/openai-adapter/src/chat_completions.rs`、`crates/openai-adapter/src/streaming.rs`、`crates/openai-adapter/Cargo.toml`：移除 blocking reqwest client，改为 async HTTP / async SSE chunk streaming，并保留 abort 轮询、状态码与响应体映射。
+- `crates/openai-adapter/src/tests.rs`、`apps/agent-server/src/model.rs`：调整 adapter / server 测试驱动方式，验证 async reqwest 下的真实调用、流式、取消与 trace 持久化。
+- `crates/agent-core/src/tests.rs`、`crates/builtin-tools/src/read.rs`、`crates/builtin-tools/src/write.rs`、`crates/builtin-tools/src/edit.rs`、`crates/builtin-tools/src/glob.rs`、`crates/builtin-tools/src/grep.rs`、`crates/builtin-tools/src/shell.rs`、`crates/agent-runtime/src/runtime.rs`、`crates/agent-runtime/src/runtime/helpers.rs`、`crates/agent-runtime/src/runtime/turn.rs`、`crates/agent-runtime/src/runtime/tests.rs`：补齐 async trait 测试迁移，并让 runtime 的同步包装入口在无当前 Tokio handle 时也能安全 fallback。
+- `docs/status.md`、`docs/architecture.md`、`docs/async-phases.md`：同步记录全异步主链 Phase 1 / 2 已完成，下一步转向工具原生 async、server 去 `spawn_blocking` 与工具协议 / MCP 优先级。
+**验证**：`cargo check` 通过；`cargo test -p agent-core -p builtin-tools -p openai-adapter -p agent-runtime -p agent-server` 通过。
+**提交**：待提交
+**下次方向**：优先推进全异步主链 Phase 3 / 4：继续收口工具执行原生 async，并评估 `apps/agent-server` 如何移除 turn 执行上的 `spawn_blocking`；在共享工具边界稳定后，再优先推进统一工具协议映射与 MCP 接入。
+
 ## 2026-03-17 Session 9
 
 **诊断**：动态测量窗口化与锚定补偿虽然改善了部分长历史场景，但在产品优先级上，“流式阶段绝不出现额外闪动/抖动”比极端长列表下的滚动精细度更重要；这套机制也额外增加了测量、补偿和调试复杂度。

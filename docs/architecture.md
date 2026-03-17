@@ -24,7 +24,7 @@ README 里真正难的是这些能力：
 - `session-tape`：扁平条目磁带（`{id, kind, payload, meta, date}`）、轻量锚点、handoff 事件、查询切片、fork / merge 与重建状态
 - `agent-runtime`：运行时编排与最小 turn 执行
 - `provider-registry`：provider 资料、活动项与本地持久化
-- `openai-adapter`：首个真实模型适配层，负责把统一请求映射到 Responses 风格接口
+- `openai-adapter`：首个真实模型适配层，负责把统一请求映射到 Responses 风格接口，并已切到原生 async `reqwest` 主链
 - `agent-store`：本地 SQLite session / trace 存储与查询
 - `apps/agent-server`：最小应用壳，负责把共享运行时桥接到 HTTP + SSE
 - `apps/web`：主界面承接层，消费服务端事件流并负责交互展示
@@ -100,8 +100,8 @@ README 里真正难的是这些能力：
 - 历史轮次可从磁带 entries 按 `meta.run_id` 分组重建，不依赖磁带内 TurnRecord
 - trace context 生成已统一通过共享 helper 收口，不再由不同路径各自手写 trace/span 标识
 - stop/cancel 已贯穿 server → runtime → provider streaming / embedded shell
-- `openai-adapter` 的流式读取已从单线程阻塞 `BufRead::lines()` 轮询升级为“后台按行泵送 + 前台 abort 轮询”，避免 SSE 长时间不出新行时取消被卡在阻塞读里
-- 全异步主链已开始按阶段推进：当前 Phase 1 先把 `agent-core` 的模型/工具 trait 与 `agent-runtime` turn 主链改成 async，并在 server 层保留同步包装入口，避免一次性推倒现有 session manager 执行模型
+- `openai-adapter` 已改为原生 async `reqwest`：单次请求不再依赖 blocking client，流式读取改为 async chunk streaming + abort 轮询，避免 provider I/O 把后续 server 原生 async 化继续卡在边缘层
+- 全异步主链已完成 Phase 1 / 2：`agent-core` 的模型/工具 trait、`agent-runtime` turn 主链、`openai-adapter` provider I/O 都已切到 async；当前仍在 server 层保留同步包装入口与 worker ownership，以便分阶段推进后续 Phase 3 / 4
 - 时间辅助函数不假设系统时间恒定晚于 `UNIX_EPOCH`，异常场景下会安全回退
 - `tape_info` / `tape_handoff` 已通过真正的 runtime tool registry 暴露，而不是字符串特判
 
@@ -126,6 +126,8 @@ README 里真正难的是这些能力：
 
 - 把内部统一请求映射为 Responses 风格 HTTP 请求
 - 也支持映射为 OpenAI 兼容 Chat Completions 风格 HTTP 请求
+- 单次请求与流式 SSE 已统一走 async `reqwest` 客户端，而不是 blocking client
+- 流式读取使用 async chunk buffering + 行切分，并继续保留 abort 轮询与取消错误语义
 - 把两类协议返回的文本、thinking 与工具调用统一还原为内部完成结果
 - 在工具续接阶段按协议原生形态编码工具链路：Responses 使用 `function_call` / `function_call_output`，Chat Completions 使用 `assistant.tool_calls` / `tool.tool_call_id`
 - 支持把共享层的 prompt cache 配置映射为 OpenAI `prompt_cache_key` / `prompt_cache_retention`

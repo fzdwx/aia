@@ -1,4 +1,5 @@
 use std::{
+    future::Future,
     io::{Read, Write},
     net::TcpListener,
     thread,
@@ -35,6 +36,14 @@ fn sample_request() -> CompletionRequest {
         timeout: None,
         trace_context: None,
     }
+}
+
+fn run_async<T>(future: impl Future<Output = T>) -> T {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("测试运行时创建成功");
+    runtime.block_on(future)
 }
 
 #[test]
@@ -339,7 +348,7 @@ fn 可通过本地假服务完成一次真实调用() {
     ))
     .expect("模型创建成功");
 
-    let completion = model.complete(sample_request()).expect("调用成功");
+    let completion = run_async(model.complete(sample_request())).expect("调用成功");
 
     handle.join().expect("服务线程退出");
     assert_eq!(completion.plain_text(), "来自假服务");
@@ -377,7 +386,7 @@ fn 真实调用会透传_user_agent_请求头() {
 
     let mut request = sample_request();
     request.user_agent = Some("aia-test/1.0".into());
-    let completion = model.complete(request).expect("调用成功");
+    let completion = run_async(model.complete(request)).expect("调用成功");
 
     handle.join().expect("服务线程退出");
     assert_eq!(completion.plain_text(), "来自假服务");
@@ -395,7 +404,7 @@ fn 请求里的模型标识与适配器配置不一致时会报错() {
     let mut request = sample_request();
     request.model.name = "gpt-4.1".into();
 
-    let error = model.complete(request).expect_err("应当因为模型不一致而失败");
+    let error = run_async(model.complete(request)).expect_err("应当因为模型不一致而失败");
 
     assert!(error.to_string().contains("模型标识不一致"));
 }
@@ -468,11 +477,10 @@ fn 流式调用可逐段收到文本与思考() {
     .expect("模型创建成功");
 
     let mut deltas = Vec::new();
-    let completion = model
-        .complete_streaming(sample_request(), &mut |event| {
-            deltas.push(event);
-        })
-        .expect("流式调用成功");
+    let completion = run_async(model.complete_streaming(sample_request(), &mut |event| {
+        deltas.push(event);
+    }))
+    .expect("流式调用成功");
 
     handle.join().expect("服务线程退出");
     assert_eq!(completion.plain_text(), "你好");
@@ -515,8 +523,8 @@ fn responses_流式失败消息包含请求路径() {
     ))
     .expect("模型创建成功");
 
-    let error =
-        model.complete_streaming(sample_request(), &mut |_| {}).expect_err("流式调用应失败");
+    let error = run_async(model.complete_streaming(sample_request(), &mut |_| {}))
+        .expect_err("流式调用应失败");
 
     handle.join().expect("服务线程退出");
     assert!(error.to_string().contains("/responses"));
@@ -554,9 +562,9 @@ fn responses_流式调用在_abort_后返回取消错误() {
         cancel.abort();
     });
 
-    let error = model
-        .complete_streaming_with_abort(sample_request(), &abort, &mut |_| {})
-        .expect_err("应当因取消而失败");
+    let error =
+        run_async(model.complete_streaming_with_abort(sample_request(), &abort, &mut |_| {}))
+            .expect_err("应当因取消而失败");
 
     handle.join().expect("服务线程退出");
     assert!(error.is_cancelled());
@@ -596,8 +604,7 @@ fn chat_completions_流式调用在_abort_后返回取消错误() {
         cancel.abort();
     });
 
-    let error = model
-        .complete_streaming_with_abort(request, &abort, &mut |_| {})
+    let error = run_async(model.complete_streaming_with_abort(request, &abort, &mut |_| {}))
         .expect_err("应当因取消而失败");
 
     handle.join().expect("服务线程退出");
@@ -635,11 +642,10 @@ fn 流式调用可解析对象形态的推理摘要增量() {
     .expect("模型创建成功");
 
     let mut deltas = Vec::new();
-    let completion = model
-        .complete_streaming(sample_request(), &mut |event| {
-            deltas.push(event);
-        })
-        .expect("流式调用成功");
+    let completion = run_async(model.complete_streaming(sample_request(), &mut |event| {
+        deltas.push(event);
+    }))
+    .expect("流式调用成功");
 
     handle.join().expect("服务线程退出");
     assert_eq!(completion.thinking_text(), Some("先分析".into()));
@@ -685,11 +691,10 @@ fn 流式调用可解析_done_事件里的推理摘要文本() {
     .expect("模型创建成功");
 
     let mut deltas = Vec::new();
-    let completion = model
-        .complete_streaming(sample_request(), &mut |event| {
-            deltas.push(event);
-        })
-        .expect("流式调用成功");
+    let completion = run_async(model.complete_streaming(sample_request(), &mut |event| {
+        deltas.push(event);
+    }))
+    .expect("流式调用成功");
 
     handle.join().expect("服务线程退出");
     assert_eq!(completion.thinking_text(), Some("先分析".into()));
@@ -736,7 +741,8 @@ fn responses_流式工具调用会继承_response_id() {
     ))
     .expect("模型创建成功");
 
-    let completion = model.complete_streaming(sample_request(), &mut |_| {}).expect("流式调用成功");
+    let completion =
+        run_async(model.complete_streaming(sample_request(), &mut |_| {})).expect("流式调用成功");
 
     handle.join().expect("服务线程退出");
     assert!(completion.segments.iter().any(|segment| matches!(
@@ -779,9 +785,9 @@ fn 未知_reasoning_事件不会被当成思考内容() {
     .expect("模型创建成功");
 
     let mut deltas = Vec::new();
-    let completion = model
-        .complete_streaming(sample_request(), &mut |event| deltas.push(event))
-        .expect("流式调用成功");
+    let completion =
+        run_async(model.complete_streaming(sample_request(), &mut |event| deltas.push(event)))
+            .expect("流式调用成功");
 
     handle.join().expect("服务线程退出");
     assert_eq!(completion.thinking_text(), None);
@@ -1030,7 +1036,7 @@ fn 聊天补全可通过本地假服务完成一次真实调用() {
 
     let mut request = sample_request();
     request.model.name = "minum-security-llm".into();
-    let completion = model.complete(request).expect("调用成功");
+    let completion = run_async(model.complete(request)).expect("调用成功");
 
     handle.join().expect("服务线程退出");
     assert_eq!(completion.plain_text(), "来自聊天补全假服务");
@@ -1075,8 +1081,8 @@ fn 聊天补全流式调用可逐段收到文本与工具() {
     let mut request = sample_request();
     request.model.name = "minum-security-llm".into();
     let mut deltas = Vec::new();
-    let completion =
-        model.complete_streaming(request, &mut |event| deltas.push(event)).expect("流式调用成功");
+    let completion = run_async(model.complete_streaming(request, &mut |event| deltas.push(event)))
+        .expect("流式调用成功");
 
     handle.join().expect("服务线程退出");
     assert_eq!(completion.thinking_text(), Some("先分析".into()));
