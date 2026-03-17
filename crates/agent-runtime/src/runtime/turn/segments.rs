@@ -87,16 +87,16 @@ where
                     buffers.source_entry_ids.push(tool_call_entry_id);
                     let invocation = self
                         .execute_tool_call(
-                            ExecuteToolCallContext {
+                            ExecuteToolCallContext::new(
                                 turn_id,
-                                parent_trace_context: llm_trace_context,
+                                llm_trace_context,
                                 assistant_entry_id,
                                 tool_call_entry_id,
                                 call,
-                                seen_tool_calls: &mut buffers.seen_tool_calls,
-                                source_entry_ids: &mut buffers.source_entry_ids,
-                                abort_signal: abort_signal.clone(),
-                            },
+                                &mut buffers.seen_tool_calls,
+                                &mut buffers.source_entry_ids,
+                                abort_signal.clone(),
+                            ),
                             on_delta,
                         )
                         .await?;

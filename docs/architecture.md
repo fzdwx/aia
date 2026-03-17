@@ -108,6 +108,7 @@ README 里真正难的是这些能力：
 - `agent-runtime` 对外 turn API 也已继续收口为单一异步入口 `handle_turn_streaming(user_input, control, sink)`：旧的同步 `handle_turn` 和历史命名 `handle_turn_streaming_with_control_async` 已移除，server 与测试消费方统一经由这条异步流式主链驱动 turn
 - `agent-runtime` 的上下文压缩入口也已只保留异步 `auto_compress_now()`：旧的同步包装和内部 `block_on_sync` helper 已移除，避免 runtime 在共享层继续暴露“同步外壳 + 内部临时 runtime”模式
 - `agent-runtime::runtime::tool_calls` 内部也已收口 runtime tool / 普通 tool 共用的生命周期记账路径：结果条目落盘、事件发布、`ToolInvocationLifecycle` 组装与 `seen_tool_calls` 更新不再在两条分支里各自复制，减少后续继续扩展工具语义时的分支漂移
+- `agent-runtime::runtime::tool_calls` 现也已按职责拆为 `tool_calls::{execute,lifecycle,types}`：工具调用主流程、生命周期落盘/事件发布与共享上下文类型分离，`ExecuteToolCallContext::new(...)` / `lifecycle_context(...)` 负责收口重复的 started event 与 lifecycle context 样板，避免 runtime tool / 普通 tool 分支继续在单文件里来回复制上下文拼装
 - 时间辅助函数不假设系统时间恒定晚于 `UNIX_EPOCH`，异常场景下会安全回退
 - `tape_info` / `tape_handoff` 已通过真正的 runtime tool registry 暴露，而不是字符串特判
 
