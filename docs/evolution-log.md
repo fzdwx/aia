@@ -1,5 +1,18 @@
 # 演进日志
 
+## 2026-03-17 Session 33
+
+**Diagnosis**：`crates/openai-adapter/src/payloads.rs` 仍同时承载 Responses 与 Chat Completions 两条协议的反序列化载体；虽然文件还在使用，但它已经成为协议边界重新混杂的“共享垃圾桶”。
+**Decision**：不删除仍在使用的 payload 定义，而是把它们按协议拆回 `responses::payloads` 与 `chat_completions::payloads`；这样既保留现有行为，又让两条适配栈的模块边界与前面已经完成的 `request/parsing/streaming/client` 拆分保持一致。
+**Changes**：
+- `crates/openai-adapter/src/payloads.rs`：删除跨协议共用 payload 模块。
+- `crates/openai-adapter/src/responses/mod.rs`、`crates/openai-adapter/src/responses/request.rs`、`crates/openai-adapter/src/responses/parsing.rs`、`crates/openai-adapter/src/responses/payloads.rs`：把 Responses 专属 usage / output / response 反序列化类型收回 `responses` 子模块，并更新解析与请求映射入口。
+- `crates/openai-adapter/src/chat_completions/mod.rs`、`crates/openai-adapter/src/chat_completions/request.rs`、`crates/openai-adapter/src/chat_completions/parsing.rs`、`crates/openai-adapter/src/chat_completions/payloads.rs`：把 Chat Completions 专属 usage / response 反序列化类型收回 `chat_completions` 子模块，并更新解析与请求映射入口。
+- `crates/openai-adapter/src/lib.rs`、`docs/status.md`、`docs/architecture.md`：移除顶层 payload re-export，并同步记录协议边界收口进展。
+**Verification**：`cargo fmt --all --check` 通过；`cargo check -p openai-adapter` 通过；`cargo test -p openai-adapter -- --nocapture` 通过（需脱离沙箱以允许本地测试 listener 绑定）。
+**Commit**：`f17a8c0` `refactor: split adapter payloads by protocol`
+**Next direction**：优先继续检查 `crates/openai-adapter/src/streaming.rs` 与两条协议各自 `streaming.rs` 的共享 SSE 行处理/helper，继续减少跨协议重复逻辑。
+
 ## 2026-03-17 Session 27
 
 **Diagnosis**：虽然 OpenAI 适配层已经模块化，但共享 `LanguageModel` trait 仍残留 `complete`、`complete_streaming`、`complete_streaming_with_abort` 三个入口，导致 adapter、server bridge、runtime 压缩路径和测试 mock 里继续堆重复分支；与此同时 `agent-runtime::runtime::turn::driver` 也还残留大量重复的失败收尾样板。
