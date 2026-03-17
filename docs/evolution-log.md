@@ -11,7 +11,7 @@
 - `apps/agent-server/src/session_manager.rs`、`apps/agent-server/src/main.rs`：移除 `std::thread::Builder`、`LocalSet` 与 `spawn_local`，session manager 改为直接 `tokio::spawn(session_manager_loop(...))`，turn worker 改为 `tokio::spawn(async move { ... })`；同时新增 `ContextStats` 运行态快照，使运行中的 `/api/session/info` 不再回退磁带。
 - `docs/status.md`、`docs/architecture.md`、`docs/async-phases.md`：同步记录 server 已完成原生 async task 收口，当前剩余重点转向 runtime ownership / return-path 简化与共享层抽取。
 **验证**：`cargo fmt --all` 通过；`cargo check` 通过；`cargo test -p agent-server session_manager -- --nocapture` 通过；`cargo test -p agent-runtime --lib -- --nocapture` 通过。
-**Commit**：待提交
+**Commit**：`740f562` `refactor: remove threaded session manager runtime`
 **Next direction**：继续收口 `apps/agent-server` 里剩余的 runtime ownership / return-path 复杂度，并评估哪些 session 驱动辅助可以继续上移到共享 `agent-runtime` / 共享桥接层。
 
 ## 2026-03-17 Session 12
