@@ -1,5 +1,17 @@
 # 演进日志
 
+## 2026-03-17 Session 17
+
+**Diagnosis**：虽然 `shell` 已不再自建线程/runtime，但 stdout/stderr 读取仍通过 `std::io::PipeReader` + `tokio::spawn_blocking` 桥接；在搜索工具和 trace 路由都已完成原生 async 收口后，这成了 `builtin-tools` 主路径上最后一个显眼的显式 blocking 池依赖。
+**Decision**：保留 `brush` 的执行语义与流式输出契约，但把输出捕获从 pipe reader 改成异步 tail 临时 capture 文件：`brush` 直接写入临时文件，Tokio task 按 offset 异步读取新增内容并继续推送 stdout/stderr delta。这样既去掉 `spawn_blocking`，也不需要再为 `PipeReader` 维护专门桥接逻辑。
+**Changes**：
+- `crates/builtin-tools/src/shell.rs`：移除 `spawn_blocking` pipe reader，改为为 stdout/stderr 创建临时 capture 文件，并由 Tokio task 按 offset 异步 tail 新增输出；补上完成信号与临时文件清理。
+- `crates/builtin-tools/Cargo.toml`：为 `tokio` 增加 `io-util` feature，供 `shell` 的异步读取/seek 使用。
+- `docs/status.md`、`docs/architecture.md`、`docs/async-phases.md`：同步更新 `shell` 输出捕获已不再依赖 blocking 池，当前剩余同步边界已主要收敛到共享 SQLite store 访问。
+**Verification**：`cargo fmt --all` 通过；`cargo check -p builtin-tools` 通过；`cargo test -p builtin-tools shell -- --nocapture` 通过；`cargo check` 通过。
+**Commit**：`99f7982` `refactor: asyncify shell output capture`
+**Next direction**：优先继续清理共享 SQLite store 的同步访问边界，并评估哪些 store/driver 辅助应该上移到更统一的共享层。
+
 ## 2026-03-17 Session 16
 
 **Diagnosis**：`apps/agent-server` 的 trace 读路由虽然不在 turn 热路径上，但仍为每次 `/api/traces` / `/api/traces/{id}` / `/api/traces/summary` 请求额外包了一层 `spawn_blocking`；在 session manager 和 turn worker 都已改成原生 Tokio task 后，这里成了 server 控制面的一个明显异步化缺口。
