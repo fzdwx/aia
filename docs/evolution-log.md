@@ -1,5 +1,19 @@
 # 演进日志
 
+## 2026-03-17 Session 35
+
+**Diagnosis**：`crates/agent-runtime/src/runtime/tool_calls.rs` 仍把工具调用主流程、runtime tool bridge、生命周期落盘/事件发布和共享上下文类型全塞在一个 400+ 行单文件里；虽然前面已经清掉一轮重复记账逻辑，但 `ToolCallLifecycleContext` 拼装和 started/failure 分支样板仍让后续维护成本偏高。
+**Decision**：沿用 `turn` 的拆分模式，把 `tool_calls` 继续按“执行主流程 / 生命周期记录 / 共享类型”切成 `tool_calls::{execute,lifecycle,types}`，并用 `ExecuteToolCallContext::new(...)` / `lifecycle_context(...)` 收口重复的 started event 与 lifecycle context 拼装；这样能继续压平重复样板，又不改变 runtime tool 和普通 tool 的对外语义。
+**Changes**：
+- `crates/agent-runtime/src/runtime/tool_calls.rs`：收缩为薄 façade，只声明并 re-export `tool_calls` 子模块入口。
+- `crates/agent-runtime/src/runtime/tool_calls/execute.rs`：抽出 `execute_tool_call`、runtime tool invoke 路径，以及“按上下文记录成功/失败并 remember outcome”的共享 helper。
+- `crates/agent-runtime/src/runtime/tool_calls/lifecycle.rs`：抽出工具结果落盘、失败事件记录、`RuntimeEvent::ToolInvocation` 发布与 handoff drain。
+- `crates/agent-runtime/src/runtime/tool_calls/types.rs`、`crates/agent-runtime/src/runtime/turn/segments.rs`：抽出共享上下文类型，并让 turn segment 改走 `ExecuteToolCallContext::new(...)`，不再在调用侧手拼字段。
+- `docs/status.md`、`docs/architecture.md`：同步记录 `agent-runtime::runtime::tool_calls` 已完成模块化，以及下一批热点顺延到共享 SQLite store 边界与 `openai-adapter` 剩余协议特有 helper。
+**Verification**：`cargo fmt --all --check` 通过；`cargo check -p agent-runtime` 通过；`cargo test -p agent-runtime --lib -- --nocapture` 通过（61 passed）。
+**Commit**：`10d791e` `refactor: split runtime tool call modules`
+**Next direction**：优先继续检查 `agent-store` / `apps/agent-server` 之间还能继续下沉的共享查询/投影逻辑，或回到 `openai-adapter` 收口剩余协议特有的 delta / tool-call 累积 helper。
+
 ## 2026-03-17 Session 34
 
 **Diagnosis**：`openai-adapter` 虽然已经拆开 Responses / Chat Completions 两条协议栈，但两边的 `complete_streaming` 仍重复维护同一套流式请求发送、状态码失败处理、SSE transcript 累积、`data:` JSON 行解析和 `[DONE]` 终止判断；协议 streaming state 里也各自带着同构的 `handle_line` 壳。
