@@ -67,6 +67,8 @@
 - 完成提交前的后端自动压缩收口：高压力下会先 idle auto-compress 再启动 turn
 - 完成 Web 历史消息体验优化：切换 session / 水合历史时直接跳到底部，历史按页加载
 - 完成 Web 历史分页交互收口：消息列表上滚接近顶部时自动加载前一页，替代显式点击按钮
+- 完成 Web 历史翻页定位重构：只以 `user message` 作为上下文锚点恢复位置，并关闭浏览器默认滚动锚定，减少提前触发加载时的顶跳与漂移
+- 完成 Web 历史翻页锚点补偿修正：加载前一页后优先按首个可见消息锚点恢复视口，减少定位漂移
 - 完成 Web session 切换流畅度收口：store 维护按 session 的本地快照缓存，切换时保留上一帧内容并显示轻量 loading 提示，不再先清空消息区造成闪烁
 - 完成 Web session 切换滚动收口：每次切换 session 时都强制跳到最新消息底部，不再保留旧会话的局部滚动位置
 - 完成 Web 聊天列表首轮渲染减载：消息项引入 memo，长历史列表改为轻量窗口化渲染，并按 session 恢复滚动位置；历史分页加载时不再意外强制滚到底部
@@ -111,6 +113,7 @@
 - 完成 SSE 落后客户端显式重同步：`apps/agent-server` 的 `/api/events` 在 `broadcast` 消费者落后时会发出 `sync_required` 事件，而不是静默丢弃；`apps/web` 收到后会主动补拉 session 列表与当前 session 的历史、当前 turn、上下文压力，避免事件流与本地 UI 状态无声漂移
 - 完成真实工具实现到 `schemars` 参数 schema 的统一迁移：`agent-core::ToolDefinition` 除支持手写 JSON 外，也可直接从 `JsonSchema` 类型生成统一参数 schema；当前 `builtin-tools` 与 runtime tools 的 `definition()` 已切到共享 helper，减少工具实现重复手拼 JSON Schema
 - 完成真实工具调用到 typed args 的统一收口：`agent-core::ToolCall` 新增共享 `parse_arguments()`，当前 `builtin-tools` 与 runtime tools 的 `call()` 已改为直接反序列化结构化参数，而不再手工散落 `str_arg/opt_*_arg/arguments.get(...)` 取值
+- 完成 `agent-store` async façade 收口：session / trace 的 SQLite 访问已通过共享 async store API 暴露给 `apps/agent-server` 与 `ServerModel`，trace/session 路由、session manager 初始化与 turn/tool trace 落盘不再在 async 路径里直接调用同步 store 方法
 - 完成 `agent-store` SQLite 锁中毒恢复：trace/session 读写与 schema 初始化不再因 `Mutex<Connection>` poisoned 而 panic
 - 完成 `aia-config` 共享配置 crate：把 `.aia` 路径、默认 session 标题、server 默认地址 / 事件缓冲 / 请求超时、统一 user agent 组装，以及 trace / span / prompt-cache 稳定前缀从 `apps/agent-server` 与相关共享 crate 中收口
 - 完成 `aia-config` 内部模块化：拆为 `paths`、`server`、`identifiers` 三类共享配置模块，`lib.rs` 保持薄 façade
@@ -128,13 +131,13 @@
 - 继续把 trace 数据模型从“本地 span store + event timeline”推进到更完整的 resources / richer events 模型，但暂不抢在工具协议映射与 MCP 之前做 exporter / collector 集成
 - 验证 stop/cancel 目前对长时间 shell / 外部 provider streaming 的实际覆盖率；当前已打通 server→runtime→tool context，并进一步补上 OpenAI streaming 读取中的取消检查与 shell 作业 `TERM` 中断，后续仍需继续观察 provider/运行时在不同上游和复杂 shell pipeline 下的真实中断覆盖率
 - 当前 OpenAI adapter 已切到 async `reqwest` + async chunk streaming；后续观察重点转为不同上游是否仍在连接建立、TLS、代理缓冲或服务端长时间不刷新的窗口里残留取消迟滞
-- 全异步主链已完成 Phase 1 / 2，并继续推进完成了 Phase 3 / 4 的当前高优先级主路径：`shell`、文件工具、搜索工具都已从当前线程阻塞路径中收口，session manager / turn worker 也已改为 Tokio async task，runtime 公共 turn / 压缩 API 也已去掉同步包装并统一到 async 入口，tool 调用生命周期记账也已收口到共享 helper，trace 查询路由也已去掉 per-request `spawn_blocking` 包装；当前剩余的生产路径同步桥接点已大多缩到 SQLite 驱动本身，而 `agent-store` 的共享锁边界和 `openai-adapter` 的通用 HTTP helper 也已先后收口，重点转向这些尾部收口以及 runtime ownership、return-path 简化与共享层抽取
-- 继续盘点跨 crate 的超大文件与重复逻辑热点；在 `routes`、`session_manager`、`model`、`runtime_worker`、`agent-store::trace`、`agent-runtime::runtime::turn`、`agent-runtime::runtime::tool_calls`、`builtin-tools::shell`、`openai-adapter::responses` 与 `openai-adapter::chat_completions` 完成拆分后，`agent-store` / `agent-server` 之间也已先后收掉默认 session 查询、记录构造与 current-turn 投影 helper 样板，`openai-adapter` 里跨协议共用的 payload 定义、流式请求驱动和 SSE transcript 解析也已先后收口；下一批优先候选集中在共享 SQLite store 的同步访问边界，以及 `openai-adapter` 剩余协议特有 delta / tool-call 累积 helper 的进一步收口
+- 全异步主链已完成 Phase 1-4：`shell`、文件工具、搜索工具、session manager / turn worker、runtime 公共 turn / 压缩 API、trace/session store 访问与 provider I/O 都已统一到 async 调用面；当前后续重点转为 runtime ownership / return-path 简化、共享层继续抽象，以及剩余实现样板的继续压缩
+- 继续盘点跨 crate 的超大文件与重复逻辑热点；在 `routes`、`session_manager`、`model`、`runtime_worker`、`agent-store::trace`、`agent-runtime::runtime::turn`、`agent-runtime::runtime::tool_calls`、`builtin-tools::shell`、`openai-adapter::responses` 与 `openai-adapter::chat_completions` 完成拆分后，`agent-store` / `agent-server` 之间也已先后收掉默认 session 查询、记录构造、async store 边界与 current-turn 投影 helper 样板；下一批优先候选集中在 `openai-adapter` 剩余协议特有 delta / tool-call 累积 helper，以及 server/runtime ownership 路径的进一步收口
 - 持续校准哪些跨 crate 应用级常量应该进入 `aia-config`，哪些应继续留在协议层、运行时或算法层
 
 ## 下一步
 
-1. 继续推进全异步主链的后续收口，并配合按领域继续拆分 app 壳 / store 中的超大文件：优先清理共享 SQLite store 访问边界上的剩余同步桥接，并优先评估 `openai-adapter` 剩余协议特有 delta / tool-call 累积 helper 与 store 访问层中适合继续下沉或拆分的辅助逻辑
+1. 在全异步主链完成后，继续推进实现简化与按领域拆分：优先压缩 `session_manager` 的 runtime ownership / return-path 复杂度，并继续评估 `openai-adapter` 剩余协议特有 delta / tool-call 累积 helper 与 store 访问层中适合继续下沉或拆分的辅助逻辑
 2. 在 async 主链与共享工具边界进一步稳定后，优先推进统一工具协议映射与 MCP 接入，而不是继续堆厚客户端界面
 3. runtime 驱动辅助从 `apps/agent-server` 继续抽到共享层
 4. 在工具协议边界进一步收稳后，把本地 trace 从当前 span record + event timeline 继续推进到更完整的 resources / richer events 形态

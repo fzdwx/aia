@@ -103,7 +103,7 @@ README 里真正难的是这些能力：
 - trace context 生成已统一通过共享 helper 收口，不再由不同路径各自手写 trace/span 标识
 - stop/cancel 已贯穿 server → runtime → provider streaming / embedded shell
 - `openai-adapter` 已改为原生 async `reqwest`：单次请求不再依赖 blocking client，流式读取改为 async chunk streaming + abort 轮询，避免 provider I/O 把后续 server 原生 async 化继续卡在边缘层
-- 全异步主链已完成 Phase 1 / 2，并继续推进 Phase 3 / 4：`agent-core` 的模型/工具 trait、`agent-runtime` turn 主链、`openai-adapter` provider I/O 都已切到 async；`builtin-tools::shell` 已改为直接挂在 Tokio task 上的 async 事件泵，不再自建专用 thread/runtime，stdout/stderr 捕获也已改为异步 tail 临时 capture 文件，不再依赖 `spawn_blocking`；`read` / `write` / `edit` 已切到 `tokio::fs`，`glob` / `grep` 也已改为共享的 async `.gitignore` 感知仓库遍历 + async 文件读取，不再依赖 `spawn_blocking` / `ignore::WalkBuilder`，trace 查询路由也已去掉 per-request `spawn_blocking` 包装；当前剩余尾部主要是共享 SQLite store 的同步访问边界
+- 全异步主链已完成 Phase 1-4：`agent-core` 的模型/工具 trait、`agent-runtime` turn 主链、`openai-adapter` provider I/O、`builtin-tools`、`agent-store` async façade 与 `apps/agent-server` turn/session/store 主路径都已切到 async 调用面；当前后续重点转为内部实现简化与共享层继续抽象，而不再是异步化阶段本身
 - turn 主链内部已继续按职责拆为 `turn::{driver,segments,types}`：公开入口保持不变，流式 turn 驱动、completion segment 持久化与共享 turn buffer / success-failure context 分离，减少 runtime 单文件耦合与重复失败上下文拼装
 - `turn::driver` 已继续清理历史样板：重复的失败收尾路径已收口为共享 `fail_turn` helper，避免取消/stop_reason/模型错误分支继续各自拼接 `record_turn_failure + return Err(...)`
 - `agent-runtime` 对外 turn API 也已继续收口为单一异步入口 `handle_turn_streaming(user_input, control, sink)`：旧的同步 `handle_turn` 和历史命名 `handle_turn_streaming_with_control_async` 已移除，server 与测试消费方统一经由这条异步流式主链驱动 turn
@@ -158,6 +158,7 @@ README 里真正难的是这些能力：
 - trace store 内部已按 schema 初始化、store 查询/写入实现、row 映射与测试拆分子模块，避免 SQL、JSON 解码与提取 helper 继续堆在单个超大文件里
 - 统一封装 `Mutex<Connection>` 访问，poisoned mutex 场景下可恢复 guard 继续服务
 - `AiaStore` 现以 `with_conn(...)` 明确表达 SQLite 锁边界：session、trace、schema 初始化与 legacy 迁移都经由统一 helper 进入连接访问，避免各模块继续直接传播 `MutexGuard<Connection>`；这也为后续继续评估 store 边界是否需要再下沉或异步化留出单一入口
+- `AiaStore` 现同时提供共享 async façade：server 与 model 层通过 async store API 访问 session / trace 数据，内部再由共享 `spawn_blocking` 边界桥接 `rusqlite`，避免 async 路由和 turn 路径直接阻塞 Tokio worker
 - session 侧也已开始承接 server 共享样板：`SessionRecord::new(...)` 统一了新 session 的时间戳/字段构造，`AiaStore::first_session_id()` 让 app 壳在解析默认 session 时不必为了取第一条记录而整表加载
 - 为 server 与 trace 诊断页提供本地存储支撑，而不把 SQLite 细节扩散到更多边界
 

@@ -1,5 +1,31 @@
 # 演进日志
 
+## 2026-03-17 Session 45
+
+**Diagnosis**：异步化主链虽然已经完成到 provider/tool/runtime/server turn loop，但 `agent-store` 仍以同步 `rusqlite` API 直接暴露给 `apps/agent-server`；trace/session 路由、session manager 初始化、turn 开始时的 session touch，以及 trace/tool trace 落盘都还会在 async 路径里直接调用同步 store。
+**Decision**：把剩余 SQLite 边界收口到共享 `agent-store` 层：新增 async store façade，由 `agent-store` 内部统一通过受控 `spawn_blocking` 桥接 `rusqlite`，而 `apps/agent-server` 与 `ServerModel` 只再面向 async store API 编程。这样完成本轮异步化设计文档里的最后尾巴，同时不把 SQLite 细节继续散落在 app 壳里。
+**Changes**：
+- `crates/agent-store/src/lib.rs`、`crates/agent-store/src/session.rs`、`crates/agent-store/src/trace/store.rs`、`crates/agent-store/src/{session.rs,trace/tests.rs}`：新增共享 `with_conn_async(...)`，补齐 async session / trace API，并新增异步回归测试。
+- `apps/agent-server/src/{main.rs,model.rs}`、`apps/agent-server/src/routes/{common,session,trace,turn}.rs`：默认 session 初始化、trace 查询、session 列表解析与 trace 落盘都已改走 async store API；`ServerModel` 不再通过同步 trace store 在 async provider 完成后直接写 SQLite。
+- `apps/agent-server/src/session_manager.rs`、`apps/agent-server/src/session_manager/tool_trace.rs`、`apps/agent-server/src/routes/tests.rs`：session manager 启动 hydrate、create/delete/touch session 与 tool trace 持久化也已切到 async store；相关路由测试同步升级到 async helper。
+- `docs/async-phases.md`、`docs/architecture.md`、`docs/status.md`：同步把异步化状态更新为 Phase 1-4 已完成，并记录 `agent-store` 现通过共享 async façade 暴露 SQLite 访问。
+**Verification**：先新增 `agent-store` async session/trace 测试并确认缺少 API；随后 `cargo test -p agent-store async_` 通过；再执行 `cargo check -p agent-server`、`cargo test -p agent-store`、`cargo test -p agent-server`、`cargo check`，全部通过。
+**Commit**：未提交。
+**Next direction**：下一步可继续压缩 `session_manager` 的 runtime ownership / return-path 复杂度，但这已属于实现简化，不再阻塞异步化阶段完成结论。
+
+## 2026-03-17 Session 44
+
+**Diagnosis**：`apps/web/src/components/chat-messages.tsx` 里 tool 展示逻辑继续往单文件堆：标题摘要、参数展开、不同 tool details 的展示规则全耦合在组件内部，既不利于满足“参数进标题、详情按 tool 定制”的新需求，也会让后续继续加 tool renderer 时放大 UI 文件体积与漂移风险。
+**Decision**：把前端 tool 展示收口为聊天特性级 renderer 注册器，放到 `apps/web/src/features/chat/tool-rendering/`，由 `chat-messages` 只负责列表与交互壳，具体“标题怎么摘要 / 展开后怎么渲染 details”交给每个 tool renderer；这样既满足当前展示需求，也避免继续把协议细节和视图逻辑挤进通用 `lib` 或单一组件文件。
+**Changes**：
+- `apps/web/src/features/chat/tool-rendering/index.tsx`：新增聊天特性级 tool renderer 注册器，已接入 `read`、`write`、`edit`、`glob`、`grep`、`shell`、`apply_patch`、`tape_info`、`tape_handoff` 的标题/详情渲染规则；参数摘要移到标题，详情改为按 tool 的 `details` 定制展示。
+- `apps/web/AGENTS.md`、`apps/web/README.md`：按 `apps/web/package.json` 的真实脚本语义重写前端命令说明；补记“全局 `vp` 可能缺失时可改用项目本地 `./node_modules/.bin/vp`”，同时明确 `pnpm run test` 在当前仓库里确实可用（它会执行现有 `test` 脚本，即 `bun test`），类型检查当前可走 `tsc --noEmit` / `pnpm run typecheck`，不要把所有命令都机械等同成单一入口。
+- `apps/web/src/features/chat/tool-rendering/index.test.tsx`：补充注册器回归测试，锁住 read/shell/default renderer 的标题摘要行为。
+- `apps/web/src/components/chat-messages.tsx`：工具行已改为调用 renderer 注册器生成标题与详情，移除内联 `Arguments` 展开块；耗时显示也已放到行尾，流式 active tool 标题同样走注册器。
+**Verification**：已在 `apps/web` 内运行 `./node_modules/.bin/vp test src/features/chat/tool-rendering/index.test.tsx`（3 passed）与 `./node_modules/.bin/tsc --noEmit` 通过；此前全局 `vp` 缺失，但项目本地 `node_modules/.bin/vp` 可用。
+**Commit**：未提交。
+**Next direction**：继续把 `tool-rendering/index.tsx` 里的单 tool renderer 再按领域拆成 `renderers/*`，并补齐前端校验，让后续新增 tool 详情展示时只需注册新 renderer。
+
 ## 2026-03-17 Session 43
 
 **Diagnosis**：虽然真实工具的 `definition()` 已统一切到 `schemars` 参数 schema，但运行时 `call()` 里仍普遍是手工 `str_arg/opt_*_arg/arguments.get(...)` 取值，导致参数 schema 与实际解析逻辑仍然是两套源头。

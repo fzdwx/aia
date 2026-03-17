@@ -188,7 +188,7 @@
 
 ## 当前状态
 
-当前仓库已完成 **Phase 1** 与 **Phase 2**，并对 **Phase 3 / 4** 做了第一轮收口：
+当前仓库已完成 **Phase 1**、**Phase 2**、**Phase 3** 与 **Phase 4**：
 
 - `agent-core` / `agent-runtime` / `builtin-tools` / `openai-adapter` / `apps/agent-server` 已全部接到 async trait 边界
 - 相关 mock / 测试实现已完成迁移，当前 `cargo check` 与受影响 crate `cargo test` 已通过
@@ -197,9 +197,15 @@
 - `builtin-tools::shell` 已把输出聚合、abort 轮询与输出捕获都改为 async 事件泵，并移除自建 thread + current-thread runtime；当前 `brush` 执行直接挂在 Tokio task 上，stdout/stderr 通过异步 tail capture 文件收口，不再依赖 `spawn_blocking`
 - `builtin-tools::read` / `write` / `edit` 已切到 `tokio::fs`，`glob` / `grep` 也已改为共享的 async `.gitignore` 感知仓库遍历 + async 文件读取，不再依赖 `spawn_blocking` / `ignore::WalkBuilder` 扫描大仓库
 - `apps/agent-server` 的 session manager 与 turn 执行都已切到原生 Tokio async task：不再使用 `tokio::spawn_blocking`、`std::thread::Builder`、`LocalSet` 或 `spawn_local` 承载 turn 主链；运行中 `session/info` 也改为直接读取内存中的 `ContextStats` 快照
-- `apps/agent-server` 的 trace 查询路由也已去掉 per-request `spawn_blocking` 包装；当前剩余尾部主要是共享 SQLite store 的同步访问边界
+- `agent-store` 已补齐共享 async façade：session / trace 访问通过共享 `spawn_blocking` 边界异步暴露给 server，`apps/agent-server` 的 `routes::trace`、`routes::session`、`session_manager` 与 `ServerModel` 均已改走 async store API，不再在 async 路由或 turn 路径里直接调用同步 SQLite 访问
+
+因此，本轮异步化改造的阶段性结论是：
+
+1. 生产代码的 provider、tool、runtime turn loop、server session manager、trace/session store 访问都已收口到 async 调用面
+2. `spawn_blocking` 已不再作为 server turn 执行包装层存在；目前仅保留在共享 `agent-store` 内部，作为 `rusqlite` 同步驱动的受控桥接边界
+3. 后续可以继续优化内部实现复杂度（例如 `session_manager` 的 runtime ownership / return-path），但这已不再阻塞本设计文档定义的异步化阶段完成标准
 
 因此，下一步最高优先级变为：
 
-1. 继续完成 Phase 4 的剩余收口：进一步压缩 `apps/agent-server` 内部的 runtime ownership / return-path 复杂度，并继续收口共享 SQLite store 边界上的同步访问
-2. 在 async 主链与工具边界进一步稳定后，再优先推进统一工具协议映射与 MCP 接入，而不是继续堆厚客户端界面
+1. 继续压缩 `apps/agent-server` 内部的 runtime ownership / return-path 复杂度，把当前 async 主链上的剩余实现样板继续下沉或收口
+2. 在 async 主链与工具边界稳定后，优先推进统一工具协议映射与 MCP 接入，而不是继续堆厚客户端界面
