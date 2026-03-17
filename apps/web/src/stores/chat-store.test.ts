@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, test } from "node:test"
 import assert from "node:assert/strict"
 
-import { useChatStore } from "./chat-store"
+import { __setScheduleIdleWorkForTests, useChatStore } from "./chat-store"
 import type { SseEvent } from "@/lib/types"
 
 type FetchMock = typeof fetch
@@ -30,10 +30,15 @@ describe("chat store submitTurn", () => {
 
   beforeEach(() => {
     useChatStore.setState(initialState)
+    __setScheduleIdleWorkForTests((callback) => {
+      callback()
+      return 0
+    })
   })
 
   afterEach(() => {
     globalThis.fetch = originalFetch
+    __setScheduleIdleWorkForTests(null)
   })
 
   test("shows user message immediately after submit", () => {
@@ -607,6 +612,134 @@ describe("chat store submitTurn", () => {
     assert.equal(hydrated.sessionHydrating, false)
     assert.equal(hydrated.turns[0]?.turn_id, "turn-2-live")
     assert.equal(hydrated._sessionSnapshots["session-1"]?.latestTurn?.turn_id, "turn-1")
+
+    globalThis.fetch = originalFetchImpl
+  })
+
+  test("switchSession cancels background history backfill when leaving session", async () => {
+    const originalFetchImpl = globalThis.fetch
+    let resolveInitialHistory: ((value: Response) => void) | null = null
+    let resolveBackgroundHistory: ((value: Response) => void) | null = null
+    let historyRequestCount = 0
+
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString()
+      if (url.includes("/api/session/info")) {
+        return new Response(
+          JSON.stringify({
+            total_entries: 0,
+            anchor_count: 0,
+            entries_since_last_anchor: 0,
+            last_input_tokens: null,
+            context_limit: null,
+            output_limit: null,
+            pressure_ratio: 0.25,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
+      }
+      if (url.includes("/api/session/current-turn")) {
+        return new Response("null", {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      }
+      if (url.includes("session_id=session-3")) {
+        return new Response(
+          JSON.stringify({
+            turns: [],
+            has_more: false,
+            next_before_turn_id: null,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
+      }
+      if (url.includes("/api/session/history")) {
+        historyRequestCount += 1
+        if (historyRequestCount === 1) {
+          return await new Promise<Response>((resolve) => {
+            resolveInitialHistory = resolve
+          })
+        }
+        return await new Promise<Response>((resolve) => {
+          resolveBackgroundHistory = resolve
+        })
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }) as FetchMock
+
+    const switchPromise = useChatStore.getState().switchSession("session-2")
+
+    resolveInitialHistory?.(
+      new Response(
+        JSON.stringify({
+          turns: [
+            {
+              turn_id: "turn-2-latest",
+              started_at_ms: 11,
+              finished_at_ms: 12,
+              source_entry_ids: [3],
+              user_message: "target latest question",
+              blocks: [{ kind: "assistant", content: "target latest answer" }],
+              assistant_message: "target latest answer",
+              thinking: null,
+              tool_invocations: [],
+              usage: null,
+              failure_message: null,
+              outcome: "succeeded",
+            },
+          ],
+          has_more: true,
+          next_before_turn_id: "turn-2-latest",
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      )
+    )
+
+    await switchPromise
+    await useChatStore.getState().switchSession("session-3")
+
+    resolveBackgroundHistory?.(
+      new Response(
+        JSON.stringify({
+          turns: [
+            {
+              turn_id: "turn-2-older",
+              started_at_ms: 9,
+              finished_at_ms: 10,
+              source_entry_ids: [4],
+              user_message: "target older question",
+              blocks: [{ kind: "assistant", content: "target older answer" }],
+              assistant_message: "target older answer",
+              thinking: null,
+              tool_invocations: [],
+              usage: null,
+              failure_message: null,
+              outcome: "succeeded",
+            },
+          ],
+          has_more: false,
+          next_before_turn_id: null,
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      )
+    )
+
+    const state = useChatStore.getState()
+    assert.notEqual(state.activeSessionId, "session-2")
+    assert.equal(state.turns.some((turn) => turn.turn_id === "turn-2-older"), false)
 
     globalThis.fetch = originalFetchImpl
   })

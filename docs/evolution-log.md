@@ -1,5 +1,18 @@
 # 演进日志
 
+## 2026-03-17 Session 7
+
+**诊断**：session 切换虽然已经做成“最后一个 turn 先显示、其余历史后台补”，但后台补页仍会立即发起且不可取消；这会在用户快速切会话时制造无效请求，也会让非关键历史拉取继续和滚动/streaming 抢主线程与网络。
+**决策**：把后台补历史页进一步收口到 idle/可取消模型：首屏 hydrate 后，只在空闲时增量补旧页；如果用户又切走 session，则直接 abort。这样能继续降低切换后的竞争负载，又不牺牲最终历史完整性。
+**变更**：
+- `apps/web/src/lib/api.ts`：为 `fetchHistory` 增加可选 `AbortSignal` 支持。
+- `apps/web/src/stores/chat-store.ts`：新增 idle 调度与 abort 控制，session 首屏后只在空闲时补剩余历史，并在切换/删除 session 时取消后台补页；补页合并时按 `turn_id` 去重，避免重复最后一条。
+- `apps/web/src/stores/chat-store.test.ts`：新增后台补页取消回归测试，并让 idle 调度在测试中可控。
+- `docs/status.md`、`docs/architecture.md`：补充 session 后台补历史改为空闲时增量补页的说明。
+**验证**：`bun test`（`apps/web`）通过；`bun run typecheck`（`apps/web`）通过；`cargo check` 受工作区中现有未收口的 Rust 改动阻塞，与本次前端改动无关。
+**提交**：`a285357` `perf: defer and cancel session history backfill`
+**下次方向**：继续观察 idle 补页在高频切 session 与长 streaming 并发时的收益；如果还需要更稳，可以再把 idle 调度升级为真正的 `requestIdleCallback` / 优先级调度抽象，并把“首屏之后补几页”做成动态策略。
+
 ## 2026-03-17 Session 6
 
 **诊断**：即使 session 切换已经改成“最后一个 turn 先显示、其余历史后台补”，`_sessionSnapshots` 仍然沿用近似完整历史页的结构语义，容易让前端缓存再次偷偷变重，也让“快照到底是 UI 热缓存还是历史副本”边界不够清晰。

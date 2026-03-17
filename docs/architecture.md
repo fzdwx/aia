@@ -155,6 +155,7 @@ README 里真正难的是这些能力：
 - 动态高度窗口化已增加“首个可见 turn 锚定补偿”：当工具输出详情展开/收起、Markdown 高度变化等导致已测高度更新时，会尽量保持当前视口锚点稳定，减少内容突然上跳/下跳
 - session 切换首屏已改为“两阶段 hydrate”：切换前只同步保存旧 session 的最后一个 turn 快照；进入新 session 时先请求并展示最新一条历史 / 当前 turn，再后台补齐初始历史页，降低切换前后的主线程压力
 - `_sessionSnapshots` 已收缩为最小 UI snapshot：仅保存最后一个 turn、`streamingTurn`、`chatState`、`contextPressure`、`lastCompression`，不再把历史页副本长期保留在前端内存中
+- session 的后台补历史已改为空闲时增量补页，并支持在切走会话时中断，避免首屏切换后的非关键历史拉取继续和滚动/streaming 抢主线程与网络
 - 已覆盖 provider 管理、session 列表、历史消息、当前 turn 恢复、stop/cancel、trace 诊断视图
 - 使用独立 Web 子目录规则，具体开发规范由 `docs/frontend-web-guidelines.md` 与 `apps/web/AGENTS.md` 约束
 

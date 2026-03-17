@@ -9,7 +9,6 @@ import type {
   TraceListPage,
   TraceRecord,
   TraceSummary,
-  TurnLifecycle,
 } from "./types"
 
 export type ContextStats = {
@@ -65,16 +64,19 @@ export async function fetchHistory(params?: {
   sessionId?: string
   beforeTurnId?: string
   limit?: number
+  signal?: AbortSignal
 }): Promise<HistoryPage> {
   const search = new URLSearchParams()
   if (params?.sessionId) search.set("session_id", params.sessionId)
   if (params?.beforeTurnId) search.set("before_turn_id", params.beforeTurnId)
   if (params?.limit != null) search.set("limit", String(params.limit))
   const query = search.size > 0 ? `?${search.toString()}` : ""
-  const res = await fetch(`/api/session/history${query}`)
+  const res = await fetch(`/api/session/history${query}`, {
+    signal: params?.signal,
+  })
   if (!res.ok)
     throw new Error(`GET /api/session/history failed: ${res.status}`)
-  return res.json() as Promise<HistoryPage>
+  return await res.json() as Promise<HistoryPage>
 }
 
 export async function fetchCurrentTurn(
@@ -84,7 +86,7 @@ export async function fetchCurrentTurn(
   const res = await fetch(`/api/session/current-turn${params}`)
   if (!res.ok)
     throw new Error(`GET /api/session/current-turn failed: ${res.status}`)
-  return res.json() as Promise<CurrentTurnSnapshot | null>
+  return await res.json() as Promise<CurrentTurnSnapshot | null>
 }
 
 export async function submitTurn(
@@ -115,13 +117,13 @@ export async function cancelTurn(sessionId?: string): Promise<boolean> {
 export async function fetchProviders(): Promise<ProviderInfo> {
   const res = await fetch("/api/providers")
   if (!res.ok) throw new Error(`GET /api/providers failed: ${res.status}`)
-  return res.json() as Promise<ProviderInfo>
+  return await res.json() as Promise<ProviderInfo>
 }
 
 export async function listProviders(): Promise<ProviderListItem[]> {
   const res = await fetch("/api/providers/list")
   if (!res.ok) throw new Error(`GET /api/providers/list failed: ${res.status}`)
-  return res.json() as Promise<ProviderListItem[]>
+  return  await res.json() as Promise<ProviderListItem[]>
 }
 
 export async function fetchTraces(params?: {
@@ -135,19 +137,19 @@ export async function fetchTraces(params?: {
   const query = search.size > 0 ? `?${search.toString()}` : ""
   const res = await fetch(`/api/traces${query}`)
   if (!res.ok) throw new Error(`GET /api/traces failed: ${res.status}`)
-  return res.json() as Promise<TraceListPage>
+  return await res.json() as Promise<TraceListPage>
 }
 
 export async function fetchTrace(id: string): Promise<TraceRecord> {
   const res = await fetch(`/api/traces/${encodeURIComponent(id)}`)
   if (!res.ok) throw new Error(`GET /api/traces/${id} failed: ${res.status}`)
-  return res.json() as Promise<TraceRecord>
+  return await res.json() as Promise<TraceRecord>
 }
 
 export async function fetchTraceSummary(): Promise<TraceSummary> {
   const res = await fetch("/api/traces/summary")
   if (!res.ok) throw new Error(`GET /api/traces/summary failed: ${res.status}`)
-  return res.json() as Promise<TraceSummary>
+  return await res.json() as Promise<TraceSummary>
 }
 
 export async function createProvider(body: {

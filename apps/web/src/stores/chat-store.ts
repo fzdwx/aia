@@ -35,6 +35,8 @@ const SESSION_HISTORY_PAGE_SIZE = 5
 const INITIAL_SESSION_HISTORY_PAGE_SIZE = 1
 const MAX_CACHED_SESSION_SNAPSHOTS = 24
 
+type IdleHandle = number
+
 type SessionSnapshot = {
   latestTurn: TurnLifecycle | null
   streamingTurn: StreamingTurn | null
@@ -70,6 +72,22 @@ function snapshotFromState(state: Pick<
     contextPressure: state.contextPressure,
     lastCompression: state.lastCompression,
   }
+}
+
+function mergeTurnsById(
+  olderTurns: TurnLifecycle[],
+  newerTurns: TurnLifecycle[]
+): TurnLifecycle[] {
+  const seen = new Set<string>()
+  const merged: TurnLifecycle[] = []
+
+  for (const turn of [...olderTurns, ...newerTurns]) {
+    if (seen.has(turn.turn_id)) continue
+    seen.add(turn.turn_id)
+    merged.push(turn)
+  }
+
+  return merged
 }
 
 function currentTurnToStreamingTurn(
@@ -226,9 +244,33 @@ type ChatStore = {
 }
 
 let latestSessionLoadId = 0
+let pendingHistoryHydrationAbort: AbortController | null = null
+let pendingHistoryHydrationIdleHandle: IdleHandle | null = null
+let scheduleIdleWork: (callback: () => void) => IdleHandle = (callback) =>
+  window.setTimeout(callback, 120)
+
+export function __setScheduleIdleWorkForTests(
+  scheduler: ((callback: () => void) => IdleHandle) | null
+) {
+  scheduleIdleWork = scheduler ?? ((callback) => window.setTimeout(callback, 120))
+}
+
+function cancelPendingHistoryHydration() {
+  pendingHistoryHydrationAbort?.abort()
+  pendingHistoryHydrationAbort = null
+  if (pendingHistoryHydrationIdleHandle != null) {
+    clearTimeout(pendingHistoryHydrationIdleHandle)
+    pendingHistoryHydrationIdleHandle = null
+  }
+}
+
+function scheduleIdle(callback: () => void): IdleHandle {
+  return scheduleIdleWork(callback)
+}
 
 export const useChatStore = create<ChatStore>((set, get) => {
   async function hydrateSession(id: string) {
+    cancelPendingHistoryHydration()
     const loadId = ++latestSessionLoadId
     const cachedSnapshot = get()._sessionSnapshots[id] ?? EMPTY_SESSION_SNAPSHOT
     const historyPagePromise = fetchHistory({
@@ -303,34 +345,61 @@ export const useChatStore = create<ChatStore>((set, get) => {
         historyPage.has_more &&
         historyPage.next_before_turn_id
       ) {
-        void fetchHistory({
-          sessionId: id,
-          limit: SESSION_HISTORY_PAGE_SIZE,
-        })
-          .then((fullHistoryPage) => {
-            if (loadId !== latestSessionLoadId || get().activeSessionId !== id) {
-              return
-            }
-            const nextSnapshot: SessionSnapshot = {
-              latestTurn: latestTurn(fullHistoryPage.turns),
-              streamingTurn: get().streamingTurn,
-              chatState: get().chatState,
-              contextPressure: get().contextPressure,
-              lastCompression: get().lastCompression,
-            }
-            set((state) => ({
-              turns: fullHistoryPage.turns,
-              historyHasMore: fullHistoryPage.has_more,
-              historyNextBeforeTurnId: fullHistoryPage.next_before_turn_id,
-              _sessionSnapshots: upsertSessionSnapshot(
-                state._sessionSnapshots,
-                id,
-                nextSnapshot,
-                state.sessions
-              ),
-            }))
+        const beforeTurnId = historyPage.next_before_turn_id
+        const abortController = new AbortController()
+        pendingHistoryHydrationAbort = abortController
+        pendingHistoryHydrationIdleHandle = scheduleIdle(() => {
+          pendingHistoryHydrationIdleHandle = null
+          void fetchHistory({
+            sessionId: id,
+            beforeTurnId,
+            limit: SESSION_HISTORY_PAGE_SIZE - INITIAL_SESSION_HISTORY_PAGE_SIZE,
+            signal: abortController.signal,
           })
-          .catch(() => {})
+            .then((olderHistoryPage) => {
+              if (
+                abortController.signal.aborted ||
+                loadId !== latestSessionLoadId ||
+                get().activeSessionId !== id
+              ) {
+                return
+              }
+
+              const existingTurns = get().turns
+              const turns = mergeTurnsById(olderHistoryPage.turns, existingTurns)
+              const nextSnapshot: SessionSnapshot = {
+                latestTurn: latestTurn(turns),
+                streamingTurn: get().streamingTurn,
+                chatState: get().chatState,
+                contextPressure: get().contextPressure,
+                lastCompression: get().lastCompression,
+              }
+              set((state) => ({
+                turns,
+                historyHasMore: olderHistoryPage.has_more,
+                historyNextBeforeTurnId: olderHistoryPage.next_before_turn_id,
+                _sessionSnapshots: upsertSessionSnapshot(
+                  state._sessionSnapshots,
+                  id,
+                  nextSnapshot,
+                  state.sessions
+                ),
+              }))
+            })
+            .catch((error: unknown) => {
+              if (
+                error instanceof DOMException &&
+                error.name === "AbortError"
+              ) {
+                return
+              }
+            })
+            .finally(() => {
+              if (pendingHistoryHydrationAbort === abortController) {
+                pendingHistoryHydrationAbort = null
+              }
+            })
+        })
       }
     } catch {
       if (loadId !== latestSessionLoadId) {
@@ -1031,6 +1100,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
       if (id === get().activeSessionId && !get().sessionHydrating) {
         return
       }
+      cancelPendingHistoryHydration()
       await hydrateSession(id)
     },
 
@@ -1070,6 +1140,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     deleteSession: async (id: string) => {
+      cancelPendingHistoryHydration()
       await apiDeleteSession(id)
       const state = get()
       const remaining = state.sessions.filter((s) => s.id !== id)
