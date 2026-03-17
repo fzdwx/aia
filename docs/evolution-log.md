@@ -1,5 +1,18 @@
 # 演进日志
 
+## 2026-03-17 Session 36
+
+**Diagnosis**：`agent-store` 与 `apps/agent-server` 在 session 相关路径上还残着一层低价值样板：server 为解析默认 session 需要整表 `list_sessions()` 只取第一条记录，启动与 `create_session` 路径也都在 app 壳里重复手拼 `SessionRecord` 时间戳字段。
+**Decision**：把这层通用 session 查询/构造样板下沉到共享 store/types 层：新增 `AiaStore::first_session_id()` 和 `SessionRecord::new(...)`，让 server 路由、启动路径和 session manager 都复用同一套 helper，而不是继续把“默认 session 解析”和“新 session 记录构造”散落在 app 壳里。
+**Changes**：
+- `crates/agent-store/src/session.rs`：新增 `SessionRecord::new(...)` 与 `AiaStore::first_session_id()`，并补充“返回最早 session id”的回归测试。
+- `apps/agent-server/src/routes/common.rs`：默认 session 解析改走 `store.first_session_id()`，不再为取第一条 session 整表加载。
+- `apps/agent-server/src/main.rs`、`apps/agent-server/src/session_manager.rs`：默认 session 创建和 `handle_create_session(...)` 改走 `SessionRecord::new(...)`，去掉重复的时间戳/字段拼装和相应旧导入。
+- `docs/status.md`、`docs/architecture.md`：同步记录 store/server 之间这轮共享 session helper 收口。
+**Verification**：`cargo fmt --all` 通过；`cargo check -p agent-store -p agent-server` 通过；`cargo test -p agent-store session -- --nocapture` 通过（9 passed）；`cargo test -p agent-server routes::tests -- --nocapture` 通过（8 passed）。
+**Commit**：`54656a1` `refactor: share session store helpers`
+**Next direction**：优先继续检查 `agent-store` / `apps/agent-server` 之间还能继续下沉的共享查询/投影逻辑，或回到 `openai-adapter` 收口剩余协议特有的 delta / tool-call 累积 helper。
+
 ## 2026-03-17 Session 35
 
 **Diagnosis**：`crates/agent-runtime/src/runtime/tool_calls.rs` 仍把工具调用主流程、runtime tool bridge、生命周期落盘/事件发布和共享上下文类型全塞在一个 400+ 行单文件里；虽然前面已经清掉一轮重复记账逻辑，但 `ToolCallLifecycleContext` 拼装和 started/failure 分支样板仍让后续维护成本偏高。
