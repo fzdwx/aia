@@ -1,5 +1,16 @@
 # 演进日志
 
+## 2026-03-17 Session 14
+
+**诊断**：虽然 session manager / turn worker 已经切到纯 Tokio task，但 `builtin-tools::shell` 仍保留一个自建执行线程和内部 `current_thread` runtime 来承载 `brush`；这让“runtime 主链已经全异步”在 shell 路径上仍有一个显眼例外，也继续增加了线程与 runtime 嵌套复杂度。
+**决策**：继续把 `shell` 收口到更原生的 async 托管方式：保留现有 `brush` 语义与取消链路，但移除专用 shell thread/runtime，直接在当前 Tokio runtime 上执行 `brush` async future；pipe 读取暂通过 Tokio blocking 池桥接同步 `PipeReader`。这样既不引入行为倒退，也进一步消除了 runtime 主链上的手工线程壳。
+**变更**：
+- `crates/builtin-tools/src/shell.rs`：移除 embedded shell 的专用 `std::thread::spawn` 和 `runtime.block_on(...)` 包装，改为直接 `tokio::spawn(async move { ... })` 执行 `brush`；stdout/stderr pipe reader 改为 Tokio blocking 池任务，避免再显式手工管理线程。
+- `docs/status.md`、`docs/architecture.md`、`docs/async-phases.md`：同步记录 `shell` 已不再自建 thread/runtime，当前仅剩 pipe 读取与搜索/SQLite 等同步 I/O 仍通过 Tokio blocking 池桥接。
+**验证**：`cargo check -p builtin-tools` 通过；`cargo test -p builtin-tools shell -- --nocapture` 通过。
+**Commit**：待提交
+**Next direction**：优先继续清理生产路径里剩余的 blocking 池桥接点，尤其评估 `glob` / `grep`、trace/SQLite 查询路由与 embedded shell pipe 读取的后续 async 化空间。
+
 ## 2026-03-17 Session 13
 
 **诊断**：虽然前两轮已经把 turn 执行从 `spawn_blocking` 和 per-turn 线程里拔出来，但 `apps/agent-server` 仍依赖专用 `std::thread::Builder` + current-thread Tokio runtime + `LocalSet` 托管 session manager；同时 `agent-core` 到 `agent-runtime` 的 trait / runtime tool bridge 也还停留在 `?Send` / `Rc`，使 server 无法真正用纯 Tokio async task 承载整条 runtime 主链。

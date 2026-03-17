@@ -1,6 +1,5 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::thread;
 use std::time::Duration;
 
 use agent_core::{
@@ -112,14 +111,15 @@ async fn run_embedded_brush(
     let shell_command = command.to_owned();
     let shell_cwd = cwd.to_path_buf();
     let shell_tx = event_tx.clone();
-    let shell_handle = thread::spawn(move || {
-        let result = run_embedded_brush_in_runtime(
+    let shell_handle = tokio::spawn(async move {
+        let result = run_embedded_brush_in_task(
             shell_command,
             shell_cwd,
             stdout_writer,
             stderr_writer,
             shell_tx.clone(),
-        );
+        )
+        .await;
         let _ = shell_tx.send(ShellEvent::Finished(result));
     });
     drop(event_tx);
@@ -163,9 +163,9 @@ async fn run_embedded_brush(
         }
     }
 
-    stdout_handle.join().map_err(|_| CoreError::new("stdout capture thread panicked"))?;
-    stderr_handle.join().map_err(|_| CoreError::new("stderr capture thread panicked"))?;
-    shell_handle.join().map_err(|_| CoreError::new("embedded shell thread panicked"))?;
+    stdout_handle.await.map_err(|_| CoreError::new("stdout capture task panicked"))?;
+    stderr_handle.await.map_err(|_| CoreError::new("stderr capture task panicked"))?;
+    shell_handle.await.map_err(|_| CoreError::new("embedded shell task panicked"))?;
 
     let exit_code =
         finished.unwrap_or_else(|| Err(CoreError::new("embedded shell exited without status")))?;
@@ -173,73 +173,66 @@ async fn run_embedded_brush(
     Ok(EmbeddedShellExecution { stdout, stderr, exit_code })
 }
 
-fn run_embedded_brush_in_runtime(
+async fn run_embedded_brush_in_task(
     command: String,
     cwd: PathBuf,
     stdout_writer: std::io::PipeWriter,
     stderr_writer: std::io::PipeWriter,
     shell_tx: tokio::sync::mpsc::UnboundedSender<ShellEvent>,
 ) -> Result<i32, CoreError> {
-    let runtime =
-        tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| {
-            CoreError::new(format!("failed to build embedded {EMBEDDED_SHELL_NAME} runtime: {e}"))
+    let mut shell = brush_core::Shell::builder()
+        .no_profile(true)
+        .no_rc(true)
+        .default_builtins(BuiltinSet::BashMode)
+        .shell_name("aia-shell".to_owned())
+        .build()
+        .await
+        .map_err(|e| {
+            CoreError::new(format!("failed to initialize embedded {EMBEDDED_SHELL_NAME}: {e}"))
         })?;
 
-    runtime.block_on(async move {
-        let mut shell = brush_core::Shell::builder()
-            .no_profile(true)
-            .no_rc(true)
-            .default_builtins(BuiltinSet::BashMode)
-            .shell_name("aia-shell".to_owned())
-            .build()
-            .await
-            .map_err(|e| {
-                CoreError::new(format!("failed to initialize embedded {EMBEDDED_SHELL_NAME}: {e}"))
-            })?;
+    shell
+        .set_working_dir(cwd)
+        .map_err(|e| CoreError::new(format!("failed to set shell working directory: {e}")))?;
 
-        shell
-            .set_working_dir(cwd)
-            .map_err(|e| CoreError::new(format!("failed to set shell working directory: {e}")))?;
+    let mut params = shell.default_exec_params();
+    params.set_fd(OpenFiles::STDOUT_FD, stdout_writer.into());
+    params.set_fd(OpenFiles::STDERR_FD, stderr_writer.into());
 
-        let mut params = shell.default_exec_params();
-        params.set_fd(OpenFiles::STDOUT_FD, stdout_writer.into());
-        params.set_fd(OpenFiles::STDERR_FD, stderr_writer.into());
+    let (control_tx, control_rx) = tokio::sync::oneshot::channel::<ShellControlMessage>();
+    let _ = shell_tx.send(ShellEvent::ShellReady(control_tx));
 
-        let (control_tx, control_rx) = tokio::sync::oneshot::channel::<ShellControlMessage>();
-        let _ = shell_tx.send(ShellEvent::ShellReady(control_tx));
-
-        tokio::pin!(control_rx);
-        let run_result = tokio::select! {
-            result = shell.run_string(command, &params) => result,
-            message = &mut control_rx => {
-                if matches!(message, Ok(ShellControlMessage::Abort)) {
-                    for job in &shell.jobs.jobs {
-                        let _ = job.kill(TrapSignal::try_from("TERM").map_err(|e| {
-                            CoreError::new(format!("failed to resolve TERM signal: {e}"))
-                        })?);
-                    }
-                    return Ok(130);
+    tokio::pin!(control_rx);
+    let run_result = tokio::select! {
+        result = shell.run_string(command, &params) => result,
+        message = &mut control_rx => {
+            if matches!(message, Ok(ShellControlMessage::Abort)) {
+                for job in &shell.jobs.jobs {
+                    let _ = job.kill(TrapSignal::try_from("TERM").map_err(|e| {
+                        CoreError::new(format!("failed to resolve TERM signal: {e}"))
+                    })?);
                 }
                 return Ok(130);
             }
-        };
+            return Ok(130);
+        }
+    };
 
-        run_result.map_err(|e| {
-            CoreError::new(format!("embedded {EMBEDDED_SHELL_NAME} execution failed: {e}"))
-        })?;
+    run_result.map_err(|e| {
+        CoreError::new(format!("embedded {EMBEDDED_SHELL_NAME} execution failed: {e}"))
+    })?;
 
-        drop(params);
+    drop(params);
 
-        Ok(i32::from(shell.last_result()))
-    })
+    Ok(i32::from(shell.last_result()))
 }
 
 fn spawn_pipe_reader(
     mut reader: std::io::PipeReader,
     stream: ToolOutputStream,
     sender: tokio::sync::mpsc::UnboundedSender<ShellEvent>,
-) -> thread::JoinHandle<()> {
-    thread::spawn(move || {
+) -> tokio::task::JoinHandle<()> {
+    tokio::task::spawn_blocking(move || {
         let mut buffer = [0_u8; 4096];
 
         loop {

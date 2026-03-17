@@ -101,7 +101,7 @@ README 里真正难的是这些能力：
 - trace context 生成已统一通过共享 helper 收口，不再由不同路径各自手写 trace/span 标识
 - stop/cancel 已贯穿 server → runtime → provider streaming / embedded shell
 - `openai-adapter` 已改为原生 async `reqwest`：单次请求不再依赖 blocking client，流式读取改为 async chunk streaming + abort 轮询，避免 provider I/O 把后续 server 原生 async 化继续卡在边缘层
-- 全异步主链已完成 Phase 1 / 2，并继续推进 Phase 3 / 4：`agent-core` 的模型/工具 trait、`agent-runtime` turn 主链、`openai-adapter` provider I/O 都已切到 async；`builtin-tools::shell` 已改为 async 事件泵，`read` / `write` / `edit` 已切到 `tokio::fs`，`glob` / `grep` 已改为 async 入口 + abort 感知的阻塞池搜索，但 server ownership 与 live runtime stats 仍在继续分阶段收口
+- 全异步主链已完成 Phase 1 / 2，并继续推进 Phase 3 / 4：`agent-core` 的模型/工具 trait、`agent-runtime` turn 主链、`openai-adapter` provider I/O 都已切到 async；`builtin-tools::shell` 已改为直接挂在 Tokio task 上的 async 事件泵，不再自建专用 thread/runtime，`read` / `write` / `edit` 已切到 `tokio::fs`，`glob` / `grep` 已改为 async 入口 + abort 感知的阻塞池搜索，但 server ownership 与 live runtime stats 仍在继续分阶段收口
 - 时间辅助函数不假设系统时间恒定晚于 `UNIX_EPOCH`，异常场景下会安全回退
 - `tape_info` / `tape_handoff` 已通过真正的 runtime tool registry 暴露，而不是字符串特判
 
