@@ -70,6 +70,7 @@
 - cached prompt usage 已贯通到 `completion.usage`、trace 存储、trace 汇总与 Web 聊天/诊断展示
 - `apps/agent-server` 当前由后台 runtime worker 独占运行时，provider / history / current-turn 读取走共享快照
 - `apps/agent-server` 的 turn 执行已去掉 `tokio::spawn_blocking`，session manager 与 turn worker 当前都由原生 Tokio async task 承载，不再依赖独立 current-thread Tokio worker thread
+- `apps/agent-server` 的 trace 查询路由已去掉 per-request `spawn_blocking` 包装，当前直接复用共享 SQLite store 读取路径
 - provider 变更已采用事务式提交：候选 registry 校验、registry 落盘、session tape 落盘全部成功后才更新内存 runtime / tape
 - 已完成完整 stop/cancel 基线，并继续打通到 OpenAI streaming 与 embedded shell `TERM` 中断
 - 本地 trace 当前已形成 OTel-shaped 诊断模型：agent loop root span、LLM client spans、tool internal spans 与本地 event timeline

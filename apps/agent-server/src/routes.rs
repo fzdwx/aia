@@ -247,7 +247,7 @@ pub async fn delete_session(
     }
 }
 
-// ── Trace endpoints (unchanged) ────────────────────────────────
+// ── Trace endpoints ────────────────────────────────────────────
 
 pub async fn list_traces(
     State(state): State<SharedState>,
@@ -256,14 +256,9 @@ pub async fn list_traces(
     let page_size = query.page_size.unwrap_or(12).clamp(1, 50);
     let page = query.page.unwrap_or(1).max(1);
     let offset = (page - 1) * page_size;
-    let store = state.store.clone();
-    match tokio::task::spawn_blocking(move || store.list_page(page_size, offset)).await {
-        Ok(Ok(result)) => json_response(StatusCode::OK, result),
-        Ok(Err(error)) => trace_store_error_response(error),
-        Err(error) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": error.to_string() })),
-        ),
+    match state.store.list_page(page_size, offset) {
+        Ok(result) => json_response(StatusCode::OK, result),
+        Err(error) => trace_store_error_response(error),
     }
 }
 
@@ -271,33 +266,23 @@ pub async fn get_trace(
     State(state): State<SharedState>,
     Path(id): Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let store = state.store.clone();
     let missing_id = id.clone();
-    match tokio::task::spawn_blocking(move || store.get(&id)).await {
-        Ok(Ok(Some(trace))) => json_response(StatusCode::OK, trace),
-        Ok(Ok(None)) => (
+    match state.store.get(&id) {
+        Ok(Some(trace)) => json_response(StatusCode::OK, trace),
+        Ok(None) => (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": format!("trace 不存在：{missing_id}") })),
         ),
-        Ok(Err(error)) => trace_store_error_response(error),
-        Err(error) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": error.to_string() })),
-        ),
+        Err(error) => trace_store_error_response(error),
     }
 }
 
 pub async fn get_trace_summary(
     State(state): State<SharedState>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let store = state.store.clone();
-    match tokio::task::spawn_blocking(move || store.summary()).await {
-        Ok(Ok(summary)) => json_response(StatusCode::OK, summary),
-        Ok(Err(error)) => trace_store_error_response(error),
-        Err(error) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": error.to_string() })),
-        ),
+    match state.store.summary() {
+        Ok(summary) => json_response(StatusCode::OK, summary),
+        Err(error) => trace_store_error_response(error),
     }
 }
 
@@ -630,10 +615,18 @@ pub async fn cancel_turn(
 
 #[cfg(test)]
 mod tests {
+    use agent_store::{
+        LlmTraceEvent, LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus, LlmTraceStore,
+    };
     use axum::http::StatusCode;
+    use axum::{
+        Json,
+        extract::{Path, Query, State},
+    };
 
     use super::{
-        CancelTurnRequest, ModelConfigDto, ModelLimitDto, json_response, resolve_session_id,
+        CancelTurnRequest, ModelConfigDto, ModelLimitDto, TraceListQuery, get_trace,
+        get_trace_summary, json_response, list_traces, resolve_session_id,
     };
     use crate::{
         session_manager::{ProviderInfoSnapshot, SessionManagerHandle},
@@ -654,6 +647,52 @@ mod tests {
             })),
             store: Arc::new(agent_store::AiaStore::in_memory().expect("memory store")),
         })
+    }
+
+    fn seed_trace(state: &AppState, id: &str, started_at_ms: u64) {
+        state
+            .store
+            .record(&LlmTraceRecord {
+                id: id.into(),
+                trace_id: format!("trace-{id}"),
+                span_id: format!("span-{id}"),
+                parent_span_id: None,
+                root_span_id: format!("root-{id}"),
+                operation_name: "responses.create".into(),
+                span_kind: LlmTraceSpanKind::Client,
+                turn_id: format!("turn-{id}"),
+                run_id: format!("run-{id}"),
+                request_kind: "completion".into(),
+                step_index: 0,
+                provider: "openai".into(),
+                protocol: "responses".into(),
+                model: "gpt-5.4".into(),
+                base_url: "https://api.openai.com".into(),
+                endpoint_path: "/v1/responses".into(),
+                streaming: true,
+                started_at_ms,
+                finished_at_ms: Some(started_at_ms + 25),
+                duration_ms: Some(25),
+                status_code: Some(200),
+                status: LlmTraceStatus::Succeeded,
+                stop_reason: Some("completed".into()),
+                error: None,
+                request_summary: serde_json::json!({ "messages": [{ "role": "user", "content": "hi" }] }),
+                provider_request: serde_json::json!({ "model": "gpt-5.4" }),
+                response_summary: serde_json::json!({ "output_text": "hello" }),
+                response_body: Some("{\"ok\":true}".into()),
+                input_tokens: Some(10),
+                output_tokens: Some(5),
+                total_tokens: Some(15),
+                cached_tokens: Some(2),
+                otel_attributes: serde_json::json!({ "http.method": "POST" }),
+                events: vec![LlmTraceEvent {
+                    name: "response.completed".into(),
+                    at_ms: started_at_ms + 25,
+                    attributes: serde_json::json!({}),
+                }],
+            })
+            .expect("trace record should save");
     }
 
     #[test]
@@ -730,5 +769,51 @@ mod tests {
         .expect("cancel turn request should deserialize");
 
         assert_eq!(parsed.session_id.as_deref(), Some("session-1"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn list_traces_reads_trace_page_from_store() {
+        let state = test_state();
+        seed_trace(&state, "trace-older", 1_000);
+        seed_trace(&state, "trace-newer", 2_000);
+
+        let (status, Json(body)) =
+            list_traces(State(state), Query(TraceListQuery { page: Some(1), page_size: Some(10) }))
+                .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["items"].as_array().map(Vec::len), Some(2));
+        assert_eq!(body["items"][0]["id"], "trace-newer");
+        assert_eq!(body["items"][1]["id"], "trace-older");
+        assert_eq!(body["total_loops"], 2);
+        assert_eq!(body["page"], 1);
+        assert_eq!(body["page_size"], 10);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn get_trace_returns_not_found_for_missing_id() {
+        let state = test_state();
+
+        let (status, Json(body)) = get_trace(State(state), Path("missing-trace".into())).await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(body["error"], "trace 不存在：missing-trace");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn get_trace_summary_returns_aggregate_counts() {
+        let state = test_state();
+        seed_trace(&state, "trace-1", 1_000);
+        seed_trace(&state, "trace-2", 2_000);
+
+        let (status, Json(body)) = get_trace_summary(State(state)).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["total_requests"], 2);
+        assert_eq!(body["failed_requests"], 0);
+        assert_eq!(body["total_input_tokens"], 20);
+        assert_eq!(body["total_output_tokens"], 10);
+        assert_eq!(body["total_tokens"], 30);
+        assert_eq!(body["total_cached_tokens"], 4);
     }
 }
