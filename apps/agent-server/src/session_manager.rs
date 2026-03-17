@@ -13,7 +13,7 @@ use agent_core::{
     RequestTimeoutConfig, StreamEvent, ToolRegistry,
 };
 use agent_runtime::{AgentRuntime, ContextStats, RuntimeEvent, RuntimeSubscriberId, TurnLifecycle};
-use agent_store::{AiaStore, LlmTraceStore, SessionRecord, generate_session_id};
+use agent_store::{AiaStore, SessionRecord, generate_session_id};
 use builtin_tools::build_tool_registry;
 use provider_registry::ProviderRegistry;
 use session_tape::{SessionProviderBinding, SessionTape};
@@ -53,7 +53,7 @@ async fn session_manager_loop(
     let (return_tx, mut return_rx) = mpsc::channel::<RuntimeReturn>(64);
 
     // Load existing sessions from DB and hydrate slots
-    if let Ok(records) = config.store.list_sessions() {
+    if let Ok(records) = config.store.list_sessions_async().await {
         for record in records {
             if let Ok(slot) = create_slot_for_session(&record.id, &config) {
                 slots.insert(record.id, slot);
@@ -66,15 +66,15 @@ async fn session_manager_loop(
             Some(command) = rx.recv() => {
                 match command {
                     SessionCommand::CreateSession { title, reply } => {
-                        let result = handle_create_session(&mut slots, &config, title);
+                        let result = handle_create_session(&mut slots, &config, title).await;
                         let _ = reply.send(result);
                     }
                     SessionCommand::DeleteSession { session_id, reply } => {
-                        let result = handle_delete_session(&mut slots, &config, &session_id);
+                        let result = handle_delete_session(&mut slots, &config, &session_id).await;
                         let _ = reply.send(result);
                     }
                     SessionCommand::SubmitTurn { session_id, prompt, reply } => {
-                        let result = handle_submit_turn(&mut slots, &config, &return_tx, &session_id, prompt);
+                        let result = handle_submit_turn(&mut slots, &config, &return_tx, &session_id, prompt).await;
                         let _ = reply.send(result);
                     }
                     SessionCommand::CancelTurn { session_id, reply } => {
@@ -227,7 +227,7 @@ fn collect_runtime_events(
     })
 }
 
-fn handle_create_session(
+async fn handle_create_session(
     slots: &mut HashMap<SessionId, SessionSlot>,
     config: &SessionManagerConfig,
     title: Option<String>,
@@ -239,7 +239,8 @@ fn handle_create_session(
 
     config
         .store
-        .create_session(&record)
+        .create_session_async(record.clone())
+        .await
         .map_err(|e| RuntimeWorkerError::internal(format!("session db insert failed: {e}")))?;
 
     let slot = create_slot_for_session(&session_id, config)?;
@@ -252,7 +253,7 @@ fn handle_create_session(
     Ok(record)
 }
 
-fn handle_delete_session(
+async fn handle_delete_session(
     slots: &mut HashMap<SessionId, SessionSlot>,
     config: &SessionManagerConfig,
     session_id: &str,
@@ -275,7 +276,8 @@ fn handle_delete_session(
 
     config
         .store
-        .delete_session(session_id)
+        .delete_session_async(session_id.to_string())
+        .await
         .map_err(|e| RuntimeWorkerError::internal(format!("session db delete failed: {e}")))?;
 
     let _ =
@@ -284,7 +286,7 @@ fn handle_delete_session(
     Ok(())
 }
 
-fn handle_submit_turn(
+async fn handle_submit_turn(
     slots: &mut HashMap<SessionId, SessionSlot>,
     config: &SessionManagerConfig,
     return_tx: &mpsc::Sender<RuntimeReturn>,
@@ -307,7 +309,7 @@ fn handle_submit_turn(
     slot.running_turn = Some(RunningTurnHandle { control: turn_control.clone() });
     slot.status = SlotStatus::Running;
 
-    let _ = config.store.update_session(session_id, None, None);
+    let _ = config.store.update_session_async(session_id.to_string(), None, None).await;
 
     // Initialize current turn snapshot
     *write_lock(&slot.current_turn) = Some(CurrentTurnSnapshot {
@@ -400,7 +402,7 @@ async fn run_turn_worker(
                 let turn =
                     broadcast_runtime_events_with_session(events, &broadcast_tx, &session_id);
                 if let Some(turn) = turn {
-                    persist_tool_trace_spans(&turn, trace_store.as_ref());
+                    persist_tool_trace_spans(&turn, trace_store.clone()).await;
                     write_lock(&history_snapshot).push(turn.clone());
                     let _ = broadcast_tx
                         .send(SsePayload::TurnCompleted { session_id: session_id.clone(), turn });
@@ -422,7 +424,7 @@ async fn run_turn_worker(
                     let turn =
                         broadcast_runtime_events_with_session(events, &broadcast_tx, &session_id);
                     if let Some(turn) = turn {
-                        persist_tool_trace_spans(&turn, trace_store.as_ref());
+                        persist_tool_trace_spans(&turn, trace_store.clone()).await;
                         write_lock(&history_snapshot).push(turn.clone());
                         let _ = broadcast_tx.send(SsePayload::TurnCompleted {
                             session_id: session_id.clone(),
@@ -704,7 +706,7 @@ fn sync_all_runtimes_to_registry(
 
 fn prepare_runtime_sync(
     registry: &ProviderRegistry,
-    trace_store: Option<Arc<dyn LlmTraceStore>>,
+    trace_store: Option<Arc<AiaStore>>,
 ) -> Result<
     (ProviderInfoSnapshot, ModelIdentity, ServerModel, SessionProviderBinding),
     RuntimeWorkerError,
