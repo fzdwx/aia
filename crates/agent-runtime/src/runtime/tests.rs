@@ -1,4 +1,5 @@
 use std::{
+    future::Future,
     sync::{Mutex, MutexGuard},
     time::{Duration, UNIX_EPOCH},
 };
@@ -22,6 +23,37 @@ fn mutex_lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+fn run_async<T>(future: impl Future<Output = T>) -> T {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime should build");
+    runtime.block_on(future)
+}
+
+fn run_turn<M, T>(
+    runtime: &mut AgentRuntime<M, T>,
+    user_input: impl Into<String>,
+) -> Result<crate::TurnOutput, crate::RuntimeError>
+where
+    M: LanguageModel,
+    T: ToolExecutor,
+{
+    run_turn_with_control(runtime, user_input, TurnControl::new(AbortSignal::new()))
+}
+
+fn run_turn_with_control<M, T>(
+    runtime: &mut AgentRuntime<M, T>,
+    user_input: impl Into<String>,
+    control: TurnControl,
+) -> Result<crate::TurnOutput, crate::RuntimeError>
+where
+    M: LanguageModel,
+    T: ToolExecutor,
+{
+    run_async(runtime.handle_turn_streaming(user_input, control, |_| {}))
+}
+
 #[test]
 fn time_before_unix_epoch_falls_back_to_zero_duration() {
     let before_epoch = UNIX_EPOCH - Duration::from_secs(1);
@@ -35,7 +67,12 @@ struct StubModel;
 impl LanguageModel for StubModel {
     type Error = CoreError;
 
-    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete_streaming(
+        &self,
+        request: CompletionRequest,
+        _abort: &AbortSignal,
+        _sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
+    ) -> Result<Completion, Self::Error> {
         let last_user_index = request
             .conversation
             .iter()
@@ -94,7 +131,12 @@ struct FailingModel;
 impl LanguageModel for FailingModel {
     type Error = CoreError;
 
-    async fn complete(&self, _request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete_streaming(
+        &self,
+        _request: CompletionRequest,
+        _abort: &AbortSignal,
+        _sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
+    ) -> Result<Completion, Self::Error> {
         Err(CoreError::new("模拟失败"))
     }
 }
@@ -105,7 +147,12 @@ struct UsageModel;
 impl LanguageModel for UsageModel {
     type Error = CoreError;
 
-    async fn complete(&self, _request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete_streaming(
+        &self,
+        _request: CompletionRequest,
+        _abort: &AbortSignal,
+        _sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
+    ) -> Result<Completion, Self::Error> {
         Ok(Completion {
             segments: vec![CompletionSegment::Text("带 usage 的回答".into())],
             stop_reason: CompletionStopReason::Stop,
@@ -145,7 +192,12 @@ impl ContinueAfterToolModel {
 impl LanguageModel for ContinueAfterToolModel {
     type Error = CoreError;
 
-    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete_streaming(
+        &self,
+        request: CompletionRequest,
+        _abort: &AbortSignal,
+        _sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
+    ) -> Result<Completion, Self::Error> {
         let step = mutex_lock(&self.seen_requests).len();
         mutex_lock(&self.seen_requests).push(request.clone());
         if step == 0 {
@@ -178,11 +230,7 @@ struct StreamingCancelledModel;
 impl LanguageModel for StreamingCancelledModel {
     type Error = CoreError;
 
-    async fn complete(&self, _request: CompletionRequest) -> Result<Completion, Self::Error> {
-        Err(CoreError::new("should use streaming path"))
-    }
-
-    async fn complete_streaming_with_abort(
+    async fn complete_streaming(
         &self,
         _request: CompletionRequest,
         _abort: &AbortSignal,
@@ -222,7 +270,12 @@ impl ManyToolRoundsModel {
 impl LanguageModel for ManyToolRoundsModel {
     type Error = CoreError;
 
-    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete_streaming(
+        &self,
+        request: CompletionRequest,
+        _abort: &AbortSignal,
+        _sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
+    ) -> Result<Completion, Self::Error> {
         let step = mutex_lock(&self.seen_requests).len();
         mutex_lock(&self.seen_requests).push(request.clone());
 
@@ -252,7 +305,12 @@ impl LanguageModel for ManyToolRoundsModel {
 impl LanguageModel for DuplicateToolLoopModel {
     type Error = CoreError;
 
-    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete_streaming(
+        &self,
+        request: CompletionRequest,
+        _abort: &AbortSignal,
+        _sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
+    ) -> Result<Completion, Self::Error> {
         mutex_lock(&self.seen_requests).push(request.clone());
         let saw_duplicate_skip = request.conversation.iter().any(|item| {
             item.as_tool_result()
@@ -314,7 +372,12 @@ impl ToolExecutor for FailingTools {
 impl LanguageModel for RecordingModel {
     type Error = CoreError;
 
-    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete_streaming(
+        &self,
+        request: CompletionRequest,
+        _abort: &AbortSignal,
+        _sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
+    ) -> Result<Completion, Self::Error> {
         mutex_lock(&self.seen_requests).push(request);
         Ok(Completion::text("记录完成"))
     }
@@ -334,7 +397,12 @@ impl BudgetRecordingModel {
 impl LanguageModel for BudgetRecordingModel {
     type Error = CoreError;
 
-    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete_streaming(
+        &self,
+        request: CompletionRequest,
+        _abort: &AbortSignal,
+        _sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
+    ) -> Result<Completion, Self::Error> {
         mutex_lock(&self.seen_requests).push(request);
         Ok(Completion::text("预算检查完成"))
     }
@@ -354,7 +422,12 @@ impl RequestRecordingModel {
 impl LanguageModel for RequestRecordingModel {
     type Error = CoreError;
 
-    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete_streaming(
+        &self,
+        request: CompletionRequest,
+        _abort: &AbortSignal,
+        _sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
+    ) -> Result<Completion, Self::Error> {
         let index = mutex_lock(&self.seen_requests).len();
         mutex_lock(&self.seen_requests).push(request);
         Ok(Completion {
@@ -381,7 +454,12 @@ impl StopReasonDrivenModel {
 impl LanguageModel for StopReasonDrivenModel {
     type Error = CoreError;
 
-    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete_streaming(
+        &self,
+        request: CompletionRequest,
+        _abort: &AbortSignal,
+        _sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
+    ) -> Result<Completion, Self::Error> {
         let index = mutex_lock(&self.seen_requests).len();
         mutex_lock(&self.seen_requests).push(request);
 
@@ -489,9 +567,8 @@ fn 运行时可在工具执行期间取消当前轮() {
         cancel_handle.cancel();
     });
 
-    let error = runtime
-        .handle_turn_streaming_with_control("请执行", control, |_| {})
-        .expect_err("取消后应结束当前轮");
+    let error =
+        run_turn_with_control(&mut runtime, "请执行", control).expect_err("取消后应结束当前轮");
 
     assert!(error.is_cancelled());
     assert!(runtime.tape().entries().iter().any(|entry| {
@@ -516,9 +593,8 @@ fn 运行时在开始前取消时不会执行模型() {
     let control = TurnControl::new(AbortSignal::new());
     control.cancel();
 
-    let error = runtime
-        .handle_turn_streaming_with_control("不要执行", control, |_| {})
-        .expect_err("预取消应直接失败");
+    let error =
+        run_turn_with_control(&mut runtime, "不要执行", control).expect_err("预取消应直接失败");
 
     assert!(error.is_cancelled());
     assert!(mutex_lock(&runtime.model.seen_requests).is_empty());
@@ -548,9 +624,7 @@ fn 取消轮次会标记为_cancelled_outcome() {
     });
 
     let subscriber = runtime.subscribe();
-    let _ = runtime
-        .handle_turn_streaming_with_control("请执行", control, |_| {})
-        .expect_err("取消后应结束当前轮");
+    let _ = run_turn_with_control(&mut runtime, "请执行", control).expect_err("取消后应结束当前轮");
 
     let events = runtime.collect_events(subscriber).expect("应读取事件");
     let last_turn =
@@ -576,8 +650,7 @@ fn provider_取消错误前的流式_partial_output_会进入最终轮次() {
     let mut runtime = AgentRuntime::new(StreamingCancelledModel, StubTools, identity);
     let subscriber = runtime.subscribe();
 
-    let error = runtime
-        .handle_turn_streaming_with_control("请开始", TurnControl::new(AbortSignal::new()), |_| {})
+    let error = run_turn_with_control(&mut runtime, "请开始", TurnControl::new(AbortSignal::new()))
         .expect_err("应按取消失败返回");
 
     assert!(error.is_cancelled());
@@ -625,11 +698,7 @@ struct StreamingTextThenSameCompletionModel;
 impl LanguageModel for StreamingTextThenSameCompletionModel {
     type Error = CoreError;
 
-    async fn complete(&self, _request: CompletionRequest) -> Result<Completion, Self::Error> {
-        Err(CoreError::new("should use streaming path"))
-    }
-
-    async fn complete_streaming_with_abort(
+    async fn complete_streaming(
         &self,
         _request: CompletionRequest,
         _abort: &AbortSignal,
@@ -646,11 +715,7 @@ struct StreamingThinkingThenSameCompletionModel;
 impl LanguageModel for StreamingThinkingThenSameCompletionModel {
     type Error = CoreError;
 
-    async fn complete(&self, _request: CompletionRequest) -> Result<Completion, Self::Error> {
-        Err(CoreError::new("should use streaming path"))
-    }
-
-    async fn complete_streaming_with_abort(
+    async fn complete_streaming(
         &self,
         _request: CompletionRequest,
         _abort: &AbortSignal,
@@ -674,7 +739,7 @@ fn 流式思考与最终完成思考相同时不会重复记录思考() {
     let mut runtime =
         AgentRuntime::new(StreamingThinkingThenSameCompletionModel, StubTools, identity);
 
-    let _ = runtime.handle_turn("测试思考重复").expect("应成功完成");
+    let _ = run_turn(&mut runtime, "测试思考重复").expect("应成功完成");
 
     let thinking_entries = runtime
         .tape()
@@ -690,7 +755,7 @@ fn 流式文本与最终完成文本相同时不会重复记录助手消息() {
     let identity = ModelIdentity::new("local", "streaming-same-text", ModelDisposition::Balanced);
     let mut runtime = AgentRuntime::new(StreamingTextThenSameCompletionModel, StubTools, identity);
 
-    let output = runtime.handle_turn("测试重复显示").expect("应成功完成");
+    let output = run_turn(&mut runtime, "测试重复显示").expect("应成功完成");
 
     assert_eq!(output.assistant_text, "同一段回答");
     let assistant_messages = runtime
@@ -709,7 +774,7 @@ fn 运行时工具失败事件保留失败结果() {
     let mut runtime = AgentRuntime::new(StubModel, FailingTools, identity);
     let subscriber = runtime.subscribe();
 
-    let _ = runtime.handle_turn("你好").expect("工具失败应写入轮次而不是直接报错");
+    let _ = run_turn(&mut runtime, "你好").expect("工具失败应写入轮次而不是直接报错");
     let events = runtime.collect_events(subscriber).expect("读取事件成功");
 
     assert!(events.iter().any(|event| matches!(
@@ -727,7 +792,7 @@ fn 运行时会记录用户与助手消息() {
     let mut runtime =
         AgentRuntime::new(StubModel, StubTools, identity).with_instructions("保持简洁");
 
-    let output = runtime.handle_turn("你好").expect("运行成功");
+    let output = run_turn(&mut runtime, "你好").expect("运行成功");
 
     assert_eq!(output.assistant_text, "已收到：你好");
     assert_eq!(runtime.tape().entries().len(), 7);
@@ -739,7 +804,7 @@ fn 运行时会记录用户与助手消息() {
 fn 运行时可生成交接() {
     let identity = ModelIdentity::new("local", "stub", ModelDisposition::Balanced);
     let mut runtime = AgentRuntime::new(StubModel, StubTools, identity);
-    runtime.handle_turn("开始").expect("运行成功");
+    run_turn(&mut runtime, "开始").expect("运行成功");
 
     let handoff =
         runtime.handoff("handoff", json!({"summary": "发现阶段结束", "next_steps": ["进入实现"]}));
@@ -759,7 +824,7 @@ fn 已禁用工具会作为失败结果写回上下文() {
 
     runtime.disable_tool("search");
 
-    let output = runtime.handle_turn("你好").expect("应写回失败结果并继续完成");
+    let output = run_turn(&mut runtime, "你好").expect("应写回失败结果并继续完成");
 
     assert_eq!(output.assistant_text, "已收到：你好");
     assert!(runtime.tape().entries().iter().any(|entry| {
@@ -772,8 +837,8 @@ fn 多轮调用会保留上下文() {
     let identity = ModelIdentity::new("local", "stub", ModelDisposition::Balanced);
     let mut runtime = AgentRuntime::new(StubModel, StubTools, identity);
 
-    runtime.handle_turn("第一轮").expect("第一轮成功");
-    let output = runtime.handle_turn("第二轮").expect("第二轮成功");
+    run_turn(&mut runtime, "第一轮").expect("第一轮成功");
+    let output = run_turn(&mut runtime, "第二轮").expect("第二轮成功");
 
     assert_eq!(output.assistant_text, "已收到：第二轮");
     assert_eq!(runtime.tape().entries().len(), 14);
@@ -793,7 +858,7 @@ fn 同一轮内工具完成后会继续再次调用模型() {
     let model = ContinueAfterToolModel::new();
     let mut runtime = AgentRuntime::new(model, StubTools, identity);
 
-    let output = runtime.handle_turn("开始").expect("应继续完成");
+    let output = run_turn(&mut runtime, "开始").expect("应继续完成");
 
     assert_eq!(output.assistant_text, "已根据工具结果继续回答");
     assert_eq!(mutex_lock(&runtime.model.seen_requests).len(), 2);
@@ -813,7 +878,7 @@ fn 工具失败不会直接让整轮报错() {
     let identity = ModelIdentity::new("local", "stub", ModelDisposition::Balanced);
     let mut runtime = AgentRuntime::new(StubModel, FailingTools, identity);
 
-    let output = runtime.handle_turn("你好").expect("工具失败应写入轮次而不是直接报错");
+    let output = run_turn(&mut runtime, "你好").expect("工具失败应写入轮次而不是直接报错");
 
     assert_eq!(output.assistant_text, "已收到：你好");
     assert!(runtime.tape().entries().iter().any(|entry| entry.as_tool_result().is_some()));
@@ -832,7 +897,7 @@ fn 运行时不会在旧默认步数后强行中断整轮() {
     let mut runtime =
         AgentRuntime::new(model, StubTools, identity).with_max_tool_calls_per_turn(16);
 
-    let output = runtime.handle_turn("继续执行").expect("不应被旧默认步数上限打断");
+    let output = run_turn(&mut runtime, "继续执行").expect("不应被旧默认步数上限打断");
 
     assert_eq!(output.assistant_text, "超过旧默认步数后仍成功收尾");
     let requests = mutex_lock(&runtime.model.seen_requests);
@@ -845,7 +910,7 @@ fn 运行时不会自动追加最大步数收尾消息() {
     let model = ContinueAfterToolModel::new();
     let mut runtime = AgentRuntime::new(model, StubTools, identity);
 
-    let output = runtime.handle_turn("开始").expect("应收尾成功");
+    let output = run_turn(&mut runtime, "开始").expect("应收尾成功");
 
     assert_eq!(output.assistant_text, "已根据工具结果继续回答");
     let requests = mutex_lock(&runtime.model.seen_requests);
@@ -861,7 +926,7 @@ fn 运行时按_stop_reason_而非工具片段决定是否继续() {
     let model = StopReasonDrivenModel::new();
     let mut runtime = AgentRuntime::new(model, StubTools, identity);
 
-    let output = runtime.handle_turn("开始").expect("应按 stop reason 继续后再收尾");
+    let output = run_turn(&mut runtime, "开始").expect("应按 stop reason 继续后再收尾");
 
     assert_eq!(output.assistant_text, "按 stop reason 收尾");
     assert_eq!(mutex_lock(&runtime.model.seen_requests).len(), 2);
@@ -875,7 +940,12 @@ fn 工具片段与_stop_reason_不一致时会报错() {
     impl LanguageModel for MismatchModel {
         type Error = CoreError;
 
-        async fn complete(&self, _request: CompletionRequest) -> Result<Completion, Self::Error> {
+        async fn complete_streaming(
+            &self,
+            _request: CompletionRequest,
+            _abort: &AbortSignal,
+            _sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
+        ) -> Result<Completion, Self::Error> {
             Ok(Completion {
                 segments: vec![CompletionSegment::ToolUse(ToolCall::new("search"))],
                 stop_reason: CompletionStopReason::Stop,
@@ -889,7 +959,7 @@ fn 工具片段与_stop_reason_不一致时会报错() {
     let identity = ModelIdentity::new("local", "mismatch", ModelDisposition::Balanced);
     let mut runtime = AgentRuntime::new(MismatchModel, StubTools, identity);
 
-    let error = runtime.handle_turn("开始").expect_err("停止原因不匹配应失败");
+    let error = run_turn(&mut runtime, "开始").expect_err("停止原因不匹配应失败");
 
     assert!(error.to_string().contains("停止原因与完成内容不匹配"));
     assert!(runtime.tape().entries().iter().all(|entry| entry.as_tool_call().is_none()));
@@ -902,7 +972,7 @@ fn 未设置自定义指令时不会自动注入预算提示词() {
     let model = ContinueAfterToolModel::new();
     let mut runtime = AgentRuntime::new(model, StubTools, identity);
 
-    let _ = runtime.handle_turn("开始").expect("应成功完成");
+    let _ = run_turn(&mut runtime, "开始").expect("应成功完成");
 
     let requests = mutex_lock(&runtime.model.seen_requests);
     assert_eq!(requests[0].instructions, None);
@@ -915,7 +985,7 @@ fn 运行时会把全局_request_timeout_映射到请求() {
     let mut runtime = AgentRuntime::new(model, StubTools, identity)
         .with_request_timeout(agent_core::RequestTimeoutConfig { read_timeout_ms: Some(90_000) });
 
-    let _ = runtime.handle_turn("检查超时配置").expect("应成功完成");
+    let _ = run_turn(&mut runtime, "检查超时配置").expect("应成功完成");
 
     let requests = mutex_lock(&runtime.model.seen_requests);
     assert_eq!(
@@ -931,7 +1001,7 @@ fn 运行时会把模型输出上限映射为本次请求预算() {
     let model = BudgetRecordingModel::new();
     let mut runtime = AgentRuntime::new(model, StubTools, identity);
 
-    let _ = runtime.handle_turn("开始").expect("应成功完成");
+    let _ = run_turn(&mut runtime, "开始").expect("应成功完成");
 
     let requests = mutex_lock(&runtime.model.seen_requests);
     assert_eq!(requests[0].max_output_tokens, Some(131_072));
@@ -957,7 +1027,7 @@ fn 上下文接近窗口上限时会自动收紧输出预算() {
     ));
     let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape);
 
-    let _ = runtime.handle_turn("继续").expect("应成功完成");
+    let _ = run_turn(&mut runtime, "继续").expect("应成功完成");
 
     let requests = mutex_lock(&runtime.model.seen_requests);
     assert_eq!(requests[0].max_output_tokens, Some(1));
@@ -969,7 +1039,7 @@ fn 可通过_builder_限制单轮最大工具调用次数() {
     let model = DuplicateToolLoopModel::new();
     let mut runtime = AgentRuntime::new(model, StubTools, identity).with_max_tool_calls_per_turn(1);
 
-    let error = runtime.handle_turn("今天星期几").expect_err("超过工具调用上限应失败");
+    let error = run_turn(&mut runtime, "今天星期几").expect_err("超过工具调用上限应失败");
 
     assert!(error.to_string().contains("轮次超过最大工具调用次数：1"));
 }
@@ -979,7 +1049,7 @@ fn 模型失败时当前轮只保留用户消息() {
     let identity = ModelIdentity::new("local", "stub", ModelDisposition::Balanced);
     let mut runtime = AgentRuntime::new(FailingModel, StubTools, identity);
 
-    let error = runtime.handle_turn("会失败").expect_err("应当失败");
+    let error = run_turn(&mut runtime, "会失败").expect_err("应当失败");
 
     assert!(error.to_string().contains("模型执行失败"));
     assert_eq!(runtime.tape().entries().len(), 2);
@@ -995,9 +1065,9 @@ fn 默认上下文会从最新锚点之后重建() {
     let identity = ModelIdentity::new("local", "stub", ModelDisposition::Balanced);
     let mut runtime = AgentRuntime::new(StubModel, StubTools, identity);
 
-    runtime.handle_turn("第一轮").expect("第一轮成功");
+    run_turn(&mut runtime, "第一轮").expect("第一轮成功");
     let _ = runtime.handoff("handoff", json!({"summary": "切到实现阶段"}));
-    runtime.handle_turn("第二轮").expect("第二轮成功");
+    run_turn(&mut runtime, "第二轮").expect("第二轮成功");
 
     let default_messages = runtime.tape().default_messages();
 
@@ -1015,9 +1085,9 @@ fn 锚点状态会注入后续请求上下文() {
     let model = RecordingModel::new();
     let mut runtime = AgentRuntime::new(model, StubTools, identity);
 
-    runtime.handle_turn("第一轮").expect("第一轮成功");
+    run_turn(&mut runtime, "第一轮").expect("第一轮成功");
     let _ = runtime.handoff("handoff", json!({"summary": "切到实现阶段"}));
-    runtime.handle_turn("第二轮").expect("第二轮成功");
+    run_turn(&mut runtime, "第二轮").expect("第二轮成功");
 
     let requests = mutex_lock(&runtime.model.seen_requests);
     let last_request = requests.last().expect("应记录第二轮请求");
@@ -1044,7 +1114,7 @@ fn 载入现有磁带后会继续沿用已保存上下文() {
     tape.append(Message::new(Role::Assistant, "历史助手消息"));
 
     let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape);
-    runtime.handle_turn("新的输入").expect("运行成功");
+    run_turn(&mut runtime, "新的输入").expect("运行成功");
 
     let requests = mutex_lock(&runtime.model.seen_requests);
     let last_request = requests.last().expect("应记录新请求");
@@ -1076,8 +1146,8 @@ fn responses_下一轮请求会重放结构化上下文() {
     });
     let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape);
 
-    runtime.handle_turn("第一轮").expect("第一轮成功");
-    runtime.handle_turn("第二轮").expect("第二轮成功");
+    run_turn(&mut runtime, "第一轮").expect("第一轮成功");
+    run_turn(&mut runtime, "第二轮").expect("第二轮成功");
 
     let requests = mutex_lock(&runtime.model.seen_requests);
     assert_eq!(requests.len(), 2);
@@ -1095,7 +1165,7 @@ fn 多个订阅者可各自拿到同一批事件() {
     let first = runtime.subscribe();
     let second = runtime.subscribe();
 
-    runtime.handle_turn("你好").expect("运行成功");
+    run_turn(&mut runtime, "你好").expect("运行成功");
 
     let first_events = runtime.collect_events(first).expect("读取事件成功");
     let second_events = runtime.collect_events(second).expect("读取事件成功");
@@ -1120,7 +1190,7 @@ fn 统一方法读取事件后同一订阅者不会重复拿到旧事件() {
     let mut runtime = AgentRuntime::new(StubModel, StubTools, identity);
     let subscriber = runtime.subscribe();
 
-    runtime.handle_turn("你好").expect("运行成功");
+    run_turn(&mut runtime, "你好").expect("运行成功");
     let first = runtime.collect_events(subscriber).expect("第一次读取成功");
     let second = runtime.collect_events(subscriber).expect("第二次读取成功");
 
@@ -1134,7 +1204,7 @@ fn 失败轮也会发出失败事件() {
     let mut runtime = AgentRuntime::new(FailingModel, StubTools, identity);
     let subscriber = runtime.subscribe();
 
-    let _ = runtime.handle_turn("会失败");
+    let _ = run_turn(&mut runtime, "会失败");
     let events = runtime.collect_events(subscriber).expect("读取事件成功");
 
     assert!(events.contains(&RuntimeEvent::UserMessage { content: "会失败".into() }));
@@ -1151,7 +1221,7 @@ fn 工具调用与结果会写入磁带并发出事件() {
     let mut runtime = AgentRuntime::new(StubModel, StubTools, identity);
     let subscriber = runtime.subscribe();
 
-    let _ = runtime.handle_turn("你好").expect("运行成功");
+    let _ = run_turn(&mut runtime, "你好").expect("运行成功");
     let events = runtime.collect_events(subscriber).expect("读取事件成功");
 
     assert!(runtime.tape().entries().iter().any(|entry| entry.as_tool_call().is_some()));
@@ -1179,7 +1249,7 @@ fn 禁用工具后即使模型建议也不会执行() {
     let subscriber = runtime.subscribe();
     runtime.disable_tool("search");
 
-    let output = runtime.handle_turn("你好").expect("应当继续完成");
+    let output = run_turn(&mut runtime, "你好").expect("应当继续完成");
     let events = runtime.collect_events(subscriber).expect("读取事件成功");
 
     assert_eq!(output.assistant_text, "已收到：你好");
@@ -1199,7 +1269,7 @@ fn 工具结果调用标识错配时会作为失败结果保留() {
     let mut runtime = AgentRuntime::new(StubModel, MismatchedTools, identity);
     let subscriber = runtime.subscribe();
 
-    let output = runtime.handle_turn("你好").expect("应当继续完成");
+    let output = run_turn(&mut runtime, "你好").expect("应当继续完成");
     let events = runtime.collect_events(subscriber).expect("读取事件成功");
 
     assert_eq!(output.assistant_text, "已收到：你好");
@@ -1222,7 +1292,7 @@ fn 成功轮会聚合成完整轮次块事件() {
     let mut runtime = AgentRuntime::new(StubModel, StubTools, identity);
     let subscriber = runtime.subscribe();
 
-    let _ = runtime.handle_turn("你好").expect("运行成功");
+    let _ = run_turn(&mut runtime, "你好").expect("运行成功");
     let events = runtime.collect_events(subscriber).expect("读取事件成功");
 
     assert!(events.iter().any(|event| matches!(
@@ -1269,7 +1339,7 @@ fn 工具失败后成功收尾的轮次也会聚合完整块事件() {
     let mut runtime = AgentRuntime::new(StubModel, MismatchedTools, identity);
     let subscriber = runtime.subscribe();
 
-    let _ = runtime.handle_turn("你好").expect("应继续完成");
+    let _ = run_turn(&mut runtime, "你好").expect("应继续完成");
     let events = runtime.collect_events(subscriber).expect("读取事件成功");
 
     assert!(events.iter().any(|event| matches!(
@@ -1317,7 +1387,7 @@ fn 成功轮会保留模型返回的真实_usage() {
     let mut runtime = AgentRuntime::new(UsageModel, StubTools, identity);
     let subscriber = runtime.subscribe();
 
-    let output = runtime.handle_turn("统计这次 token").expect("运行成功");
+    let output = run_turn(&mut runtime, "统计这次 token").expect("运行成功");
     let events = runtime.collect_events(subscriber).expect("读取事件成功");
 
     assert_eq!(
@@ -1379,7 +1449,12 @@ impl SummarizerModel {
 impl LanguageModel for SummarizerModel {
     type Error = CoreError;
 
-    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete_streaming(
+        &self,
+        request: CompletionRequest,
+        _abort: &AbortSignal,
+        _sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
+    ) -> Result<Completion, Self::Error> {
         mutex_lock(&self.seen_requests).push(request.clone());
         // If instructions contain "Summarize", this is a compression call
         if request.instructions.as_ref().is_some_and(|i| i.contains("handoff summary")) {
@@ -1405,7 +1480,12 @@ impl ContextLengthErrorModel {
 impl LanguageModel for ContextLengthErrorModel {
     type Error = CoreError;
 
-    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete_streaming(
+        &self,
+        request: CompletionRequest,
+        _abort: &AbortSignal,
+        _sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
+    ) -> Result<Completion, Self::Error> {
         // Compression calls always succeed
         if request.instructions.as_ref().is_some_and(|i| i.contains("handoff summary")) {
             return Ok(Completion::text("压缩摘要：之前讨论了文件编辑。"));
@@ -1430,7 +1510,7 @@ fn 上下文未超阈值时不触发压缩() {
     let mut runtime =
         AgentRuntime::new(model, StubTools, identity).with_context_pressure_threshold(0.80);
 
-    let _ = runtime.handle_turn("你好").expect("应成功完成");
+    let _ = run_turn(&mut runtime, "你好").expect("应成功完成");
 
     // No compression call should have been made — only the regular turn call
     let requests = mutex_lock(&runtime.model.seen_requests);
@@ -1454,7 +1534,12 @@ impl CompressionInspectionModel {
 impl LanguageModel for CompressionInspectionModel {
     type Error = CoreError;
 
-    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete_streaming(
+        &self,
+        request: CompletionRequest,
+        _abort: &AbortSignal,
+        _sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
+    ) -> Result<Completion, Self::Error> {
         mutex_lock(&self.seen_requests).push(request.clone());
         if request.instructions.as_ref().is_some_and(|i| i.contains("handoff summary")) {
             let combined = request
@@ -1487,7 +1572,7 @@ fn 预压缩发生在新用户消息写入之前() {
     let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape)
         .with_context_pressure_threshold(0.50);
 
-    let _ = runtime.handle_turn("这是新消息").expect("应成功完成");
+    let _ = run_turn(&mut runtime, "这是新消息").expect("应成功完成");
 
     let anchor = runtime
         .tape()
@@ -1522,7 +1607,7 @@ fn 上下文超阈值时触发压缩生成锚点() {
     let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape)
         .with_context_pressure_threshold(0.50);
 
-    let _ = runtime.handle_turn("继续").expect("应成功完成");
+    let _ = run_turn(&mut runtime, "继续").expect("应成功完成");
 
     // A compression anchor should have been created
     assert!(runtime.tape().anchors().iter().any(|a| a.name == "context_compression"));
@@ -1546,7 +1631,7 @@ fn 压缩锚点仅保留摘要字段() {
     let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape)
         .with_context_pressure_threshold(0.50);
 
-    let _ = runtime.handle_turn("继续").expect("应成功完成");
+    let _ = run_turn(&mut runtime, "继续").expect("应成功完成");
 
     let anchor = runtime
         .tape()
@@ -1583,7 +1668,7 @@ fn 压缩后_default_view_从新锚点开始() {
     let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape)
         .with_context_pressure_threshold(0.50);
 
-    let _ = runtime.handle_turn("新消息").expect("应成功完成");
+    let _ = run_turn(&mut runtime, "新消息").expect("应成功完成");
 
     let view = runtime.tape().default_view();
     // The view should start from the compression anchor, not include old messages
@@ -1606,7 +1691,7 @@ fn 模型返回_context_length_exceeded_时压缩并重试() {
     tape.append(Message::new(Role::Assistant, "历史回答二"));
     let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape);
 
-    let output = runtime.handle_turn("你好").expect("压缩重试后应成功");
+    let output = run_turn(&mut runtime, "你好").expect("压缩重试后应成功");
 
     assert_eq!(output.assistant_text, "压缩后成功");
     assert!(runtime.tape().anchors().iter().any(|a| a.name == "context_compression"));
@@ -1625,7 +1710,7 @@ fn 压缩重试最多一次() {
     tape.append(Message::new(Role::Assistant, "历史回答二"));
     let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape);
 
-    let error = runtime.handle_turn("你好").expect_err("第二次失败应传播");
+    let error = run_turn(&mut runtime, "你好").expect_err("第二次失败应传播");
 
     assert!(error.to_string().contains("模型执行失败"));
     assert!(error.to_string().contains("context_length_exceeded"));
@@ -1716,7 +1801,7 @@ fn 锚点收缩上下文后不会因旧_token_统计重复压缩() {
     let pre_turn_stats = runtime.context_stats();
     assert_eq!(pre_turn_stats.pressure_ratio, None);
 
-    let _ = runtime.handle_turn("继续").expect("应成功完成");
+    let _ = run_turn(&mut runtime, "继续").expect("应成功完成");
 
     let requests = mutex_lock(&runtime.model.seen_requests);
     assert_eq!(requests.len(), 1);
@@ -1742,7 +1827,7 @@ fn 压缩事件会被发布到事件流() {
         .with_context_pressure_threshold(0.50);
     let subscriber = runtime.subscribe();
 
-    let _ = runtime.handle_turn("继续").expect("应成功完成");
+    let _ = run_turn(&mut runtime, "继续").expect("应成功完成");
     let events = runtime.collect_events(subscriber).expect("读取事件成功");
 
     assert!(events.iter().any(|event| matches!(
@@ -1764,7 +1849,7 @@ fn 成功轮完成后若真实_usage_超阈值会立刻自动压缩() {
         .with_context_pressure_threshold(0.20);
     let subscriber = runtime.subscribe();
 
-    let _ = runtime.handle_turn("统计并在结束后触发压缩").expect("应成功完成");
+    let _ = run_turn(&mut runtime, "统计并在结束后触发压缩").expect("应成功完成");
     let events = runtime.collect_events(subscriber).expect("读取事件成功");
 
     assert!(runtime.tape().anchors().iter().any(|a| a.name == "context_compression"));
@@ -1791,7 +1876,12 @@ impl TapeInfoModel {
 impl LanguageModel for TapeInfoModel {
     type Error = CoreError;
 
-    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete_streaming(
+        &self,
+        request: CompletionRequest,
+        _abort: &AbortSignal,
+        _sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
+    ) -> Result<Completion, Self::Error> {
         let step = mutex_lock(&self.seen_requests).len();
         mutex_lock(&self.seen_requests).push(request.clone());
         if step == 0 {
@@ -1838,7 +1928,7 @@ fn tape_info_结果包含结构化_details() {
     ));
     let mut runtime = AgentRuntime::with_tape(TapeInfoModel::new(), StubTools, identity, tape);
 
-    let _ = runtime.handle_turn("读取 tape info").expect("应成功完成");
+    let _ = run_turn(&mut runtime, "读取 tape info").expect("应成功完成");
 
     let tool_result = runtime
         .tape()
@@ -1872,7 +1962,12 @@ impl TapeHandoffModel {
 impl LanguageModel for TapeHandoffModel {
     type Error = CoreError;
 
-    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete_streaming(
+        &self,
+        request: CompletionRequest,
+        _abort: &AbortSignal,
+        _sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
+    ) -> Result<Completion, Self::Error> {
         let step = mutex_lock(&self.seen_requests).len();
         mutex_lock(&self.seen_requests).push(request.clone());
         if step == 0 {
@@ -1919,7 +2014,7 @@ fn tape_info_工具返回上下文统计() {
     let model = TapeInfoModel::new();
     let mut runtime = AgentRuntime::new(model, StubTools, identity);
 
-    let output = runtime.handle_turn("查看上下文状态").expect("应成功完成");
+    let output = run_turn(&mut runtime, "查看上下文状态").expect("应成功完成");
 
     assert_eq!(output.assistant_text, "已获取上下文统计信息");
     // Verify the tool result was recorded
@@ -1939,7 +2034,7 @@ fn tape_handoff_工具创建锚点() {
     tape.append(Message::new(Role::Assistant, "历史回答"));
     let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape);
 
-    let output = runtime.handle_turn("创建检查点").expect("应成功完成");
+    let output = run_turn(&mut runtime, "创建检查点").expect("应成功完成");
 
     assert_eq!(output.assistant_text, "已创建锚点");
     assert!(runtime.tape().anchors().iter().any(|a| a.name == "test_anchor"));
@@ -1960,7 +2055,7 @@ fn runtime_tool_bridge_创建锚点后后续请求会过滤孤立_tool_result() 
     tape.append(Message::new(Role::Assistant, "历史回答"));
     let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape);
 
-    let output = runtime.handle_turn("创建检查点").expect("应成功完成");
+    let output = run_turn(&mut runtime, "创建检查点").expect("应成功完成");
 
     assert_eq!(output.assistant_text, "已创建锚点");
     let entries = runtime.tape().entries();
@@ -2026,10 +2121,10 @@ fn 无锚点摘要时不注入上下文消息() {
     let model = RecordingModel::new();
     let mut runtime = AgentRuntime::new(model, StubTools, identity);
 
-    runtime.handle_turn("第一轮").expect("第一轮成功");
+    run_turn(&mut runtime, "第一轮").expect("第一轮成功");
     // Handoff with empty summary
     let _ = runtime.handoff("handoff", json!({"summary": ""}));
-    runtime.handle_turn("第二轮").expect("第二轮成功");
+    run_turn(&mut runtime, "第二轮").expect("第二轮成功");
 
     let requests = mutex_lock(&runtime.model.seen_requests);
     let last_request = requests.last().expect("应记录第二轮请求");

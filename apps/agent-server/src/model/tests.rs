@@ -24,6 +24,13 @@ fn run_async<T>(future: impl Future<Output = T>) -> T {
     runtime.block_on(future)
 }
 
+fn complete_model<M: LanguageModel>(
+    model: &M,
+    request: CompletionRequest,
+) -> Result<agent_core::Completion, M::Error> {
+    run_async(model.complete_streaming(request, &AbortSignal::new(), &mut |_| {}))
+}
+
 #[test]
 fn server_model_marks_cancelled_openai_errors_as_cancelled() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
@@ -68,7 +75,7 @@ fn server_model_marks_cancelled_openai_errors_as_cancelled() {
         cancel.abort();
     });
 
-    let error = run_async(model.complete_streaming_with_abort(
+    let error = run_async(model.complete_streaming(
         CompletionRequest {
             model: ModelIdentity::new("openai", "gpt-5.4", ModelDisposition::Balanced),
             instructions: Some("保持简洁".into()),
@@ -156,6 +163,7 @@ fn responses_model_call_writes_llm_trace_record() {
                 step_index: 0,
             }),
         },
+        &AbortSignal::new(),
         &mut |_| {},
     ))
     .expect("completion should succeed");
@@ -222,27 +230,30 @@ fn responses_http_502_writes_failed_trace_record() {
         build_model_from_selection(ProviderLaunchChoice::OpenAi(profile), Some(store.clone()))
             .expect("model should build");
 
-    let error = run_async(model.complete(CompletionRequest {
-        model: ModelIdentity::new("openai", "gpt-5.4", ModelDisposition::Balanced),
-        instructions: Some("保持简洁".into()),
-        conversation: vec![ConversationItem::Message(Message::new(Role::User, "hi"))],
-        max_output_tokens: Some(128),
-        available_tools: vec![],
-        prompt_cache: None,
-        user_agent: Some("aia-test/1.0".into()),
-        timeout: None,
-        trace_context: Some(agent_core::LlmTraceRequestContext {
-            trace_id: "aia-trace-turn-1".into(),
-            span_id: "trace-502".into(),
-            parent_span_id: Some("aia-span-turn-1-root".into()),
-            root_span_id: "aia-span-turn-1-root".into(),
-            operation_name: "chat".into(),
-            turn_id: "turn-1".into(),
-            run_id: "turn-1".into(),
-            request_kind: "completion".into(),
-            step_index: 0,
-        }),
-    }))
+    let error = complete_model(
+        &model,
+        CompletionRequest {
+            model: ModelIdentity::new("openai", "gpt-5.4", ModelDisposition::Balanced),
+            instructions: Some("保持简洁".into()),
+            conversation: vec![ConversationItem::Message(Message::new(Role::User, "hi"))],
+            max_output_tokens: Some(128),
+            available_tools: vec![],
+            prompt_cache: None,
+            user_agent: Some("aia-test/1.0".into()),
+            timeout: None,
+            trace_context: Some(agent_core::LlmTraceRequestContext {
+                trace_id: "aia-trace-turn-1".into(),
+                span_id: "trace-502".into(),
+                parent_span_id: Some("aia-span-turn-1-root".into()),
+                root_span_id: "aia-span-turn-1-root".into(),
+                operation_name: "chat".into(),
+                turn_id: "turn-1".into(),
+                run_id: "turn-1".into(),
+                request_kind: "completion".into(),
+                step_index: 0,
+            }),
+        },
+    )
     .expect_err("completion should fail");
 
     handle.join().expect("server thread should exit");

@@ -1,6 +1,4 @@
-use agent_core::{
-    AbortSignal, CompletionStopReason, LanguageModel, Message, Role, StreamEvent, ToolExecutor,
-};
+use agent_core::{CompletionStopReason, LanguageModel, Message, Role, StreamEvent, ToolExecutor};
 use session_tape::TapeEntry;
 
 use crate::{RuntimeEvent, TurnControl, TurnOutput};
@@ -8,7 +6,7 @@ use crate::{RuntimeEvent, TurnControl, TurnOutput};
 use super::super::{
     AgentRuntime, RuntimeError,
     compress::is_context_length_error,
-    helpers::{block_on_sync, next_turn_id, now_timestamp_ms},
+    helpers::{next_turn_id, now_timestamp_ms},
 };
 use super::types::TurnBuffers;
 
@@ -17,51 +15,22 @@ where
     M: LanguageModel,
     T: ToolExecutor,
 {
-    pub fn handle_turn(
+    fn fail_turn(
         &mut self,
-        user_input: impl Into<String>,
+        turn_id: &str,
+        started_at_ms: u64,
+        user_message: &str,
+        buffers: &mut TurnBuffers,
+        runtime_error: RuntimeError,
     ) -> Result<TurnOutput, RuntimeError> {
-        block_on_sync(self.handle_turn_async(user_input))
+        self.record_turn_failure(
+            buffers.failure_context(turn_id, started_at_ms, user_message),
+            runtime_error.clone(),
+        )?;
+        Err(runtime_error)
     }
 
-    pub async fn handle_turn_async(
-        &mut self,
-        user_input: impl Into<String>,
-    ) -> Result<TurnOutput, RuntimeError> {
-        self.handle_turn_streaming_async(user_input, |_| {}).await
-    }
-
-    pub fn handle_turn_streaming(
-        &mut self,
-        user_input: impl Into<String>,
-        on_delta: impl FnMut(StreamEvent) + Send,
-    ) -> Result<TurnOutput, RuntimeError> {
-        block_on_sync(self.handle_turn_streaming_async(user_input, on_delta))
-    }
-
-    pub async fn handle_turn_streaming_async(
-        &mut self,
-        user_input: impl Into<String>,
-        on_delta: impl FnMut(StreamEvent) + Send,
-    ) -> Result<TurnOutput, RuntimeError> {
-        self.handle_turn_streaming_with_control_async(
-            user_input,
-            TurnControl::new(AbortSignal::new()),
-            on_delta,
-        )
-        .await
-    }
-
-    pub fn handle_turn_streaming_with_control(
-        &mut self,
-        user_input: impl Into<String>,
-        control: TurnControl,
-        on_delta: impl FnMut(StreamEvent) + Send,
-    ) -> Result<TurnOutput, RuntimeError> {
-        block_on_sync(self.handle_turn_streaming_with_control_async(user_input, control, on_delta))
-    }
-
-    pub async fn handle_turn_streaming_with_control_async(
+    pub async fn handle_turn_streaming(
         &mut self,
         user_input: impl Into<String>,
         control: TurnControl,
@@ -94,12 +63,13 @@ where
 
         loop {
             if abort_signal.is_aborted() {
-                let runtime_error = RuntimeError::cancelled();
-                self.record_turn_failure(
-                    buffers.failure_context(&turn_id, started_at_ms, &user_message.content),
-                    runtime_error.clone(),
-                )?;
-                return Err(runtime_error);
+                return self.fail_turn(
+                    &turn_id,
+                    started_at_ms,
+                    &user_message.content,
+                    &mut buffers,
+                    RuntimeError::cancelled(),
+                );
             }
 
             let request = self.build_completion_request(&turn_id, "completion", llm_step_index);
@@ -107,7 +77,7 @@ where
             llm_step_index = llm_step_index.saturating_add(1);
             let completion = match self
                 .model
-                .complete_streaming_with_abort(request, &abort_signal, &mut |event| {
+                .complete_streaming(request, &abort_signal, &mut |event| {
                     buffers.record_stream_event(&event);
                     on_delta(event);
                 })
@@ -120,13 +90,14 @@ where
                 }
                 Err(error) => {
                     if M::is_cancelled_error(&error) {
-                        let runtime_error = RuntimeError::cancelled();
                         self.flush_streamed_partial_segments(&turn_id, &mut buffers)?;
-                        self.record_turn_failure(
-                            buffers.failure_context(&turn_id, started_at_ms, &user_message.content),
-                            runtime_error.clone(),
-                        )?;
-                        return Err(runtime_error);
+                        return self.fail_turn(
+                            &turn_id,
+                            started_at_ms,
+                            &user_message.content,
+                            &mut buffers,
+                            RuntimeError::cancelled(),
+                        );
                     }
                     if !already_compressed && is_context_length_error(&error.to_string()) {
                         already_compressed = true;
@@ -135,30 +106,34 @@ where
                             continue;
                         }
                     }
-                    let runtime_error = RuntimeError::model(error);
-                    self.record_turn_failure(
-                        buffers.failure_context(&turn_id, started_at_ms, &user_message.content),
-                        runtime_error.clone(),
-                    )?;
-                    return Err(runtime_error);
+                    return self.fail_turn(
+                        &turn_id,
+                        started_at_ms,
+                        &user_message.content,
+                        &mut buffers,
+                        RuntimeError::model(error),
+                    );
                 }
             };
 
             if abort_signal.is_aborted() {
-                let runtime_error = RuntimeError::cancelled();
-                self.record_turn_failure(
-                    buffers.failure_context(&turn_id, started_at_ms, &user_message.content),
-                    runtime_error.clone(),
-                )?;
-                return Err(runtime_error);
+                return self.fail_turn(
+                    &turn_id,
+                    started_at_ms,
+                    &user_message.content,
+                    &mut buffers,
+                    RuntimeError::cancelled(),
+                );
             }
 
             if let Err(runtime_error) = self.validate_completion_stop_reason(&completion) {
-                self.record_turn_failure(
-                    buffers.failure_context(&turn_id, started_at_ms, &user_message.content),
-                    runtime_error.clone(),
-                )?;
-                return Err(runtime_error);
+                return self.fail_turn(
+                    &turn_id,
+                    started_at_ms,
+                    &user_message.content,
+                    &mut buffers,
+                    runtime_error,
+                );
             }
 
             let assistant_text = completion.plain_text();
@@ -181,35 +156,37 @@ where
             {
                 Ok(value) => value,
                 Err(runtime_error) => {
-                    self.record_turn_failure(
-                        buffers.failure_context(&turn_id, started_at_ms, &user_message.content),
-                        runtime_error.clone(),
-                    )?;
-                    return Err(runtime_error);
+                    return self.fail_turn(
+                        &turn_id,
+                        started_at_ms,
+                        &user_message.content,
+                        &mut buffers,
+                        runtime_error,
+                    );
                 }
             };
 
             match completion.stop_reason {
                 CompletionStopReason::ToolUse => {
                     if !saw_tool_calls {
-                        let runtime_error =
-                            RuntimeError::stop_reason_mismatch(&completion.stop_reason);
-                        self.record_turn_failure(
-                            buffers.failure_context(&turn_id, started_at_ms, &user_message.content),
-                            runtime_error.clone(),
-                        )?;
-                        return Err(runtime_error);
+                        return self.fail_turn(
+                            &turn_id,
+                            started_at_ms,
+                            &user_message.content,
+                            &mut buffers,
+                            RuntimeError::stop_reason_mismatch(&completion.stop_reason),
+                        );
                     }
                 }
                 _ => {
                     if saw_tool_calls {
-                        let runtime_error =
-                            RuntimeError::stop_reason_mismatch(&completion.stop_reason);
-                        self.record_turn_failure(
-                            buffers.failure_context(&turn_id, started_at_ms, &user_message.content),
-                            runtime_error.clone(),
-                        )?;
-                        return Err(runtime_error);
+                        return self.fail_turn(
+                            &turn_id,
+                            started_at_ms,
+                            &user_message.content,
+                            &mut buffers,
+                            RuntimeError::stop_reason_mismatch(&completion.stop_reason),
+                        );
                     }
 
                     self.finish_success_turn(buffers.into_success_context(

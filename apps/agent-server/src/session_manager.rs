@@ -376,7 +376,7 @@ async fn run_turn_worker(
     let stream_snapshot = current_turn_snapshot.clone();
 
     let result = runtime
-        .handle_turn_streaming_with_control_async(prompt, turn_control, |event| {
+        .handle_turn_streaming(prompt, turn_control, |event| {
             let new_status = match &event {
                 StreamEvent::ThinkingDelta { .. } => CurrentStatusInner::Thinking,
                 StreamEvent::TextDelta { .. } => CurrentStatusInner::Generating,

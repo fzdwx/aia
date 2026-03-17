@@ -1,5 +1,34 @@
 # 演进日志
 
+## 2026-03-17 Session 27
+
+**Diagnosis**：虽然 OpenAI 适配层已经模块化，但共享 `LanguageModel` trait 仍残留 `complete`、`complete_streaming`、`complete_streaming_with_abort` 三个入口，导致 adapter、server bridge、runtime 压缩路径和测试 mock 里继续堆重复分支；与此同时 `agent-runtime::runtime::turn::driver` 也还残留大量重复的失败收尾样板。
+**Decision**：直接清理历史接口：把 `LanguageModel` 收口为单一 `complete_streaming(request, abort, sink)` 入口，所有非流式消费方改为传空 sink；同时把 `turn::driver` 里的重复失败出口收口到共享 `fail_turn` helper。这样能一次性减少协议层和运行时主链里的历史分叉。
+**Changes**：
+- `crates/agent-core/src/traits.rs`：移除 `complete` 与 `complete_streaming_with_abort`，共享模型 trait 只保留单一流式入口。
+- `crates/openai-adapter/src/responses/client.rs`、`crates/openai-adapter/src/chat_completions/client.rs`、`apps/agent-server/src/model.rs`、`apps/agent-server/src/model/bootstrap.rs`、`crates/agent-runtime/src/runtime/compress.rs`、`crates/agent-runtime/src/runtime/turn/driver.rs`：全部改走统一 `complete_streaming(request, abort, sink)` 主链；`driver` 额外新增 `fail_turn` helper 收口重复失败路径。
+- `crates/openai-adapter/src/tests.rs`、`apps/agent-server/src/model/tests.rs`、`crates/agent-runtime/src/runtime/tests.rs`：同步移除旧接口调用和 mock 实现；适配器的“真实调用”测试改成真正走 SSE。
+- `crates/openai-adapter/src/responses/mod.rs`、`crates/openai-adapter/src/chat_completions/mod.rs`、`crates/openai-adapter/src/lib.rs`、`crates/openai-adapter/src/payloads.rs`：把只供解析单测使用的非流式 parse helper/payload 收口为 test-only 或 test-oriented 代码，清掉生产构建 dead-code 告警。
+- `docs/status.md`、`docs/architecture.md`：同步记录共享模型接口已收口为单一流式入口，以及 `turn::driver` 的历史失败样板已清理。
+**Verification**：`cargo fmt --all` 通过；`cargo check` 通过；`cargo test -p agent-runtime --lib -- --nocapture` 通过（61 passed）；`cargo test -p openai-adapter -- --nocapture` 通过（29 passed，需脱离沙箱以允许本地测试 listener 绑定）；`cargo test -p agent-server model -- --nocapture` 通过（4 passed，需脱离沙箱）；`cargo check` 再次通过。
+**Commit**：未提交；上一批结构化重构提交为 `26db9b5` `refactor: split large server runtime and adapter modules`
+**Next direction**：优先继续处理 `crates/agent-runtime/src/runtime/tool_calls.rs`；如果想继续削减 OpenAI 适配层的重复逻辑，也可以转向 `crates/openai-adapter/src/streaming.rs` 和 request helper 的共享收口。
+
+## 2026-03-17 Session 26
+
+**Diagnosis**：`crates/openai-adapter/src/chat_completions.rs` 仍把配置、请求构造、HTTP helper、响应体解析、流式 SSE 状态累积和 `LanguageModel` 实现堆在单个大文件里；在 `responses` 已完成模块化后，两条协议栈的内部边界开始明显不对称。
+**Decision**：沿用 `responses` 刚建立的拆分模式，把 `chat_completions` 也收口为 `chat_completions::{mod,request,parsing,streaming,client}`，保持对外配置、请求/响应语义和 async 行为不变；这样能让两条 OpenAI 协议适配栈的结构保持一致，为后续继续抽共享 helper 做准备。
+**Changes**：
+- `crates/openai-adapter/src/chat_completions/mod.rs`：收缩为薄入口，仅保留 `OpenAiChatCompletionsConfig`、`OpenAiChatCompletionsModel` 和基础构造。
+- `crates/openai-adapter/src/chat_completions/request.rs`：抽出请求体构造、HTTP client/user-agent helper、usage/finish reason 映射与模型标识校验。
+- `crates/openai-adapter/src/chat_completions/parsing.rs`：抽出非流式响应体解析与 tool call 组装。
+- `crates/openai-adapter/src/chat_completions/streaming.rs`：抽出 Chat Completions SSE 流式状态累积、tool call delta 归并与最终 completion 组装。
+- `crates/openai-adapter/src/chat_completions/client.rs`：抽出 `LanguageModel` 实现，复用新的请求/解析/流式辅助模块。
+- `docs/status.md`、`docs/architecture.md`：同步记录 `openai-adapter::chat_completions` 已完成模块化，并把下一批热点顺延到 `agent-runtime::runtime::tool_calls`、共享 SQLite store 边界和 `openai-adapter::streaming` / 共享适配 helper。
+**Verification**：`cargo fmt --all` 通过；`cargo check -p openai-adapter` 通过；`cargo test -p openai-adapter -- --nocapture` 通过（29 passed，需脱离沙箱以允许本地测试 listener 绑定）；`cargo check` 通过。
+**Commit**：未提交；当前上一批结构化重构已提交为 `26db9b5` `refactor: split large server runtime and adapter modules`
+**Next direction**：优先继续处理 `crates/agent-runtime/src/runtime/tool_calls.rs`；如果想继续先把 OpenAI 适配层里剩余重复 helper 往中间收口，也可以转向 `crates/openai-adapter/src/streaming.rs`。
+
 ## 2026-03-17 Session 25
 
 **Diagnosis**：`crates/openai-adapter/src/responses.rs` 仍把配置、请求构造、HTTP helper、响应体解析、流式 SSE 状态机和 `LanguageModel` 实现全部塞在一个 400+ 行单文件里，已经成为 provider 边缘层当前最明显的大文件热点。
@@ -12,7 +41,7 @@
 - `crates/openai-adapter/src/responses/client.rs`：抽出 `LanguageModel` 实现，复用新的请求/解析/流式辅助模块。
 - `docs/status.md`、`docs/architecture.md`：同步记录 `openai-adapter::responses` 已完成模块化，并把下一批热点顺延到 `agent-runtime::runtime::tool_calls`、`openai-adapter::chat_completions` 与共享 SQLite store 访问边界。
 **Verification**：`cargo fmt --all` 通过；`cargo check -p openai-adapter` 通过；`cargo test -p openai-adapter -- --nocapture` 通过（29 passed，需脱离沙箱以允许本地测试 listener 绑定）；`cargo check` 通过。
-**Commit**：未提交（当前 CLI 运行约束禁止自动 `git commit`）；建议提交信息：`refactor: split responses adapter modules`
+**Commit**：`26db9b5` `refactor: split large server runtime and adapter modules`
 **Next direction**：优先继续处理 `crates/agent-runtime/src/runtime/tool_calls.rs`；如果想先把 OpenAI 两条协议栈保持对称，也可以接着拆 `crates/openai-adapter/src/chat_completions.rs`。
 
 ## 2026-03-17 Session 24
@@ -503,3 +532,16 @@
 **验证**：`cargo check -p agent-core` 通过；`cargo check -p agent-runtime` 通过；`cargo check -p builtin-tools` 通过；`cargo check -p openai-adapter` 通过；`cargo check -p agent-server` 通过；`cargo check` 通过。`cargo test -p agent-runtime --no-run` 当前仍因旧测试实现未迁到 async trait 而失败。
 **提交**：待提交
 **下次方向**：继续完成 Phase 1 的测试迁移，把 `agent-runtime` / `agent-server` 的 mock model/tool 全部改成 async trait 宏与 `Handle::block_on` 辅助；完成后再进入 Phase 2，把 `openai-adapter` 从 blocking reqwest 切到真正 async HTTP。 
+
+## 2026-03-17 Session 28
+
+**Diagnosis**：虽然模型层已经收口为单一 `complete_streaming`，但 `agent-runtime` 公开 turn API 仍残留 `handle_turn` / `handle_turn_streaming_with_control_async` 等历史包装，既重复命名，又继续把同步消费方式暴露到共享 runtime 边界。
+**Decision**：移除 runtime 侧同步 `handle_turn` 包装，并把唯一公开入口统一命名为异步 `handle_turn_streaming(user_input, control, sink)`；这样 server、runtime tests 与后续外部客户端都围绕同一条 async 流式主链工作，避免全异步改造收尾时又保留一层历史别名。
+**Changes**：
+- `crates/agent-runtime/src/runtime/turn/driver.rs`：删除同步 `handle_turn` 包装，重命名 `handle_turn_streaming_with_control_async` 为 `handle_turn_streaming`，并保留共享 `fail_turn` 失败收口。
+- `apps/agent-server/src/session_manager.rs`：turn worker 直接 await 统一后的 `handle_turn_streaming(...)`，去掉对旧 runtime 入口名的依赖。
+- `crates/agent-runtime/src/runtime/tests.rs`：新增测试 helper 统一驱动 async turn 入口，移除对已删除同步/public 历史 turn API 的依赖。
+- `docs/status.md`、`docs/architecture.md`、`docs/frontend-web-guidelines.md`：同步记录 runtime 公共 turn API 已收口为单一 async 入口，并修正文档里残留的 `spawn_blocking` 旧叙述。
+**Verification**：`cargo fmt --all`、`cargo check`、`cargo test -p agent-runtime --lib -- --nocapture`、`cargo test -p openai-adapter -- --nocapture`、`cargo test -p agent-server -- --nocapture` 通过。
+**Commit**：未提交（建议：`refactor: unify async runtime turn entrypoint`）
+**Next direction**：继续扫描 `crates/agent-runtime/src/runtime/tool_calls.rs`、共享 SQLite store 访问边界和 `crates/openai-adapter/src/streaming.rs`，优先清理剩余同步桥接与重复 helper。

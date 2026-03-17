@@ -1,5 +1,6 @@
 use serde::Deserialize;
 
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Deserialize)]
 pub(crate) struct ResponsesResponse {
     #[serde(default)]
@@ -31,12 +32,14 @@ pub(crate) struct ResponsesInputTokensDetails {
     pub cached_tokens: Option<u64>,
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Deserialize)]
 pub(crate) struct ResponsesIncompleteDetails {
     #[serde(default)]
     pub reason: Option<String>,
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Deserialize)]
 #[serde(tag = "type")]
 pub(crate) enum ResponsesOutput {
@@ -53,6 +56,7 @@ pub(crate) enum ResponsesOutput {
     Other,
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Deserialize)]
 #[serde(tag = "type")]
 pub(crate) enum ResponsesContent {
@@ -62,6 +66,7 @@ pub(crate) enum ResponsesContent {
     Other,
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Deserialize)]
 #[serde(tag = "type")]
 pub(crate) enum ReasoningSummaryPart {
@@ -71,6 +76,7 @@ pub(crate) enum ReasoningSummaryPart {
     Other,
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Deserialize)]
 pub(crate) struct ChatCompletionsResponse {
     #[serde(default)]
@@ -96,6 +102,7 @@ pub(crate) struct ChatCompletionsPromptTokensDetails {
     pub cached_tokens: Option<u64>,
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Deserialize)]
 pub(crate) struct ChatCompletionChoice {
     pub message: ChatCompletionMessage,
@@ -103,6 +110,7 @@ pub(crate) struct ChatCompletionChoice {
     pub finish_reason: Option<String>,
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Deserialize)]
 pub(crate) struct ChatCompletionMessage {
     #[serde(default)]
@@ -113,12 +121,14 @@ pub(crate) struct ChatCompletionMessage {
     pub tool_calls: Vec<ChatCompletionToolCall>,
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Deserialize)]
 pub(crate) struct ChatCompletionToolCall {
     pub id: Option<String>,
     pub function: ChatCompletionFunction,
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Deserialize)]
 pub(crate) struct ChatCompletionFunction {
     pub name: String,

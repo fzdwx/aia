@@ -1,4 +1,6 @@
-use agent_core::{Completion, CompletionRequest, CoreError, LanguageModel};
+use agent_core::{
+    AbortSignal, Completion, CompletionRequest, CoreError, LanguageModel, StreamEvent,
+};
 use async_trait::async_trait;
 
 pub(super) struct BootstrapModel;
@@ -7,7 +9,12 @@ pub(super) struct BootstrapModel;
 impl LanguageModel for BootstrapModel {
     type Error = CoreError;
 
-    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
+    async fn complete_streaming(
+        &self,
+        request: CompletionRequest,
+        _abort: &AbortSignal,
+        sink: &mut (dyn FnMut(StreamEvent) + Send),
+    ) -> Result<Completion, Self::Error> {
         let latest_user = request
             .conversation
             .iter()
@@ -19,8 +26,10 @@ impl LanguageModel for BootstrapModel {
             })
             .unwrap_or_else(|| "空输入".into());
 
-        Ok(Completion::text(format!(
+        let completion = Completion::text(format!(
             "Bootstrap 模式收到：{latest_user}。请配置真实 provider 以使用完整功能。"
-        )))
+        ));
+        sink(StreamEvent::Done);
+        Ok(completion)
     }
 }

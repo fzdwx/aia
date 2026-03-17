@@ -53,6 +53,7 @@ README 里真正难的是这些能力：
 
 - 消息、角色、上下文窗口
 - 模型能力与人格标签
+- `LanguageModel` 已收口为单一流式入口：`complete_streaming(request, abort, sink)`；同步/非流式消费方通过空 sink 消费最终 `Completion`，避免 `complete` / `complete_streaming_with_abort` 三套入口长期并存
 - 工具定义、工具调用、统一工具规范
 - 运行时需要的请求与响应载荷
 - 结构化会话条目：普通消息、工具调用、工具结果
@@ -103,6 +104,8 @@ README 里真正难的是这些能力：
 - `openai-adapter` 已改为原生 async `reqwest`：单次请求不再依赖 blocking client，流式读取改为 async chunk streaming + abort 轮询，避免 provider I/O 把后续 server 原生 async 化继续卡在边缘层
 - 全异步主链已完成 Phase 1 / 2，并继续推进 Phase 3 / 4：`agent-core` 的模型/工具 trait、`agent-runtime` turn 主链、`openai-adapter` provider I/O 都已切到 async；`builtin-tools::shell` 已改为直接挂在 Tokio task 上的 async 事件泵，不再自建专用 thread/runtime，stdout/stderr 捕获也已改为异步 tail 临时 capture 文件，不再依赖 `spawn_blocking`；`read` / `write` / `edit` 已切到 `tokio::fs`，`glob` / `grep` 也已改为共享的 async `.gitignore` 感知仓库遍历 + async 文件读取，不再依赖 `spawn_blocking` / `ignore::WalkBuilder`，trace 查询路由也已去掉 per-request `spawn_blocking` 包装；当前剩余尾部主要是共享 SQLite store 的同步访问边界
 - turn 主链内部已继续按职责拆为 `turn::{driver,segments,types}`：公开入口保持不变，流式 turn 驱动、completion segment 持久化与共享 turn buffer / success-failure context 分离，减少 runtime 单文件耦合与重复失败上下文拼装
+- `turn::driver` 已继续清理历史样板：重复的失败收尾路径已收口为共享 `fail_turn` helper，避免取消/stop_reason/模型错误分支继续各自拼接 `record_turn_failure + return Err(...)`
+- `agent-runtime` 对外 turn API 也已继续收口为单一异步入口 `handle_turn_streaming(user_input, control, sink)`：旧的同步 `handle_turn` 和历史命名 `handle_turn_streaming_with_control_async` 已移除，server 与测试消费方统一经由这条异步流式主链驱动 turn
 - 时间辅助函数不假设系统时间恒定晚于 `UNIX_EPOCH`，异常场景下会安全回退
 - `tape_info` / `tape_handoff` 已通过真正的 runtime tool registry 暴露，而不是字符串特判
 
@@ -137,6 +140,7 @@ README 里真正难的是这些能力：
 - 解析 Responses / Chat Completions usage 中的 `cached_tokens`，回填到共享 `CompletionUsage`
 - 保持提供商细节停留在边缘层，不把外部协议泄漏进 `agent-core`
 - `responses` 内部已进一步按职责拆分：根模块只保留配置与模型入口，请求构造/HTTP helper、响应体解析、流式状态累积与 `LanguageModel` 客户端入口分别下沉到 `responses::{request,parsing,streaming,client}`，避免边缘层协议映射、SSE 状态机与 HTTP 细节继续堆在单个超大文件里
+- `chat_completions` 内部也已按相同模式拆分：根模块只保留配置与模型入口，请求构造/HTTP helper、响应体解析、流式状态累积与 `LanguageModel` 客户端入口分别下沉到 `chat_completions::{request,parsing,streaming,client}`，让两条 OpenAI 协议适配栈保持边界对称，便于后续继续收口共享 helper
 
 ### `agent-store`
 
@@ -183,7 +187,7 @@ README 里真正难的是这些能力：
 - 全局 `broadcast::channel` 向所有 SSE 客户端推送事件
 - 暴露 provider、session、turn、cancel、handoff、trace 等 HTTP API
 - `POST /api/turn` 仍保持 fire-and-forget，但真正的 turn 执行、事件回收与 session 条目追加都在 worker 内串行完成
-- turn 执行与 session manager 已切到原生 Tokio async task：`apps/agent-server` 不再依赖 `tokio::spawn_blocking`、`std::thread::Builder`、`LocalSet` 或 `spawn_local` 承载 turn 主链；运行中 `session/info` 通过 slot 内的 `ContextStats` 快照读取 live stats，turn 结束后仍沿用显式 runtime ownership 归还路径
+- turn 执行与 session manager 已切到原生 Tokio async task：`apps/agent-server` 不再依赖 `tokio::spawn_blocking`、`std::thread::Builder`、`LocalSet` 或 `spawn_local` 承载 turn 主链；worker 直接 await `AgentRuntime::handle_turn_streaming(...)`，运行中 `session/info` 通过 slot 内的 `ContextStats` 快照读取 live stats，turn 结束后仍沿用显式 runtime ownership 归还路径
 - 运行中的条目会实时 append 到 `.aia/session.jsonl`
 - provider 变更采用事务式提交，避免 registry / runtime / tape 持久化分叉
 - 启动失败与 JSON 序列化失败都已收口为结构化错误路径，而不是 panic

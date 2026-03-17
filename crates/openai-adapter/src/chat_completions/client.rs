@@ -3,10 +3,10 @@ use async_trait::async_trait;
 
 use crate::{OpenAiAdapterError, stream_lines_with_abort};
 
-use super::{OpenAiResponsesModel, streaming::ResponsesStreamingState};
+use super::{OpenAiChatCompletionsModel, streaming::ChatCompletionsStreamingState};
 
 #[async_trait]
-impl LanguageModel for OpenAiResponsesModel {
+impl LanguageModel for OpenAiChatCompletionsModel {
     type Error = OpenAiAdapterError;
 
     async fn complete_streaming(
@@ -39,7 +39,7 @@ impl LanguageModel for OpenAiResponsesModel {
             return Err(self.request_failure(status, &body));
         }
 
-        let mut state = ResponsesStreamingState::default();
+        let mut state = ChatCompletionsStreamingState::default();
         stream_lines_with_abort(response, abort, sink, |line, sink| state.handle_line(line, sink))
             .await?;
 

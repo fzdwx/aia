@@ -1,4 +1,4 @@
-use agent_core::{CompletionRequest, LanguageModel, ToolExecutor};
+use agent_core::{AbortSignal, CompletionRequest, LanguageModel, ToolExecutor};
 use serde_json::json;
 
 use crate::RuntimeEvent;
@@ -47,7 +47,11 @@ where
             }),
         };
 
-        let completion = self.model.complete(request).await.map_err(RuntimeError::model)?;
+        let completion = self
+            .model
+            .complete_streaming(request, &AbortSignal::new(), &mut |_| {})
+            .await
+            .map_err(RuntimeError::model)?;
         let summary = completion.plain_text();
 
         self.record_handoff("context_compression", json!({ "summary": summary }), "system")?;

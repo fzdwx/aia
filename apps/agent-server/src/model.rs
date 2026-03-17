@@ -4,8 +4,8 @@ mod tests;
 mod trace;
 
 use agent_core::{
-    Completion, CompletionRequest, CoreError, LanguageModel, ModelDisposition, ModelIdentity,
-    ModelLimit, StreamEvent,
+    AbortSignal, Completion, CompletionRequest, CoreError, LanguageModel, ModelDisposition,
+    ModelIdentity, ModelLimit, StreamEvent,
 };
 use agent_store::{LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus, LlmTraceStore};
 use async_trait::async_trait;
@@ -78,25 +78,13 @@ impl std::error::Error for ServerModelError {}
 impl LanguageModel for ServerModel {
     type Error = ServerModelError;
 
-    async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
-        self.complete_with_trace(request, None, None).await
-    }
-
     async fn complete_streaming(
         &self,
         request: CompletionRequest,
+        abort: &AbortSignal,
         sink: &mut (dyn FnMut(StreamEvent) + Send),
     ) -> Result<Completion, Self::Error> {
-        self.complete_with_trace(request, None, Some(sink)).await
-    }
-
-    async fn complete_streaming_with_abort(
-        &self,
-        request: CompletionRequest,
-        abort: &agent_core::AbortSignal,
-        sink: &mut (dyn FnMut(StreamEvent) + Send),
-    ) -> Result<Completion, Self::Error> {
-        self.complete_with_trace(request, Some(abort), Some(sink)).await
+        self.complete_with_trace(request, abort, sink).await
     }
 
     fn is_cancelled_error(error: &Self::Error) -> bool {
@@ -108,79 +96,30 @@ impl ServerModel {
     async fn complete_with_trace(
         &self,
         request: CompletionRequest,
-        abort: Option<&agent_core::AbortSignal>,
-        sink: Option<&mut (dyn FnMut(StreamEvent) + Send)>,
+        abort: &AbortSignal,
+        sink: &mut (dyn FnMut(StreamEvent) + Send),
     ) -> Result<Completion, ServerModelError> {
         let started_at_ms = now_timestamp_ms();
-        let trace_seed = self.trace_seed(&request, sink.is_some());
+        let trace_seed = self.trace_seed(&request, true);
         let mut event_collector = TraceEventCollector::new(started_at_ms);
         let started = Instant::now();
-        let result = match (&self.inner, abort, sink) {
-            (ServerModelInner::Bootstrap(model), _, None) => {
-                model.complete(request).await.map_err(ServerModelError::Bootstrap)
-            }
-            (ServerModelInner::Bootstrap(model), _, Some(sink)) => {
-                let mut traced_sink = |event: StreamEvent| {
-                    event_collector.observe(&event);
-                    sink(event);
-                };
-                model
-                    .complete_streaming(request, &mut traced_sink)
-                    .await
-                    .map_err(ServerModelError::Bootstrap)
-            }
-            (ServerModelInner::OpenAiResponses(model), None, None) => {
-                model.complete(request).await.map_err(ServerModelError::OpenAi)
-            }
-            (ServerModelInner::OpenAiResponses(model), None, Some(sink)) => {
-                let mut traced_sink = |event: StreamEvent| {
-                    event_collector.observe(&event);
-                    sink(event);
-                };
-                model
-                    .complete_streaming(request, &mut traced_sink)
-                    .await
-                    .map_err(ServerModelError::OpenAi)
-            }
-            (ServerModelInner::OpenAiResponses(model), Some(abort), Some(sink)) => {
-                let mut traced_sink = |event: StreamEvent| {
-                    event_collector.observe(&event);
-                    sink(event);
-                };
-                model
-                    .complete_streaming_with_abort(request, abort, &mut traced_sink)
-                    .await
-                    .map_err(ServerModelError::OpenAi)
-            }
-            (ServerModelInner::OpenAiResponses(model), Some(_), None) => {
-                model.complete(request).await.map_err(ServerModelError::OpenAi)
-            }
-            (ServerModelInner::OpenAiChatCompletions(model), None, None) => {
-                model.complete(request).await.map_err(ServerModelError::OpenAi)
-            }
-            (ServerModelInner::OpenAiChatCompletions(model), None, Some(sink)) => {
-                let mut traced_sink = |event: StreamEvent| {
-                    event_collector.observe(&event);
-                    sink(event);
-                };
-                model
-                    .complete_streaming(request, &mut traced_sink)
-                    .await
-                    .map_err(ServerModelError::OpenAi)
-            }
-            (ServerModelInner::OpenAiChatCompletions(model), Some(abort), Some(sink)) => {
-                let mut traced_sink = |event: StreamEvent| {
-                    event_collector.observe(&event);
-                    sink(event);
-                };
-                model
-                    .complete_streaming_with_abort(request, abort, &mut traced_sink)
-                    .await
-                    .map_err(ServerModelError::OpenAi)
-            }
-            (ServerModelInner::OpenAiChatCompletions(model), Some(_), None) => {
-                model.complete(request).await.map_err(ServerModelError::OpenAi)
-            }
+        let mut traced_sink = |event: StreamEvent| {
+            event_collector.observe(&event);
+            sink(event);
+        };
+        let result = match &self.inner {
+            ServerModelInner::Bootstrap(model) => model
+                .complete_streaming(request, abort, &mut traced_sink)
+                .await
+                .map_err(ServerModelError::Bootstrap),
+            ServerModelInner::OpenAiResponses(model) => model
+                .complete_streaming(request, abort, &mut traced_sink)
+                .await
+                .map_err(ServerModelError::OpenAi),
+            ServerModelInner::OpenAiChatCompletions(model) => model
+                .complete_streaming(request, abort, &mut traced_sink)
+                .await
+                .map_err(ServerModelError::OpenAi),
         };
 
         self.persist_trace(trace_seed, started_at_ms, started.elapsed(), &result, event_collector);

@@ -15,7 +15,7 @@
 ```
 React (Vite :5173)  ──proxy──>  axum server (:3434)
      │                               │
-  POST /api/turn          spawn_blocking
+  POST /api/turn          Tokio async task
      │                               │
   EventSource             AgentRuntime
   GET /api/events         handle_turn_streaming()
