@@ -38,108 +38,18 @@ mod tests {
     use std::collections::BTreeSet;
 
     use agent_core::{Tool, ToolDefinition, ToolExecutor};
-    use schemars::JsonSchema;
-    use serde::{Deserialize, Serialize};
 
     use super::{
         ApplyPatchTool, EditTool, GlobTool, GrepTool, ReadTool, ShellTool, WriteTool,
         build_tool_registry,
     };
-
-    #[derive(Serialize, Deserialize, JsonSchema)]
-    #[serde(deny_unknown_fields)]
-    struct ShellToolArgs {
-        #[schemars(description = "The shell command to execute")]
-        command: String,
-    }
-
-    #[derive(Serialize, Deserialize, JsonSchema)]
-    #[serde(deny_unknown_fields)]
-    struct ReadToolArgs {
-        #[schemars(description = "Path to the file to read")]
-        file_path: String,
-        #[schemars(description = "Starting line number (0-based, default 0)")]
-        offset: Option<usize>,
-        #[schemars(description = "Maximum lines to read (default 2000)")]
-        limit: Option<usize>,
-    }
-
-    #[derive(Serialize, Deserialize, JsonSchema)]
-    #[serde(deny_unknown_fields)]
-    struct WriteToolArgs {
-        #[schemars(description = "Path to write to")]
-        file_path: String,
-        #[schemars(description = "Content to write")]
-        content: String,
-    }
-
-    #[derive(Serialize, Deserialize, JsonSchema)]
-    #[serde(deny_unknown_fields)]
-    struct EditToolArgs {
-        #[schemars(description = "Path to the file to edit")]
-        file_path: String,
-        #[schemars(description = "Exact text to find (must match uniquely)")]
-        old_string: String,
-        #[schemars(description = "Replacement text")]
-        new_string: String,
-    }
-
-    #[derive(Serialize, Deserialize, JsonSchema)]
-    #[serde(deny_unknown_fields)]
-    struct ApplyPatchToolPatchArgs {
-        #[schemars(description = "The full patch text in apply_patch format")]
-        patch: String,
-    }
-
-    #[derive(Serialize, Deserialize, JsonSchema)]
-    #[serde(deny_unknown_fields)]
-    struct ApplyPatchToolPatchTextArgs {
-        #[schemars(description = "Alias for patch; the full patch text in apply_patch format")]
-        #[serde(rename = "patchText")]
-        patch_text: String,
-    }
-
-    #[derive(Serialize, Deserialize, JsonSchema)]
-    #[serde(deny_unknown_fields)]
-    struct ApplyPatchToolCombinedArgs {
-        #[schemars(description = "The full patch text in apply_patch format")]
-        patch: String,
-        #[schemars(description = "Alias for patch; the full patch text in apply_patch format")]
-        #[serde(rename = "patchText")]
-        patch_text: String,
-    }
-
-    #[derive(Serialize, Deserialize, JsonSchema)]
-    #[serde(untagged)]
-    enum ApplyPatchToolArgs {
-        Patch(ApplyPatchToolPatchArgs),
-        PatchText(ApplyPatchToolPatchTextArgs),
-        Combined(ApplyPatchToolCombinedArgs),
-    }
-
-    #[derive(Serialize, Deserialize, JsonSchema)]
-    #[serde(deny_unknown_fields)]
-    struct GlobToolArgs {
-        #[schemars(description = "Glob pattern (e.g. **/*.rs)")]
-        pattern: String,
-        #[schemars(description = "Base directory to search in")]
-        path: Option<String>,
-        #[schemars(description = "Maximum matched files to return (default 200, max 1000)")]
-        limit: Option<usize>,
-    }
-
-    #[derive(Serialize, Deserialize, JsonSchema)]
-    #[serde(deny_unknown_fields)]
-    struct GrepToolArgs {
-        #[schemars(description = "Regex pattern to search for")]
-        pattern: String,
-        #[schemars(description = "Directory or file to search in")]
-        path: Option<String>,
-        #[schemars(description = "File glob filter (e.g. *.rs)")]
-        glob: Option<String>,
-        #[schemars(description = "Maximum matched files to return (default 200, max 1000)")]
-        limit: Option<usize>,
-    }
+    use crate::apply_patch::ApplyPatchToolArgs;
+    use crate::edit::EditToolArgs;
+    use crate::glob::GlobToolArgs;
+    use crate::grep::GrepToolArgs;
+    use crate::read::ReadToolArgs;
+    use crate::shell::ShellToolArgs;
+    use crate::write::WriteToolArgs;
 
     #[test]
     fn registry_exposes_only_new_tool_names() {

@@ -4,6 +4,8 @@ use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use crate::walk::collect_candidate_files;
 
@@ -23,6 +25,19 @@ enum GrepSearchOutcome {
     Cancelled,
 }
 
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct GrepToolArgs {
+    #[schemars(description = "Regex pattern to search for")]
+    pattern: String,
+    #[schemars(description = "Directory or file to search in")]
+    path: Option<String>,
+    #[schemars(description = "File glob filter (e.g. *.rs)")]
+    glob: Option<String>,
+    #[schemars(description = "Maximum matched files to return (default 200, max 1000)")]
+    limit: Option<usize>,
+}
+
 #[async_trait]
 impl Tool for GrepTool {
     fn name(&self) -> &str {
@@ -30,35 +45,11 @@ impl Tool for GrepTool {
     }
 
     fn definition(&self) -> ToolDefinition {
-        ToolDefinition {
-            name: "grep".into(),
-            description:
-                "Search file contents with regex (respects .gitignore and skips .git/node_modules/target)"
-                    .into(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "pattern": {
-                        "type": "string",
-                        "description": "Regex pattern to search for"
-                    },
-                    "path": {
-                        "type": "string",
-                        "description": "Directory or file to search in"
-                    },
-                    "glob": {
-                        "type": "string",
-                        "description": "File glob filter (e.g. *.rs)"
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "Maximum matched files to return (default 200, max 1000)"
-                    }
-                },
-                "required": ["pattern"],
-                "additionalProperties": false
-            }),
-        }
+        ToolDefinition::new(
+            self.name(),
+            "Search file contents with regex (respects .gitignore and skips .git/node_modules/target)",
+        )
+        .with_parameters_schema::<GrepToolArgs>()
     }
 
     async fn call(
@@ -67,14 +58,16 @@ impl Tool for GrepTool {
         _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
     ) -> Result<ToolResult, CoreError> {
-        let pattern = call.str_arg("pattern")?;
-        let limit = call.opt_usize_arg("limit").unwrap_or(DEFAULT_MATCH_LIMIT).min(MAX_MATCH_LIMIT);
-        let base = call
-            .opt_str_arg("path")
-            .map(|p| context.resolve_path(&p))
+        let args: GrepToolArgs = call.parse_arguments()?;
+        let pattern = args.pattern;
+        let limit = args.limit.unwrap_or(DEFAULT_MATCH_LIMIT).min(MAX_MATCH_LIMIT);
+        let base = args
+            .path
+            .as_deref()
+            .map(|p| context.resolve_path(p))
             .or_else(|| context.workspace_root.clone())
             .unwrap_or_else(|| PathBuf::from("."));
-        let glob_filter = call.opt_str_arg("glob");
+        let glob_filter = args.glob;
         let abort = context.abort.clone();
 
         if abort.is_aborted() {
@@ -88,10 +81,10 @@ impl Tool for GrepTool {
             })));
         }
 
-        match run_grep_search(pattern, base, glob_filter, limit, abort).await? {
+        match run_grep_search(pattern.clone(), base, glob_filter, limit, abort).await? {
             GrepSearchOutcome::Completed(result) => Ok(ToolResult::from_call(call, result.content)
                 .with_details(serde_json::json!({
-                    "pattern": call.str_arg("pattern")?,
+                    "pattern": pattern,
                     "matches": result.match_count,
                     "returned": result.returned,
                     "limit": limit,
@@ -99,7 +92,7 @@ impl Tool for GrepTool {
                 }))),
             GrepSearchOutcome::Cancelled => Ok(ToolResult::from_call(call, "[aborted]")
                 .with_details(serde_json::json!({
-                    "pattern": call.str_arg("pattern")?,
+                    "pattern": pattern,
                     "matches": 0,
                     "returned": 0,
                     "limit": limit,

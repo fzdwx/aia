@@ -5,6 +5,8 @@ use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use crate::walk::collect_candidate_files;
 
@@ -24,6 +26,17 @@ enum GlobSearchOutcome {
     Cancelled,
 }
 
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct GlobToolArgs {
+    #[schemars(description = "Glob pattern (e.g. **/*.rs)")]
+    pattern: String,
+    #[schemars(description = "Base directory to search in")]
+    path: Option<String>,
+    #[schemars(description = "Maximum matched files to return (default 200, max 1000)")]
+    limit: Option<usize>,
+}
+
 #[async_trait]
 impl Tool for GlobTool {
     fn name(&self) -> &str {
@@ -31,31 +44,11 @@ impl Tool for GlobTool {
     }
 
     fn definition(&self) -> ToolDefinition {
-        ToolDefinition {
-            name: "glob".into(),
-            description:
-                "Find files matching a glob pattern (respects .gitignore and skips .git/node_modules/target)"
-                    .into(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "pattern": {
-                        "type": "string",
-                        "description": "Glob pattern (e.g. **/*.rs)"
-                    },
-                    "path": {
-                        "type": "string",
-                        "description": "Base directory to search in"
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "Maximum matched files to return (default 200, max 1000)"
-                    }
-                },
-                "required": ["pattern"],
-                "additionalProperties": false
-            }),
-        }
+        ToolDefinition::new(
+            self.name(),
+            "Find files matching a glob pattern (respects .gitignore and skips .git/node_modules/target)",
+        )
+        .with_parameters_schema::<GlobToolArgs>()
     }
 
     async fn call(
@@ -64,11 +57,13 @@ impl Tool for GlobTool {
         _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
     ) -> Result<ToolResult, CoreError> {
-        let pattern = call.str_arg("pattern")?;
-        let limit = call.opt_usize_arg("limit").unwrap_or(DEFAULT_MATCH_LIMIT).min(MAX_MATCH_LIMIT);
-        let base = call
-            .opt_str_arg("path")
-            .map(|p| context.resolve_path(&p))
+        let args: GlobToolArgs = call.parse_arguments()?;
+        let pattern = args.pattern;
+        let limit = args.limit.unwrap_or(DEFAULT_MATCH_LIMIT).min(MAX_MATCH_LIMIT);
+        let base = args
+            .path
+            .as_deref()
+            .map(|p| context.resolve_path(p))
             .or_else(|| context.workspace_root.clone())
             .unwrap_or_else(|| PathBuf::from("."));
         let abort = context.abort.clone();
@@ -84,10 +79,10 @@ impl Tool for GlobTool {
             })));
         }
 
-        match run_glob_search(pattern, base, limit, abort).await? {
+        match run_glob_search(pattern.clone(), base, limit, abort).await? {
             GlobSearchOutcome::Completed(result) => Ok(ToolResult::from_call(call, result.content)
                 .with_details(serde_json::json!({
-                    "pattern": call.str_arg("pattern")?,
+                    "pattern": pattern,
                     "matches": result.match_count,
                     "returned": result.returned,
                     "limit": limit,
@@ -95,7 +90,7 @@ impl Tool for GlobTool {
                 }))),
             GlobSearchOutcome::Cancelled => Ok(ToolResult::from_call(call, "[aborted]")
                 .with_details(serde_json::json!({
-                    "pattern": call.str_arg("pattern")?,
+                    "pattern": pattern,
                     "matches": 0,
                     "returned": 0,
                     "limit": limit,

@@ -18,14 +18,14 @@ pub struct ApplyPatchTool;
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct ApplyPatchToolPatchArgs {
+pub(crate) struct ApplyPatchToolPatchArgs {
     #[schemars(description = "The full patch text in apply_patch format")]
     patch: String,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct ApplyPatchToolPatchTextArgs {
+pub(crate) struct ApplyPatchToolPatchTextArgs {
     #[schemars(description = "Alias for patch; the full patch text in apply_patch format")]
     #[serde(rename = "patchText")]
     patch_text: String,
@@ -33,7 +33,7 @@ struct ApplyPatchToolPatchTextArgs {
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct ApplyPatchToolCombinedArgs {
+pub(crate) struct ApplyPatchToolCombinedArgs {
     #[schemars(description = "The full patch text in apply_patch format")]
     patch: String,
     #[schemars(description = "Alias for patch; the full patch text in apply_patch format")]
@@ -43,10 +43,26 @@ struct ApplyPatchToolCombinedArgs {
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
-enum ApplyPatchToolArgs {
+pub(crate) enum ApplyPatchToolArgs {
     Patch(ApplyPatchToolPatchArgs),
     PatchText(ApplyPatchToolPatchTextArgs),
     Combined(ApplyPatchToolCombinedArgs),
+}
+
+impl ApplyPatchToolArgs {
+    fn patch_text(self) -> Result<String, CoreError> {
+        match self {
+            Self::Patch(args) => Ok(args.patch),
+            Self::PatchText(args) => Ok(args.patch_text),
+            Self::Combined(args) => {
+                if args.patch == args.patch_text {
+                    Ok(args.patch)
+                } else {
+                    Err(CoreError::new("patch and patchText must match when both are provided"))
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -112,7 +128,7 @@ impl Tool for ApplyPatchTool {
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(
-            "apply_patch",
+            self.name(),
             "Apply a patch in apply_patch format (supports Update File, Add File, Delete File, Move to)",
         )
         .with_parameters_schema::<ApplyPatchToolArgs>()
@@ -124,7 +140,7 @@ impl Tool for ApplyPatchTool {
         _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
     ) -> Result<ToolResult, CoreError> {
-        let patch = patch_argument(call)?;
+        let patch = call.parse_arguments::<ApplyPatchToolArgs>()?.patch_text()?;
         let parsed = parse_apply_patch(&patch)?;
         let summary = apply_parsed_patch(context, parsed).await?;
         let total_files = summary.updated_files
@@ -145,12 +161,6 @@ impl Tool for ApplyPatchTool {
                 "files": summary.files,
             })))
     }
-}
-
-fn patch_argument(call: &ToolCall) -> Result<String, CoreError> {
-    call.opt_str_arg("patch")
-        .or_else(|| call.opt_str_arg("patchText"))
-        .ok_or_else(|| CoreError::new("missing required argument: patch or patchText"))
 }
 
 fn parse_apply_patch(patch: &str) -> Result<ParsedPatch, CoreError> {
@@ -710,6 +720,29 @@ mod tests {
             .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
 
         assert_eq!(fs::read_to_string(&path)?, "beta\n");
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn apply_patch_tool_rejects_conflicting_patch_and_patch_text()
+    -> Result<(), Box<dyn Error>> {
+        let dir = TestDir::new()?;
+        let path = dir.path().join("notes.txt");
+        fs::write(&path, "alpha\n")?;
+
+        let tool = ApplyPatchTool;
+        let call = ToolCall::new("apply_patch").with_arguments_value(serde_json::json!({
+            "patch": "*** Begin Patch\n*** Update File: notes.txt\n@@\n-alpha\n+beta\n*** End Patch",
+            "patchText": "*** Begin Patch\n*** Update File: notes.txt\n@@\n-alpha\n+gamma\n*** End Patch"
+        }));
+
+        let error = match tool.call(&call, &mut |_| {}, &test_context(dir.path())).await {
+            Ok(_) => return Err("apply_patch should reject conflicting patch inputs".into()),
+            Err(error) => error,
+        };
+
+        assert!(error.to_string().contains("patch and patchText must match"));
+        assert_eq!(fs::read_to_string(&path)?, "alpha\n");
         Ok(())
     }
 
