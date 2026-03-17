@@ -1,4 +1,4 @@
-use std::{fs, io::ErrorKind};
+use std::io::ErrorKind;
 
 use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
@@ -50,13 +50,14 @@ impl Tool for ReadTool {
         let limit = call.opt_usize_arg("limit").unwrap_or(2000);
         let path = context.resolve_path(&raw_path);
 
-        let content = fs::read_to_string(&path).map_err(|error| match error.kind() {
-            ErrorKind::InvalidData => CoreError::new(format!(
-                "failed to read {}: file is not valid UTF-8 text",
-                path.display()
-            )),
-            _ => CoreError::new(format!("failed to read {}: {error}", path.display())),
-        })?;
+        let content =
+            tokio::fs::read_to_string(&path).await.map_err(|error| match error.kind() {
+                ErrorKind::InvalidData => CoreError::new(format!(
+                    "failed to read {}: file is not valid UTF-8 text",
+                    path.display()
+                )),
+                _ => CoreError::new(format!("failed to read {}: {error}", path.display())),
+            })?;
 
         let total_lines = content.lines().count();
 

@@ -193,10 +193,10 @@
 - `openai-adapter` 已从 `reqwest::blocking` 切到 async `reqwest`
 - Responses / Chat Completions 的 SSE 读取已改为 async chunk streaming，并继续保留 abort 轮询与取消语义
 - `builtin-tools::shell` 已把输出聚合与 abort 轮询改为 async 事件泵，避免 async tool 调用卡在同步 `recv_timeout`
+- `builtin-tools::read` / `write` / `edit` 已切到 `tokio::fs`，`glob` / `grep` 已改为 async 入口 + abort 感知的阻塞池搜索，避免大仓库文件/搜索工具继续直接阻塞 current-thread runtime
 - `apps/agent-server` 的 turn 执行已去掉 `tokio::spawn_blocking`，当前通过独立 current-thread Tokio worker thread 承载 async runtime turn，并在结束后归还 runtime ownership
 
 因此，下一步最高优先级变为：
 
-1. 继续完成 Phase 3，优先把剩余可能长时间占用线程的工具路径进一步收口为更原生的 async / cancel 模型
-2. 继续完成 Phase 4，把 `apps/agent-server` 从“async turn worker thread + runtime handoff”推进到更原生的 live runtime stats / ownership 方案
-3. 在 async 主链与工具边界进一步稳定后，再优先推进统一工具协议映射与 MCP 接入，而不是继续堆厚客户端界面
+1. 继续完成 Phase 4，把 `apps/agent-server` 从“async turn worker thread + runtime handoff”推进到更原生的 live runtime stats / ownership 方案
+2. 在 async 主链与工具边界进一步稳定后，再优先推进统一工具协议映射与 MCP 接入，而不是继续堆厚客户端界面

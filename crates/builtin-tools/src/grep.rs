@@ -11,6 +11,18 @@ pub struct GrepTool;
 const DEFAULT_MATCH_LIMIT: usize = 200;
 const MAX_MATCH_LIMIT: usize = 1000;
 
+struct GrepSearchResult {
+    content: String,
+    match_count: usize,
+    returned: usize,
+    truncated: bool,
+}
+
+enum GrepSearchOutcome {
+    Completed(GrepSearchResult),
+    Cancelled,
+}
+
 #[async_trait(?Send)]
 impl Tool for GrepTool {
     fn name(&self) -> &str {
@@ -63,64 +75,108 @@ impl Tool for GrepTool {
             .or_else(|| context.workspace_root.clone())
             .unwrap_or_else(|| PathBuf::from("."));
         let glob_filter = call.opt_str_arg("glob");
+        let abort = context.abort.clone();
 
-        let matcher = grep_regex::RegexMatcher::new(&pattern)
-            .map_err(|e| CoreError::new(format!("invalid regex pattern: {e}")))?;
-        let glob_matcher = glob_filter
-            .as_deref()
-            .map(globset::Glob::new)
-            .transpose()
-            .map_err(|e| CoreError::new(format!("invalid glob filter: {e}")))?
-            .map(|glob| glob.compile_matcher());
-
-        let mut walker_builder = ignore::WalkBuilder::new(&base);
-        walker_builder.filter_entry(|entry| !should_skip_directory(entry));
-
-        let mut matched_files: Vec<String> = Vec::new();
-        let mut searcher = grep_searcher::Searcher::new();
-
-        for entry in walker_builder.build() {
-            let entry = match entry {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
-            if !entry.file_type().is_some_and(|ft| ft.is_file()) {
-                continue;
-            }
-            let path = entry.into_path();
-            if let Some(glob_matcher) = &glob_matcher {
-                let relative = path.strip_prefix(&base).unwrap_or(&path);
-                if !glob_matcher.is_match(relative) && !glob_matcher.is_match(&path) {
-                    continue;
-                }
-            }
-            let mut found = false;
-            let sink = grep_searcher::sinks::UTF8(|_line_num, _line| {
-                found = true;
-                Ok(false)
-            });
-            // Silently skip files that cannot be searched (binary, permission denied, etc.).
-            let _ = searcher.search_path(&matcher, &path, sink);
-            if found {
-                matched_files.push(path.display().to_string());
-            }
+        if abort.is_aborted() {
+            return Ok(ToolResult::from_call(call, "[aborted]").with_details(serde_json::json!({
+                "pattern": pattern,
+                "matches": 0,
+                "returned": 0,
+                "limit": limit,
+                "truncated": false,
+                "aborted": true,
+            })));
         }
 
-        let match_count = matched_files.len();
-        let returned = matched_files.len().min(limit);
-        let truncated = match_count > limit;
-        Ok(ToolResult::from_call(
-            call,
-            matched_files.into_iter().take(limit).collect::<Vec<_>>().join("\n"),
-        )
-        .with_details(serde_json::json!({
-            "pattern": pattern,
-            "matches": match_count,
-            "returned": returned,
-            "limit": limit,
-            "truncated": truncated,
-        })))
+        match tokio::task::spawn_blocking(move || {
+            run_grep_search(pattern, base, glob_filter, limit, abort)
+        })
+        .await
+        {
+            Ok(Ok(GrepSearchOutcome::Completed(result))) => {
+                Ok(ToolResult::from_call(call, result.content).with_details(serde_json::json!({
+                    "pattern": call.str_arg("pattern")?,
+                    "matches": result.match_count,
+                    "returned": result.returned,
+                    "limit": limit,
+                    "truncated": result.truncated,
+                })))
+            }
+            Ok(Ok(GrepSearchOutcome::Cancelled)) => Ok(ToolResult::from_call(call, "[aborted]")
+                .with_details(serde_json::json!({
+                    "pattern": call.str_arg("pattern")?,
+                    "matches": 0,
+                    "returned": 0,
+                    "limit": limit,
+                    "truncated": false,
+                    "aborted": true,
+                }))),
+            Ok(Err(error)) => Err(error),
+            Err(error) => Err(CoreError::new(format!("grep search task failed: {error}"))),
+        }
     }
+}
+
+fn run_grep_search(
+    pattern: String,
+    base: PathBuf,
+    glob_filter: Option<String>,
+    limit: usize,
+    abort: agent_core::AbortSignal,
+) -> Result<GrepSearchOutcome, CoreError> {
+    let matcher = grep_regex::RegexMatcher::new(&pattern)
+        .map_err(|e| CoreError::new(format!("invalid regex pattern: {e}")))?;
+    let glob_matcher = glob_filter
+        .as_deref()
+        .map(globset::Glob::new)
+        .transpose()
+        .map_err(|e| CoreError::new(format!("invalid glob filter: {e}")))?
+        .map(|glob| glob.compile_matcher());
+
+    let mut walker_builder = ignore::WalkBuilder::new(&base);
+    walker_builder.filter_entry(|entry| !should_skip_directory(entry));
+
+    let mut matched_files: Vec<String> = Vec::new();
+    let mut searcher = grep_searcher::Searcher::new();
+
+    for entry in walker_builder.build() {
+        if abort.is_aborted() {
+            return Ok(GrepSearchOutcome::Cancelled);
+        }
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        if !entry.file_type().is_some_and(|ft| ft.is_file()) {
+            continue;
+        }
+        let path = entry.into_path();
+        if let Some(glob_matcher) = &glob_matcher {
+            let relative = path.strip_prefix(&base).unwrap_or(&path);
+            if !glob_matcher.is_match(relative) && !glob_matcher.is_match(&path) {
+                continue;
+            }
+        }
+        let mut found = false;
+        let sink = grep_searcher::sinks::UTF8(|_line_num, _line| {
+            found = true;
+            Ok(false)
+        });
+        let _ = searcher.search_path(&matcher, &path, sink);
+        if found {
+            matched_files.push(path.display().to_string());
+        }
+    }
+
+    let match_count = matched_files.len();
+    let returned = matched_files.len().min(limit);
+    let truncated = match_count > limit;
+    Ok(GrepSearchOutcome::Completed(GrepSearchResult {
+        content: matched_files.into_iter().take(limit).collect::<Vec<_>>().join("\n"),
+        match_count,
+        returned,
+        truncated,
+    }))
 }
 
 #[cfg(test)]
@@ -255,6 +311,38 @@ mod tests {
         assert_eq!(details["returned"], 1);
         assert_eq!(details["limit"], 1);
         assert_eq!(details["truncated"], true);
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn grep_tool_returns_aborted_result_when_signal_is_pre_cancelled()
+    -> Result<(), Box<dyn Error>> {
+        let dir = TestDir::new()?;
+        fs::write(dir.path().join("keep.rs"), "needle\n")?;
+        let abort = AbortSignal::new();
+        abort.abort();
+
+        let tool = GrepTool;
+        let call = ToolCall::new("grep").with_arguments_value(serde_json::json!({
+            "pattern": "needle"
+        }));
+        let result = tool
+            .call(
+                &call,
+                &mut |_| {},
+                &ToolExecutionContext {
+                    run_id: "test-run".into(),
+                    workspace_root: Some(dir.path().to_path_buf()),
+                    abort,
+                    runtime: None,
+                },
+            )
+            .await
+            .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
+
+        assert_eq!(result.content, "[aborted]");
+        let details = result.details.ok_or("grep aborted result should include details")?;
+        assert_eq!(details["aborted"], true);
         Ok(())
     }
 }

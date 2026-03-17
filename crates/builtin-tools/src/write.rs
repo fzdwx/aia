@@ -1,5 +1,3 @@
-use std::fs;
-
 use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
@@ -46,13 +44,15 @@ impl Tool for WriteTool {
         let path = context.resolve_path(&raw_path);
 
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
+            tokio::fs::create_dir_all(parent)
+                .await
                 .map_err(|e| CoreError::new(format!("failed to create directory: {e}")))?;
         }
 
         let bytes = content.len();
         let lines = content.lines().count();
-        fs::write(&path, &content)
+        tokio::fs::write(&path, &content)
+            .await
             .map_err(|e| CoreError::new(format!("failed to write {}: {e}", path.display())))?;
 
         Ok(ToolResult::from_call(call, format!("Wrote {bytes} bytes to {}", path.display()))

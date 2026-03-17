@@ -12,6 +12,18 @@ pub struct GlobTool;
 const DEFAULT_MATCH_LIMIT: usize = 200;
 const MAX_MATCH_LIMIT: usize = 1000;
 
+struct GlobSearchResult {
+    content: String,
+    match_count: usize,
+    returned: usize,
+    truncated: bool,
+}
+
+enum GlobSearchOutcome {
+    Completed(GlobSearchResult),
+    Cancelled,
+}
+
 #[async_trait(?Send)]
 impl Tool for GlobTool {
     fn name(&self) -> &str {
@@ -59,53 +71,94 @@ impl Tool for GlobTool {
             .map(|p| context.resolve_path(&p))
             .or_else(|| context.workspace_root.clone())
             .unwrap_or_else(|| PathBuf::from("."));
+        let abort = context.abort.clone();
 
-        let glob = globset::Glob::new(&pattern)
-            .map_err(|e| CoreError::new(format!("invalid glob pattern: {e}")))?
-            .compile_matcher();
-
-        let mut builder = ignore::WalkBuilder::new(&base);
-        builder.filter_entry(|entry| !should_skip_directory(entry));
-        let walker = builder.build();
-
-        let mut entries: Vec<(PathBuf, SystemTime)> = Vec::new();
-        for entry in walker {
-            let entry = match entry {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
-            if !entry.file_type().is_some_and(|ft| ft.is_file()) {
-                continue;
-            }
-            let path = entry.path();
-            let relative = path.strip_prefix(&base).unwrap_or(path);
-            if !glob.is_match(relative) && !glob.is_match(path) {
-                continue;
-            }
-            let mtime = entry.metadata().ok().and_then(|m| m.modified().ok()).unwrap_or(UNIX_EPOCH);
-            entries.push((path.to_path_buf(), mtime));
+        if abort.is_aborted() {
+            return Ok(ToolResult::from_call(call, "[aborted]").with_details(serde_json::json!({
+                "pattern": pattern,
+                "matches": 0,
+                "returned": 0,
+                "limit": limit,
+                "truncated": false,
+                "aborted": true,
+            })));
         }
 
-        entries.sort_by(|a, b| b.1.cmp(&a.1));
-
-        let match_count = entries.len();
-        let returned = entries.len().min(limit);
-        let truncated = match_count > limit;
-        let result = entries
-            .iter()
-            .take(limit)
-            .map(|(p, _)| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        Ok(ToolResult::from_call(call, result).with_details(serde_json::json!({
-            "pattern": pattern,
-            "matches": match_count,
-            "returned": returned,
-            "limit": limit,
-            "truncated": truncated,
-        })))
+        match tokio::task::spawn_blocking(move || run_glob_search(pattern, base, limit, abort))
+            .await
+        {
+            Ok(Ok(GlobSearchOutcome::Completed(result))) => {
+                Ok(ToolResult::from_call(call, result.content).with_details(serde_json::json!({
+                    "pattern": call.str_arg("pattern")?,
+                    "matches": result.match_count,
+                    "returned": result.returned,
+                    "limit": limit,
+                    "truncated": result.truncated,
+                })))
+            }
+            Ok(Ok(GlobSearchOutcome::Cancelled)) => Ok(ToolResult::from_call(call, "[aborted]")
+                .with_details(serde_json::json!({
+                    "pattern": call.str_arg("pattern")?,
+                    "matches": 0,
+                    "returned": 0,
+                    "limit": limit,
+                    "truncated": false,
+                    "aborted": true,
+                }))),
+            Ok(Err(error)) => Err(error),
+            Err(error) => Err(CoreError::new(format!("glob search task failed: {error}"))),
+        }
     }
+}
+
+fn run_glob_search(
+    pattern: String,
+    base: PathBuf,
+    limit: usize,
+    abort: agent_core::AbortSignal,
+) -> Result<GlobSearchOutcome, CoreError> {
+    let glob = globset::Glob::new(&pattern)
+        .map_err(|e| CoreError::new(format!("invalid glob pattern: {e}")))?
+        .compile_matcher();
+
+    let mut builder = ignore::WalkBuilder::new(&base);
+    builder.filter_entry(|entry| !should_skip_directory(entry));
+    let walker = builder.build();
+
+    let mut entries: Vec<(PathBuf, SystemTime)> = Vec::new();
+    for entry in walker {
+        if abort.is_aborted() {
+            return Ok(GlobSearchOutcome::Cancelled);
+        }
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        if !entry.file_type().is_some_and(|ft| ft.is_file()) {
+            continue;
+        }
+        let path = entry.path();
+        let relative = path.strip_prefix(&base).unwrap_or(path);
+        if !glob.is_match(relative) && !glob.is_match(path) {
+            continue;
+        }
+        let mtime = entry.metadata().ok().and_then(|m| m.modified().ok()).unwrap_or(UNIX_EPOCH);
+        entries.push((path.to_path_buf(), mtime));
+    }
+
+    entries.sort_by(|a, b| b.1.cmp(&a.1));
+
+    let match_count = entries.len();
+    let returned = entries.len().min(limit);
+    let truncated = match_count > limit;
+    let content = entries
+        .iter()
+        .take(limit)
+        .map(|(p, _)| p.display().to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Ok(GlobSearchOutcome::Completed(GlobSearchResult { content, match_count, returned, truncated }))
 }
 
 #[cfg(test)]
@@ -239,6 +292,38 @@ mod tests {
         assert_eq!(details["returned"], 2);
         assert_eq!(details["limit"], 2);
         assert_eq!(details["truncated"], true);
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn glob_tool_returns_aborted_result_when_signal_is_pre_cancelled()
+    -> Result<(), Box<dyn Error>> {
+        let dir = TestDir::new()?;
+        fs::write(dir.path().join("kept.rs"), "fn kept() {}\n")?;
+        let abort = AbortSignal::new();
+        abort.abort();
+
+        let tool = GlobTool;
+        let call = ToolCall::new("glob").with_arguments_value(serde_json::json!({
+            "pattern": "**/*.rs"
+        }));
+        let result = tool
+            .call(
+                &call,
+                &mut |_| {},
+                &ToolExecutionContext {
+                    run_id: "test-run".into(),
+                    workspace_root: Some(dir.path().to_path_buf()),
+                    abort,
+                    runtime: None,
+                },
+            )
+            .await
+            .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
+
+        assert_eq!(result.content, "[aborted]");
+        let details = result.details.ok_or("glob aborted result should include details")?;
+        assert_eq!(details["aborted"], true);
         Ok(())
     }
 }

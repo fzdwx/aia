@@ -1,5 +1,3 @@
-use std::fs;
-
 use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
@@ -50,7 +48,8 @@ impl Tool for EditTool {
         let new_string = call.str_arg("new_string")?;
         let path = context.resolve_path(&raw_path);
 
-        let content = fs::read_to_string(&path)
+        let content = tokio::fs::read_to_string(&path)
+            .await
             .map_err(|e| CoreError::new(format!("failed to read {}: {e}", path.display())))?;
 
         let count = content.matches(&*old_string).count();
@@ -58,7 +57,7 @@ impl Tool for EditTool {
             0 => Err(CoreError::new("old_string not found in file")),
             1 => {
                 let new_content = content.replacen(&*old_string, &new_string, 1);
-                fs::write(&path, &new_content).map_err(|e| {
+                tokio::fs::write(&path, &new_content).await.map_err(|e| {
                     CoreError::new(format!("failed to write {}: {e}", path.display()))
                 })?;
                 let old_lines = old_string.lines().count();

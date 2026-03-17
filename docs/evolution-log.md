@@ -1,5 +1,17 @@
 # 演进日志
 
+## 2026-03-17 Session 12
+
+**诊断**：`shell` 和 turn worker 已完成第一轮异步收口，但 `builtin-tools` 里 `read` / `write` / `edit` 仍直接走同步文件 I/O，`glob` / `grep` 也还会在 current-thread runtime 上同步扫盘；在大仓库里，这些路径仍会继续挤占 turn worker 的当前线程。
+**决策**：继续完成 Phase 3 的 builtin 工具收口：文件工具切到 `tokio::fs`，搜索工具改成 async 入口 + abort 感知的阻塞池执行。这样能在不改动工具对外契约的前提下，进一步减少工具执行对 async 主链的直接阻塞。
+**变更**：
+- `crates/builtin-tools/src/read.rs`、`crates/builtin-tools/src/write.rs`、`crates/builtin-tools/src/edit.rs`、`crates/builtin-tools/Cargo.toml`：把文件读写改为 `tokio::fs`，并显式补齐 `tokio` 的 `fs` feature。
+- `crates/builtin-tools/src/glob.rs`、`crates/builtin-tools/src/grep.rs`：把仓库扫描 / 内容搜索移到 async 入口下的 `spawn_blocking` 执行，并在遍历过程中轮询 abort；新增 pre-cancel 回归测试，验证工具会返回 `[aborted]`。
+- `docs/status.md`、`docs/requirements.md`、`docs/architecture.md`、`docs/async-phases.md`：同步记录 builtin 文件/搜索工具异步化已完成，当前优先级转向 Phase 4 的 live runtime stats / ownership 收口。
+**验证**：`cargo check` 通过；`cargo test -p builtin-tools -- --nocapture` 通过。
+**提交**：待补
+**下次方向**：优先继续减少 `apps/agent-server` 在运行中 `session/info` 上对 tape / 快照回退的依赖，并评估如何把当前 turn worker thread handoff 进一步收口为更自然的 runtime ownership 模型。
+
 ## 2026-03-17 Session 11
 
 **诊断**：虽然 Phase 1 / 2 已完成，但 `apps/agent-server` 的 turn 执行仍依赖 `tokio::spawn_blocking`，同时 `builtin-tools::shell` 还在 async tool 调用里用同步 `recv_timeout` 等待事件，这会拖住“全部改成异步”的 Phase 3 / 4 收口。
