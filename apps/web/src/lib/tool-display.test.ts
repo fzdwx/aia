@@ -1,11 +1,11 @@
-import { describe, test } from "node:test"
+import { describe, expect, test } from "vite-plus/test"
 import assert from "node:assert/strict"
 
 import { getToolDisplayName, getToolDisplayPath } from "./tool-display"
 
 describe("tool display name", () => {
   test("normalizes namespaced tool names", () => {
-    assert.equal(getToolDisplayName("functions.read"), "read")
+    expect(getToolDisplayName("functions.read")).toBe("read")
   })
 })
 

@@ -1,7 +1,11 @@
 import path from "path"
+import { fileURLToPath } from "url"
 import tailwindcss from "@tailwindcss/vite"
 import react from "@vitejs/plugin-react"
 import { defineConfig } from "vite-plus"
+
+const currentFilePath = fileURLToPath(import.meta.url)
+const currentDirectoryPath = path.dirname(currentFilePath)
 
 export default defineConfig({
   test: {
@@ -143,13 +147,13 @@ export default defineConfig({
       "pnpm-lock.yaml",
       "package-lock.json",
       "pnpm-lock.yaml",
-      "yarn.lock"
-    ]
+      "yarn.lock",
+    ],
   },
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(currentDirectoryPath, "./src"),
     },
   },
   server: {

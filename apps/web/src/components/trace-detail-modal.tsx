@@ -429,7 +429,9 @@ function SystemPromptSection({ prompts }: { prompts: PromptEntry[] }) {
           <Badge variant="outline" className="text-[11px]">
             {prompts.length}
           </Badge>
-          <span className="text-[11px] text-muted-foreground">{totalCharacters} chars</span>
+          <span className="text-[11px] text-muted-foreground">
+            {totalCharacters} chars
+          </span>
         </>
       }
     >
@@ -711,12 +713,19 @@ function ResponsesRequestContextCard({
   })
 
   return (
-    <Collapsible defaultOpen={false} className="rounded-xl border border-border/50 bg-muted/[0.04]">
+    <Collapsible
+      defaultOpen={false}
+      className="rounded-xl border border-border/50 bg-muted/[0.04]"
+    >
       <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left">
         <div className="space-y-0.5">
           <div className="flex items-center gap-2">
-            <h3 className="text-sm font-semibold text-foreground">Provider request</h3>
-            <Badge variant="outline" className="text-[10px]">responses</Badge>
+            <h3 className="text-sm font-semibold text-foreground">
+              Provider request
+            </h3>
+            <Badge variant="outline" className="text-[10px]">
+              responses
+            </Badge>
           </div>
           <p className="text-[12px] text-muted-foreground">
             {input.length} items · {prompts.length} system
@@ -740,7 +749,12 @@ function ResponsesRequestContextCard({
                 value: formatPrimitive(asNumber(request?.max_output_tokens)),
               },
               ...(toolNames.length > 0
-                ? [{ label: "Enabled tools", value: renderToolBadges(toolNames) }]
+                ? [
+                    {
+                      label: "Enabled tools",
+                      value: renderToolBadges(toolNames),
+                    },
+                  ]
                 : []),
             ]}
           />
@@ -993,10 +1007,7 @@ function TraceSummaryBar({ trace }: { trace: TraceRecord }) {
             value={String(trace.total_tokens ?? 0)}
           />
           {trace.cached_tokens != null && trace.cached_tokens > 0 ? (
-            <SummaryBadge
-              label="Cached"
-              value={String(trace.cached_tokens)}
-            />
+            <SummaryBadge label="Cached" value={String(trace.cached_tokens)} />
           ) : null}
           <SummaryBadge label="Time" value={time} />
         </div>

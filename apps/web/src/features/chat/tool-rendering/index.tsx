@@ -11,7 +11,10 @@ import {
   createReadRenderer,
   createWriteRenderer,
 } from "./renderers/file-tools"
-import { createGlobRenderer, createGrepRenderer } from "./renderers/search-tools"
+import {
+  createGlobRenderer,
+  createGrepRenderer,
+} from "./renderers/search-tools"
 import { createShellRenderer } from "./renderers/shell"
 import { createApplyPatchRenderer } from "./renderers/apply-patch"
 import {

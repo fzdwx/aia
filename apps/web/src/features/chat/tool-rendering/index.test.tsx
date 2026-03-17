@@ -66,7 +66,9 @@ describe("tool renderer registry", () => {
       succeeded: true,
     })
 
-    expect(title).toBe("session-cut — Condensed handoff summary for the next wake.")
+    expect(title).toBe(
+      "session-cut — Condensed handoff summary for the next wake."
+    )
   })
 
   test("falls back to default renderer for unknown tools", () => {

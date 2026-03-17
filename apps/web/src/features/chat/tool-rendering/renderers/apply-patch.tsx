@@ -2,14 +2,12 @@ import { getToolDisplayPath, normalizeToolArguments } from "@/lib/tool-display"
 
 import type { ToolRenderer } from "../types"
 import {
-  DetailList,
-  ExpandableOutput,
-  ToolDetailSection,
   getArrayValue,
   getNumberValue,
   getStringValue,
   truncateInline,
-} from "../ui"
+} from "../helpers"
+import { DetailList, ExpandableOutput, ToolDetailSection } from "../ui"
 
 export function createApplyPatchRenderer(): ToolRenderer {
   return {
@@ -35,11 +33,26 @@ export function createApplyPatchRenderer(): ToolRenderer {
           <ToolDetailSection title="Summary">
             <DetailList
               entries={[
-                { label: "Updated", value: getNumberValue(data.details, "files_updated") },
-                { label: "Added", value: getNumberValue(data.details, "files_added") },
-                { label: "Deleted", value: getNumberValue(data.details, "files_deleted") },
-                { label: "Moved", value: getNumberValue(data.details, "files_moved") },
-                { label: "Lines added", value: getNumberValue(data.details, "lines_added") },
+                {
+                  label: "Updated",
+                  value: getNumberValue(data.details, "files_updated"),
+                },
+                {
+                  label: "Added",
+                  value: getNumberValue(data.details, "files_added"),
+                },
+                {
+                  label: "Deleted",
+                  value: getNumberValue(data.details, "files_deleted"),
+                },
+                {
+                  label: "Moved",
+                  value: getNumberValue(data.details, "files_moved"),
+                },
+                {
+                  label: "Lines added",
+                  value: getNumberValue(data.details, "lines_added"),
+                },
                 {
                   label: "Lines removed",
                   value: getNumberValue(data.details, "lines_removed"),
@@ -57,7 +70,8 @@ export function createApplyPatchRenderer(): ToolRenderer {
                       : undefined
                   if (!fileRecord) return null
                   const filePath =
-                    getStringValue(fileRecord, "file_path") ?? `file ${index + 1}`
+                    getStringValue(fileRecord, "file_path") ??
+                    `file ${index + 1}`
                   const kind = getStringValue(fileRecord, "kind")
                   const moveTo = getStringValue(fileRecord, "move_to")
                   const patch = getStringValue(fileRecord, "patch")
@@ -70,16 +84,23 @@ export function createApplyPatchRenderer(): ToolRenderer {
                       <summary className="cursor-pointer px-2.5 py-2 text-[12px] text-foreground/80">
                         <span className="font-medium">{filePath}</span>
                         {kind ? (
-                          <span className="ml-2 text-muted-foreground/60">{kind}</span>
+                          <span className="ml-2 text-muted-foreground/60">
+                            {kind}
+                          </span>
                         ) : null}
                         {moveTo ? (
-                          <span className="ml-2 text-muted-foreground/60">→ {moveTo}</span>
+                          <span className="ml-2 text-muted-foreground/60">
+                            → {moveTo}
+                          </span>
                         ) : null}
                       </summary>
                       <div className="space-y-2 border-t border-border/20 px-2.5 py-2">
                         <DetailList
                           entries={[
-                            { label: "Added", value: getNumberValue(fileRecord, "added") },
+                            {
+                              label: "Added",
+                              value: getNumberValue(fileRecord, "added"),
+                            },
                             {
                               label: "Removed",
                               value: getNumberValue(fileRecord, "removed"),

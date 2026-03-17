@@ -15,7 +15,11 @@ import {
   updateProvider as apiUpdateProvider,
   deleteProvider as apiDeleteProvider,
 } from "@/lib/api"
-import { createIdleScheduler, type IdleCanceller, type IdleScheduler } from "@/lib/idle"
+import {
+  createIdleScheduler,
+  type IdleCanceller,
+  type IdleScheduler,
+} from "@/lib/idle"
 import { normalizeToolArguments } from "@/lib/tool-display"
 import type {
   AppView,
@@ -57,17 +61,19 @@ const EMPTY_SESSION_SNAPSHOT: SessionSnapshot = {
 }
 
 function latestTurn(turns: TurnLifecycle[]): TurnLifecycle | null {
-  return turns.length > 0 ? turns[turns.length - 1] ?? null : null
+  return turns.length > 0 ? (turns[turns.length - 1] ?? null) : null
 }
 
-function snapshotFromState(state: Pick<
-  ChatStore,
-  | "turns"
-  | "streamingTurn"
-  | "chatState"
-  | "contextPressure"
-  | "lastCompression"
->): SessionSnapshot {
+function snapshotFromState(
+  state: Pick<
+    ChatStore,
+    | "turns"
+    | "streamingTurn"
+    | "chatState"
+    | "contextPressure"
+    | "lastCompression"
+  >
+): SessionSnapshot {
   return {
     latestTurn: latestTurn(state.turns),
     streamingTurn: state.streamingTurn,
@@ -253,12 +259,10 @@ let scheduleIdleWork: IdleScheduler = defaultIdleScheduler.schedule
 let cancelIdleWork: IdleCanceller = defaultIdleScheduler.cancel
 
 export function __setIdleSchedulerForTests(
-  scheduler:
-    | {
-        schedule: IdleScheduler
-        cancel: IdleCanceller
-      }
-    | null
+  scheduler: {
+    schedule: IdleScheduler
+    cancel: IdleCanceller
+  } | null
 ) {
   if (scheduler) {
     scheduleIdleWork = scheduler.schedule
@@ -338,7 +342,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
       const hydratedSnapshot: SessionSnapshot = {
         latestTurn: latestTurn(historyPage.turns),
-        streamingTurn: currentTurn ? currentTurnToStreamingTurn(currentTurn) : null,
+        streamingTurn: currentTurn
+          ? currentTurnToStreamingTurn(currentTurn)
+          : null,
         chatState: currentTurn ? "active" : "idle",
         contextPressure: get().contextPressure,
         lastCompression: null,
@@ -367,7 +373,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
           void fetchHistory({
             sessionId: id,
             beforeTurnId,
-            limit: SESSION_HISTORY_PAGE_SIZE - INITIAL_SESSION_HISTORY_PAGE_SIZE,
+            limit:
+              SESSION_HISTORY_PAGE_SIZE - INITIAL_SESSION_HISTORY_PAGE_SIZE,
             signal: abortController.signal,
           })
             .then((olderHistoryPage) => {
@@ -380,7 +387,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
               }
 
               const existingTurns = get().turns
-              const turns = mergeTurnsById(olderHistoryPage.turns, existingTurns)
+              const turns = mergeTurnsById(
+                olderHistoryPage.turns,
+                existingTurns
+              )
               const nextSnapshot: SessionSnapshot = {
                 latestTurn: latestTurn(turns),
                 streamingTurn: get().streamingTurn,
@@ -468,10 +478,16 @@ export const useChatStore = create<ChatStore>((set, get) => {
     handleSseEvent: (event: SseEvent) => {
       const activeId = get().activeSessionId
 
-      function findToolBlockIndex(blocks: StreamingTurn["blocks"], invocationId: string) {
+      function findToolBlockIndex(
+        blocks: StreamingTurn["blocks"],
+        invocationId: string
+      ) {
         for (let i = blocks.length - 1; i >= 0; i -= 1) {
           const block = blocks[i]
-          if (block?.type === "tool" && block.tool.invocationId === invocationId) {
+          if (
+            block?.type === "tool" &&
+            block.tool.invocationId === invocationId
+          ) {
             return i
           }
         }
@@ -491,7 +507,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
               state._sessionSnapshots,
               activeId,
               {
-                ...(state._sessionSnapshots[activeId] ?? EMPTY_SESSION_SNAPSHOT),
+                ...(state._sessionSnapshots[activeId] ??
+                  EMPTY_SESSION_SNAPSHOT),
                 streamingTurn: nextStreamingTurn,
               },
               state.sessions
@@ -509,7 +526,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
             const prev = get().streamingTurn
             if (prev) {
               set((state) => {
-                const nextStreamingTurn = { ...prev, status: "waiting" as const }
+                const nextStreamingTurn = {
+                  ...prev,
+                  status: "waiting" as const,
+                }
                 return {
                   _pendingPrompt: null,
                   chatState: "active",
@@ -836,7 +856,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
         }
         case "sync_required": {
           if (!activeId) break
-          void get().fetchSessions().catch(() => {})
+          void get()
+            .fetchSessions()
+            .catch(() => {})
           void hydrateSession(activeId)
           break
         }
@@ -968,7 +990,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
           status: "waiting",
           blocks: [],
         }
-        const snapshot = state._sessionSnapshots[sessionId] ?? EMPTY_SESSION_SNAPSHOT
+        const snapshot =
+          state._sessionSnapshots[sessionId] ?? EMPTY_SESSION_SNAPSHOT
         const nextState = {
           ...state,
           error: null,
@@ -1147,7 +1170,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
               state._sessionSnapshots,
               sessionId,
               {
-                ...(state._sessionSnapshots[sessionId] ?? EMPTY_SESSION_SNAPSHOT),
+                ...(state._sessionSnapshots[sessionId] ??
+                  EMPTY_SESSION_SNAPSHOT),
                 latestTurn: latestTurn(turns),
               },
               state.sessions

@@ -75,7 +75,7 @@ export function Sidebar() {
                   void deleteSession(session.id)
                 }}
                 disabled={isSwitchingTo}
-                className="ml-1 hidden shrink-0 rounded p-0.5 text-muted-foreground/50 hover:text-foreground/80 disabled:opacity-30 group-hover:block"
+                className="ml-1 hidden shrink-0 rounded p-0.5 text-muted-foreground/50 group-hover:block hover:text-foreground/80 disabled:opacity-30"
               >
                 <X className="size-3" />
               </button>

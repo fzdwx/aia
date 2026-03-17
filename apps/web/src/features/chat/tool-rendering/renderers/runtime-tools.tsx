@@ -1,14 +1,8 @@
 import { normalizeToolArguments } from "@/lib/tool-display"
 
 import type { ToolRenderer } from "../types"
-import {
-  DetailList,
-  ExpandableOutput,
-  ToolDetailSection,
-  getNumberValue,
-  getStringValue,
-  truncateInline,
-} from "../ui"
+import { getNumberValue, getStringValue, truncateInline } from "../helpers"
+import { DetailList, ExpandableOutput, ToolDetailSection } from "../ui"
 
 export function createTapeInfoRenderer(): ToolRenderer {
   return {
@@ -25,11 +19,20 @@ export function createTapeInfoRenderer(): ToolRenderer {
           <ToolDetailSection title="Context">
             <DetailList
               entries={[
-                { label: "Entries", value: getNumberValue(data.details, "entries") },
-                { label: "Anchors", value: getNumberValue(data.details, "anchors") },
+                {
+                  label: "Entries",
+                  value: getNumberValue(data.details, "entries"),
+                },
+                {
+                  label: "Anchors",
+                  value: getNumberValue(data.details, "anchors"),
+                },
                 {
                   label: "Since last anchor",
-                  value: getNumberValue(data.details, "entries_since_last_anchor"),
+                  value: getNumberValue(
+                    data.details,
+                    "entries_since_last_anchor"
+                  ),
                 },
                 {
                   label: "Last input tokens",
@@ -55,7 +58,10 @@ export function createTapeInfoRenderer(): ToolRenderer {
           </ToolDetailSection>
           {data.outputContent ? (
             <ToolDetailSection title="Payload">
-              <ExpandableOutput value={data.outputContent} failed={!data.succeeded} />
+              <ExpandableOutput
+                value={data.outputContent}
+                failed={!data.succeeded}
+              />
             </ToolDetailSection>
           ) : null}
         </div>
@@ -80,7 +86,10 @@ export function createTapeHandoffRenderer(): ToolRenderer {
     renderDetails(data) {
       return data.outputContent ? (
         <ToolDetailSection title="Outcome">
-          <ExpandableOutput value={data.outputContent} failed={!data.succeeded} />
+          <ExpandableOutput
+            value={data.outputContent}
+            failed={!data.succeeded}
+          />
         </ToolDetailSection>
       ) : null
     },

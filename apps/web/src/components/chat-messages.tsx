@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   CompressionNotice,
   MemoizedStreamingView,
@@ -41,6 +41,41 @@ export function ChatMessages() {
   const topSpacerHeight = 0
   const bottomSpacerHeight = 0
   const showHistoryHint = historyLoadingMore || scrollTop < 160
+
+  const handleLoadOlderTurns = useCallback(async () => {
+    if (
+      autoLoadingOlderTurnsRef.current ||
+      historyLoadingMoreRef.current ||
+      sessionHydratingRef.current ||
+      !historyHasMoreRef.current
+    ) {
+      return
+    }
+
+    autoLoadingOlderTurnsRef.current = true
+    const container = containerRef.current
+    const previousScrollHeight = container?.scrollHeight ?? 0
+    skipNextAutoScrollRef.current = true
+    try {
+      await loadOlderTurns()
+      requestAnimationFrame(() => {
+        const nextContainer = containerRef.current
+        if (!nextContainer) {
+          autoLoadingOlderTurnsRef.current = false
+          return
+        }
+        const nextScrollHeight = nextContainer.scrollHeight
+        nextContainer.scrollTop += nextScrollHeight - previousScrollHeight
+        setScrollTop(nextContainer.scrollTop)
+        if (activeSessionId) {
+          scrollPositionsRef.current[activeSessionId] = nextContainer.scrollTop
+        }
+        autoLoadingOlderTurnsRef.current = false
+      })
+    } catch {
+      autoLoadingOlderTurnsRef.current = false
+    }
+  }, [activeSessionId, loadOlderTurns])
 
   useEffect(() => {
     historyHasMoreRef.current = historyHasMore
@@ -106,7 +141,14 @@ export function ChatMessages() {
     return () => {
       observer.disconnect()
     }
-  }, [activeSessionId, turns.length, historyHasMore, historyLoadingMore, sessionHydrating])
+  }, [
+    activeSessionId,
+    turns.length,
+    historyHasMore,
+    historyLoadingMore,
+    sessionHydrating,
+    handleLoadOlderTurns,
+  ])
 
   useEffect(() => {
     const previousSessionId = previousSessionIdRef.current
@@ -177,41 +219,6 @@ export function ChatMessages() {
     previousStreamingBlockCountRef.current = currentStreamingBlockCount
   }, [activeSessionId, turns.length, streamingTurn?.blocks.length])
 
-  async function handleLoadOlderTurns() {
-    if (
-      autoLoadingOlderTurnsRef.current ||
-      historyLoadingMoreRef.current ||
-      sessionHydratingRef.current ||
-      !historyHasMoreRef.current
-    ) {
-      return
-    }
-
-    autoLoadingOlderTurnsRef.current = true
-    const container = containerRef.current
-    const previousScrollHeight = container?.scrollHeight ?? 0
-    skipNextAutoScrollRef.current = true
-    try {
-      await loadOlderTurns()
-      requestAnimationFrame(() => {
-        const nextContainer = containerRef.current
-        if (!nextContainer) {
-          autoLoadingOlderTurnsRef.current = false
-          return
-        }
-        const nextScrollHeight = nextContainer.scrollHeight
-        nextContainer.scrollTop += nextScrollHeight - previousScrollHeight
-        setScrollTop(nextContainer.scrollTop)
-        if (activeSessionId) {
-          scrollPositionsRef.current[activeSessionId] = nextContainer.scrollTop
-        }
-        autoLoadingOlderTurnsRef.current = false
-      })
-    } catch {
-      autoLoadingOlderTurnsRef.current = false
-    }
-  }
-
   if (turns.length === 0 && !streamingTurn) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center px-4">
@@ -236,11 +243,16 @@ export function ChatMessages() {
         {sessionHydrating && <SessionHydratingIndicator />}
         {historyHasMore && (
           <>
-            <div ref={historyTriggerRef} className="h-px w-full" aria-hidden="true" />
             <div
-              className={showHistoryHint
-                ? "sticky top-0 z-10 -mx-6 mb-4 flex justify-center bg-gradient-to-b from-background via-background/95 to-transparent px-6 pt-2 pb-3 opacity-100 transition-opacity duration-150 pointer-events-none"
-                : "sticky top-0 z-10 -mx-6 mb-4 flex justify-center bg-gradient-to-b from-background via-background/95 to-transparent px-6 pt-2 pb-3 opacity-0 transition-opacity duration-150 pointer-events-none"
+              ref={historyTriggerRef}
+              className="h-px w-full"
+              aria-hidden="true"
+            />
+            <div
+              className={
+                showHistoryHint
+                  ? "pointer-events-none sticky top-0 z-10 -mx-6 mb-4 flex justify-center bg-gradient-to-b from-background via-background/95 to-transparent px-6 pt-2 pb-3 opacity-100 transition-opacity duration-150"
+                  : "pointer-events-none sticky top-0 z-10 -mx-6 mb-4 flex justify-center bg-gradient-to-b from-background via-background/95 to-transparent px-6 pt-2 pb-3 opacity-0 transition-opacity duration-150"
               }
               aria-hidden={!showHistoryHint}
             >
@@ -253,14 +265,20 @@ export function ChatMessages() {
           </>
         )}
         <div
-          className={sessionHydrating ? "transition-opacity duration-150 ease-out opacity-80" : "transition-opacity duration-150 ease-out opacity-100"}
+          className={
+            sessionHydrating
+              ? "opacity-80 transition-opacity duration-150 ease-out"
+              : "opacity-100 transition-opacity duration-150 ease-out"
+          }
           aria-busy={sessionHydrating}
         >
           {topSpacerHeight > 0 && <div style={{ height: topSpacerHeight }} />}
           {visibleTurns.map((turn) => (
             <MemoizedTurnView key={turn.turn_id} turn={turn} />
           ))}
-          {bottomSpacerHeight > 0 && <div style={{ height: bottomSpacerHeight }} />}
+          {bottomSpacerHeight > 0 && (
+            <div style={{ height: bottomSpacerHeight }} />
+          )}
           {lastCompression && !streamingTurn && (
             <CompressionNotice summary={lastCompression.summary} />
           )}

@@ -2,14 +2,12 @@ import { normalizeToolArguments } from "@/lib/tool-display"
 
 import type { ToolRenderer } from "../types"
 import {
-  DetailList,
-  ExpandableOutput,
-  ToolDetailSection,
   getBooleanValue,
   getNumberValue,
   getStringValue,
   truncateInline,
-} from "../ui"
+} from "../helpers"
+import { DetailList, ExpandableOutput, ToolDetailSection } from "../ui"
 
 export function createGlobRenderer(): ToolRenderer {
   return {
@@ -26,20 +24,37 @@ export function createGlobRenderer(): ToolRenderer {
           <ToolDetailSection title="Matches">
             <DetailList
               entries={[
-                { label: "Pattern", value: getStringValue(data.details, "pattern") },
-                { label: "Matches", value: getNumberValue(data.details, "matches") },
-                { label: "Returned", value: getNumberValue(data.details, "returned") },
-                { label: "Limit", value: getNumberValue(data.details, "limit") },
+                {
+                  label: "Pattern",
+                  value: getStringValue(data.details, "pattern"),
+                },
+                {
+                  label: "Matches",
+                  value: getNumberValue(data.details, "matches"),
+                },
+                {
+                  label: "Returned",
+                  value: getNumberValue(data.details, "returned"),
+                },
+                {
+                  label: "Limit",
+                  value: getNumberValue(data.details, "limit"),
+                },
                 {
                   label: "Aborted",
-                  value: getBooleanValue(data.details, "aborted") ? "yes" : undefined,
+                  value: getBooleanValue(data.details, "aborted")
+                    ? "yes"
+                    : undefined,
                 },
               ]}
             />
           </ToolDetailSection>
           {data.outputContent ? (
             <ToolDetailSection title="Results">
-              <ExpandableOutput value={data.outputContent} failed={!data.succeeded} />
+              <ExpandableOutput
+                value={data.outputContent}
+                failed={!data.succeeded}
+              />
             </ToolDetailSection>
           ) : null}
         </div>
@@ -70,20 +85,37 @@ export function createGrepRenderer(): ToolRenderer {
           <ToolDetailSection title="Search">
             <DetailList
               entries={[
-                { label: "Pattern", value: getStringValue(data.details, "pattern") },
-                { label: "Matches", value: getNumberValue(data.details, "matches") },
-                { label: "Returned", value: getNumberValue(data.details, "returned") },
-                { label: "Limit", value: getNumberValue(data.details, "limit") },
+                {
+                  label: "Pattern",
+                  value: getStringValue(data.details, "pattern"),
+                },
+                {
+                  label: "Matches",
+                  value: getNumberValue(data.details, "matches"),
+                },
+                {
+                  label: "Returned",
+                  value: getNumberValue(data.details, "returned"),
+                },
+                {
+                  label: "Limit",
+                  value: getNumberValue(data.details, "limit"),
+                },
                 {
                   label: "Aborted",
-                  value: getBooleanValue(data.details, "aborted") ? "yes" : undefined,
+                  value: getBooleanValue(data.details, "aborted")
+                    ? "yes"
+                    : undefined,
                 },
               ]}
             />
           </ToolDetailSection>
           {data.outputContent ? (
             <ToolDetailSection title="Results">
-              <ExpandableOutput value={data.outputContent} failed={!data.succeeded} />
+              <ExpandableOutput
+                value={data.outputContent}
+                failed={!data.succeeded}
+              />
             </ToolDetailSection>
           ) : null}
         </div>

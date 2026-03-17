@@ -10,7 +10,11 @@ import type {
   TurnUsage,
 } from "@/lib/types"
 
-import { MemoizedStreamingToolGroup, MemoizedToolGroup, formatDurationMs, fromInvocation } from "./tool-timeline"
+import { MemoizedStreamingToolGroup, MemoizedToolGroup } from "./tool-timeline"
+import {
+  formatDurationMs,
+  fromInvocation,
+} from "@/features/chat/tool-timeline-helpers.ts"
 
 type BlockGroup =
   | { type: "single"; block: TurnBlock }
@@ -130,7 +134,11 @@ const STATUS_LABELS: Record<StreamingTurn["status"], string> = {
   cancelled: "Cancelled",
 }
 
-export function StatusIndicator({ status }: { status: StreamingTurn["status"] }) {
+export function StatusIndicator({
+  status,
+}: {
+  status: StreamingTurn["status"]
+}) {
   return (
     <div className="py-2">
       <Shimmer as="span" className="text-[14px] font-medium" duration={2}>
@@ -164,12 +172,12 @@ function TurnMeta({ turn }: { turn: TurnLifecycle }) {
   if (!duration && !turn.usage && !statusLabel) return null
 
   return (
-    <div className="mt-2 flex items-center gap-3 text-[11px] text-muted-foreground/55 opacity-0 transition-opacity duration-150 group-hover/turn:opacity-100 group-focus-within/turn:opacity-100">
+    <div className="mt-2 flex items-center gap-3 text-[11px] text-muted-foreground/55 opacity-0 transition-opacity duration-150 group-focus-within/turn:opacity-100 group-hover/turn:opacity-100">
       {duration && (
-        <span className="tabular-nums text-muted-foreground/65">{`latency ${duration}`}</span>
+        <span className="text-muted-foreground/65 tabular-nums">{`latency ${duration}`}</span>
       )}
       {statusLabel && (
-        <span className="rounded-full border border-border/40 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground/80">
+        <span className="rounded-full border border-border/40 px-2 py-0.5 text-[10px] font-medium tracking-[0.08em] text-muted-foreground/80 uppercase">
           {statusLabel}
         </span>
       )}
@@ -215,7 +223,10 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
         {grouped.map((group, i) => {
           if (group.type === "tools") {
             return (
-              <MemoizedToolGroup key={i} items={group.invocations.map(fromInvocation)} />
+              <MemoizedToolGroup
+                key={i}
+                items={group.invocations.map(fromInvocation)}
+              />
             )
           }
           return <BlockRenderer key={i} block={group.block} />
@@ -250,13 +261,20 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
         </div>
         {groups.map((group, i) => {
           if (group.type === "thinking") {
-            const isLast = i === groups.length - 1 && streaming.status === "thinking"
+            const isLast =
+              i === groups.length - 1 && streaming.status === "thinking"
             return (
-              <ThinkingBlock key={i} content={group.content} isStreaming={isLast} />
+              <ThinkingBlock
+                key={i}
+                content={group.content}
+                isStreaming={isLast}
+              />
             )
           }
           if (group.type === "tools") {
-            return <MemoizedStreamingToolGroup key={i} toolOutputs={group.tools} />
+            return (
+              <MemoizedStreamingToolGroup key={i} toolOutputs={group.tools} />
+            )
           }
           return (
             <MarkdownContent
@@ -285,7 +303,7 @@ export const MemoizedStreamingView = memo(
 export function CompressionNotice({ summary }: { summary: string }) {
   return (
     <div className="mb-4 rounded-lg border border-border/30 bg-muted/25 px-3 py-2 text-[12px] text-muted-foreground">
-      <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/60">
+      <div className="mb-1 text-[11px] font-semibold tracking-[0.08em] text-foreground/60 uppercase">
         Context compressed
       </div>
       <p className="line-clamp-3 whitespace-pre-wrap">{summary}</p>

@@ -1,14 +1,8 @@
 import { getToolDisplayPath, normalizeToolArguments } from "@/lib/tool-display"
 
 import type { ToolRenderer } from "../types"
-import {
-  DetailList,
-  ExpandableOutput,
-  ToolDetailSection,
-  getNumberValue,
-  getStringValue,
-  truncateInline,
-} from "../ui"
+import { getNumberValue, getStringValue, truncateInline } from "../helpers"
+import { DetailList, ExpandableOutput, ToolDetailSection } from "../ui"
 
 export function createShellRenderer(): ToolRenderer {
   return {
@@ -42,7 +36,10 @@ export function createShellRenderer(): ToolRenderer {
           ) : null}
           {!stdout && !stderr && data.outputContent ? (
             <ToolDetailSection title="Outcome">
-              <ExpandableOutput value={data.outputContent} failed={!data.succeeded} />
+              <ExpandableOutput
+                value={data.outputContent}
+                failed={!data.succeeded}
+              />
             </ToolDetailSection>
           ) : null}
         </div>

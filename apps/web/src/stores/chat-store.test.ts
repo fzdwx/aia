@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, test } from "node:test"
+import { afterEach, beforeEach, describe, expect, test } from "vite-plus/test"
 import assert from "node:assert/strict"
 
 import { __setIdleSchedulerForTests, useChatStore } from "./chat-store"
@@ -51,13 +51,13 @@ describe("chat store submitTurn", () => {
     useChatStore.getState().submitTurn("hello world")
 
     const state = useChatStore.getState()
-    assert.equal(state.chatState, "active")
+    expect(state.chatState).toBe("active")
     assert.deepEqual(state.streamingTurn, {
       userMessage: "hello world",
       status: "waiting",
       blocks: [],
     })
-    assert.equal(state.error, null)
+    expect(state.error).toBe(null)
   })
 
   test("waiting status does not wipe optimistic streaming blocks", () => {
@@ -124,7 +124,7 @@ describe("chat store submitTurn", () => {
 
     useChatStore.getState().handleSseEvent(errorEvent)
 
-    assert.equal(useChatStore.getState().error, null)
+    expect(useChatStore.getState().error).toBe(null)
   })
 
   test("creates tool block from started event with full arguments", () => {
@@ -153,17 +153,17 @@ describe("chat store submitTurn", () => {
     useChatStore.getState().handleSseEvent(startedEvent)
 
     const state = useChatStore.getState().streamingTurn
-    assert.equal(state?.blocks.length, 1)
-    assert.equal(state?.blocks[0]?.type, "tool")
+    expect(state?.blocks.length).toBe(1)
+    expect(state?.blocks[0]?.type).toBe("tool")
     if (state?.blocks[0]?.type !== "tool") {
       throw new Error("expected tool block")
     }
-    assert.equal(state.blocks[0].tool.invocationId, "functions.read:27")
-    assert.equal(state.blocks[0].tool.toolName, "functions.read")
+    expect(state.blocks[0].tool.invocationId).toBe("functions.read:27")
+    expect(state.blocks[0].tool.toolName).toBe("functions.read")
     assert.deepEqual(state.blocks[0].tool.arguments, {
       file_path: "/home/like/projects/aia/AGENTS.md",
     })
-    assert.equal(typeof state.blocks[0].tool.startedAtMs, "number")
+    expect(typeof state.blocks[0].tool.startedAtMs).toBe("number")
   })
 
   test("keeps partial streaming content visible after cancelled error", () => {
@@ -191,8 +191,8 @@ describe("chat store submitTurn", () => {
     useChatStore.getState().handleSseEvent(errorEvent)
 
     const state = useChatStore.getState()
-    assert.equal(state.chatState, "idle")
-    assert.equal(state.error, null)
+    expect(state.chatState).toBe("idle")
+    expect(state.error).toBe(null)
     assert.deepEqual(state.streamingTurn, {
       userMessage: "hello world",
       status: "cancelled",
@@ -220,7 +220,7 @@ describe("chat store submitTurn", () => {
     useChatStore.getState().handleSseEvent(compressionEvent)
 
     const state = useChatStore.getState()
-    assert.deepEqual(state.lastCompression, compressionEvent.data)
+    expect(state.lastCompression).toEqual(compressionEvent.data)
   })
 
   test("sync_required 会主动重拉当前会话状态", async () => {
@@ -374,25 +374,21 @@ describe("chat store submitTurn", () => {
       },
     })
 
-    useChatStore
-      .getState()
-      .handleSseEvent(
-        {
-          type: "sync_required",
-          data: { reason: "lagged", skipped_messages: 3 },
-        } as unknown as SseEvent
-      )
+    useChatStore.getState().handleSseEvent({
+      type: "sync_required",
+      data: { reason: "lagged", skipped_messages: 3 },
+    } as unknown as SseEvent)
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     const state = useChatStore.getState()
-    assert.equal(state.turns[0]?.turn_id, "turn-resynced")
+    expect(state.turns[0]?.turn_id).toBe("turn-resynced")
     assert.deepEqual(state.streamingTurn, {
       userMessage: "继续执行",
       status: "working",
       blocks: [{ type: "text", content: "已恢复中的输出" }],
     })
-    assert.equal(state.contextPressure, 0.7)
+    expect(state.contextPressure).toBe(0.7)
     assert.deepEqual(
       state.sessions.map((session) => session.id),
       ["session-1", "session-2"]
@@ -458,13 +454,16 @@ describe("chat store submitTurn", () => {
     useChatStore.getState().handleSseEvent(completedEvent)
 
     const state = useChatStore.getState()
-    assert.equal(state.chatState, "idle")
-    assert.equal(state.streamingTurn, null)
-    assert.equal(state.turns.length, 1)
-    assert.equal(state.turns[0]?.outcome, "cancelled")
-    assert.equal(state.turns[0]?.assistant_message, "部分回答")
-    assert.equal(state._sessionSnapshots["session-1"]?.latestTurn?.turn_id, "turn-cancelled-1")
-    assert.equal(state._sessionSnapshots["session-1"]?.streamingTurn, null)
+    expect(state.chatState).toBe("idle")
+    expect(state.streamingTurn).toBe(null)
+    expect(state.turns.length).toBe(1)
+    expect(state.turns[0]?.outcome).toBe("cancelled")
+    expect(state.turns[0]?.assistant_message).toBe("部分回答")
+    assert.equal(
+      state._sessionSnapshots["session-1"]?.latestTurn?.turn_id,
+      "turn-cancelled-1"
+    )
+    expect(state._sessionSnapshots["session-1"]?.streamingTurn).toBe(null)
   })
 
   test("switchSession snapshots previous session with only latest turn and hydrates target from latest turn first", async () => {
@@ -587,8 +586,8 @@ describe("chat store submitTurn", () => {
     await switchPromise
 
     const firstHydrated = useChatStore.getState()
-    assert.equal(firstHydrated.turns.length, 1)
-    assert.equal(firstHydrated.turns[0]?.turn_id, "turn-2-latest")
+    expect(firstHydrated.turns.length).toBe(1)
+    expect(firstHydrated.turns[0]?.turn_id).toBe("turn-2-latest")
 
     resolveFullHistory?.(
       new Response(
@@ -747,10 +746,10 @@ describe("chat store submitTurn", () => {
     const switchPromise = useChatStore.getState().switchSession("session-2")
 
     const duringHydration = useChatStore.getState()
-    assert.equal(duringHydration.activeSessionId, "session-2")
-    assert.equal(duringHydration.sessionHydrating, true)
-    assert.equal(duringHydration.turns[0]?.turn_id, "turn-2-cached")
-    assert.equal(duringHydration.turns.length, 1)
+    expect(duringHydration.activeSessionId).toBe("session-2")
+    expect(duringHydration.sessionHydrating).toBe(true)
+    expect(duringHydration.turns[0]?.turn_id).toBe("turn-2-cached")
+    expect(duringHydration.turns.length).toBe(1)
 
     resolveHistory?.(
       new Response(
@@ -790,9 +789,12 @@ describe("chat store submitTurn", () => {
     await switchPromise
 
     const hydrated = useChatStore.getState()
-    assert.equal(hydrated.sessionHydrating, false)
-    assert.equal(hydrated.turns[0]?.turn_id, "turn-2-live")
-    assert.equal(hydrated._sessionSnapshots["session-1"]?.latestTurn?.turn_id, "turn-1")
+    expect(hydrated.sessionHydrating).toBe(false)
+    expect(hydrated.turns[0]?.turn_id).toBe("turn-2-live")
+    assert.equal(
+      hydrated._sessionSnapshots["session-1"]?.latestTurn?.turn_id,
+      "turn-1"
+    )
 
     globalThis.fetch = originalFetchImpl
   })
@@ -919,8 +921,11 @@ describe("chat store submitTurn", () => {
     )
 
     const state = useChatStore.getState()
-    assert.notEqual(state.activeSessionId, "session-2")
-    assert.equal(state.turns.some((turn) => turn.turn_id === "turn-2-older"), false)
+    expect(state.activeSessionId).not.toBe("session-2")
+    assert.equal(
+      state.turns.some((turn) => turn.turn_id === "turn-2-older"),
+      false
+    )
 
     globalThis.fetch = originalFetchImpl
   })

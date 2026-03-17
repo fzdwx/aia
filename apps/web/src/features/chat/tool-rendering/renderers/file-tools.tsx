@@ -1,14 +1,8 @@
 import { getToolDisplayPath, normalizeToolArguments } from "@/lib/tool-display"
 
 import type { ToolRenderer } from "../types"
-import {
-  DetailList,
-  ExpandableOutput,
-  ToolDetailSection,
-  getNumberValue,
-  getStringValue,
-  truncateInline,
-} from "../ui"
+import { getNumberValue, getStringValue, truncateInline } from "../helpers"
+import { DetailList, ExpandableOutput, ToolDetailSection } from "../ui"
 
 export function createReadRenderer(): ToolRenderer {
   return {
@@ -33,8 +27,14 @@ export function createReadRenderer(): ToolRenderer {
           <ToolDetailSection title="Read">
             <DetailList
               entries={[
-                { label: "File", value: getStringValue(data.details, "file_path") },
-                { label: "Lines", value: getNumberValue(data.details, "lines_read") },
+                {
+                  label: "File",
+                  value: getStringValue(data.details, "file_path"),
+                },
+                {
+                  label: "Lines",
+                  value: getNumberValue(data.details, "lines_read"),
+                },
                 {
                   label: "Total lines",
                   value: getNumberValue(data.details, "total_lines"),
@@ -44,7 +44,10 @@ export function createReadRenderer(): ToolRenderer {
           </ToolDetailSection>
           {data.outputContent ? (
             <ToolDetailSection title="Content">
-              <ExpandableOutput value={data.outputContent} failed={!data.succeeded} />
+              <ExpandableOutput
+                value={data.outputContent}
+                failed={!data.succeeded}
+              />
             </ToolDetailSection>
           ) : null}
         </div>
@@ -70,14 +73,23 @@ export function createWriteRenderer(): ToolRenderer {
           <ToolDetailSection title="Write">
             <DetailList
               entries={[
-                { label: "File", value: getStringValue(data.details, "file_path") },
-                { label: "Lines", value: getNumberValue(data.details, "lines") },
+                {
+                  label: "File",
+                  value: getStringValue(data.details, "file_path"),
+                },
+                {
+                  label: "Lines",
+                  value: getNumberValue(data.details, "lines"),
+                },
               ]}
             />
           </ToolDetailSection>
           {data.outputContent ? (
             <ToolDetailSection title="Outcome">
-              <ExpandableOutput value={data.outputContent} failed={!data.succeeded} />
+              <ExpandableOutput
+                value={data.outputContent}
+                failed={!data.succeeded}
+              />
             </ToolDetailSection>
           ) : null}
         </div>
@@ -108,15 +120,27 @@ export function createEditRenderer(): ToolRenderer {
           <ToolDetailSection title="Edit">
             <DetailList
               entries={[
-                { label: "File", value: getStringValue(data.details, "file_path") },
-                { label: "Added", value: getNumberValue(data.details, "added") },
-                { label: "Removed", value: getNumberValue(data.details, "removed") },
+                {
+                  label: "File",
+                  value: getStringValue(data.details, "file_path"),
+                },
+                {
+                  label: "Added",
+                  value: getNumberValue(data.details, "added"),
+                },
+                {
+                  label: "Removed",
+                  value: getNumberValue(data.details, "removed"),
+                },
               ]}
             />
           </ToolDetailSection>
           {data.outputContent ? (
             <ToolDetailSection title="Outcome">
-              <ExpandableOutput value={data.outputContent} failed={!data.succeeded} />
+              <ExpandableOutput
+                value={data.outputContent}
+                failed={!data.succeeded}
+              />
             </ToolDetailSection>
           ) : null}
         </div>

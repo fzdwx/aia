@@ -306,7 +306,10 @@ function collectAssistantTextsFromPayload(payload: unknown): string[] {
   for (const item of output) {
     const outputItem = asRecord(item)
     if (!outputItem) continue
-    if (asString(outputItem.role) && asString(outputItem.role) !== "assistant") {
+    if (
+      asString(outputItem.role) &&
+      asString(outputItem.role) !== "assistant"
+    ) {
       continue
     }
 
@@ -651,7 +654,9 @@ function formatScalar(value: unknown): string {
   return JSON.stringify(value)
 }
 
-function filterToolArgumentsForInspector(value: unknown): Record<string, unknown> {
+function filterToolArgumentsForInspector(
+  value: unknown
+): Record<string, unknown> {
   const record = asRecord(value)
   if (!record) return {}
   return record
@@ -807,20 +812,19 @@ function EventTimeline({
   )
 }
 
-function TraceActiveStrip({
-  group,
-}: {
-  group: TraceLoopGroup
-}) {
+function TraceActiveStrip({ group }: { group: TraceLoopGroup }) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-border/40 border-t-2 border-t-foreground/8 bg-card">
+    <div className="overflow-hidden rounded-2xl border border-t-2 border-border/40 border-t-foreground/8 bg-card">
       <div className="grid gap-3 px-3 py-3 md:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-lg font-semibold tracking-tight text-foreground">
               trace
             </span>
-            <Badge variant={loopBadgeVariant(group.finalStatus)} className="text-[10px]">
+            <Badge
+              variant={loopBadgeVariant(group.finalStatus)}
+              className="text-[10px]"
+            >
               {group.finalStatus}
             </Badge>
             <span className="rounded-md border border-border/35 bg-background/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
@@ -857,7 +861,9 @@ function TraceActiveStrip({
           />
           <SummaryItem
             label="flags"
-            value={group.failedToolCount > 0 ? String(group.failedToolCount) : "0"}
+            value={
+              group.failedToolCount > 0 ? String(group.failedToolCount) : "0"
+            }
             tone={group.failedToolCount > 0 ? "warning" : "default"}
             icon={<AlertTriangle className="size-3.5" />}
           />
@@ -1019,7 +1025,7 @@ function WaterfallRow({
             {node.kind !== "agent_root" &&
             "status" in node &&
             node.status === "error" ? (
-              <span className="rounded-sm border border-destructive/30 bg-destructive/[0.08] px-1.5 py-0.5 text-[10px] font-medium uppercase text-destructive">
+              <span className="rounded-sm border border-destructive/30 bg-destructive/[0.08] px-1.5 py-0.5 text-[10px] font-medium text-destructive uppercase">
                 err
               </span>
             ) : null}
@@ -1205,7 +1211,11 @@ function LlmInspector({
               ) : (
                 <div className="flex flex-wrap gap-1.5">
                   {toolNames.map((tool) => (
-                    <Badge key={tool} variant="secondary" className="text-[10px]">
+                    <Badge
+                      key={tool}
+                      variant="secondary"
+                      className="text-[10px]"
+                    >
                       {tool}
                     </Badge>
                   ))}
@@ -1258,7 +1268,10 @@ function LlmInspector({
             { label: "model", value: node.trace.model },
             { label: "provider", value: node.trace.provider },
             { label: "operation", value: node.operationName },
-            { label: "duration", value: formatDuration(node.trace.duration_ms) },
+            {
+              label: "duration",
+              value: formatDuration(node.trace.duration_ms),
+            },
             {
               label: "tokens",
               value: formatCount(node.trace.total_tokens ?? 0),
@@ -1505,9 +1518,7 @@ export function TracePanel() {
           </button>
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-base font-semibold tracking-tight">
-                trace
-              </h1>
+              <h1 className="text-base font-semibold tracking-tight">trace</h1>
               <Badge variant="outline" className="text-[10px]">
                 local
               </Badge>
@@ -1573,7 +1584,9 @@ export function TracePanel() {
           {loopGroups.length === 0 && !traceLoading ? (
             <div className="flex flex-col items-center justify-center py-16 text-center">
               <Waypoints className="size-10 text-muted-foreground/30" />
-              <p className="mt-4 text-sm font-medium text-foreground/70">No traces yet</p>
+              <p className="mt-4 text-sm font-medium text-foreground/70">
+                No traces yet
+              </p>
               <p className="mt-1 text-[13px] text-muted-foreground">
                 Start a conversation to see agent loops and LLM spans here.
               </p>
@@ -1605,7 +1618,9 @@ export function TracePanel() {
                       active={group.key === activeGroup?.key}
                       onSelect={() => {
                         setActiveLoopKey(group.key)
-                        setSelectedNodeId(group.finalSpanId ?? `${group.key}:root`)
+                        setSelectedNodeId(
+                          group.finalSpanId ?? `${group.key}:root`
+                        )
                       }}
                     />
                   ))}
@@ -1623,19 +1638,14 @@ export function TracePanel() {
                     </Button>
                     <span className="text-[11px] text-muted-foreground">
                       {(tracePage - 1) * tracePageSize + 1}-
-                      {Math.min(
-                        tracePage * tracePageSize,
-                        totalTraceLoops
-                      )}{" "}
-                      of {totalTraceLoops}
+                      {Math.min(tracePage * tracePageSize, totalTraceLoops)} of{" "}
+                      {totalTraceLoops}
                     </span>
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => refreshTraces({ page: tracePage + 1 })}
-                      disabled={
-                        tracePage >= traceListPageCount || traceLoading
-                      }
+                      disabled={tracePage >= traceListPageCount || traceLoading}
                     >
                       Next
                       <ChevronRight className="size-3.5" />

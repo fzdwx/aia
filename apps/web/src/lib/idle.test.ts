@@ -1,5 +1,4 @@
-import { describe, test } from "node:test"
-import assert from "node:assert/strict"
+import { describe, expect, test } from "vite-plus/test"
 
 import { createIdleScheduler } from "./idle"
 
@@ -23,9 +22,9 @@ describe("idle scheduler", () => {
     const handle = schedule(() => {})
     cancel(handle)
 
-    assert.equal(scheduled, true)
-    assert.equal(handle, 7)
-    assert.equal(cancelledHandle, 7)
+    expect(scheduled).toBe(true)
+    expect(handle).toBe(7)
+    expect(cancelledHandle).toBe(7)
   })
 
   test("falls back to setTimeout when requestIdleCallback is unavailable", () => {
@@ -47,8 +46,8 @@ describe("idle scheduler", () => {
     const handle = schedule(() => {})
     cancel(handle)
 
-    assert.equal(scheduledDelay, 120)
-    assert.equal(handle, 13)
-    assert.equal(clearedHandle, 13)
+    expect(scheduledDelay).toBe(120)
+    expect(handle).toBe(13)
+    expect(clearedHandle).toBe(13)
   })
 })
