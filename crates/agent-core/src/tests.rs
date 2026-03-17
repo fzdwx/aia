@@ -37,11 +37,33 @@ fn 工具定义可用_schemars_生成参数() {
         ToolDefinition::new("search", "搜索代码").with_parameters_schema::<SearchArgsSchema>();
 
     assert!(definition.parameters.get("$schema").is_none());
+    assert!(definition.parameters.get("title").is_none());
     assert_eq!(definition.parameters["type"], "object");
     assert_eq!(definition.parameters["properties"]["query"]["type"], "string");
     assert_eq!(definition.parameters["properties"]["query"]["description"], "要搜索的关键字");
+    assert_eq!(definition.parameters["properties"]["limit"]["type"], "integer");
+    assert!(definition.parameters["properties"]["limit"].get("anyOf").is_none());
     assert_eq!(definition.parameters["required"], serde_json::json!(["query"]));
     assert_eq!(definition.parameters["additionalProperties"], false);
+}
+
+#[test]
+fn 工具定义可直接接收手写参数_schema() {
+    let definition =
+        ToolDefinition::new("apply_patch", "应用补丁").with_parameters_value(serde_json::json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+                "patch": { "type": "string" }
+            },
+            "required": ["patch"],
+            "additionalProperties": false
+        }));
+
+    assert!(definition.parameters.get("$schema").is_none());
+    assert_eq!(definition.parameters["type"], "object");
+    assert_eq!(definition.parameters["properties"]["patch"]["type"], "string");
+    assert_eq!(definition.parameters["required"], serde_json::json!(["patch"]));
 }
 
 #[test]

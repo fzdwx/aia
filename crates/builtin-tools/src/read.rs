@@ -5,20 +5,41 @@ use agent_core::{
 };
 use agent_prompts::tool_descriptions::read_tool_description;
 use async_trait::async_trait;
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 pub struct ReadTool;
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ReadToolArgs {
-    #[schemars(description = "Path to the file to read")]
     file_path: String,
-    #[schemars(description = "Starting line number (0-based, default 0)")]
     offset: Option<usize>,
-    #[schemars(description = "Maximum lines to read (default 2000)")]
     limit: Option<usize>,
+}
+
+pub(crate) fn read_tool_parameters() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "file_path": {
+                "description": "Path to the file to read",
+                "type": "string"
+            },
+            "offset": {
+                "description": "Starting line number (0-based, default 0)",
+                "type": "integer",
+                "minimum": 0
+            },
+            "limit": {
+                "description": "Maximum lines to read (default 2000)",
+                "type": "integer",
+                "minimum": 0
+            }
+        },
+        "required": ["file_path"],
+        "additionalProperties": false
+    })
 }
 
 #[async_trait]
@@ -29,7 +50,7 @@ impl Tool for ReadTool {
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(self.name(), read_tool_description())
-            .with_parameters_schema::<ReadToolArgs>()
+            .with_parameters_value(read_tool_parameters())
     }
 
     async fn call(

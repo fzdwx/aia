@@ -6,7 +6,7 @@ use std::{
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::CoreError;
 
@@ -60,13 +60,116 @@ impl ToolDefinition {
         self.parameters = normalize_schema_parameters(schemars::schema_for!(T).into());
         self
     }
+
+    pub fn with_parameters_value(mut self, parameters: Value) -> Self {
+        self.parameters = normalize_schema_parameters(parameters);
+        self
+    }
 }
 
 fn normalize_schema_parameters(mut schema: Value) -> Value {
-    if let Some(object) = schema.as_object_mut() {
-        object.remove("$schema");
-    }
+    normalize_schema_value(&mut schema);
     schema
+}
+
+fn normalize_schema_value(value: &mut Value) {
+    match value {
+        Value::Object(object) => normalize_schema_object(object),
+        Value::Array(items) => {
+            for item in items {
+                normalize_schema_value(item);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
+fn normalize_schema_object(object: &mut Map<String, Value>) {
+    object.remove("$schema");
+    object.remove("title");
+
+    for value in object.values_mut() {
+        normalize_schema_value(value);
+    }
+
+    normalize_nullable_type(object);
+    normalize_nullable_union(object, "anyOf");
+    normalize_nullable_union(object, "oneOf");
+}
+
+fn normalize_nullable_type(object: &mut Map<String, Value>) {
+    let Some(type_value) = object.get_mut("type") else {
+        return;
+    };
+    let Value::Array(type_items) = type_value else {
+        return;
+    };
+
+    let filtered = type_items
+        .iter()
+        .filter(|item| !matches!(item, Value::String(name) if name == "null"))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    if filtered.len() == type_items.len() || filtered.is_empty() {
+        return;
+    }
+
+    *type_value = if filtered.len() == 1 {
+        filtered.into_iter().next().unwrap_or(Value::String("null".into()))
+    } else {
+        Value::Array(filtered)
+    };
+}
+
+fn normalize_nullable_union(object: &mut Map<String, Value>, key: &str) {
+    let Some(Value::Array(options)) = object.remove(key) else {
+        return;
+    };
+
+    let mut non_null = Vec::new();
+    let mut null_count = 0;
+    for option in options {
+        if is_null_schema(&option) {
+            null_count += 1;
+        } else {
+            non_null.push(option);
+        }
+    }
+
+    if null_count == 0 || non_null.is_empty() {
+        let mut restored = non_null;
+        restored.extend(std::iter::repeat_n(serde_json::json!({ "type": "null" }), null_count));
+        object.insert(key.to_string(), Value::Array(restored));
+        return;
+    }
+
+    if non_null.len() == 1 {
+        if let Some(remaining) = non_null.into_iter().next() {
+            match remaining {
+                Value::Object(branch) => {
+                    for (branch_key, branch_value) in branch {
+                        object.entry(branch_key).or_insert(branch_value);
+                    }
+                }
+                value => {
+                    object.insert(key.to_string(), Value::Array(vec![value]));
+                }
+            }
+        }
+        return;
+    }
+
+    object.insert(key.to_string(), Value::Array(non_null));
+}
+
+fn is_null_schema(value: &Value) -> bool {
+    match value {
+        Value::Object(object) => {
+            matches!(object.get("type"), Some(Value::String(name)) if name == "null")
+        }
+        _ => false,
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

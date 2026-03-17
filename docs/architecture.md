@@ -55,7 +55,7 @@ README 里真正难的是这些能力：
 - 模型能力与人格标签
 - `LanguageModel` 已收口为单一流式入口：`complete_streaming(request, abort, sink)`；同步/非流式消费方通过空 sink 消费最终 `Completion`，避免 `complete` / `complete_streaming_with_abort` 三套入口长期并存
 - 工具定义、工具调用、统一工具规范
-- `ToolDefinition` 参数 schema 既支持手写 JSON 构造，也支持基于 `schemars::JsonSchema` 的共享生成 helper；当前内建工具与 runtime tools 已统一切到该 helper，同时真实工具调用也开始经由共享 `ToolCall::parse_arguments()` 做结构化取参，避免 schema 与运行时取参长期漂移
+- `ToolDefinition` 参数 schema 既支持手写 JSON 构造，也支持基于 `schemars::JsonSchema` 的共享生成 helper；当前内建工具与 runtime tools 对模型暴露的生产 schema 已优先收口为手写裸 JSON，以保证外部工具契约稳定、可读且不泄漏 Rust 内部联合类型细节；真实工具调用继续经由共享 `ToolCall::parse_arguments()` 做结构化取参，避免 schema 与运行时取参长期漂移
 - 运行时需要的请求与响应载荷
 - 结构化会话条目：普通消息、工具调用、工具结果
 
@@ -109,6 +109,7 @@ README 里真正难的是这些能力：
 - `turn::driver` 已继续清理历史样板：重复的失败收尾路径已收口为共享 `fail_turn` helper，避免取消/stop_reason/模型错误分支继续各自拼接 `record_turn_failure + return Err(...)`
 - `agent-runtime` 对外 turn API 也已继续收口为单一异步入口 `handle_turn_streaming(user_input, control, sink)`：旧的同步 `handle_turn` 和历史命名 `handle_turn_streaming_with_control_async` 已移除，server 与测试消费方统一经由这条异步流式主链驱动 turn
 - `agent-runtime` 的上下文压缩入口也已只保留异步 `auto_compress_now()`：旧的同步包装和内部 `block_on_sync` helper 已移除，避免 runtime 在共享层继续暴露“同步外壳 + 内部临时 runtime”模式
+- `auto_compress_now()` 触发的压缩请求现在也会生成独立的 LLM trace context，不再只发 SSE 压缩通知而没有可持久化诊断记录；Web 侧通过单独的 compression 日志视图查看这类请求，而不是把它们并入常规对话 trace 列表
 - `agent-runtime::runtime::tool_calls` 内部也已收口 runtime tool / 普通 tool 共用的生命周期记账路径：结果条目落盘、事件发布、`ToolInvocationLifecycle` 组装与 `seen_tool_calls` 更新不再在两条分支里各自复制，减少后续继续扩展工具语义时的分支漂移
 - `agent-runtime::runtime::tool_calls` 现也已按职责拆为 `tool_calls::{execute,lifecycle,types}`：工具调用主流程、生命周期落盘/事件发布与共享上下文类型分离，`ExecuteToolCallContext::new(...)` / `lifecycle_context(...)` 负责收口重复的 started event 与 lifecycle context 样板，避免 runtime tool / 普通 tool 分支继续在单文件里来回复制上下文拼装
 - 时间辅助函数不假设系统时间恒定晚于 `UNIX_EPOCH`，异常场景下会安全回退
@@ -161,6 +162,7 @@ README 里真正难的是这些能力：
 - `AiaStore` 现以 `with_conn(...)` 明确表达 SQLite 锁边界：session、trace、schema 初始化与 legacy 迁移都经由统一 helper 进入连接访问，避免各模块继续直接传播 `MutexGuard<Connection>`；这也为后续继续评估 store 边界是否需要再下沉或异步化留出单一入口
 - `AiaStore` 现同时提供共享 async façade：server 与 model 层通过 async store API 访问 session / trace 数据，内部再由共享 `spawn_blocking` 边界桥接 `rusqlite`，避免 async 路由和 turn 路径直接阻塞 Tokio worker
 - session 侧也已开始承接 server 共享样板：`SessionRecord::new(...)` 统一了新 session 的时间戳/字段构造，`AiaStore::first_session_id()` 让 app 壳在解析默认 session 时不必为了取第一条记录而整表加载
+- trace 列表页现在优先读取 `request_summary.user_message` 这类轻量摘要字段，不再为列表每一行都反序列化整份 `provider_request`，把大 payload 留给详情接口按需读取
 - 为 server 与 trace 诊断页提供本地存储支撑，而不把 SQLite 细节扩散到更多边界
 
 ### `apps/web`
@@ -181,6 +183,7 @@ README 里真正难的是这些能力：
 - session 的后台补历史已改为空闲时增量补页，并支持在切走会话时中断，避免首屏切换后的非关键历史拉取继续和滚动/streaming 抢主线程与网络
 - 空闲调度已收口为独立 helper：浏览器环境优先走 `requestIdleCallback`，不支持时回退 `setTimeout`，同时保留测试注入能力，避免调度策略散落在 store 内部
 - 已覆盖 provider 管理、session 列表、历史消息、当前 turn 恢复、stop/cancel、trace 诊断视图
+- trace 工作台当前把普通对话 trace 与 compression 日志拆成独立视图：前者继续查看 agent loop / tool span，后者专门查看上下文压缩调用与压缩摘要
 - 使用独立 Web 子目录规则，具体开发规范由 `docs/frontend-web-guidelines.md` 与 `apps/web/AGENTS.md` 约束
 
 ### `apps/agent-server`

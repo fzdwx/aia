@@ -3,7 +3,6 @@ use agent_core::{
 };
 use agent_prompts::tool_descriptions::apply_patch_tool_description;
 use async_trait::async_trait;
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -17,32 +16,28 @@ const NO_NEWLINE_MARKER: &str = r"\ No newline at end of file";
 
 pub struct ApplyPatchTool;
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ApplyPatchToolPatchArgs {
-    #[schemars(description = "The full patch text in apply_patch format")]
     patch: String,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ApplyPatchToolPatchTextArgs {
-    #[schemars(description = "Alias for patch; the full patch text in apply_patch format")]
     #[serde(rename = "patchText")]
     patch_text: String,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ApplyPatchToolCombinedArgs {
-    #[schemars(description = "The full patch text in apply_patch format")]
     patch: String,
-    #[schemars(description = "Alias for patch; the full patch text in apply_patch format")]
     #[serde(rename = "patchText")]
     patch_text: String,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize)]
 #[serde(untagged)]
 pub(crate) enum ApplyPatchToolArgs {
     Patch(ApplyPatchToolPatchArgs),
@@ -129,7 +124,7 @@ impl Tool for ApplyPatchTool {
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(self.name(), apply_patch_tool_description())
-            .with_parameters_schema::<ApplyPatchToolArgs>()
+            .with_parameters_value(apply_patch_tool_parameters())
     }
 
     async fn call(
@@ -159,6 +154,25 @@ impl Tool for ApplyPatchTool {
                 "files": summary.files,
             })))
     }
+}
+
+fn apply_patch_tool_parameters() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "patch": {
+                "type": "string",
+                "description": "The full patch text in apply_patch format"
+            },
+            "patchText": {
+                "type": "string",
+                "description": "Alias for patch; the full patch text in apply_patch format"
+            }
+        },
+        "required": [],
+        "additionalProperties": false,
+        "minProperties": 1
+    })
 }
 
 fn parse_apply_patch(patch: &str) -> Result<ParsedPatch, CoreError> {
@@ -633,6 +647,17 @@ mod tests {
     use agent_core::{AbortSignal, Tool, ToolCall, ToolExecutionContext};
 
     use super::ApplyPatchTool;
+
+    #[test]
+    fn apply_patch_tool_definition_exposes_flat_object_schema() {
+        let definition = ApplyPatchTool.definition();
+
+        assert_eq!(definition.parameters["type"], "object");
+        assert!(definition.parameters.get("$defs").is_none());
+        assert!(definition.parameters.get("anyOf").is_none());
+        assert_eq!(definition.parameters["properties"]["patch"]["type"], "string");
+        assert_eq!(definition.parameters["properties"]["patchText"]["type"], "string");
+    }
 
     struct TestDir {
         path: PathBuf,

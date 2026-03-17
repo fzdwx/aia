@@ -35,25 +35,20 @@ pub fn build_tool_registry() -> ToolRegistry {
 
 #[cfg(test)]
 mod tests {
-    use agent_core::{Tool, ToolDefinition, ToolExecutor};
-    use agent_prompts::tool_descriptions::{
-        apply_patch_tool_description, edit_tool_description, glob_tool_description,
-        grep_tool_description, read_tool_description, shell_tool_description,
-        write_tool_description,
-    };
+    use agent_core::{Tool, ToolExecutor};
+    use agent_prompts::tool_descriptions::shell_tool_description;
     use std::collections::BTreeSet;
 
     use super::{
         ApplyPatchTool, EditTool, GlobTool, GrepTool, ReadTool, ShellTool, WriteTool,
         build_tool_registry,
     };
-    use crate::apply_patch::ApplyPatchToolArgs;
-    use crate::edit::EditToolArgs;
-    use crate::glob::GlobToolArgs;
-    use crate::grep::GrepToolArgs;
-    use crate::read::ReadToolArgs;
-    use crate::shell::ShellToolArgs;
-    use crate::write::WriteToolArgs;
+    use crate::edit::edit_tool_parameters;
+    use crate::glob::glob_tool_parameters;
+    use crate::grep::grep_tool_parameters;
+    use crate::read::read_tool_parameters;
+    use crate::shell::shell_tool_parameters;
+    use crate::write::write_tool_parameters;
 
     #[test]
     fn registry_exposes_only_new_tool_names() {
@@ -89,61 +84,41 @@ mod tests {
     }
 
     #[test]
-    fn builtin_tool_definitions_match_schemars_output() {
+    fn builtin_tool_definitions_match_raw_json_output() {
         let shell = ShellTool.definition();
-        assert_eq!(
-            shell.parameters,
-            ToolDefinition::new("shell", shell_tool_description())
-                .with_parameters_schema::<ShellToolArgs>()
-                .parameters
-        );
+        assert_eq!(shell.parameters, shell_tool_parameters());
 
         let read = ReadTool.definition();
-        assert_eq!(
-            read.parameters,
-            ToolDefinition::new("read", read_tool_description())
-                .with_parameters_schema::<ReadToolArgs>()
-                .parameters
-        );
+        assert_eq!(read.parameters, read_tool_parameters());
+        assert!(read.parameters.get("title").is_none());
+        assert_eq!(read.parameters["properties"]["offset"]["type"], "integer");
+        assert_eq!(read.parameters["properties"]["limit"]["type"], "integer");
 
         let write = WriteTool.definition();
-        assert_eq!(
-            write.parameters,
-            ToolDefinition::new("write", write_tool_description())
-                .with_parameters_schema::<WriteToolArgs>()
-                .parameters
-        );
+        assert_eq!(write.parameters, write_tool_parameters());
 
         let edit = EditTool.definition();
-        assert_eq!(
-            edit.parameters,
-            ToolDefinition::new("edit", edit_tool_description())
-                .with_parameters_schema::<EditToolArgs>()
-                .parameters
-        );
+        assert_eq!(edit.parameters, edit_tool_parameters());
 
         let apply_patch = ApplyPatchTool.definition();
-        assert_eq!(
-            apply_patch.parameters,
-            ToolDefinition::new("apply_patch", apply_patch_tool_description())
-                .with_parameters_schema::<ApplyPatchToolArgs>()
-                .parameters
-        );
+        assert_eq!(apply_patch.parameters["type"], "object");
+        assert!(apply_patch.parameters.get("$defs").is_none());
+        assert!(apply_patch.parameters.get("anyOf").is_none());
+        assert_eq!(apply_patch.parameters["properties"]["patch"]["type"], "string");
+        assert_eq!(apply_patch.parameters["properties"]["patchText"]["type"], "string");
+        assert_eq!(apply_patch.parameters["additionalProperties"], false);
 
         let glob = GlobTool.definition();
-        assert_eq!(
-            glob.parameters,
-            ToolDefinition::new("glob", glob_tool_description())
-                .with_parameters_schema::<GlobToolArgs>()
-                .parameters
-        );
+        assert_eq!(glob.parameters, glob_tool_parameters());
+        assert!(glob.parameters.get("title").is_none());
+        assert_eq!(glob.parameters["properties"]["path"]["type"], "string");
+        assert_eq!(glob.parameters["properties"]["limit"]["type"], "integer");
 
         let grep = GrepTool.definition();
-        assert_eq!(
-            grep.parameters,
-            ToolDefinition::new("grep", grep_tool_description())
-                .with_parameters_schema::<GrepToolArgs>()
-                .parameters
-        );
+        assert_eq!(grep.parameters, grep_tool_parameters());
+        assert!(grep.parameters.get("title").is_none());
+        assert_eq!(grep.parameters["properties"]["path"]["type"], "string");
+        assert_eq!(grep.parameters["properties"]["glob"]["type"], "string");
+        assert_eq!(grep.parameters["properties"]["limit"]["type"], "integer");
     }
 }

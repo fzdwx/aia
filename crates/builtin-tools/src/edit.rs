@@ -3,20 +3,45 @@ use agent_core::{
 };
 use agent_prompts::tool_descriptions::edit_tool_description;
 use async_trait::async_trait;
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 pub struct EditTool;
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+fn build_edit_diff(old_string: &str, new_string: &str) -> String {
+    let removed = old_string.lines().map(|line| format!("-{line}"));
+    let added = new_string.lines().map(|line| format!("+{line}"));
+    removed.chain(added).collect::<Vec<_>>().join("\n")
+}
+
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct EditToolArgs {
-    #[schemars(description = "Path to the file to edit")]
     file_path: String,
-    #[schemars(description = "Exact text to find (must match uniquely)")]
     old_string: String,
-    #[schemars(description = "Replacement text")]
     new_string: String,
+}
+
+pub(crate) fn edit_tool_parameters() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "file_path": {
+                "description": "Path to the file to edit",
+                "type": "string"
+            },
+            "old_string": {
+                "description": "Exact text to find (must match uniquely)",
+                "type": "string"
+            },
+            "new_string": {
+                "description": "Replacement text",
+                "type": "string"
+            }
+        },
+        "required": ["file_path", "old_string", "new_string"],
+        "additionalProperties": false
+    })
 }
 
 #[async_trait]
@@ -27,7 +52,7 @@ impl Tool for EditTool {
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(self.name(), edit_tool_description())
-            .with_parameters_schema::<EditToolArgs>()
+            .with_parameters_value(edit_tool_parameters())
     }
 
     async fn call(
@@ -53,11 +78,14 @@ impl Tool for EditTool {
                 })?;
                 let old_lines = args.old_string.lines().count();
                 let new_lines = args.new_string.lines().count();
-                Ok(ToolResult::from_call(call, format!("Edited {}", path.display())).with_details(
+                let diff = build_edit_diff(&args.old_string, &args.new_string);
+                let file_path = path.display().to_string();
+                Ok(ToolResult::from_call(call, format!("Edited {file_path}")).with_details(
                     serde_json::json!({
-                        "file_path": path.display().to_string(),
+                        "file_path": file_path,
                         "added": new_lines,
                         "removed": old_lines,
+                        "diff": diff,
                     }),
                 ))
             }

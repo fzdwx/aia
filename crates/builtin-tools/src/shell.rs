@@ -11,16 +11,29 @@ use agent_core::{
 use agent_prompts::tool_descriptions::shell_tool_description;
 use async_trait::async_trait;
 use execution::run_embedded_brush;
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 pub struct ShellTool;
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ShellToolArgs {
-    #[schemars(description = "The shell command to execute")]
     command: String,
+}
+
+pub(crate) fn shell_tool_parameters() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "command": {
+                "description": "The shell command to execute",
+                "type": "string"
+            }
+        },
+        "required": ["command"],
+        "additionalProperties": false
+    })
 }
 
 #[async_trait]
@@ -31,7 +44,7 @@ impl Tool for ShellTool {
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(self.name(), shell_tool_description())
-            .with_parameters_schema::<ShellToolArgs>()
+            .with_parameters_value(shell_tool_parameters())
     }
 
     async fn call(

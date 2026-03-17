@@ -3,18 +3,34 @@ use agent_core::{
 };
 use agent_prompts::tool_descriptions::write_tool_description;
 use async_trait::async_trait;
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 pub struct WriteTool;
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct WriteToolArgs {
-    #[schemars(description = "Path to write to")]
     file_path: String,
-    #[schemars(description = "Content to write")]
     content: String,
+}
+
+pub(crate) fn write_tool_parameters() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "file_path": {
+                "description": "Path to write to",
+                "type": "string"
+            },
+            "content": {
+                "description": "Content to write",
+                "type": "string"
+            }
+        },
+        "required": ["file_path", "content"],
+        "additionalProperties": false
+    })
 }
 
 #[async_trait]
@@ -25,7 +41,7 @@ impl Tool for WriteTool {
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(self.name(), write_tool_description())
-            .with_parameters_schema::<WriteToolArgs>()
+            .with_parameters_value(write_tool_parameters())
     }
 
     async fn call(

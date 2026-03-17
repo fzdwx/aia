@@ -6,8 +6,8 @@ use agent_core::{
 };
 use agent_prompts::tool_descriptions::glob_tool_description;
 use async_trait::async_trait;
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use crate::walk::collect_candidate_files;
 
@@ -27,15 +27,35 @@ enum GlobSearchOutcome {
     Cancelled,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct GlobToolArgs {
-    #[schemars(description = "Glob pattern (e.g. **/*.rs)")]
     pattern: String,
-    #[schemars(description = "Base directory to search in")]
     path: Option<String>,
-    #[schemars(description = "Maximum matched files to return (default 200, max 1000)")]
     limit: Option<usize>,
+}
+
+pub(crate) fn glob_tool_parameters() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "pattern": {
+                "description": "Glob pattern (e.g. **/*.rs)",
+                "type": "string"
+            },
+            "path": {
+                "description": "Base directory to search in",
+                "type": "string"
+            },
+            "limit": {
+                "description": "Maximum matched files to return (default 200, max 1000)",
+                "type": "integer",
+                "minimum": 0
+            }
+        },
+        "required": ["pattern"],
+        "additionalProperties": false
+    })
 }
 
 #[async_trait]
@@ -46,7 +66,7 @@ impl Tool for GlobTool {
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(self.name(), glob_tool_description())
-            .with_parameters_schema::<GlobToolArgs>()
+            .with_parameters_value(glob_tool_parameters())
     }
 
     async fn call(

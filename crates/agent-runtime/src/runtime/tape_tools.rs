@@ -6,7 +6,6 @@ use agent_core::{
 };
 use agent_prompts::tool_descriptions::{tape_handoff_tool_description, tape_info_tool_description};
 use async_trait::async_trait;
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -80,9 +79,18 @@ impl RuntimeToolContext for RuntimeToolContextBridge {
 
 struct TapeInfoTool;
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TapeInfoToolArgs {}
+
+fn tape_info_tool_parameters() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+    })
+}
 
 #[async_trait]
 impl Tool for TapeInfoTool {
@@ -92,7 +100,7 @@ impl Tool for TapeInfoTool {
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(self.name(), tape_info_tool_description())
-            .with_parameters_schema::<TapeInfoToolArgs>()
+            .with_parameters_value(tape_info_tool_parameters())
     }
 
     async fn call(
@@ -124,13 +132,29 @@ impl Tool for TapeInfoTool {
 
 struct TapeHandoffTool;
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TapeHandoffToolArgs {
-    #[schemars(description = "A concise summary of the conversation so far to carry forward.")]
     summary: String,
-    #[schemars(description = "Optional name for the anchor (default: \"handoff\").")]
     name: Option<String>,
+}
+
+fn tape_handoff_tool_parameters() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "summary": {
+                "description": "A concise summary of the conversation so far to carry forward.",
+                "type": "string"
+            },
+            "name": {
+                "description": "Optional name for the anchor (default: \"handoff\").",
+                "type": "string"
+            }
+        },
+        "required": ["summary"],
+        "additionalProperties": false
+    })
 }
 
 #[async_trait]
@@ -141,7 +165,7 @@ impl Tool for TapeHandoffTool {
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(self.name(), tape_handoff_tool_description())
-            .with_parameters_schema::<TapeHandoffToolArgs>()
+            .with_parameters_value(tape_handoff_tool_parameters())
     }
 
     async fn call(
@@ -172,38 +196,23 @@ pub(super) fn is_runtime_tool(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use agent_core::ToolDefinition;
-    use agent_prompts::tool_descriptions::{
-        tape_handoff_tool_description, tape_info_tool_description,
-    };
-
     use super::{
-        TapeHandoffTool, TapeHandoffToolArgs, TapeInfoTool, TapeInfoToolArgs,
-        runtime_tool_definitions,
+        TapeHandoffTool, TapeInfoTool, runtime_tool_definitions, tape_handoff_tool_parameters,
+        tape_info_tool_parameters,
     };
     use crate::runtime::tape_tools::Tool;
 
     #[test]
-    fn runtime_tool_definitions_match_schemars_output() {
+    fn runtime_tool_definitions_match_raw_json_output() {
         let definitions = runtime_tool_definitions();
         assert_eq!(definitions.len(), 2);
 
         let tape_info = TapeInfoTool.definition();
         assert!(definitions.iter().any(|definition| definition == &tape_info));
-        assert_eq!(
-            tape_info.parameters,
-            ToolDefinition::new("tape_info", tape_info_tool_description())
-                .with_parameters_schema::<TapeInfoToolArgs>()
-                .parameters
-        );
+        assert_eq!(tape_info.parameters, tape_info_tool_parameters());
 
         let tape_handoff = TapeHandoffTool.definition();
         assert!(definitions.iter().any(|definition| definition == &tape_handoff));
-        assert_eq!(
-            tape_handoff.parameters,
-            ToolDefinition::new("tape_handoff", tape_handoff_tool_description())
-                .with_parameters_schema::<TapeHandoffToolArgs>()
-                .parameters
-        );
+        assert_eq!(tape_handoff.parameters, tape_handoff_tool_parameters());
     }
 }
