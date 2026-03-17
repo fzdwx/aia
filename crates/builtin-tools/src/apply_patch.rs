@@ -1,5 +1,6 @@
 use agent_core::{
-    CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
+    CoreError, Tool, ToolArgsSchema, ToolCall, ToolDefinition, ToolExecutionContext,
+    ToolOutputDelta, ToolResult,
 };
 use agent_prompts::tool_descriptions::apply_patch_tool_description;
 use async_trait::async_trait;
@@ -16,47 +17,27 @@ const NO_NEWLINE_MARKER: &str = r"\ No newline at end of file";
 
 pub struct ApplyPatchTool;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, ToolArgsSchema)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct ApplyPatchToolPatchArgs {
-    patch: String,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct ApplyPatchToolPatchTextArgs {
+#[tool_schema(min_properties = 1)]
+pub(crate) struct ApplyPatchToolArgs {
+    #[tool_schema(description = "The full patch text in apply_patch format")]
+    patch: Option<String>,
     #[serde(rename = "patchText")]
-    patch_text: String,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct ApplyPatchToolCombinedArgs {
-    patch: String,
-    #[serde(rename = "patchText")]
-    patch_text: String,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(untagged)]
-pub(crate) enum ApplyPatchToolArgs {
-    Patch(ApplyPatchToolPatchArgs),
-    PatchText(ApplyPatchToolPatchTextArgs),
-    Combined(ApplyPatchToolCombinedArgs),
+    #[tool_schema(description = "Alias for patch; the full patch text in apply_patch format")]
+    patch_text: Option<String>,
 }
 
 impl ApplyPatchToolArgs {
     fn patch_text(self) -> Result<String, CoreError> {
-        match self {
-            Self::Patch(args) => Ok(args.patch),
-            Self::PatchText(args) => Ok(args.patch_text),
-            Self::Combined(args) => {
-                if args.patch == args.patch_text {
-                    Ok(args.patch)
-                } else {
-                    Err(CoreError::new("patch and patchText must match when both are provided"))
-                }
+        match (self.patch, self.patch_text) {
+            (Some(patch), None) => Ok(patch),
+            (None, Some(patch_text)) => Ok(patch_text),
+            (Some(patch), Some(patch_text)) if patch == patch_text => Ok(patch),
+            (Some(_), Some(_)) => {
+                Err(CoreError::new("patch and patchText must match when both are provided"))
             }
+            (None, None) => Err(CoreError::new("either patch or patchText must be provided")),
         }
     }
 }
@@ -124,7 +105,7 @@ impl Tool for ApplyPatchTool {
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(self.name(), apply_patch_tool_description())
-            .with_parameters_value(apply_patch_tool_parameters())
+            .with_parameters_schema::<ApplyPatchToolArgs>()
     }
 
     async fn call(
@@ -154,25 +135,6 @@ impl Tool for ApplyPatchTool {
                 "files": summary.files,
             })))
     }
-}
-
-fn apply_patch_tool_parameters() -> serde_json::Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "patch": {
-                "type": "string",
-                "description": "The full patch text in apply_patch format"
-            },
-            "patchText": {
-                "type": "string",
-                "description": "Alias for patch; the full patch text in apply_patch format"
-            }
-        },
-        "required": [],
-        "additionalProperties": false,
-        "minProperties": 1
-    })
 }
 
 fn parse_apply_patch(patch: &str) -> Result<ParsedPatch, CoreError> {

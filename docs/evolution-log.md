@@ -13,6 +13,19 @@
 **Commit**：未提交。
 **Next direction**：如果后续 typed helper 真正开始在多个真实工具上重复扩展，再评估是否补更细的 property helper；在那之前，坚持它只服务当前最小工具 schema 子集，避免再次演化成通用 schema 系统。
 
+## 2026-03-18 Session 52
+
+**Diagnosis**：虽然上一轮已经去掉了 `schemars`，但 `ToolArgsSchema` 仍只能靠手写 `impl` 才能生成参数 schema，导致大多数工具参数结构体继续在“业务字段定义”和“schema builder 实现”之间重复维护；这与希望在参数类型上直接挂一个类似宏来自动生成 schema 的目标仍有距离。
+**Decision**：在 `agent-core` 现有最小 schema trait 之上新增独立 proc-macro crate，提供 `#[derive(ToolArgsSchema)]` 自动为命名字段 struct 生成 schema；首轮只支持当前真实需要的最小边界：`String`、`usize/u32/u64`、它们的 `Option` 形式、`serde(rename)`、以及 `tool_schema(description / min_properties)` 属性。与此同时，把 `builtin-tools`、runtime tape tools 和测试里的常规参数结构体统一切到 derive 宏；`apply_patch` 参数则进一步收口为单 struct + 别名字段模型，以便一起复用这条自动生成能力。
+**Changes**：
+- `crates/agent-core-macros/{Cargo.toml,src/lib.rs}`、`Cargo.toml`：新增独立 proc-macro crate 并接入 workspace，生成对 `agent_core::ToolArgsSchema` / `ToolSchema` / `ToolSchemaProperty` 的最小调用代码。
+- `crates/agent-core/src/{lib.rs,tooling.rs,tests.rs}`：`agent-core` 重新导出 derive 宏并添加 `extern crate self as agent_core` 供宏在本 crate 内使用；`ToolSchema` 新增 `min_properties()`；测试改为基于 derive 宏与 `tool_schema(...)` 属性验证自动生成行为。
+- `crates/builtin-tools/src/{shell,read,write,edit,glob,grep,apply_patch,lib}.rs`：常规工具参数结构体统一切到 `#[derive(ToolArgsSchema)]`；删掉对应手写 `*_tool_parameters()` helper；`ApplyPatchToolArgs` 改成单 struct + 可选别名字段，并继续保持双字段冲突校验语义。
+- `crates/agent-runtime/src/runtime/tape_tools.rs`、`crates/openai-adapter/src/tests.rs`：runtime tape tools 与适配器链路测试也统一切到 derive 宏。
+**Verification**：先把测试切到 derive 宏并确认缺少 derive macro / `tool_schema` 属性时红灯；随后实现 proc-macro crate，再执行 `cargo test -p agent-core 工具定义可用自研_schema_生成参数`、`cargo test -p agent-core 自研_schema_可为带别名的可选字段_struct_生成扁平对象参数`、`cargo test -p builtin-tools builtin_tool_definitions_match_derive_schema_output`、`cargo test -p builtin-tools apply_patch_tool_definition_exposes_flat_object_schema`、`cargo test -p agent-runtime runtime_tool_definitions_match_derive_schema_output`、`cargo test -p openai-adapter responses_请求体会透传自研_schema_工具参数且不包含_schema_元字段` 转绿；最后继续跑 `cargo fmt --all`、`cargo test -p agent-core`、`cargo test -p builtin-tools`、`cargo test -p agent-runtime`、`cargo test -p openai-adapter`、`cargo check` 做全量收尾验证。
+**Commit**：未提交。
+**Next direction**：如果后续真实参数类型开始出现 `bool`、数组、嵌套对象或更复杂的 serde 语义，再单独扩展 derive 宏；在那之前，继续把它限制在当前最小工具 schema 子集，不重新造一套通用 schema 系统。
+
 ## 2026-03-17 Session 50
 
 **Diagnosis**：压缩日志独立视图虽然已经拆出来了，但 trace 页仍然很慢。直接观察代码和 SQLite 查询计划后发现有两个根因同时存在：前端在 `StrictMode` 下会对同一视图触发重复刷新，而后端 trace 列表/汇总又仍然走全表扫描与临时排序，导致单连接 SQLite 把多个慢查询串行放大。

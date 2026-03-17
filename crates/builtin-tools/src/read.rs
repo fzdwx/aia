@@ -1,45 +1,24 @@
 use std::io::ErrorKind;
 
 use agent_core::{
-    CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
+    CoreError, Tool, ToolArgsSchema, ToolCall, ToolDefinition, ToolExecutionContext,
+    ToolOutputDelta, ToolResult,
 };
 use agent_prompts::tool_descriptions::read_tool_description;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 
 pub struct ReadTool;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, ToolArgsSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ReadToolArgs {
+    #[tool_schema(description = "Path to the file to read")]
     file_path: String,
+    #[tool_schema(description = "Starting line number (0-based, default 0)")]
     offset: Option<usize>,
+    #[tool_schema(description = "Maximum lines to read (default 2000)")]
     limit: Option<usize>,
-}
-
-pub(crate) fn read_tool_parameters() -> serde_json::Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "file_path": {
-                "description": "Path to the file to read",
-                "type": "string"
-            },
-            "offset": {
-                "description": "Starting line number (0-based, default 0)",
-                "type": "integer",
-                "minimum": 0
-            },
-            "limit": {
-                "description": "Maximum lines to read (default 2000)",
-                "type": "integer",
-                "minimum": 0
-            }
-        },
-        "required": ["file_path"],
-        "additionalProperties": false
-    })
 }
 
 #[async_trait]
@@ -50,7 +29,7 @@ impl Tool for ReadTool {
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(self.name(), read_tool_description())
-            .with_parameters_value(read_tool_parameters())
+            .with_parameters_schema::<ReadToolArgs>()
     }
 
     async fn call(

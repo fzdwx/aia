@@ -9,7 +9,6 @@ use agent_core::{
     AbortSignal, CompletionRequest, CompletionSegment, CompletionStopReason, ConversationItem,
     LanguageModel, Message, ModelDisposition, ModelIdentity, PromptCacheConfig,
     PromptCacheRetention, Role, StreamEvent, ToolArgsSchema, ToolCall, ToolDefinition, ToolResult,
-    ToolSchema, ToolSchemaProperty,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -41,20 +40,11 @@ fn sample_request() -> CompletionRequest {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, ToolArgsSchema)]
 #[serde(deny_unknown_fields)]
 struct SearchToolArgs {
+    #[tool_schema(description = "要搜索的关键字")]
     query: String,
-}
-
-impl ToolArgsSchema for SearchToolArgs {
-    fn schema() -> ToolSchema {
-        ToolSchema::object().property(
-            "query",
-            ToolSchemaProperty::string().description("要搜索的关键字"),
-            true,
-        )
-    }
 }
 
 fn run_async<T>(future: impl Future<Output = T>) -> T {

@@ -3,6 +3,7 @@ members = [
   "apps/agent-server",
   "crates/aia-config",
   "crates/agent-core",
+  "crates/agent-core-macros",
   "crates/agent-prompts",
   "crates/agent-runtime",
   "crates/builtin-tools",

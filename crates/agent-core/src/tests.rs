@@ -21,19 +21,13 @@ fn 工具定义用_json_schema_构建参数() {
     assert_eq!(definition.parameters["required"], serde_json::json!(["query"]));
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, ToolArgsSchema)]
 #[serde(deny_unknown_fields)]
 struct SearchArgsSchema {
+    #[tool_schema(description = "要搜索的关键字")]
     query: String,
+    #[tool_schema(description = "限定返回数量")]
     limit: Option<u32>,
-}
-
-impl ToolArgsSchema for SearchArgsSchema {
-    fn schema() -> ToolSchema {
-        ToolSchema::object()
-            .property("query", ToolSchemaProperty::string().description("要搜索的关键字"), true)
-            .property("limit", ToolSchemaProperty::integer().description("限定返回数量"), false)
-    }
 }
 
 #[test]
@@ -50,6 +44,30 @@ fn 工具定义可用自研_schema_生成参数() {
     assert!(definition.parameters["properties"]["limit"].get("anyOf").is_none());
     assert_eq!(definition.parameters["required"], serde_json::json!(["query"]));
     assert_eq!(definition.parameters["additionalProperties"], false);
+}
+
+#[derive(Serialize, Deserialize, ToolArgsSchema)]
+#[serde(deny_unknown_fields)]
+#[tool_schema(min_properties = 1)]
+struct AliasPatchArgs {
+    #[tool_schema(description = "补丁正文")]
+    patch: Option<String>,
+    #[serde(rename = "patchText")]
+    #[tool_schema(description = "补丁正文别名")]
+    patch_text: Option<String>,
+}
+
+#[test]
+fn 自研_schema_可为带别名的可选字段_struct_生成扁平对象参数() {
+    let definition =
+        ToolDefinition::new("apply_patch", "应用补丁").with_parameters_schema::<AliasPatchArgs>();
+
+    assert_eq!(definition.parameters["type"], "object");
+    assert_eq!(definition.parameters["minProperties"], 1);
+    assert_eq!(definition.parameters["required"], serde_json::json!([]));
+    assert_eq!(definition.parameters["properties"]["patch"]["type"], "string");
+    assert_eq!(definition.parameters["properties"]["patchText"]["type"], "string");
+    assert_eq!(definition.parameters["properties"]["patchText"]["description"], "补丁正文别名");
 }
 
 #[test]

@@ -1,3 +1,5 @@
+extern crate self as agent_core;
+
 mod completion;
 mod conversation;
 mod error;
@@ -9,6 +11,7 @@ mod traits;
 #[cfg(test)]
 mod tests;
 
+pub use agent_core_macros::ToolArgsSchema;
 pub use completion::{
     Completion, CompletionRequest, CompletionSegment, CompletionStopReason, CompletionUsage,
     LlmTraceRequestContext, ModelDisposition, ModelIdentity, ModelLimit, PromptCacheConfig,

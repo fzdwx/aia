@@ -1,8 +1,9 @@
 use std::sync::{Arc, Mutex};
 
 use agent_core::{
-    CoreError, LanguageModel, RuntimeToolContext, RuntimeToolContextStats, Tool, ToolCall,
-    ToolDefinition, ToolExecutionContext, ToolExecutor, ToolOutputDelta, ToolRegistry, ToolResult,
+    CoreError, LanguageModel, RuntimeToolContext, RuntimeToolContextStats, Tool, ToolArgsSchema,
+    ToolCall, ToolDefinition, ToolExecutionContext, ToolExecutor, ToolOutputDelta, ToolRegistry,
+    ToolResult,
 };
 use agent_prompts::tool_descriptions::{tape_handoff_tool_description, tape_info_tool_description};
 use async_trait::async_trait;
@@ -79,18 +80,9 @@ impl RuntimeToolContext for RuntimeToolContextBridge {
 
 struct TapeInfoTool;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, ToolArgsSchema)]
 #[serde(deny_unknown_fields)]
 struct TapeInfoToolArgs {}
-
-fn tape_info_tool_parameters() -> serde_json::Value {
-    json!({
-        "type": "object",
-        "properties": {},
-        "required": [],
-        "additionalProperties": false
-    })
-}
 
 #[async_trait]
 impl Tool for TapeInfoTool {
@@ -100,7 +92,7 @@ impl Tool for TapeInfoTool {
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(self.name(), tape_info_tool_description())
-            .with_parameters_value(tape_info_tool_parameters())
+            .with_parameters_schema::<TapeInfoToolArgs>()
     }
 
     async fn call(
@@ -132,29 +124,13 @@ impl Tool for TapeInfoTool {
 
 struct TapeHandoffTool;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, ToolArgsSchema)]
 #[serde(deny_unknown_fields)]
 struct TapeHandoffToolArgs {
+    #[tool_schema(description = "A concise summary of the conversation so far to carry forward.")]
     summary: String,
+    #[tool_schema(description = "Optional name for the anchor (default: \"handoff\").")]
     name: Option<String>,
-}
-
-fn tape_handoff_tool_parameters() -> serde_json::Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "summary": {
-                "description": "A concise summary of the conversation so far to carry forward.",
-                "type": "string"
-            },
-            "name": {
-                "description": "Optional name for the anchor (default: \"handoff\").",
-                "type": "string"
-            }
-        },
-        "required": ["summary"],
-        "additionalProperties": false
-    })
 }
 
 #[async_trait]
@@ -165,7 +141,7 @@ impl Tool for TapeHandoffTool {
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(self.name(), tape_handoff_tool_description())
-            .with_parameters_value(tape_handoff_tool_parameters())
+            .with_parameters_schema::<TapeHandoffToolArgs>()
     }
 
     async fn call(
@@ -197,22 +173,33 @@ pub(super) fn is_runtime_tool(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        TapeHandoffTool, TapeInfoTool, runtime_tool_definitions, tape_handoff_tool_parameters,
-        tape_info_tool_parameters,
+        TapeHandoffTool, TapeHandoffToolArgs, TapeInfoTool, TapeInfoToolArgs,
+        runtime_tool_definitions,
     };
     use crate::runtime::tape_tools::Tool;
+    use agent_core::ToolDefinition;
 
     #[test]
-    fn runtime_tool_definitions_match_raw_json_output() {
+    fn runtime_tool_definitions_match_derive_schema_output() {
         let definitions = runtime_tool_definitions();
         assert_eq!(definitions.len(), 2);
 
         let tape_info = TapeInfoTool.definition();
         assert!(definitions.iter().any(|definition| definition == &tape_info));
-        assert_eq!(tape_info.parameters, tape_info_tool_parameters());
+        assert_eq!(
+            tape_info.parameters,
+            ToolDefinition::new("tape_info", "ignored")
+                .with_parameters_schema::<TapeInfoToolArgs>()
+                .parameters
+        );
 
         let tape_handoff = TapeHandoffTool.definition();
         assert!(definitions.iter().any(|definition| definition == &tape_handoff));
-        assert_eq!(tape_handoff.parameters, tape_handoff_tool_parameters());
+        assert_eq!(
+            tape_handoff.parameters,
+            ToolDefinition::new("tape_handoff", "ignored")
+                .with_parameters_schema::<TapeHandoffToolArgs>()
+                .parameters
+        );
     }
 }

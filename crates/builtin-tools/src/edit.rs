@@ -1,10 +1,10 @@
 use agent_core::{
-    CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
+    CoreError, Tool, ToolArgsSchema, ToolCall, ToolDefinition, ToolExecutionContext,
+    ToolOutputDelta, ToolResult,
 };
 use agent_prompts::tool_descriptions::edit_tool_description;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 
 pub struct EditTool;
 
@@ -14,34 +14,15 @@ fn build_edit_diff(old_string: &str, new_string: &str) -> String {
     removed.chain(added).collect::<Vec<_>>().join("\n")
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, ToolArgsSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct EditToolArgs {
+    #[tool_schema(description = "Path to the file to edit")]
     file_path: String,
+    #[tool_schema(description = "Exact text to find (must match uniquely)")]
     old_string: String,
+    #[tool_schema(description = "Replacement text")]
     new_string: String,
-}
-
-pub(crate) fn edit_tool_parameters() -> serde_json::Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "file_path": {
-                "description": "Path to the file to edit",
-                "type": "string"
-            },
-            "old_string": {
-                "description": "Exact text to find (must match uniquely)",
-                "type": "string"
-            },
-            "new_string": {
-                "description": "Replacement text",
-                "type": "string"
-            }
-        },
-        "required": ["file_path", "old_string", "new_string"],
-        "additionalProperties": false
-    })
 }
 
 #[async_trait]
@@ -52,7 +33,7 @@ impl Tool for EditTool {
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(self.name(), edit_tool_description())
-            .with_parameters_value(edit_tool_parameters())
+            .with_parameters_schema::<EditToolArgs>()
     }
 
     async fn call(

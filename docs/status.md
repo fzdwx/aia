@@ -111,7 +111,7 @@
 - 完成 `agent-runtime` / `openai-adapter` 的并行工具调用首轮落地：共享 `CompletionRequest` 新增 `parallel_tool_calls`，Responses / Chat Completions 请求会显式发送该字段；runtime 对同一批工具调用开始按策略执行——`read` / `glob` / `grep` 等只读类工具可并行准备与执行，而 `shell` / `write` / `edit` / runtime tools 继续保持串行，避免文件系统冲突与交互副作用
 - 完成独立内建 `apply_patch` 工具：`edit` 保持单文件精确唯一替换语义不变，同时新增短名稳定的 `apply_patch` 工具承接 `*** Begin Patch` / `*** End Patch` 风格多文件补丁，支持 `Update File`、`Add File`、`Delete File`，让 Codex/Claude 风格补丁映射无需借道 shell，也避免把两种编辑语义继续混在同一个工具里；其每文件结果元数据现也已收口为共享强类型结构，而不是继续在实现里手写 `serde_json::Value`
 - 完成 SSE 落后客户端显式重同步：`apps/agent-server` 的 `/api/events` 在 `broadcast` 消费者落后时会发出 `sync_required` 事件，而不是静默丢弃；`apps/web` 收到后会主动补拉 session 列表与当前 session 的历史、当前 turn、上下文压力，避免事件流与本地 UI 状态无声漂移
-- 完成工具参数 schema 共享 helper 收口：`agent-core::ToolDefinition` 除支持手写 JSON 外，也支持基于自研最小 `ToolArgsSchema` trait 生成统一参数 schema；该 helper 只覆盖当前真实需要的 object/properties/required/additionalProperties/description/minimum 子集，避免再引入外部反射式 schema 依赖
+- 完成工具参数 schema 共享 helper 收口：`agent-core::ToolDefinition` 除支持手写 JSON 外，也支持基于自研最小 `ToolArgsSchema` trait 与 derive 宏生成统一参数 schema；当前 `builtin-tools`、runtime tape tools 与测试中的常规参数结构体已切到 `#[derive(ToolArgsSchema)]` 自动生成，`ApplyPatchToolArgs` 也已收口为单 struct + 别名字段模型来复用这条能力；该 helper 继续只覆盖当前真实需要的 object/properties/required/additionalProperties/description/minimum/minProperties 子集，避免再引入外部反射式 schema 依赖
 - 完成真实工具调用到 typed args 的统一收口：`agent-core::ToolCall` 新增共享 `parse_arguments()`，当前 `builtin-tools` 与 runtime tools 的 `call()` 已改为直接反序列化结构化参数，而不再手工散落 `str_arg/opt_*_arg/arguments.get(...)` 取值
 - 完成真实工具 description 的集中管理：`agent-prompts` 现通过 `prompts/tool/` 目录下的 Markdown 文件统一管理内建工具与 runtime tools 的共享 description，`builtin-tools` / `agent-runtime` 的真实 `ToolDefinition` 已改为复用这些文本，不再各 crate 自带字面量
 - 完成 `agent-store` async façade 收口：session / trace 的 SQLite 访问已通过共享 async store API 暴露给 `apps/agent-server` 与 `ServerModel`，trace/session 路由、session manager 初始化与 turn/tool trace 落盘不再在 async 路径里直接调用同步 store 方法
@@ -126,7 +126,7 @@
 - 完成 `apps/web` 工具链切换到 Vite+ 工作流，并引入子目录级 `apps/web/AGENTS.md` 约束
 - 完成 trace 列表读取瘦身：`agent-store` 的列表查询改为从 `request_summary.user_message` 读取轻量用户消息预览，不再为每条列表项反序列化完整 `provider_request`
 - 完成上下文压缩调用 trace 化：`agent-runtime::auto_compress_now()` 现在会生成独立压缩 trace context，`apps/agent-server` 会把压缩请求持久化到 trace store，`apps/web` 的 trace 面板也会显式标识 compression activity
-- 完成工具参数 schema 对外收口：当前 `builtin-tools` 与 runtime tape tools 已统一改为手写裸 JSON Schema，直接通过 `ToolDefinition::with_parameters_value(...)` 暴露稳定外部契约；`apply_patch` 内部仍用未标记枚举兼容 `patch` / `patchText` / 双字段并存解析，但对模型暴露的 schema 已保持扁平 object 形态；共享 schema 归一化仍保留为后备能力，用于测试与少量非生产场景的自研 schema helper 输出清洗
+- 完成工具参数 schema 对外收口：当前 `builtin-tools` 与 runtime tape tools 已统一通过手写裸 JSON 或 derive schema helper 暴露稳定外部契约；`apply_patch` 参数也已从未标记枚举收口为单 struct + `patch` / `patchText` 可选别名字段模型，在保持原有兼容语义的同时复用 derive 能力；共享 schema 归一化仍保留为后备能力，用于清洗手写 JSON 与 derive helper 的输出细节
 - 完成 compression 日志独立视图：`apps/agent-server` 的 trace 列表/汇总已支持按 `request_kind` 过滤，`apps/web` 把普通对话 trace 与上下文压缩日志拆成独立视图，不再混合展示
 - 完成 trace 首屏请求合并与查询提速：`apps/agent-server` 新增 `/api/traces/overview` 单次概览读取，`apps/web` 的 trace store 会合并同页重复刷新，`agent-store` 也已为 trace 列表/汇总热点查询补齐复合索引
 

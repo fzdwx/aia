@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
 use agent_core::{
-    CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
+    CoreError, Tool, ToolArgsSchema, ToolCall, ToolDefinition, ToolExecutionContext,
+    ToolOutputDelta, ToolResult,
 };
 use agent_prompts::tool_descriptions::grep_tool_description;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 
 use crate::walk::collect_candidate_files;
 
@@ -26,40 +26,17 @@ enum GrepSearchOutcome {
     Cancelled,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, ToolArgsSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct GrepToolArgs {
+    #[tool_schema(description = "Regex pattern to search for")]
     pattern: String,
+    #[tool_schema(description = "Directory or file to search in")]
     path: Option<String>,
+    #[tool_schema(description = "File glob filter (e.g. *.rs)")]
     glob: Option<String>,
+    #[tool_schema(description = "Maximum matched files to return (default 200, max 1000)")]
     limit: Option<usize>,
-}
-
-pub(crate) fn grep_tool_parameters() -> serde_json::Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "pattern": {
-                "description": "Regex pattern to search for",
-                "type": "string"
-            },
-            "path": {
-                "description": "Directory or file to search in",
-                "type": "string"
-            },
-            "glob": {
-                "description": "File glob filter (e.g. *.rs)",
-                "type": "string"
-            },
-            "limit": {
-                "description": "Maximum matched files to return (default 200, max 1000)",
-                "type": "integer",
-                "minimum": 0
-            }
-        },
-        "required": ["pattern"],
-        "additionalProperties": false
-    })
 }
 
 #[async_trait]
@@ -70,7 +47,7 @@ impl Tool for GrepTool {
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(self.name(), grep_tool_description())
-            .with_parameters_value(grep_tool_parameters())
+            .with_parameters_schema::<GrepToolArgs>()
     }
 
     async fn call(

@@ -60,6 +60,13 @@ impl ToolSchema {
         self
     }
 
+    pub fn min_properties(mut self, minimum: u64) -> Self {
+        if let Some(object) = self.value.as_object_mut() {
+            object.insert("minProperties".into(), Value::Number(minimum.into()));
+        }
+        self
+    }
+
     pub fn into_value(self) -> Value {
         self.value
     }
