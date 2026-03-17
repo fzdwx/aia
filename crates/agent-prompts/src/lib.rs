@@ -1,3 +1,5 @@
+pub mod tool_descriptions;
+
 /// Auto-compression: structured handoff summary prompt template.
 ///
 /// Contains `{{token_budget}}` — call [`handoff_summary`] to render.
