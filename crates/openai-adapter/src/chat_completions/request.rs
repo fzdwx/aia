@@ -72,6 +72,7 @@ impl OpenAiChatCompletionsModel {
             "model": self.config.model,
             "messages": messages,
             "tools": tools,
+            "parallel_tool_calls": request.parallel_tool_calls.unwrap_or(true),
         });
         if let Some(output_limit) = request.max_output_tokens {
             body["max_completion_tokens"] = json!(output_limit);

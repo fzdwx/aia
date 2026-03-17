@@ -30,7 +30,7 @@ type TapeEntryListener =
 
 pub struct AgentRuntime<M, T> {
     model: M,
-    tools: T,
+    tools: Arc<T>,
     tape: SessionTape,
     model_identity: ModelIdentity,
     instructions: Option<String>,
@@ -70,7 +70,7 @@ where
 
         Self {
             model,
-            tools,
+            tools: Arc::new(tools),
             tape,
             model_identity,
             instructions: None,

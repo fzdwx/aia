@@ -30,6 +30,7 @@ dependencies = [
  "agent-prompts",
  "aia-config",
  "async-trait",
+ "futures",
  "serde",
  "serde_json",
  "session-tape",

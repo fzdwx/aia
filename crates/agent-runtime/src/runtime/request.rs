@@ -34,6 +34,7 @@ where
             conversation,
             max_output_tokens,
             available_tools,
+            parallel_tool_calls: Some(true),
             prompt_cache: self.prompt_cache.clone(),
             user_agent: self.user_agent.clone(),
             timeout: self.request_timeout.clone(),

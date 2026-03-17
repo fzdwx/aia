@@ -180,6 +180,8 @@ pub struct CompletionRequest {
     pub max_output_tokens: Option<u32>,
     pub available_tools: Vec<ToolDefinition>,
     #[serde(default)]
+    pub parallel_tool_calls: Option<bool>,
+    #[serde(default)]
     pub prompt_cache: Option<PromptCacheConfig>,
     #[serde(default)]
     pub user_agent: Option<String>,

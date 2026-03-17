@@ -1,6 +1,6 @@
 use std::{
     future::Future,
-    sync::{Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard},
     time::{Duration, UNIX_EPOCH},
 };
 
@@ -440,6 +440,112 @@ impl LanguageModel for RequestRecordingModel {
     }
 }
 
+struct ParallelToolModel {
+    seen_requests: Mutex<Vec<CompletionRequest>>,
+}
+
+impl ParallelToolModel {
+    fn new() -> Self {
+        Self { seen_requests: Mutex::new(Vec::new()) }
+    }
+}
+
+#[async_trait]
+impl LanguageModel for ParallelToolModel {
+    type Error = CoreError;
+
+    async fn complete_streaming(
+        &self,
+        request: CompletionRequest,
+        _abort: &AbortSignal,
+        _sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
+    ) -> Result<Completion, Self::Error> {
+        let step = mutex_lock(&self.seen_requests).len();
+        mutex_lock(&self.seen_requests).push(request.clone());
+        if step == 0 {
+            Ok(Completion {
+                segments: vec![
+                    CompletionSegment::ToolUse(ToolCall::new("read").with_argument("path", "Cargo.toml")),
+                    CompletionSegment::ToolUse(ToolCall::new("glob").with_argument("pattern", "**/*.rs")),
+                ],
+                stop_reason: CompletionStopReason::ToolUse,
+                usage: None,
+                response_body: None,
+                http_status_code: None,
+            })
+        } else {
+            Ok(Completion::text("并行工具已完成"))
+        }
+    }
+}
+
+struct SerialWriteToolModel {
+    seen_requests: Mutex<Vec<CompletionRequest>>,
+}
+
+impl SerialWriteToolModel {
+    fn new() -> Self {
+        Self { seen_requests: Mutex::new(Vec::new()) }
+    }
+}
+
+#[async_trait]
+impl LanguageModel for SerialWriteToolModel {
+    type Error = CoreError;
+
+    async fn complete_streaming(
+        &self,
+        request: CompletionRequest,
+        _abort: &AbortSignal,
+        _sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
+    ) -> Result<Completion, Self::Error> {
+        let step = mutex_lock(&self.seen_requests).len();
+        mutex_lock(&self.seen_requests).push(request.clone());
+        if step == 0 {
+            Ok(Completion {
+                segments: vec![
+                    CompletionSegment::ToolUse(ToolCall::new("write").with_argument("path", "a.txt")),
+                    CompletionSegment::ToolUse(ToolCall::new("read").with_argument("path", "a.txt")),
+                ],
+                stop_reason: CompletionStopReason::ToolUse,
+                usage: None,
+                response_body: None,
+                http_status_code: None,
+            })
+        } else {
+            Ok(Completion::text("串行工具已完成"))
+        }
+    }
+}
+
+struct TimingTools {
+    events: Arc<Mutex<Vec<String>>>,
+}
+
+#[async_trait]
+impl ToolExecutor for TimingTools {
+    type Error = CoreError;
+
+    fn definitions(&self) -> Vec<ToolDefinition> {
+        vec![
+            ToolDefinition::new("read", "读取文件"),
+            ToolDefinition::new("glob", "查找文件"),
+            ToolDefinition::new("write", "写文件"),
+        ]
+    }
+
+    async fn call(
+        &self,
+        call: &ToolCall,
+        _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
+        _context: &ToolExecutionContext,
+    ) -> Result<ToolResult, Self::Error> {
+        mutex_lock(&self.events).push(format!("start:{}", call.tool_name));
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        mutex_lock(&self.events).push(format!("end:{}", call.tool_name));
+        Ok(ToolResult::from_call(call, format!("done:{}", call.tool_name)))
+    }
+}
 struct StopReasonDrivenModel {
     seen_requests: Mutex<Vec<CompletionRequest>>,
 }
@@ -918,6 +1024,58 @@ fn 运行时不会自动追加最大步数收尾消息() {
     assert!(requests.iter().all(|request| request.conversation.iter().all(|item| {
         item.as_message().is_none_or(|message| !message.content.contains("最大步骤数"))
     })));
+}
+
+#[test]
+fn 运行时会默认请求模型允许并行工具调用() {
+    let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced);
+    let model = BudgetRecordingModel::new();
+    let mut runtime = AgentRuntime::new(model, StubTools, identity);
+
+    let _ = run_turn(&mut runtime, "检查并行工具开关").expect("应成功完成");
+
+    let requests = mutex_lock(&runtime.model.seen_requests);
+    assert_eq!(requests[0].parallel_tool_calls, Some(true));
+}
+
+#[test]
+fn 纯读取类工具会在同一批次并行执行() {
+    let identity = ModelIdentity::new("local", "parallel-tools", ModelDisposition::Balanced);
+    let model = ParallelToolModel::new();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let tools = TimingTools { events: events.clone() };
+    let mut runtime = AgentRuntime::new(model, tools, identity);
+
+    let output = run_turn(&mut runtime, "并行执行读取工具").expect("应成功完成");
+
+    assert_eq!(output.assistant_text, "并行工具已完成");
+    let events = mutex_lock(&events).clone();
+    let start_read = events.iter().position(|item| item == "start:read").expect("应记录 read start");
+    let start_glob = events.iter().position(|item| item == "start:glob").expect("应记录 glob start");
+    let end_read = events.iter().position(|item| item == "end:read").expect("应记录 read end");
+    let end_glob = events.iter().position(|item| item == "end:glob").expect("应记录 glob end");
+    assert!(start_read < end_read);
+    assert!(start_glob < end_glob);
+    assert!(start_glob < end_read, "glob 应在 read 完成前已开始");
+}
+
+#[test]
+fn 写入类工具会保持串行执行() {
+    let identity = ModelIdentity::new("local", "serial-write-tools", ModelDisposition::Balanced);
+    let model = SerialWriteToolModel::new();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let tools = TimingTools { events: events.clone() };
+    let mut runtime = AgentRuntime::new(model, tools, identity);
+
+    let output = run_turn(&mut runtime, "串行执行写工具").expect("应成功完成");
+
+    assert_eq!(output.assistant_text, "串行工具已完成");
+    let events = mutex_lock(&events).clone();
+    let start_write = events.iter().position(|item| item == "start:write").expect("应记录 write start");
+    let end_write = events.iter().position(|item| item == "end:write").expect("应记录 write end");
+    let start_read = events.iter().position(|item| item == "start:read").expect("应记录 read start");
+    assert!(start_write < end_write);
+    assert!(end_write < start_read, "read 应在 write 完成后才开始");
 }
 
 #[test]

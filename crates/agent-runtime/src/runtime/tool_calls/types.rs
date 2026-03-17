@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use agent_core::{AbortSignal, LlmTraceRequestContext, StreamEvent, ToolCall};
+use agent_core::{AbortSignal, LlmTraceRequestContext, StreamEvent, ToolCall, ToolResult};
 
 use crate::{ToolInvocationOutcome, ToolTraceContext};
 
@@ -30,6 +30,21 @@ pub(super) struct ToolCallLifecycleContext<'a> {
 pub(super) struct FailedToolCallContext<'a> {
     pub(super) lifecycle: ToolCallLifecycleContext<'a>,
     pub(super) event_name: &'a str,
+}
+
+pub(crate) enum PreparedToolCallOutcome {
+    Completed {
+        started_at_ms: u64,
+        tool_trace_context: Option<ToolTraceContext>,
+        result: ToolResult,
+        failed: bool,
+    },
+    Failed {
+        started_at_ms: u64,
+        tool_trace_context: Option<ToolTraceContext>,
+        event_name: &'static str,
+        runtime_error: super::super::RuntimeError,
+    },
 }
 
 impl ExecuteToolCallContext<'_> {

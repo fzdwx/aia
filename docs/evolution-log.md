@@ -1,5 +1,19 @@
 # 演进日志
 
+## 2026-03-17 Session 38
+
+**Diagnosis**：内部工具协议已经稳定，但 `agent-core` 请求模型、`openai-adapter` 的 OpenAI 请求映射与 `agent-runtime` 的工具执行主链之间还没有真正把“模型可并行发起独立工具调用”闭环打通；即使模型一次返回多个互不依赖的只读工具调用，runtime 仍会全部串行执行。
+**Decision**：参考 OpenAI `parallel_tool_calls` 语义，在共享 `CompletionRequest` 中补齐该开关，并把 Responses / Chat Completions 两条协议请求都显式映射为 `parallel_tool_calls: true`；同时让 runtime 对同一批工具调用按策略执行：只读类工具允许并行准备与执行，而 `shell` / `write` / `edit` / runtime tools 继续串行，避免文件系统冲突和交互副作用。
+**Changes**：
+- `crates/agent-core/src/completion.rs`、`crates/agent-runtime/src/runtime/request.rs`、`crates/agent-runtime/src/runtime/compress.rs`：为共享 `CompletionRequest` 新增 `parallel_tool_calls` 字段，普通 completion 请求默认启用，并为压缩请求显式关闭。
+- `crates/openai-adapter/src/responses/request.rs`、`crates/openai-adapter/src/chat_completions/request.rs`、`crates/openai-adapter/src/tests.rs`：Responses / Chat Completions 请求体显式映射 `parallel_tool_calls`，并补充请求体回归测试。
+- `crates/agent-runtime/src/runtime.rs`、`crates/agent-runtime/src/runtime/tool_calls/{execute,policy,types}.rs`、`crates/agent-runtime/src/runtime/turn/segments.rs`：runtime 工具执行器改为共享 `Arc<T>` 持有；新增“哪些工具可并行”的策略模块；把工具执行拆成 prepare/commit 两段式，并让同一批纯只读工具调用经由 `join_all` 并行执行后按原顺序提交结果。
+- `crates/agent-runtime/src/runtime/tests.rs`、`apps/agent-server/src/model/tests.rs`：新增 runtime 并行/串行工具回归测试，并同步补齐新增请求字段导致的 server model 测试初始化。
+- `docs/status.md`：同步记录并行工具调用首轮已打通。
+**Verification**：`cargo check` 通过；`cargo test -p agent-runtime --lib -- --nocapture` 通过（64 passed）；`cargo test -p openai-adapter -- --nocapture` 通过（33 passed）；`cargo test -p agent-server runtime_worker -- --nocapture` 通过（7 passed）；`cargo test -p agent-server model -- --nocapture` 通过（4 passed）。
+**Commit**：未提交（当前会话未执行 `git commit`）；建议提交信息：`feat: add parallel tool call execution`
+**Next direction**：优先继续把并行工具调用的策略从“按工具名静态分类”推进到更显式的工具元数据能力（如 read-only / interactive / fs-write），并评估是否需要把并行工具输出事件的提交顺序与 UI 展示顺序再做一次细化收口。
+
 ## 2026-03-17 Session 37
 
 **Diagnosis**：`apps/agent-server` 的 current-turn 语义仍残着一层历史重复：live stream 更新和 tape→snapshot 重建分别各自维护 `CurrentTurnBlock` / `CurrentToolOutput` 的对象归一化、tool block 构造与状态推断，后续一旦继续改工具输出语义很容易漂移。

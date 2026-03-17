@@ -1,12 +1,19 @@
 use agent_core::{
     AbortSignal, Completion, CompletionSegment, CompletionStopReason, LanguageModel,
-    LlmTraceRequestContext, Message, Role, StreamEvent, ToolExecutor,
+    LlmTraceRequestContext, Message, Role, StreamEvent, ToolExecutionContext, ToolExecutor,
+    ToolOutputDelta,
 };
+use futures::future::join_all;
 use session_tape::TapeEntry;
 
 use crate::{RuntimeEvent, TurnBlock};
 
-use super::super::{AgentRuntime, RuntimeError, tool_calls::ExecuteToolCallContext};
+use super::super::{
+    AgentRuntime, RuntimeError,
+    helpers::{build_tool_trace_context, now_timestamp_ms},
+    tape_tools,
+    tool_calls::{ExecuteToolCallContext, can_run_in_parallel},
+};
 use super::types::TurnBuffers;
 
 impl<M, T> AgentRuntime<M, T>
@@ -47,6 +54,16 @@ where
         self.flush_streamed_partial_segments(turn_id, buffers)?;
         let mut assistant_entry_id = None;
         let mut saw_tool_calls = false;
+        let tool_calls_are_parallel = completion
+            .segments
+            .iter()
+            .filter_map(|segment| match segment {
+                CompletionSegment::ToolUse(call) => Some(call),
+                CompletionSegment::Thinking(_) | CompletionSegment::Text(_) => None,
+            })
+            .all(|call| can_run_in_parallel(call) && !tape_tools::is_runtime_tool(&call.tool_name));
+
+        let mut parallel_calls = Vec::new();
 
         for segment in &completion.segments {
             match segment {
@@ -75,7 +92,7 @@ where
                     assistant_entry_id = Some(entry_id);
                 }
                 CompletionSegment::ToolUse(call) => {
-                    if buffers.tool_invocations.len() >= self.max_tool_calls_per_turn {
+                    if buffers.tool_invocations.len() + parallel_calls.len() >= self.max_tool_calls_per_turn {
                         return Err(RuntimeError::tool_call_limit(self.max_tool_calls_per_turn));
                     }
                     if abort_signal.is_aborted() {
@@ -85,27 +102,172 @@ where
                     let tool_call_entry_id =
                         self.append_tape_entry(TapeEntry::tool_call(call).with_run_id(turn_id))?;
                     buffers.source_entry_ids.push(tool_call_entry_id);
-                    let invocation = self
-                        .execute_tool_call(
-                            ExecuteToolCallContext::new(
-                                turn_id,
-                                llm_trace_context,
+
+                    if tool_calls_are_parallel {
+                        parallel_calls.push((assistant_entry_id, tool_call_entry_id, call.clone()));
+                    } else {
+                        let invocation = self
+                            .execute_tool_call(
+                                ExecuteToolCallContext::new(
+                                    turn_id,
+                                    llm_trace_context,
+                                    assistant_entry_id,
+                                    tool_call_entry_id,
+                                    call,
+                                    &mut buffers.seen_tool_calls,
+                                    &mut buffers.source_entry_ids,
+                                    abort_signal.clone(),
+                                ),
+                                on_delta,
+                            )
+                            .await?;
+                        buffers.blocks.push(TurnBlock::ToolInvocation {
+                            invocation: Box::new(invocation.clone()),
+                        });
+                        buffers.tool_invocations.push(invocation);
+                    }
+                }
+                CompletionSegment::Thinking(_) | CompletionSegment::Text(_) => {}
+            }
+        }
+
+        if tool_calls_are_parallel && !parallel_calls.is_empty() {
+            let visible_tool_names = self
+                .visible_tools()
+                .into_iter()
+                .map(|definition| definition.name)
+                .collect::<std::collections::BTreeSet<_>>();
+            let tools = self.tools.clone();
+            let workspace_root = self.workspace_root.clone();
+            let turn_id_owned = turn_id.to_string();
+            let trace_context = llm_trace_context.cloned();
+
+            let prepared_results = join_all(parallel_calls.iter().cloned().map(
+                |(assistant_entry_id, tool_call_entry_id, call)| {
+                    let tools = tools.clone();
+                    let visible_tool_names = visible_tool_names.clone();
+                    let workspace_root = workspace_root.clone();
+                    let abort_signal = abort_signal.clone();
+                    let turn_id_owned = turn_id_owned.clone();
+                    let trace_context = trace_context.clone();
+                    async move {
+                        let started_at_ms = now_timestamp_ms();
+                        let tool_trace_context =
+                            trace_context.as_ref().map(|trace| build_tool_trace_context(trace, &call));
+
+                        if abort_signal.is_aborted() {
+                            return (
                                 assistant_entry_id,
                                 tool_call_entry_id,
                                 call,
-                                &mut buffers.seen_tool_calls,
-                                &mut buffers.source_entry_ids,
-                                abort_signal.clone(),
-                            ),
-                            on_delta,
-                        )
-                        .await?;
-                    buffers.blocks.push(TurnBlock::ToolInvocation {
-                        invocation: Box::new(invocation.clone()),
+                                super::super::tool_calls::PreparedToolCallOutcome::Failed {
+                                    started_at_ms,
+                                    tool_trace_context,
+                                    event_name: "tool_call_cancelled",
+                                    runtime_error: RuntimeError::cancelled(),
+                                },
+                                Vec::<ToolOutputDelta>::new(),
+                            );
+                        }
+
+                        if !visible_tool_names.contains(&call.tool_name) {
+                            let unavailable_name = call.tool_name.clone();
+                            return (
+                                assistant_entry_id,
+                                tool_call_entry_id,
+                                call,
+                                super::super::tool_calls::PreparedToolCallOutcome::Failed {
+                                    started_at_ms,
+                                    tool_trace_context,
+                                    event_name: "tool_call_rejected",
+                                    runtime_error: RuntimeError::tool_unavailable(unavailable_name),
+                                },
+                                Vec::<ToolOutputDelta>::new(),
+                            );
+                        }
+
+                        let mut deltas = Vec::<ToolOutputDelta>::new();
+                        let prepared = match tools
+                            .call(
+                                &call,
+                                &mut |delta| deltas.push(delta),
+                                &ToolExecutionContext {
+                                    run_id: turn_id_owned,
+                                    workspace_root,
+                                    abort: abort_signal.clone(),
+                                    runtime: None,
+                                },
+                            )
+                            .await
+                        {
+                            Ok(result) => {
+                                if result.invocation_id != call.invocation_id
+                                    || result.tool_name != call.tool_name
+                                {
+                                    super::super::tool_calls::PreparedToolCallOutcome::Failed {
+                                        started_at_ms,
+                                        tool_trace_context,
+                                        event_name: "tool_result_rejected",
+                                        runtime_error: RuntimeError::tool_result_mismatch(&call, &result),
+                                    }
+                                } else {
+                                    super::super::tool_calls::PreparedToolCallOutcome::Completed {
+                                        started_at_ms,
+                                        tool_trace_context,
+                                        result,
+                                        failed: abort_signal.is_aborted(),
+                                    }
+                                }
+                            }
+                            Err(error) => super::super::tool_calls::PreparedToolCallOutcome::Failed {
+                                started_at_ms,
+                                tool_trace_context,
+                                event_name: "tool_call_failed",
+                                runtime_error: RuntimeError::tool(error),
+                            },
+                        };
+
+                        (assistant_entry_id, tool_call_entry_id, call, prepared, deltas)
+                    }
+                },
+            ))
+            .await;
+
+            let mut prepared_results = prepared_results;
+            prepared_results.sort_by_key(|(_, tool_call_entry_id, _, _, _)| *tool_call_entry_id);
+
+            for (assistant_entry_id, tool_call_entry_id, call, prepared, deltas) in prepared_results {
+                on_delta(StreamEvent::ToolCallStarted {
+                    invocation_id: call.invocation_id.clone(),
+                    tool_name: call.tool_name.clone(),
+                    arguments: call.arguments.clone(),
+                });
+                for delta in deltas {
+                    on_delta(StreamEvent::ToolOutputDelta {
+                        invocation_id: call.invocation_id.clone(),
+                        stream: delta.stream,
+                        text: delta.text,
                     });
-                    buffers.tool_invocations.push(invocation);
                 }
-                CompletionSegment::Thinking(_) | CompletionSegment::Text(_) => {}
+                let invocation = self
+                    .commit_prepared_tool_call(
+                        &mut ExecuteToolCallContext::new(
+                            turn_id,
+                            llm_trace_context,
+                            assistant_entry_id,
+                            tool_call_entry_id,
+                            &call,
+                            &mut buffers.seen_tool_calls,
+                            &mut buffers.source_entry_ids,
+                            abort_signal.clone(),
+                        ),
+                        prepared,
+                        on_delta,
+                    )?;
+                buffers.blocks.push(TurnBlock::ToolInvocation {
+                    invocation: Box::new(invocation.clone()),
+                });
+                buffers.tool_invocations.push(invocation);
             }
         }
 

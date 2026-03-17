@@ -39,6 +39,7 @@ where
             conversation: view.conversation,
             max_output_tokens: Some(summary_max_tokens),
             available_tools: Vec::new(),
+            parallel_tool_calls: Some(false),
             prompt_cache: None,
             user_agent: None,
             timeout: self.request_timeout.clone(),

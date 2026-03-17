@@ -13,7 +13,7 @@ use super::super::{
     helpers::{build_tool_trace_context, now_timestamp_ms, tool_call_signature},
     tape_tools,
 };
-use super::types::{ExecuteToolCallContext, FailedToolCallContext};
+use super::types::{ExecuteToolCallContext, FailedToolCallContext, PreparedToolCallOutcome};
 
 impl<M, T> AgentRuntime<M, T>
 where
@@ -26,6 +26,16 @@ where
         on_delta: &mut (dyn FnMut(StreamEvent) + Send),
     ) -> Result<ToolInvocationLifecycle, RuntimeError> {
         let mut context = context;
+        on_delta(context.started_event());
+        let prepared = self.prepare_tool_call(&context, on_delta).await;
+        self.commit_prepared_tool_call(&mut context, prepared, on_delta)
+    }
+
+    pub(in super::super) async fn prepare_tool_call(
+        &mut self,
+        context: &ExecuteToolCallContext<'_>,
+        on_delta: &mut (dyn FnMut(StreamEvent) + Send),
+    ) -> PreparedToolCallOutcome {
         let started_at_ms = now_timestamp_ms();
         let tool_trace_context =
             context.parent_trace_context.map(|trace| build_tool_trace_context(trace, context.call));
@@ -34,62 +44,43 @@ where
             .into_iter()
             .map(|definition| definition.name)
             .collect::<BTreeSet<_>>();
-        let call_signature = tool_call_signature(context.call);
         let tool_name = context.call.tool_name.clone();
 
         if context.abort_signal.is_aborted() {
-            return self.record_failed_tool_call_for_context(
-                &mut context,
+            return PreparedToolCallOutcome::Failed {
                 started_at_ms,
-                tool_trace_context.clone(),
-                "tool_call_cancelled",
-                RuntimeError::cancelled(),
-                &call_signature,
-                on_delta,
-            );
+                tool_trace_context,
+                event_name: "tool_call_cancelled",
+                runtime_error: RuntimeError::cancelled(),
+            };
         }
 
         if !available_tool_names.contains(&tool_name) {
-            return self.record_failed_tool_call_for_context(
-                &mut context,
+            return PreparedToolCallOutcome::Failed {
                 started_at_ms,
-                tool_trace_context.clone(),
-                "tool_call_rejected",
-                RuntimeError::tool_unavailable(tool_name),
-                &call_signature,
-                on_delta,
-            );
+                tool_trace_context,
+                event_name: "tool_call_rejected",
+                runtime_error: RuntimeError::tool_unavailable(tool_name),
+            };
         }
 
         if tape_tools::is_runtime_tool(&context.call.tool_name) {
-            if context.abort_signal.is_aborted() {
-                return self.record_failed_tool_call_for_context(
-                    &mut context,
+            let prepared = match self.invoke_runtime_tool(context).await {
+                Ok(result) => PreparedToolCallOutcome::Completed {
                     started_at_ms,
-                    tool_trace_context.clone(),
-                    "tool_call_cancelled",
-                    RuntimeError::cancelled(),
-                    &call_signature,
-                    on_delta,
-                );
-            }
-
-            on_delta(context.started_event());
-
-            let result = self.invoke_runtime_tool(&context).await?;
-            let was_cancelled = context.abort_signal.is_aborted();
-            return self.record_completed_tool_call_for_context(
-                &mut context,
-                started_at_ms,
-                tool_trace_context,
-                result,
-                was_cancelled,
-                &call_signature,
-                on_delta,
-            );
+                    tool_trace_context,
+                    result,
+                    failed: context.abort_signal.is_aborted(),
+                },
+                Err(runtime_error) => PreparedToolCallOutcome::Failed {
+                    started_at_ms,
+                    tool_trace_context,
+                    event_name: "tool_call_failed",
+                    runtime_error,
+                },
+            };
+            return prepared;
         }
-
-        on_delta(context.started_event());
 
         match self
             .tools
@@ -115,35 +106,63 @@ where
                 if result.invocation_id != context.call.invocation_id
                     || result.tool_name != context.call.tool_name
                 {
-                    let mismatch_error = RuntimeError::tool_result_mismatch(context.call, &result);
-                    return self.record_failed_tool_call_for_context(
-                        &mut context,
+                    PreparedToolCallOutcome::Failed {
                         started_at_ms,
-                        tool_trace_context.clone(),
-                        "tool_result_rejected",
-                        mismatch_error,
-                        &call_signature,
-                        on_delta,
-                    );
+                        tool_trace_context,
+                        event_name: "tool_result_rejected",
+                        runtime_error: RuntimeError::tool_result_mismatch(context.call, &result),
+                    }
+                } else {
+                    PreparedToolCallOutcome::Completed {
+                        started_at_ms,
+                        tool_trace_context,
+                        result,
+                        failed: context.abort_signal.is_aborted(),
+                    }
                 }
-
-                let was_cancelled = context.abort_signal.is_aborted();
-                self.record_completed_tool_call_for_context(
-                    &mut context,
-                    started_at_ms,
-                    tool_trace_context,
-                    result,
-                    was_cancelled,
-                    &call_signature,
-                    on_delta,
-                )
             }
-            Err(error) => self.record_failed_tool_call_for_context(
-                &mut context,
+            Err(error) => PreparedToolCallOutcome::Failed {
                 started_at_ms,
                 tool_trace_context,
-                "tool_call_failed",
-                RuntimeError::tool(error),
+                event_name: "tool_call_failed",
+                runtime_error: RuntimeError::tool(error),
+            },
+        }
+    }
+
+    pub(in super::super) fn commit_prepared_tool_call(
+        &mut self,
+        context: &mut ExecuteToolCallContext<'_>,
+        prepared: PreparedToolCallOutcome,
+        on_delta: &mut (dyn FnMut(StreamEvent) + Send),
+    ) -> Result<ToolInvocationLifecycle, RuntimeError> {
+        let call_signature = tool_call_signature(context.call);
+        match prepared {
+            PreparedToolCallOutcome::Completed {
+                started_at_ms,
+                tool_trace_context,
+                result,
+                failed,
+            } => self.record_completed_tool_call_for_context(
+                context,
+                started_at_ms,
+                tool_trace_context,
+                result,
+                failed,
+                &call_signature,
+                on_delta,
+            ),
+            PreparedToolCallOutcome::Failed {
+                started_at_ms,
+                tool_trace_context,
+                event_name,
+                runtime_error,
+            } => self.record_failed_tool_call_for_context(
+                context,
+                started_at_ms,
+                tool_trace_context,
+                event_name,
+                runtime_error,
                 &call_signature,
                 on_delta,
             ),

@@ -31,6 +31,7 @@ fn sample_request() -> CompletionRequest {
             "关键字",
             true,
         )],
+        parallel_tool_calls: Some(true),
         prompt_cache: None,
         user_agent: None,
         timeout: None,
@@ -70,6 +71,7 @@ fn 请求体会映射模型指令消息与工具() {
     assert_eq!(body["input"][1]["content"], json!("帮我总结当前工作区"));
     assert_eq!(body["tools"][0]["name"], json!("search_code"));
     assert_eq!(body["tools"][0]["parameters"]["required"], json!(["query"]));
+    assert_eq!(body["parallel_tool_calls"], json!(true));
     assert!(body.get("reasoning").is_none() || body["reasoning"].is_null());
 }
 
@@ -174,6 +176,21 @@ fn responses_工具结果请求体会发送完整上下文() {
     assert_eq!(body["input"][2]["call_id"], json!("call_1"));
     assert_eq!(body["input"][3]["type"], json!("function_call_output"));
     assert_eq!(body["input"][3]["call_id"], json!("call_1"));
+}
+
+#[test]
+fn chat_completions_请求体会映射_parallel_tool_calls() {
+    let model = OpenAiChatCompletionsModel::new(OpenAiChatCompletionsConfig::new(
+        "http://127.0.0.1:1",
+        "test-key",
+        "gpt-4.1-mini",
+    ))
+    .expect("模型创建成功");
+
+    let body = model.build_request_body(&sample_request());
+
+    assert_eq!(body["parallel_tool_calls"], json!(true));
+    assert_eq!(body["tools"][0]["function"]["name"], json!("search_code"));
 }
 
 #[test]

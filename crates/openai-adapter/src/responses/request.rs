@@ -63,6 +63,7 @@ impl OpenAiResponsesModel {
             "instructions": request.instructions,
             "input": input,
             "tools": tools,
+            "parallel_tool_calls": request.parallel_tool_calls.unwrap_or(true),
         });
         if let Some(output_limit) = request.max_output_tokens {
             body["max_output_tokens"] = json!(output_limit);
