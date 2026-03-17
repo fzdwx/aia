@@ -4,9 +4,7 @@ use agent_core::{CompletionUsage, Role};
 use agent_runtime::{TurnLifecycle, TurnOutcome};
 use session_tape::SessionTape;
 
-use crate::sse::TurnStatus;
-
-use super::{CurrentToolOutput, CurrentTurnBlock, CurrentTurnSnapshot};
+use super::{CurrentTurnSnapshot, turn_block_to_current, turn_lifecycle_status};
 
 #[derive(Default)]
 pub struct SessionSnapshots {
@@ -111,10 +109,6 @@ fn parse_iso8601_utc_seconds(input: &str) -> Option<u64> {
     let total_seconds = days_since_epoch * 86_400 + hour * 3_600 + minute * 60 + second;
 
     (total_seconds >= 0).then_some((total_seconds as u64) * 1000)
-}
-
-fn object_value(value: &serde_json::Value) -> serde_json::Value {
-    if value.is_object() { value.clone() } else { serde_json::json!({}) }
 }
 
 #[derive(Default)]
@@ -256,77 +250,13 @@ impl TurnHistoryBuilder {
 
     fn into_current_turn(self) -> Option<CurrentTurnSnapshot> {
         let lifecycle = self.into_turn_lifecycle()?;
-        let status = match lifecycle.outcome {
-            TurnOutcome::Cancelled => TurnStatus::Cancelled,
-            _ if lifecycle
-                .blocks
-                .iter()
-                .any(|block| matches!(block, agent_runtime::TurnBlock::ToolInvocation { .. })) =>
-            {
-                TurnStatus::Working
-            }
-            _ if lifecycle
-                .blocks
-                .iter()
-                .any(|block| matches!(block, agent_runtime::TurnBlock::Assistant { .. })) =>
-            {
-                TurnStatus::Generating
-            }
-            _ if lifecycle
-                .blocks
-                .iter()
-                .any(|block| matches!(block, agent_runtime::TurnBlock::Thinking { .. })) =>
-            {
-                TurnStatus::Thinking
-            }
-            _ => TurnStatus::Waiting,
-        };
+        let status = turn_lifecycle_status(&lifecycle);
 
         Some(CurrentTurnSnapshot {
             started_at_ms: lifecycle.started_at_ms,
             user_message: lifecycle.user_message,
             status,
-            blocks: lifecycle
-                .blocks
-                .into_iter()
-                .filter_map(|block| match block {
-                    agent_runtime::TurnBlock::Thinking { content } => {
-                        Some(CurrentTurnBlock::Thinking { content })
-                    }
-                    agent_runtime::TurnBlock::Assistant { content } => {
-                        Some(CurrentTurnBlock::Text { content })
-                    }
-                    agent_runtime::TurnBlock::ToolInvocation { invocation } => {
-                        let invocation = *invocation;
-                        let (result_content, result_details, failed) = match invocation.outcome {
-                            agent_runtime::ToolInvocationOutcome::Succeeded { result } => {
-                                (Some(result.content), result.details, Some(false))
-                            }
-                            agent_runtime::ToolInvocationOutcome::Failed { message } => {
-                                (Some(message), None, Some(true))
-                            }
-                        };
-
-                        Some(CurrentTurnBlock::Tool {
-                            tool: CurrentToolOutput {
-                                invocation_id: invocation.call.invocation_id,
-                                tool_name: invocation.call.tool_name,
-                                arguments: object_value(&invocation.call.arguments),
-                                detected_at_ms: invocation.started_at_ms,
-                                started_at_ms: Some(invocation.started_at_ms),
-                                finished_at_ms: Some(invocation.finished_at_ms),
-                                output: String::new(),
-                                completed: true,
-                                result_content,
-                                result_details,
-                                failed,
-                            },
-                        })
-                    }
-                    agent_runtime::TurnBlock::Failure { .. }
-                    | agent_runtime::TurnBlock::Cancelled { .. } => None,
-                })
-                .collect(),
+            blocks: lifecycle.blocks.into_iter().filter_map(turn_block_to_current).collect(),
         })
     }
 }

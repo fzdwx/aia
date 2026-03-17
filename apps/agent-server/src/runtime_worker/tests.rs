@@ -124,6 +124,43 @@ fn rebuild_session_snapshots_from_tape_keeps_incomplete_turn_out_of_history() {
 }
 
 #[test]
+fn rebuild_session_snapshots_from_tape_projects_completed_tool_block() {
+    let mut tape = SessionTape::new();
+    let turn_id = "turn-tool";
+    let call =
+        ToolCall::new("read").with_invocation_id("call-1").with_argument("path", "Cargo.toml");
+    let result =
+        ToolResult::from_call(&call, "内容").with_details(serde_json::json!({ "lines": [1, 2] }));
+
+    tape.append_entry(TapeEntry::message(&Message::new(Role::User, "读一下")).with_run_id(turn_id));
+    tape.append_entry(TapeEntry::tool_call(&call).with_run_id(turn_id));
+    tape.append_entry(TapeEntry::tool_result(&result).with_run_id(turn_id));
+
+    let snapshots = rebuild_session_snapshots_from_tape(&tape);
+
+    let current = snapshots.current_turn.expect("应保留当前未完成轮次");
+    assert_eq!(current.status, crate::sse::TurnStatus::Working);
+    assert_eq!(
+        current.blocks,
+        vec![CurrentTurnBlock::Tool {
+            tool: CurrentToolOutput {
+                invocation_id: "call-1".to_string(),
+                tool_name: "read".to_string(),
+                arguments: serde_json::json!({ "path": "Cargo.toml" }),
+                detected_at_ms: current.started_at_ms,
+                started_at_ms: Some(current.started_at_ms),
+                finished_at_ms: Some(current.started_at_ms),
+                output: String::new(),
+                completed: true,
+                result_content: Some("内容".to_string()),
+                result_details: Some(serde_json::json!({ "lines": [1, 2] })),
+                failed: Some(false),
+            }
+        }]
+    );
+}
+
+#[test]
 fn rebuild_turn_history_from_tape_marks_cancelled_blocks_explicitly() {
     let mut tape = SessionTape::new();
     let turn_id = "turn-cancelled";

@@ -2,11 +2,13 @@ use std::sync::{Arc, RwLock};
 
 use agent_core::{StreamEvent, ToolRegistry};
 use agent_runtime::{AgentRuntime, ContextStats};
-use serde_json::{Value, json};
 
 use crate::{
     model::ServerModel,
-    runtime_worker::{CurrentToolOutput, CurrentTurnBlock, CurrentTurnSnapshot},
+    runtime_worker::{
+        CurrentTurnBlock, CurrentTurnSnapshot, find_tool_output_mut, live_tool_block,
+        normalize_object_value,
+    },
     sse::TurnStatus,
 };
 
@@ -77,14 +79,15 @@ pub(crate) fn update_current_turn_from_stream(
         StreamEvent::ToolCallStarted { invocation_id, tool_name, arguments } => {
             if let Some(tool) = find_tool_output_mut(&mut current.blocks, invocation_id) {
                 tool.tool_name = tool_name.clone();
-                tool.arguments = object_value(arguments);
+                tool.arguments = normalize_object_value(arguments);
                 tool.started_at_ms = Some(tool.started_at_ms.unwrap_or_else(now_timestamp_ms));
             } else {
-                current.blocks.push(tool_block(
+                current.blocks.push(live_tool_block(
                     invocation_id.clone(),
                     tool_name.clone(),
-                    object_value(arguments),
+                    normalize_object_value(arguments),
                     String::new(),
+                    now_timestamp_ms(),
                     true,
                 ));
             }
@@ -93,11 +96,12 @@ pub(crate) fn update_current_turn_from_stream(
             if let Some(tool) = find_tool_output_mut(&mut current.blocks, invocation_id) {
                 tool.output.push_str(text);
             } else {
-                current.blocks.push(tool_block(
+                current.blocks.push(live_tool_block(
                     invocation_id.clone(),
                     String::new(),
-                    json!({}),
+                    serde_json::json!({}),
                     text.clone(),
+                    now_timestamp_ms(),
                     true,
                 ));
             }
@@ -114,43 +118,4 @@ pub(crate) fn update_current_turn_from_stream(
         }
         StreamEvent::Log { .. } | StreamEvent::Done => {}
     }
-}
-
-fn find_tool_output_mut<'a>(
-    blocks: &'a mut [CurrentTurnBlock],
-    invocation_id: &str,
-) -> Option<&'a mut CurrentToolOutput> {
-    blocks.iter_mut().rev().find_map(|block| match block {
-        CurrentTurnBlock::Tool { tool } if tool.invocation_id == invocation_id => Some(tool),
-        _ => None,
-    })
-}
-
-fn tool_block(
-    invocation_id: String,
-    tool_name: String,
-    arguments: Value,
-    output: String,
-    started: bool,
-) -> CurrentTurnBlock {
-    let timestamp = now_timestamp_ms();
-    CurrentTurnBlock::Tool {
-        tool: CurrentToolOutput {
-            invocation_id,
-            tool_name,
-            arguments,
-            detected_at_ms: timestamp,
-            started_at_ms: started.then_some(timestamp),
-            finished_at_ms: None,
-            output,
-            completed: false,
-            result_content: None,
-            result_details: None,
-            failed: None,
-        },
-    }
-}
-
-fn object_value(value: &Value) -> Value {
-    if value.is_object() { value.clone() } else { json!({}) }
 }

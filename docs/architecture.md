@@ -191,6 +191,7 @@ README 里真正难的是这些能力：
 - `session_manager` 已进一步按职责拆成子模块：命令发送 handle、共享 slot/command 类型、current-turn 流式投影、tool trace 持久化与测试辅助分别独立，主文件只保留 session loop、slot 生命周期与 provider/runtime 同步主流程
 - `model` 也已按职责拆成子模块：bootstrap mock、trace 事件收集/摘要/helper 与测试分别独立，主文件只保留 provider 选择、`ServerModel` 适配与 trace 落盘主流程
 - `runtime_worker` 已按职责拆成子模块：共享类型、tape 快照重建/legacy decode helper 与测试分别独立，主文件只保留稳定 re-export 入口
+- `runtime_worker::projection` 现承接 current-turn 共享投影语义：live stream 更新与 tape→snapshot 重建共用对象归一化、tool block 构造与 `TurnLifecycle` / `TurnBlock` → `CurrentTurn*` 映射 helper，避免 `session_manager` 与 `runtime_worker` 分别维护两套 `CurrentTurnBlock` / `CurrentToolOutput` 投影逻辑
 - provider 当前信息、history 与 current turn 通过共享快照读取，避免长时间 turn 把所有路由一起锁住
 - 全局 `broadcast::channel` 向所有 SSE 客户端推送事件
 - 暴露 provider、session、turn、cancel、handoff、trace 等 HTTP API
