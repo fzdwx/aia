@@ -1,5 +1,19 @@
 # 演进日志
 
+## 2026-03-17 Session 43
+
+**Diagnosis**：虽然真实工具的 `definition()` 已统一切到 `schemars` 参数 schema，但运行时 `call()` 里仍普遍是手工 `str_arg/opt_*_arg/arguments.get(...)` 取值，导致参数 schema 与实际解析逻辑仍然是两套源头。
+**Decision**：把 typed args 解析继续收口到 `agent-core::ToolCall`：新增共享 `parse_arguments()`，并把当前所有真实工具实现统一改成直接反序列化其参数结构体；这样 `schemars` 定义与运行时解析开始共用同一份 Rust 类型。
+**Changes**：
+- `crates/agent-core/src/tooling.rs`、`crates/agent-core/src/tests.rs`：新增 `ToolCall::parse_arguments()` 与回归测试，验证 typed args 能正确解析，并在类型不匹配时返回统一错误。
+- `crates/builtin-tools/src/{shell,read,write,edit,glob,grep,apply_patch}.rs`：所有真实 builtin tool 的 `call()` 都已改成结构化取参；`apply_patch` 继续通过 `ApplyPatchToolArgs` 兼容 `patch` / `patchText` / 双字段并存三种输入，并在双字段同时提供但内容不一致时显式报错，避免静默歧义。
+- `crates/agent-runtime/src/runtime/tape_tools.rs`：`tape_info` 与 `tape_handoff` 也已改成 typed args 解析，不再直接读 `arguments` JSON。
+- `docs/architecture.md`、`docs/status.md`：同步记录真实工具调用已经开始经由共享 typed args helper 收口。
+  **Verification**：先写失败测试并确认 `ToolCall::parse_arguments()` 缺失；随后 `cargo test -p agent-core parse_arguments_`、`cargo test -p builtin-tools`、`cargo test -p agent-runtime` 通过；再用搜索确认 `crates/builtin-tools/src` 与 `crates/agent-runtime/src/runtime/tape_tools.rs` 中已无 `str_arg/opt_*_arg/arguments.get(...)` 残留；针对 `apply_patch` 又补了一条双字段冲突回归测试并转绿；最后继续执行 `cargo fmt --all`、`cargo test -p agent-core`、`cargo test -p openai-adapter`、`cargo check` 做收尾验证。
+  **Commit**：未提交。
+  **Next direction**：如果继续收口，可把测试里的示例工具与部分 runtime 内部辅助路径也迁到 typed args，或者把 parse error 进一步结构化，便于上层 UI 展示参数校验失败原因。
+
+
 ## 2026-03-17 Session 41
 
 **Diagnosis**：内建 `edit` 工具目前只支持单文件的精确字符串替换；当外部客户端或模型按 Codex/Claude 常见习惯生成 `apply_patch` 风格补丁时，核心短名工具协议无法直接承接，仍需要绕回 `shell` 或边缘层私有映射。

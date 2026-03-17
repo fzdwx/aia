@@ -110,6 +110,7 @@
 - 完成独立内建 `apply_patch` 工具：`edit` 保持单文件精确唯一替换语义不变，同时新增短名稳定的 `apply_patch` 工具承接 `*** Begin Patch` / `*** End Patch` 风格多文件补丁，支持 `Update File`、`Add File`、`Delete File`，让 Codex/Claude 风格补丁映射无需借道 shell，也避免把两种编辑语义继续混在同一个工具里；其每文件结果元数据现也已收口为共享强类型结构，而不是继续在实现里手写 `serde_json::Value`
 - 完成 SSE 落后客户端显式重同步：`apps/agent-server` 的 `/api/events` 在 `broadcast` 消费者落后时会发出 `sync_required` 事件，而不是静默丢弃；`apps/web` 收到后会主动补拉 session 列表与当前 session 的历史、当前 turn、上下文压力，避免事件流与本地 UI 状态无声漂移
 - 完成真实工具实现到 `schemars` 参数 schema 的统一迁移：`agent-core::ToolDefinition` 除支持手写 JSON 外，也可直接从 `JsonSchema` 类型生成统一参数 schema；当前 `builtin-tools` 与 runtime tools 的 `definition()` 已切到共享 helper，减少工具实现重复手拼 JSON Schema
+- 完成真实工具调用到 typed args 的统一收口：`agent-core::ToolCall` 新增共享 `parse_arguments()`，当前 `builtin-tools` 与 runtime tools 的 `call()` 已改为直接反序列化结构化参数，而不再手工散落 `str_arg/opt_*_arg/arguments.get(...)` 取值
 - 完成 `agent-store` SQLite 锁中毒恢复：trace/session 读写与 schema 初始化不再因 `Mutex<Connection>` poisoned 而 panic
 - 完成 `aia-config` 共享配置 crate：把 `.aia` 路径、默认 session 标题、server 默认地址 / 事件缓冲 / 请求超时、统一 user agent 组装，以及 trace / span / prompt-cache 稳定前缀从 `apps/agent-server` 与相关共享 crate 中收口
 - 完成 `aia-config` 内部模块化：拆为 `paths`、`server`、`identifiers` 三类共享配置模块，`lib.rs` 保持薄 façade

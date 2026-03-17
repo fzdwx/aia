@@ -55,7 +55,7 @@ README 里真正难的是这些能力：
 - 模型能力与人格标签
 - `LanguageModel` 已收口为单一流式入口：`complete_streaming(request, abort, sink)`；同步/非流式消费方通过空 sink 消费最终 `Completion`，避免 `complete` / `complete_streaming_with_abort` 三套入口长期并存
 - 工具定义、工具调用、统一工具规范
-- `ToolDefinition` 参数 schema 既支持手写 JSON 构造，也支持基于 `schemars::JsonSchema` 的共享生成 helper；当前内建工具与 runtime tools 已统一切到该 helper，避免工具层重复手拼 JSON Schema
+- `ToolDefinition` 参数 schema 既支持手写 JSON 构造，也支持基于 `schemars::JsonSchema` 的共享生成 helper；当前内建工具与 runtime tools 已统一切到该 helper，同时真实工具调用也开始经由共享 `ToolCall::parse_arguments()` 做结构化取参，避免 schema 与运行时取参长期漂移
 - 运行时需要的请求与响应载荷
 - 结构化会话条目：普通消息、工具调用、工具结果
 
