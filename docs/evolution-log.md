@@ -1,5 +1,19 @@
 # 演进日志
 
+## 2026-03-17 Session 13
+
+**诊断**：虽然前两轮已经把 turn 执行从 `spawn_blocking` 和 per-turn 线程里拔出来，但 `apps/agent-server` 仍依赖专用 `std::thread::Builder` + current-thread Tokio runtime + `LocalSet` 托管 session manager；同时 `agent-core` 到 `agent-runtime` 的 trait / runtime tool bridge 也还停留在 `?Send` / `Rc`，使 server 无法真正用纯 Tokio async task 承载整条 runtime 主链。
+**决策**：继续完成这轮异步化收口：把 `LanguageModel` / `ToolExecutor` / `Tool` 以及 runtime tool bridge 统一升级到 `Send + Sync` 语义，移除 `Rc` / `RefCell` 风格的非线程安全桥接；然后把 `apps/agent-server` 的 session manager 和 turn worker 全部改为原生 `tokio::spawn`，并把运行中 `session/info` 收口到内存 `ContextStats` 快照。这样可以真正回答“为什么还要单独起线程”这个问题：现在已经不需要了。
+**变更**：
+- `crates/agent-core/src/traits.rs`、`crates/agent-core/src/streaming.rs`、`crates/agent-core/src/registry.rs`、`crates/agent-core/src/tests.rs`：把模型/工具 trait 从 `?Send` 改为 `Send + Sync` async trait，`ToolExecutionContext.runtime` 改为 `Arc<dyn RuntimeToolContext>`，并同步收口测试实现。
+- `crates/agent-runtime/src/runtime/tape_tools.rs`、`crates/agent-runtime/src/runtime/tool_calls.rs`、`crates/agent-runtime/src/runtime/turn.rs`、`crates/agent-runtime/src/runtime/tests.rs`：把 runtime tool bridge 从 `Rc<...>/RefCell<...>` 改为 `Arc<...>/Mutex<...>`，把 turn/tool delta 回调改为 `+ Send`，并把相关 mock / tests 全部迁到新的 `Send` 边界。
+- `crates/openai-adapter/src/streaming.rs`、`crates/openai-adapter/src/responses.rs`、`crates/openai-adapter/src/chat_completions.rs`、`apps/agent-server/src/model.rs`、`crates/builtin-tools/src/read.rs`、`crates/builtin-tools/src/write.rs`、`crates/builtin-tools/src/edit.rs`、`crates/builtin-tools/src/glob.rs`、`crates/builtin-tools/src/grep.rs`、`crates/builtin-tools/src/shell.rs`：统一把 provider / tool 实现迁到 `Send` 版 async trait 签名，保证 runtime future 能安全地上 Tokio 调度。
+- `apps/agent-server/src/session_manager.rs`、`apps/agent-server/src/main.rs`：移除 `std::thread::Builder`、`LocalSet` 与 `spawn_local`，session manager 改为直接 `tokio::spawn(session_manager_loop(...))`，turn worker 改为 `tokio::spawn(async move { ... })`；同时新增 `ContextStats` 运行态快照，使运行中的 `/api/session/info` 不再回退磁带。
+- `docs/status.md`、`docs/architecture.md`、`docs/async-phases.md`：同步记录 server 已完成原生 async task 收口，当前剩余重点转向 runtime ownership / return-path 简化与共享层抽取。
+**验证**：`cargo fmt --all` 通过；`cargo check` 通过；`cargo test -p agent-server session_manager -- --nocapture` 通过；`cargo test -p agent-runtime --lib -- --nocapture` 通过。
+**Commit**：待提交
+**Next direction**：继续收口 `apps/agent-server` 里剩余的 runtime ownership / return-path 复杂度，并评估哪些 session 驱动辅助可以继续上移到共享 `agent-runtime` / 共享桥接层。
+
 ## 2026-03-17 Session 12
 
 **诊断**：`shell` 和 turn worker 已完成第一轮异步收口，但 `builtin-tools` 里 `read` / `write` / `edit` 仍直接走同步文件 I/O，`glob` / `grep` 也还会在 current-thread runtime 上同步扫盘；在大仓库里，这些路径仍会继续挤占 turn worker 的当前线程。

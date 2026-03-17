@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use agent_core::{
     AbortSignal, LanguageModel, LlmTraceRequestContext, RuntimeToolContext, StreamEvent, ToolCall,
@@ -49,7 +49,7 @@ where
     pub(super) async fn execute_tool_call(
         &mut self,
         context: ExecuteToolCallContext<'_>,
-        on_delta: &mut dyn FnMut(StreamEvent),
+        on_delta: &mut (dyn FnMut(StreamEvent) + Send),
     ) -> Result<ToolInvocationLifecycle, RuntimeError> {
         let started_at_ms = now_timestamp_ms();
         let tool_trace_context =
@@ -136,7 +136,7 @@ where
 
             let runtime_tools = tape_tools::build_runtime_tool_registry();
             let runtime_bridge = tape_tools::RuntimeToolContextBridge::new(self);
-            let runtime_context: Rc<dyn RuntimeToolContext> = runtime_bridge.clone();
+            let runtime_context: Arc<dyn RuntimeToolContext> = runtime_bridge.clone();
             let result = runtime_tools
                 .call(
                     context.call,
@@ -331,7 +331,7 @@ where
     fn apply_runtime_tool_handoffs(
         &mut self,
         _turn_id: &str,
-        runtime_bridge: &Rc<tape_tools::RuntimeToolContextBridge>,
+        runtime_bridge: &Arc<tape_tools::RuntimeToolContextBridge>,
     ) -> Result<(), RuntimeError> {
         for (name, summary) in runtime_bridge.drain_handoffs() {
             self.record_handoff(name, json!({ "summary": summary }), "ai")?;
@@ -343,7 +343,7 @@ where
         &mut self,
         context: FailedToolCallContext<'_>,
         runtime_error: RuntimeError,
-        on_delta: &mut dyn FnMut(StreamEvent),
+        on_delta: &mut (dyn FnMut(StreamEvent) + Send),
     ) -> Result<ToolInvocationLifecycle, RuntimeError> {
         let failure_message = runtime_error.to_string();
         let failed_result = ToolResult::from_call(context.call, failure_message.clone());

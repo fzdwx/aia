@@ -1,5 +1,5 @@
 use std::{
-    cell::RefCell,
+    sync::{Mutex, MutexGuard},
     time::{Duration, UNIX_EPOCH},
 };
 
@@ -18,6 +18,10 @@ use crate::{
     ToolInvocationLifecycle, ToolInvocationOutcome, TurnControl, TurnLifecycle, TurnOutcome,
 };
 
+fn mutex_lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 #[test]
 fn time_before_unix_epoch_falls_back_to_zero_duration() {
     let before_epoch = UNIX_EPOCH - Duration::from_secs(1);
@@ -27,7 +31,7 @@ fn time_before_unix_epoch_falls_back_to_zero_duration() {
 
 struct StubModel;
 
-#[async_trait(?Send)]
+#[async_trait]
 impl LanguageModel for StubModel {
     type Error = CoreError;
 
@@ -86,7 +90,7 @@ impl LanguageModel for StubModel {
 
 struct FailingModel;
 
-#[async_trait(?Send)]
+#[async_trait]
 impl LanguageModel for FailingModel {
     type Error = CoreError;
 
@@ -97,7 +101,7 @@ impl LanguageModel for FailingModel {
 
 struct UsageModel;
 
-#[async_trait(?Send)]
+#[async_trait]
 impl LanguageModel for UsageModel {
     type Error = CoreError;
 
@@ -118,32 +122,32 @@ impl LanguageModel for UsageModel {
 }
 
 struct RecordingModel {
-    seen_requests: RefCell<Vec<CompletionRequest>>,
+    seen_requests: Mutex<Vec<CompletionRequest>>,
 }
 
 impl RecordingModel {
     fn new() -> Self {
-        Self { seen_requests: RefCell::new(Vec::new()) }
+        Self { seen_requests: Mutex::new(Vec::new()) }
     }
 }
 
 struct ContinueAfterToolModel {
-    seen_requests: RefCell<Vec<CompletionRequest>>,
+    seen_requests: Mutex<Vec<CompletionRequest>>,
 }
 
 impl ContinueAfterToolModel {
     fn new() -> Self {
-        Self { seen_requests: RefCell::new(Vec::new()) }
+        Self { seen_requests: Mutex::new(Vec::new()) }
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl LanguageModel for ContinueAfterToolModel {
     type Error = CoreError;
 
     async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
-        let step = self.seen_requests.borrow().len();
-        self.seen_requests.borrow_mut().push(request.clone());
+        let step = mutex_lock(&self.seen_requests).len();
+        mutex_lock(&self.seen_requests).push(request.clone());
         if step == 0 {
             Ok(Completion {
                 segments: vec![
@@ -170,7 +174,7 @@ impl LanguageModel for ContinueAfterToolModel {
 
 struct StreamingCancelledModel;
 
-#[async_trait(?Send)]
+#[async_trait]
 impl LanguageModel for StreamingCancelledModel {
     type Error = CoreError;
 
@@ -182,7 +186,7 @@ impl LanguageModel for StreamingCancelledModel {
         &self,
         _request: CompletionRequest,
         _abort: &AbortSignal,
-        sink: &mut dyn FnMut(agent_core::StreamEvent),
+        sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
     ) -> Result<Completion, Self::Error> {
         sink(agent_core::StreamEvent::ThinkingDelta { text: "先分析".into() });
         sink(agent_core::StreamEvent::TextDelta { text: "部分回答".into() });
@@ -195,32 +199,32 @@ impl LanguageModel for StreamingCancelledModel {
 }
 
 struct DuplicateToolLoopModel {
-    seen_requests: RefCell<Vec<CompletionRequest>>,
+    seen_requests: Mutex<Vec<CompletionRequest>>,
 }
 
 impl DuplicateToolLoopModel {
     fn new() -> Self {
-        Self { seen_requests: RefCell::new(Vec::new()) }
+        Self { seen_requests: Mutex::new(Vec::new()) }
     }
 }
 
 struct ManyToolRoundsModel {
-    seen_requests: RefCell<Vec<CompletionRequest>>,
+    seen_requests: Mutex<Vec<CompletionRequest>>,
 }
 
 impl ManyToolRoundsModel {
     fn new() -> Self {
-        Self { seen_requests: RefCell::new(Vec::new()) }
+        Self { seen_requests: Mutex::new(Vec::new()) }
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl LanguageModel for ManyToolRoundsModel {
     type Error = CoreError;
 
     async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
-        let step = self.seen_requests.borrow().len();
-        self.seen_requests.borrow_mut().push(request.clone());
+        let step = mutex_lock(&self.seen_requests).len();
+        mutex_lock(&self.seen_requests).push(request.clone());
 
         let saw_latest_tool_result = request
             .conversation
@@ -244,12 +248,12 @@ impl LanguageModel for ManyToolRoundsModel {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl LanguageModel for DuplicateToolLoopModel {
     type Error = CoreError;
 
     async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
-        self.seen_requests.borrow_mut().push(request.clone());
+        mutex_lock(&self.seen_requests).push(request.clone());
         let saw_duplicate_skip = request.conversation.iter().any(|item| {
             item.as_tool_result()
                 .is_some_and(|result| result.content.contains("重复工具调用已跳过"))
@@ -288,7 +292,7 @@ impl LanguageModel for DuplicateToolLoopModel {
 
 struct FailingTools;
 
-#[async_trait(?Send)]
+#[async_trait]
 impl ToolExecutor for FailingTools {
     type Error = CoreError;
 
@@ -299,60 +303,60 @@ impl ToolExecutor for FailingTools {
     async fn call(
         &self,
         _call: &ToolCall,
-        _output: &mut dyn FnMut(ToolOutputDelta),
+        _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         _context: &ToolExecutionContext,
     ) -> Result<ToolResult, Self::Error> {
         Err(CoreError::new("工具炸了"))
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl LanguageModel for RecordingModel {
     type Error = CoreError;
 
     async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
-        self.seen_requests.borrow_mut().push(request);
+        mutex_lock(&self.seen_requests).push(request);
         Ok(Completion::text("记录完成"))
     }
 }
 
 struct BudgetRecordingModel {
-    seen_requests: RefCell<Vec<CompletionRequest>>,
+    seen_requests: Mutex<Vec<CompletionRequest>>,
 }
 
 impl BudgetRecordingModel {
     fn new() -> Self {
-        Self { seen_requests: RefCell::new(Vec::new()) }
+        Self { seen_requests: Mutex::new(Vec::new()) }
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl LanguageModel for BudgetRecordingModel {
     type Error = CoreError;
 
     async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
-        self.seen_requests.borrow_mut().push(request);
+        mutex_lock(&self.seen_requests).push(request);
         Ok(Completion::text("预算检查完成"))
     }
 }
 
 struct RequestRecordingModel {
-    seen_requests: RefCell<Vec<CompletionRequest>>,
+    seen_requests: Mutex<Vec<CompletionRequest>>,
 }
 
 impl RequestRecordingModel {
     fn new() -> Self {
-        Self { seen_requests: RefCell::new(Vec::new()) }
+        Self { seen_requests: Mutex::new(Vec::new()) }
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl LanguageModel for RequestRecordingModel {
     type Error = CoreError;
 
     async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
-        let index = self.seen_requests.borrow().len();
-        self.seen_requests.borrow_mut().push(request);
+        let index = mutex_lock(&self.seen_requests).len();
+        mutex_lock(&self.seen_requests).push(request);
         Ok(Completion {
             segments: vec![CompletionSegment::Text(format!("第{}轮完成", index + 1))],
             stop_reason: CompletionStopReason::Stop,
@@ -364,22 +368,22 @@ impl LanguageModel for RequestRecordingModel {
 }
 
 struct StopReasonDrivenModel {
-    seen_requests: RefCell<Vec<CompletionRequest>>,
+    seen_requests: Mutex<Vec<CompletionRequest>>,
 }
 
 impl StopReasonDrivenModel {
     fn new() -> Self {
-        Self { seen_requests: RefCell::new(Vec::new()) }
+        Self { seen_requests: Mutex::new(Vec::new()) }
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl LanguageModel for StopReasonDrivenModel {
     type Error = CoreError;
 
     async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
-        let index = self.seen_requests.borrow().len();
-        self.seen_requests.borrow_mut().push(request);
+        let index = mutex_lock(&self.seen_requests).len();
+        mutex_lock(&self.seen_requests).push(request);
 
         if index == 0 {
             Ok(Completion {
@@ -403,7 +407,7 @@ impl LanguageModel for StopReasonDrivenModel {
 
 struct StubTools;
 
-#[async_trait(?Send)]
+#[async_trait]
 impl ToolExecutor for StubTools {
     type Error = CoreError;
 
@@ -414,7 +418,7 @@ impl ToolExecutor for StubTools {
     async fn call(
         &self,
         call: &ToolCall,
-        _output: &mut dyn FnMut(ToolOutputDelta),
+        _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         _context: &ToolExecutionContext,
     ) -> Result<ToolResult, Self::Error> {
         Ok(ToolResult::from_call(call, "未实现"))
@@ -423,7 +427,7 @@ impl ToolExecutor for StubTools {
 
 struct MismatchedTools;
 
-#[async_trait(?Send)]
+#[async_trait]
 impl ToolExecutor for MismatchedTools {
     type Error = CoreError;
 
@@ -434,7 +438,7 @@ impl ToolExecutor for MismatchedTools {
     async fn call(
         &self,
         _call: &ToolCall,
-        _output: &mut dyn FnMut(ToolOutputDelta),
+        _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         _context: &ToolExecutionContext,
     ) -> Result<ToolResult, Self::Error> {
         Ok(ToolResult {
@@ -449,7 +453,7 @@ impl ToolExecutor for MismatchedTools {
 
 struct BlockingCancelAwareTools;
 
-#[async_trait(?Send)]
+#[async_trait]
 impl ToolExecutor for BlockingCancelAwareTools {
     type Error = CoreError;
 
@@ -460,7 +464,7 @@ impl ToolExecutor for BlockingCancelAwareTools {
     async fn call(
         &self,
         call: &ToolCall,
-        _output: &mut dyn FnMut(ToolOutputDelta),
+        _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
     ) -> Result<ToolResult, Self::Error> {
         for _ in 0..200 {
@@ -517,7 +521,7 @@ fn 运行时在开始前取消时不会执行模型() {
         .expect_err("预取消应直接失败");
 
     assert!(error.is_cancelled());
-    assert!(runtime.model.seen_requests.borrow().is_empty());
+    assert!(mutex_lock(&runtime.model.seen_requests).is_empty());
 }
 
 #[test]
@@ -617,7 +621,7 @@ fn provider_取消错误前的流式_partial_output_会进入最终轮次() {
 
 struct StreamingTextThenSameCompletionModel;
 
-#[async_trait(?Send)]
+#[async_trait]
 impl LanguageModel for StreamingTextThenSameCompletionModel {
     type Error = CoreError;
 
@@ -629,7 +633,7 @@ impl LanguageModel for StreamingTextThenSameCompletionModel {
         &self,
         _request: CompletionRequest,
         _abort: &AbortSignal,
-        sink: &mut dyn FnMut(agent_core::StreamEvent),
+        sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
     ) -> Result<Completion, Self::Error> {
         sink(agent_core::StreamEvent::TextDelta { text: "同一段回答".into() });
         Ok(Completion::text("同一段回答"))
@@ -638,7 +642,7 @@ impl LanguageModel for StreamingTextThenSameCompletionModel {
 
 struct StreamingThinkingThenSameCompletionModel;
 
-#[async_trait(?Send)]
+#[async_trait]
 impl LanguageModel for StreamingThinkingThenSameCompletionModel {
     type Error = CoreError;
 
@@ -650,7 +654,7 @@ impl LanguageModel for StreamingThinkingThenSameCompletionModel {
         &self,
         _request: CompletionRequest,
         _abort: &AbortSignal,
-        sink: &mut dyn FnMut(agent_core::StreamEvent),
+        sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
     ) -> Result<Completion, Self::Error> {
         sink(agent_core::StreamEvent::ThinkingDelta { text: "同一段思考".into() });
         Ok(Completion {
@@ -792,9 +796,10 @@ fn 同一轮内工具完成后会继续再次调用模型() {
     let output = runtime.handle_turn("开始").expect("应继续完成");
 
     assert_eq!(output.assistant_text, "已根据工具结果继续回答");
-    assert_eq!(runtime.model.seen_requests.borrow().len(), 2);
+    assert_eq!(mutex_lock(&runtime.model.seen_requests).len(), 2);
     assert!(runtime.tape().entries().iter().any(|entry| entry.as_tool_result().is_some()));
-    let second_request = &runtime.model.seen_requests.borrow()[1];
+    let requests = mutex_lock(&runtime.model.seen_requests);
+    let second_request = &requests[1];
     assert!(second_request.conversation.iter().any(
         |item| matches!(item, ConversationItem::ToolCall(call) if call.tool_name == "search")
     ));
@@ -830,7 +835,7 @@ fn 运行时不会在旧默认步数后强行中断整轮() {
     let output = runtime.handle_turn("继续执行").expect("不应被旧默认步数上限打断");
 
     assert_eq!(output.assistant_text, "超过旧默认步数后仍成功收尾");
-    let requests = runtime.model.seen_requests.borrow();
+    let requests = mutex_lock(&runtime.model.seen_requests);
     assert!(requests.len() >= 10);
 }
 
@@ -843,7 +848,7 @@ fn 运行时不会自动追加最大步数收尾消息() {
     let output = runtime.handle_turn("开始").expect("应收尾成功");
 
     assert_eq!(output.assistant_text, "已根据工具结果继续回答");
-    let requests = runtime.model.seen_requests.borrow();
+    let requests = mutex_lock(&runtime.model.seen_requests);
     assert_eq!(requests.len(), 2);
     assert!(requests.iter().all(|request| request.conversation.iter().all(|item| {
         item.as_message().is_none_or(|message| !message.content.contains("最大步骤数"))
@@ -859,14 +864,14 @@ fn 运行时按_stop_reason_而非工具片段决定是否继续() {
     let output = runtime.handle_turn("开始").expect("应按 stop reason 继续后再收尾");
 
     assert_eq!(output.assistant_text, "按 stop reason 收尾");
-    assert_eq!(runtime.model.seen_requests.borrow().len(), 2);
+    assert_eq!(mutex_lock(&runtime.model.seen_requests).len(), 2);
 }
 
 #[test]
 fn 工具片段与_stop_reason_不一致时会报错() {
     struct MismatchModel;
 
-    #[async_trait(?Send)]
+    #[async_trait]
     impl LanguageModel for MismatchModel {
         type Error = CoreError;
 
@@ -899,7 +904,7 @@ fn 未设置自定义指令时不会自动注入预算提示词() {
 
     let _ = runtime.handle_turn("开始").expect("应成功完成");
 
-    let requests = runtime.model.seen_requests.borrow();
+    let requests = mutex_lock(&runtime.model.seen_requests);
     assert_eq!(requests[0].instructions, None);
 }
 
@@ -912,7 +917,7 @@ fn 运行时会把全局_request_timeout_映射到请求() {
 
     let _ = runtime.handle_turn("检查超时配置").expect("应成功完成");
 
-    let requests = runtime.model.seen_requests.borrow();
+    let requests = mutex_lock(&runtime.model.seen_requests);
     assert_eq!(
         requests[0].timeout,
         Some(agent_core::RequestTimeoutConfig { read_timeout_ms: Some(90_000) })
@@ -928,7 +933,7 @@ fn 运行时会把模型输出上限映射为本次请求预算() {
 
     let _ = runtime.handle_turn("开始").expect("应成功完成");
 
-    let requests = runtime.model.seen_requests.borrow();
+    let requests = mutex_lock(&runtime.model.seen_requests);
     assert_eq!(requests[0].max_output_tokens, Some(131_072));
 }
 
@@ -954,7 +959,7 @@ fn 上下文接近窗口上限时会自动收紧输出预算() {
 
     let _ = runtime.handle_turn("继续").expect("应成功完成");
 
-    let requests = runtime.model.seen_requests.borrow();
+    let requests = mutex_lock(&runtime.model.seen_requests);
     assert_eq!(requests[0].max_output_tokens, Some(1));
 }
 
@@ -1014,7 +1019,7 @@ fn 锚点状态会注入后续请求上下文() {
     let _ = runtime.handoff("handoff", json!({"summary": "切到实现阶段"}));
     runtime.handle_turn("第二轮").expect("第二轮成功");
 
-    let requests = runtime.model.seen_requests.borrow();
+    let requests = mutex_lock(&runtime.model.seen_requests);
     let last_request = requests.last().expect("应记录第二轮请求");
 
     assert!(matches!(
@@ -1041,7 +1046,7 @@ fn 载入现有磁带后会继续沿用已保存上下文() {
     let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape);
     runtime.handle_turn("新的输入").expect("运行成功");
 
-    let requests = runtime.model.seen_requests.borrow();
+    let requests = mutex_lock(&runtime.model.seen_requests);
     let last_request = requests.last().expect("应记录新请求");
 
     assert!(matches!(
@@ -1074,7 +1079,7 @@ fn responses_下一轮请求会重放结构化上下文() {
     runtime.handle_turn("第一轮").expect("第一轮成功");
     runtime.handle_turn("第二轮").expect("第二轮成功");
 
-    let requests = runtime.model.seen_requests.borrow();
+    let requests = mutex_lock(&runtime.model.seen_requests);
     assert_eq!(requests.len(), 2);
     assert_eq!(requests[1].conversation.len(), 3);
     assert!(matches!(
@@ -1361,21 +1366,21 @@ fn 成功轮会保留模型返回的真实_usage() {
 // --- Context compression tests ---
 
 struct SummarizerModel {
-    seen_requests: RefCell<Vec<CompletionRequest>>,
+    seen_requests: Mutex<Vec<CompletionRequest>>,
 }
 
 impl SummarizerModel {
     fn new() -> Self {
-        Self { seen_requests: RefCell::new(Vec::new()) }
+        Self { seen_requests: Mutex::new(Vec::new()) }
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl LanguageModel for SummarizerModel {
     type Error = CoreError;
 
     async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
-        self.seen_requests.borrow_mut().push(request.clone());
+        mutex_lock(&self.seen_requests).push(request.clone());
         // If instructions contain "Summarize", this is a compression call
         if request.instructions.as_ref().is_some_and(|i| i.contains("handoff summary")) {
             return Ok(Completion::text("摘要：对话进行了多轮测试交互。"));
@@ -1385,18 +1390,18 @@ impl LanguageModel for SummarizerModel {
 }
 
 struct ContextLengthErrorModel {
-    seen_requests: RefCell<Vec<CompletionRequest>>,
-    fail_count: RefCell<usize>,
+    seen_requests: Mutex<Vec<CompletionRequest>>,
+    fail_count: Mutex<usize>,
     max_failures: usize,
 }
 
 impl ContextLengthErrorModel {
     fn new(max_failures: usize) -> Self {
-        Self { seen_requests: RefCell::new(Vec::new()), fail_count: RefCell::new(0), max_failures }
+        Self { seen_requests: Mutex::new(Vec::new()), fail_count: Mutex::new(0), max_failures }
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl LanguageModel for ContextLengthErrorModel {
     type Error = CoreError;
 
@@ -1406,10 +1411,10 @@ impl LanguageModel for ContextLengthErrorModel {
             return Ok(Completion::text("压缩摘要：之前讨论了文件编辑。"));
         }
 
-        self.seen_requests.borrow_mut().push(request);
-        let count = *self.fail_count.borrow();
+        mutex_lock(&self.seen_requests).push(request);
+        let count = *mutex_lock(&self.fail_count);
         if count < self.max_failures {
-            *self.fail_count.borrow_mut() += 1;
+            *mutex_lock(&self.fail_count) += 1;
             Err(CoreError::new("context_length_exceeded: max 128000 tokens, got 150000"))
         } else {
             Ok(Completion::text("压缩后成功"))
@@ -1428,7 +1433,7 @@ fn 上下文未超阈值时不触发压缩() {
     let _ = runtime.handle_turn("你好").expect("应成功完成");
 
     // No compression call should have been made — only the regular turn call
-    let requests = runtime.model.seen_requests.borrow();
+    let requests = mutex_lock(&runtime.model.seen_requests);
     assert_eq!(requests.len(), 1);
     assert!(requests[0].instructions.as_ref().is_none_or(|i| !i.contains("handoff summary")));
     // No compression anchor
@@ -1436,21 +1441,21 @@ fn 上下文未超阈值时不触发压缩() {
 }
 
 struct CompressionInspectionModel {
-    seen_requests: RefCell<Vec<CompletionRequest>>,
+    seen_requests: Mutex<Vec<CompletionRequest>>,
 }
 
 impl CompressionInspectionModel {
     fn new() -> Self {
-        Self { seen_requests: RefCell::new(Vec::new()) }
+        Self { seen_requests: Mutex::new(Vec::new()) }
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl LanguageModel for CompressionInspectionModel {
     type Error = CoreError;
 
     async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
-        self.seen_requests.borrow_mut().push(request.clone());
+        mutex_lock(&self.seen_requests).push(request.clone());
         if request.instructions.as_ref().is_some_and(|i| i.contains("handoff summary")) {
             let combined = request
                 .conversation
@@ -1713,7 +1718,7 @@ fn 锚点收缩上下文后不会因旧_token_统计重复压缩() {
 
     let _ = runtime.handle_turn("继续").expect("应成功完成");
 
-    let requests = runtime.model.seen_requests.borrow();
+    let requests = mutex_lock(&runtime.model.seen_requests);
     assert_eq!(requests.len(), 1);
     assert!(requests[0].instructions.as_ref().is_none_or(|i| !i.contains("handoff summary")));
 }
@@ -1773,22 +1778,22 @@ fn 成功轮完成后若真实_usage_超阈值会立刻自动压缩() {
 // --- Tape tools tests ---
 
 struct TapeInfoModel {
-    seen_requests: RefCell<Vec<CompletionRequest>>,
+    seen_requests: Mutex<Vec<CompletionRequest>>,
 }
 
 impl TapeInfoModel {
     fn new() -> Self {
-        Self { seen_requests: RefCell::new(Vec::new()) }
+        Self { seen_requests: Mutex::new(Vec::new()) }
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl LanguageModel for TapeInfoModel {
     type Error = CoreError;
 
     async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
-        let step = self.seen_requests.borrow().len();
-        self.seen_requests.borrow_mut().push(request.clone());
+        let step = mutex_lock(&self.seen_requests).len();
+        mutex_lock(&self.seen_requests).push(request.clone());
         if step == 0 {
             Ok(Completion {
                 segments: vec![CompletionSegment::ToolUse(ToolCall::new("tape_info"))],
@@ -1854,22 +1859,22 @@ fn tape_info_结果包含结构化_details() {
 }
 
 struct TapeHandoffModel {
-    seen_requests: RefCell<Vec<CompletionRequest>>,
+    seen_requests: Mutex<Vec<CompletionRequest>>,
 }
 
 impl TapeHandoffModel {
     fn new() -> Self {
-        Self { seen_requests: RefCell::new(Vec::new()) }
+        Self { seen_requests: Mutex::new(Vec::new()) }
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl LanguageModel for TapeHandoffModel {
     type Error = CoreError;
 
     async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error> {
-        let step = self.seen_requests.borrow().len();
-        self.seen_requests.borrow_mut().push(request.clone());
+        let step = mutex_lock(&self.seen_requests).len();
+        mutex_lock(&self.seen_requests).push(request.clone());
         if step == 0 {
             Ok(Completion {
                 segments: vec![CompletionSegment::ToolUse(
@@ -2026,7 +2031,7 @@ fn 无锚点摘要时不注入上下文消息() {
     let _ = runtime.handoff("handoff", json!({"summary": ""}));
     runtime.handle_turn("第二轮").expect("第二轮成功");
 
-    let requests = runtime.model.seen_requests.borrow();
+    let requests = mutex_lock(&runtime.model.seen_requests);
     let last_request = requests.last().expect("应记录第二轮请求");
 
     // First item should be user message, not a context summary

@@ -3,7 +3,7 @@
 ## 当前阶段
 
 - 阶段：核心工作区搭建之后的当前细分步骤：Web 界面 ↔ 运行时桥接收口
-- 当前步骤：在 Web + server 主路径稳定的基础上，继续收口“可作为其他客户端驱动接口”的 server 形态，并把全异步主链推进到 Phase 3 / 4 的可用收口态：`builtin-tools` 的文件/搜索工具已继续 async 化，`apps/agent-server` 的 turn worker 也已去掉 `spawn_blocking`；当前重点转向运行中 session 的 live runtime stats / ownership 继续收口，同时保持 trace 诊断与共享配置边界稳定
+- 当前步骤：在 Web + server 主路径稳定的基础上，继续收口“可作为其他客户端驱动接口”的 server 形态，并把全异步主链推进到 Phase 4 的原生 async 收口态：`builtin-tools` 的文件/搜索工具、`agent-core` / `agent-runtime` 的 async + `Send` 边界，以及 `apps/agent-server` 的 session manager / turn 执行都已切到 Tokio async task；当前重点转向进一步压缩 runtime ownership / return-path 复杂度，同时保持 trace 诊断与共享配置边界稳定
 
 ## 已完成
 
@@ -82,7 +82,7 @@
 - 完成全异步主链 Phase 2：`openai-adapter` 已从 `reqwest::blocking` 切到 async `reqwest`，Responses / Chat Completions 的单次请求与流式 SSE 都改为原生 async HTTP / chunk streaming，同时保留 abort / cancel 语义
 - 完成全异步主链 Phase 3 的关键长任务路径收口：`builtin-tools` 的 `shell` 已把 stdout/stderr 聚合与 abort 轮询改为 async 事件泵，不再在 async tool 调用里同步阻塞等待事件
 - 完成全异步主链 Phase 3 的内建文件/搜索工具收口：`read` / `write` / `edit` 已切到 `tokio::fs`，`glob` / `grep` 已改为 async 入口 + abort 感知的阻塞池搜索，不再直接阻塞 current-thread runtime 扫描仓库
-- 完成全异步主链 Phase 4 的首个 server 收口：`apps/agent-server` 的 turn 执行已去掉 `tokio::spawn_blocking`，改为在独立 current-thread Tokio worker thread 中运行 async runtime turn，并在结束后归还 runtime ownership
+- 完成全异步主链 Phase 4 的 server 原生 async 收口：`apps/agent-server` 的 session manager 与 turn 执行都已切到 Tokio async task，移除了 `tokio::spawn_blocking`、`std::thread::Builder`、`LocalSet` 与 `spawn_local`；运行中 `session/info` 也改为读取内存中的 `ContextStats` 快照，而不是回退磁带
 - 完成 `agent-store` SQLite 锁中毒恢复：trace/session 读写与 schema 初始化不再因 `Mutex<Connection>` poisoned 而 panic
 - 完成 `aia-config` 共享配置 crate：把 `.aia` 路径、默认 session 标题、server 默认地址 / 事件缓冲 / 请求超时、统一 user agent 组装，以及 trace / span / prompt-cache 稳定前缀从 `apps/agent-server` 与相关共享 crate 中收口
 - 完成 `aia-config` 内部模块化：拆为 `paths`、`server`、`identifiers` 三类共享配置模块，`lib.rs` 保持薄 façade
@@ -100,12 +100,12 @@
 - 继续把 trace 数据模型从“本地 span store + event timeline”推进到更完整的 resources / richer events 模型，但暂不抢在工具协议映射与 MCP 之前做 exporter / collector 集成
 - 验证 stop/cancel 目前对长时间 shell / 外部 provider streaming 的实际覆盖率；当前已打通 server→runtime→tool context，并进一步补上 OpenAI streaming 读取中的取消检查与 shell 作业 `TERM` 中断，后续仍需继续观察 provider/运行时在不同上游和复杂 shell pipeline 下的真实中断覆盖率
 - 当前 OpenAI adapter 已切到 async `reqwest` + async chunk streaming；后续观察重点转为不同上游是否仍在连接建立、TLS、代理缓冲或服务端长时间不刷新的窗口里残留取消迟滞
-- 全异步主链已完成 Phase 1 / 2，并继续推进了 Phase 3 / 4：`shell`、文件工具、搜索工具都已从当前线程阻塞路径中收口，turn worker 也已去掉 `spawn_blocking`；当前重点转向运行中 session 的 live runtime stats / ownership 继续收口
+- 全异步主链已完成 Phase 1 / 2，并继续推进完成了 Phase 3 / 4 的当前高优先级主路径：`shell`、文件工具、搜索工具都已从当前线程阻塞路径中收口，session manager / turn worker 也已改为 Tokio async task；当前重点转向 runtime ownership、return-path 简化与共享层抽取
 - 持续校准哪些跨 crate 应用级常量应该进入 `aia-config`，哪些应继续留在协议层、运行时或算法层
 
 ## 下一步
 
-1. 继续推进全异步主链 Phase 4：优先压缩 `apps/agent-server` 当前 turn worker thread handoff，并继续减少运行中 `session/info` 对 tape / 快照回退的依赖
+1. 继续推进全异步主链的后续收口：优先压缩 `apps/agent-server` 当前 runtime ownership / return-path 复杂度，并继续把 session 驱动辅助从 app 壳抽回共享层
 2. 在 async 主链与共享工具边界进一步稳定后，优先推进统一工具协议映射与 MCP 接入，而不是继续堆厚客户端界面
 3. runtime 驱动辅助从 `apps/agent-server` 继续抽到共享层
 4. 在工具协议边界进一步收稳后，把本地 trace 从当前 span record + event timeline 继续推进到更完整的 resources / richer events 形态

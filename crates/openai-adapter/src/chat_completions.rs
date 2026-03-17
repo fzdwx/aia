@@ -216,7 +216,7 @@ impl OpenAiChatCompletionsModel {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl LanguageModel for OpenAiChatCompletionsModel {
     type Error = OpenAiAdapterError;
 
@@ -258,7 +258,7 @@ impl LanguageModel for OpenAiChatCompletionsModel {
         &self,
         request: CompletionRequest,
         abort: &AbortSignal,
-        sink: &mut dyn FnMut(StreamEvent),
+        sink: &mut (dyn FnMut(StreamEvent) + Send),
     ) -> Result<Completion, Self::Error> {
         if request.model.name != self.config.model {
             return Err(OpenAiAdapterError::new(format!(
@@ -416,7 +416,7 @@ impl LanguageModel for OpenAiChatCompletionsModel {
     async fn complete_streaming(
         &self,
         request: CompletionRequest,
-        sink: &mut dyn FnMut(StreamEvent),
+        sink: &mut (dyn FnMut(StreamEvent) + Send),
     ) -> Result<Completion, Self::Error> {
         self.complete_streaming_with_abort(request, &AbortSignal::new(), sink).await
     }

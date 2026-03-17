@@ -229,7 +229,7 @@ impl OpenAiResponsesModel {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl LanguageModel for OpenAiResponsesModel {
     type Error = OpenAiAdapterError;
 
@@ -271,7 +271,7 @@ impl LanguageModel for OpenAiResponsesModel {
         &self,
         request: CompletionRequest,
         abort: &AbortSignal,
-        sink: &mut dyn FnMut(StreamEvent),
+        sink: &mut (dyn FnMut(StreamEvent) + Send),
     ) -> Result<Completion, Self::Error> {
         if request.model.name != self.config.model {
             return Err(OpenAiAdapterError::new(format!(
@@ -461,7 +461,7 @@ impl LanguageModel for OpenAiResponsesModel {
     async fn complete_streaming(
         &self,
         request: CompletionRequest,
-        sink: &mut dyn FnMut(StreamEvent),
+        sink: &mut (dyn FnMut(StreamEvent) + Send),
     ) -> Result<Completion, Self::Error> {
         self.complete_streaming_with_abort(request, &AbortSignal::new(), sink).await
     }

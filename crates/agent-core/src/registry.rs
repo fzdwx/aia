@@ -40,7 +40,7 @@ impl Default for ToolRegistry {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl ToolExecutor for ToolRegistry {
     type Error = CoreError;
 
@@ -51,7 +51,7 @@ impl ToolExecutor for ToolRegistry {
     async fn call(
         &self,
         call: &ToolCall,
-        output: &mut dyn FnMut(ToolOutputDelta),
+        output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
     ) -> Result<ToolResult, CoreError> {
         match self.tools.get(&call.tool_name) {

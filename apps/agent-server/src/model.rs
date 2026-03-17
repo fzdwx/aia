@@ -188,7 +188,7 @@ impl TraceEventCollector {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl LanguageModel for ServerModel {
     type Error = ServerModelError;
 
@@ -199,7 +199,7 @@ impl LanguageModel for ServerModel {
     async fn complete_streaming(
         &self,
         request: CompletionRequest,
-        sink: &mut dyn FnMut(StreamEvent),
+        sink: &mut (dyn FnMut(StreamEvent) + Send),
     ) -> Result<Completion, Self::Error> {
         self.complete_with_trace(request, None, Some(sink)).await
     }
@@ -208,7 +208,7 @@ impl LanguageModel for ServerModel {
         &self,
         request: CompletionRequest,
         abort: &agent_core::AbortSignal,
-        sink: &mut dyn FnMut(StreamEvent),
+        sink: &mut (dyn FnMut(StreamEvent) + Send),
     ) -> Result<Completion, Self::Error> {
         self.complete_with_trace(request, Some(abort), Some(sink)).await
     }
@@ -223,7 +223,7 @@ impl ServerModel {
         &self,
         request: CompletionRequest,
         abort: Option<&agent_core::AbortSignal>,
-        sink: Option<&mut dyn FnMut(StreamEvent)>,
+        sink: Option<&mut (dyn FnMut(StreamEvent) + Send)>,
     ) -> Result<Completion, ServerModelError> {
         let started_at_ms = now_timestamp_ms();
         let trace_seed = self.trace_seed(&request, sink.is_some());
@@ -626,7 +626,7 @@ fn now_timestamp_ms() -> u64 {
 
 pub struct BootstrapModel;
 
-#[async_trait(?Send)]
+#[async_trait]
 impl LanguageModel for BootstrapModel {
     type Error = CoreError;
 

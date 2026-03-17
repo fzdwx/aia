@@ -5,8 +5,8 @@ use crate::{
     ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
 
-#[async_trait(?Send)]
-pub trait LanguageModel {
+#[async_trait]
+pub trait LanguageModel: Send + Sync {
     type Error: std::error::Error;
 
     async fn complete(&self, request: CompletionRequest) -> Result<Completion, Self::Error>;
@@ -14,7 +14,7 @@ pub trait LanguageModel {
     async fn complete_streaming(
         &self,
         request: CompletionRequest,
-        sink: &mut dyn FnMut(StreamEvent),
+        sink: &mut (dyn FnMut(StreamEvent) + Send),
     ) -> Result<Completion, Self::Error> {
         let completion = self.complete(request).await?;
         sink(StreamEvent::Done);
@@ -25,7 +25,7 @@ pub trait LanguageModel {
         &self,
         request: CompletionRequest,
         abort: &AbortSignal,
-        sink: &mut dyn FnMut(StreamEvent),
+        sink: &mut (dyn FnMut(StreamEvent) + Send),
     ) -> Result<Completion, Self::Error> {
         let _ = abort;
         self.complete_streaming(request, sink).await
@@ -36,8 +36,8 @@ pub trait LanguageModel {
     }
 }
 
-#[async_trait(?Send)]
-pub trait ToolExecutor {
+#[async_trait]
+pub trait ToolExecutor: Send + Sync {
     type Error: std::error::Error;
 
     fn definitions(&self) -> Vec<ToolDefinition>;
@@ -45,13 +45,13 @@ pub trait ToolExecutor {
     async fn call(
         &self,
         call: &crate::ToolCall,
-        output: &mut dyn FnMut(ToolOutputDelta),
+        output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
     ) -> Result<ToolResult, Self::Error>;
 }
 
-#[async_trait(?Send)]
-pub trait Tool: Send {
+#[async_trait]
+pub trait Tool: Send + Sync {
     fn name(&self) -> &str;
 
     fn definition(&self) -> ToolDefinition;
@@ -59,7 +59,7 @@ pub trait Tool: Send {
     async fn call(
         &self,
         tool_call: &crate::ToolCall,
-        output: &mut dyn FnMut(ToolOutputDelta),
+        output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
     ) -> Result<ToolResult, CoreError>;
 }

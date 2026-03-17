@@ -38,11 +38,11 @@ fn drain_remaining_line(buffer: &mut Vec<u8>) -> Result<Option<String>, OpenAiAd
 pub(crate) async fn stream_lines_with_abort<H>(
     response: Response,
     abort: &AbortSignal,
-    sink: &mut dyn FnMut(StreamEvent),
+    sink: &mut (dyn FnMut(StreamEvent) + Send),
     mut handle_line: H,
 ) -> Result<(), OpenAiAdapterError>
 where
-    H: FnMut(&str, &mut dyn FnMut(StreamEvent)) -> Result<bool, OpenAiAdapterError>,
+    H: FnMut(&str, &mut (dyn FnMut(StreamEvent) + Send)) -> Result<bool, OpenAiAdapterError>,
 {
     let mut stream = response.bytes_stream();
     let mut pending = Vec::new();

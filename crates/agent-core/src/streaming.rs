@@ -1,6 +1,5 @@
 use std::{
     path::{Path, PathBuf},
-    rc::Rc,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -58,7 +57,7 @@ pub struct RuntimeToolContextStats {
     pub pressure_ratio: Option<f64>,
 }
 
-pub trait RuntimeToolContext {
+pub trait RuntimeToolContext: Send + Sync {
     fn context_stats(&self) -> RuntimeToolContextStats;
     fn record_handoff(&self, name: &str, summary: &str) -> Result<(), CoreError>;
 }
@@ -67,7 +66,7 @@ pub struct ToolExecutionContext {
     pub run_id: String,
     pub workspace_root: Option<PathBuf>,
     pub abort: AbortSignal,
-    pub runtime: Option<Rc<dyn RuntimeToolContext>>,
+    pub runtime: Option<Arc<dyn RuntimeToolContext>>,
 }
 
 impl ToolExecutionContext {

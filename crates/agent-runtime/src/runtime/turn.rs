@@ -114,7 +114,7 @@ where
     pub fn handle_turn_streaming(
         &mut self,
         user_input: impl Into<String>,
-        on_delta: impl FnMut(StreamEvent),
+        on_delta: impl FnMut(StreamEvent) + Send,
     ) -> Result<TurnOutput, RuntimeError> {
         block_on_sync(self.handle_turn_streaming_async(user_input, on_delta))
     }
@@ -122,7 +122,7 @@ where
     pub async fn handle_turn_streaming_async(
         &mut self,
         user_input: impl Into<String>,
-        on_delta: impl FnMut(StreamEvent),
+        on_delta: impl FnMut(StreamEvent) + Send,
     ) -> Result<TurnOutput, RuntimeError> {
         self.handle_turn_streaming_with_control_async(
             user_input,
@@ -136,7 +136,7 @@ where
         &mut self,
         user_input: impl Into<String>,
         control: TurnControl,
-        on_delta: impl FnMut(StreamEvent),
+        on_delta: impl FnMut(StreamEvent) + Send,
     ) -> Result<TurnOutput, RuntimeError> {
         block_on_sync(self.handle_turn_streaming_with_control_async(user_input, control, on_delta))
     }
@@ -145,7 +145,7 @@ where
         &mut self,
         user_input: impl Into<String>,
         control: TurnControl,
-        mut on_delta: impl FnMut(StreamEvent),
+        mut on_delta: impl FnMut(StreamEvent) + Send,
     ) -> Result<TurnOutput, RuntimeError> {
         let abort_signal = control.abort_signal();
         let turn_id = next_turn_id();
@@ -424,7 +424,7 @@ where
         completion: &Completion,
         buffers: &mut TurnBuffers,
         abort_signal: &AbortSignal,
-        on_delta: &mut dyn FnMut(StreamEvent),
+        on_delta: &mut (dyn FnMut(StreamEvent) + Send),
     ) -> Result<bool, RuntimeError> {
         self.flush_streamed_partial_segments(turn_id, buffers)?;
         let mut assistant_entry_id = None;

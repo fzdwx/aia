@@ -24,7 +24,7 @@ enum GlobSearchOutcome {
     Cancelled,
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl Tool for GlobTool {
     fn name(&self) -> &str {
         "glob"
@@ -61,7 +61,7 @@ impl Tool for GlobTool {
     async fn call(
         &self,
         call: &ToolCall,
-        _output: &mut dyn FnMut(ToolOutputDelta),
+        _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
     ) -> Result<ToolResult, CoreError> {
         let pattern = call.str_arg("pattern")?;

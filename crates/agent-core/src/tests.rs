@@ -137,7 +137,7 @@ fn resolve_path_无_workspace_root_时返回原样() {
 
 struct EchoTool;
 
-#[async_trait(?Send)]
+#[async_trait]
 impl Tool for EchoTool {
     fn name(&self) -> &str {
         "echo"
@@ -150,7 +150,7 @@ impl Tool for EchoTool {
     async fn call(
         &self,
         tool_call: &ToolCall,
-        _output: &mut dyn FnMut(ToolOutputDelta),
+        _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         _context: &ToolExecutionContext,
     ) -> Result<ToolResult, CoreError> {
         let text = tool_call.str_arg("text")?;

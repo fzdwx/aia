@@ -174,7 +174,7 @@ README 里真正难的是这些能力：
 - 全局 `broadcast::channel` 向所有 SSE 客户端推送事件
 - 暴露 provider、session、turn、cancel、handoff、trace 等 HTTP API
 - `POST /api/turn` 仍保持 fire-and-forget，但真正的 turn 执行、事件回收与 session 条目追加都在 worker 内串行完成
-- turn 执行已不再依赖 `tokio::spawn_blocking`：session manager 会把运行中的 turn 交给独立 current-thread Tokio worker thread 承载 async runtime 主链，结束后再把 runtime ownership 归还 slot
+- turn 执行与 session manager 已切到原生 Tokio async task：`apps/agent-server` 不再依赖 `tokio::spawn_blocking`、`std::thread::Builder`、`LocalSet` 或 `spawn_local` 承载 turn 主链；运行中 `session/info` 通过 slot 内的 `ContextStats` 快照读取 live stats，turn 结束后仍沿用显式 runtime ownership 归还路径
 - 运行中的条目会实时 append 到 `.aia/session.jsonl`
 - provider 变更采用事务式提交，避免 registry / runtime / tape 持久化分叉
 - 启动失败与 JSON 序列化失败都已收口为结构化错误路径，而不是 panic

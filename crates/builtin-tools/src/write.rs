@@ -5,7 +5,7 @@ use async_trait::async_trait;
 
 pub struct WriteTool;
 
-#[async_trait(?Send)]
+#[async_trait]
 impl Tool for WriteTool {
     fn name(&self) -> &str {
         "write"
@@ -36,7 +36,7 @@ impl Tool for WriteTool {
     async fn call(
         &self,
         call: &ToolCall,
-        _output: &mut dyn FnMut(ToolOutputDelta),
+        _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
     ) -> Result<ToolResult, CoreError> {
         let raw_path = call.str_arg("file_path")?;

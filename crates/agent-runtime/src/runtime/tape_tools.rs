@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
+use std::sync::{Arc, Mutex};
 
 use agent_core::{
     CoreError, LanguageModel, RuntimeToolContext, RuntimeToolContextStats, Tool, ToolCall,
@@ -24,17 +24,17 @@ pub(super) struct RuntimeToolContextBridge {
     context_limit: Option<u32>,
     output_limit: Option<u32>,
     pressure_ratio: Option<f64>,
-    pending_handoffs: RefCell<Vec<(String, String)>>,
+    pending_handoffs: Mutex<Vec<(String, String)>>,
 }
 
 impl RuntimeToolContextBridge {
-    pub(super) fn new<M, T>(runtime: &AgentRuntime<M, T>) -> Rc<Self>
+    pub(super) fn new<M, T>(runtime: &AgentRuntime<M, T>) -> Arc<Self>
     where
         M: LanguageModel,
         T: ToolExecutor,
     {
         let stats = runtime.context_stats();
-        Rc::new(Self {
+        Arc::new(Self {
             total_entries: stats.total_entries,
             anchor_count: stats.anchor_count,
             entries_since_last_anchor: stats.entries_since_last_anchor,
@@ -42,12 +42,14 @@ impl RuntimeToolContextBridge {
             context_limit: stats.context_limit,
             output_limit: stats.output_limit,
             pressure_ratio: stats.pressure_ratio,
-            pending_handoffs: RefCell::new(Vec::new()),
+            pending_handoffs: Mutex::new(Vec::new()),
         })
     }
 
     pub(super) fn drain_handoffs(&self) -> Vec<(String, String)> {
-        std::mem::take(&mut *self.pending_handoffs.borrow_mut())
+        let mut guard =
+            self.pending_handoffs.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        std::mem::take(&mut *guard)
     }
 }
 
@@ -65,14 +67,17 @@ impl RuntimeToolContext for RuntimeToolContextBridge {
     }
 
     fn record_handoff(&self, name: &str, summary: &str) -> Result<(), CoreError> {
-        self.pending_handoffs.borrow_mut().push((name.to_string(), summary.to_string()));
+        self.pending_handoffs
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push((name.to_string(), summary.to_string()));
         Ok(())
     }
 }
 
 struct TapeInfoTool;
 
-#[async_trait(?Send)]
+#[async_trait]
 impl Tool for TapeInfoTool {
     fn name(&self) -> &str {
         "tape_info"
@@ -85,7 +90,7 @@ impl Tool for TapeInfoTool {
     async fn call(
         &self,
         tool_call: &ToolCall,
-        _output: &mut dyn FnMut(ToolOutputDelta),
+        _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
     ) -> Result<ToolResult, CoreError> {
         let runtime = context
@@ -110,7 +115,7 @@ impl Tool for TapeInfoTool {
 
 struct TapeHandoffTool;
 
-#[async_trait(?Send)]
+#[async_trait]
 impl Tool for TapeHandoffTool {
     fn name(&self) -> &str {
         "tape_handoff"
@@ -132,7 +137,7 @@ impl Tool for TapeHandoffTool {
     async fn call(
         &self,
         tool_call: &ToolCall,
-        _output: &mut dyn FnMut(ToolOutputDelta),
+        _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
     ) -> Result<ToolResult, CoreError> {
         let runtime = context

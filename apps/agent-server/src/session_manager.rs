@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use std::thread;
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use agent_core::{
     ModelIdentity, PromptCacheConfig, PromptCacheRetention as RuntimePromptCacheRetention,
@@ -41,6 +40,7 @@ struct SessionSlot {
     session_path: PathBuf,
     history: Arc<RwLock<Vec<TurnLifecycle>>>,
     current_turn: Arc<RwLock<Option<CurrentTurnSnapshot>>>,
+    context_stats: Arc<RwLock<ContextStats>>,
     running_turn: Option<RunningTurnHandle>,
     status: SlotStatus,
 }
@@ -48,11 +48,6 @@ struct SessionSlot {
 /// Sent back from the turn worker when a turn completes.
 struct RuntimeReturn {
     session_id: SessionId,
-    runtime: AgentRuntime<ServerModel, ToolRegistry>,
-    subscriber: RuntimeSubscriberId,
-}
-
-struct PendingRuntime {
     runtime: AgentRuntime<ServerModel, ToolRegistry>,
     subscriber: RuntimeSubscriberId,
 }
@@ -298,24 +293,11 @@ pub fn spawn_session_manager(config: SessionManagerConfig) -> SessionManagerHand
 }
 
 pub(crate) fn read_lock<T>(lock: &RwLock<T>) -> RwLockReadGuard<'_, T> {
-    match lock.read() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    }
+    lock.read().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 pub(crate) fn write_lock<T>(lock: &RwLock<T>) -> RwLockWriteGuard<'_, T> {
-    match lock.write() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    }
-}
-
-fn mutex_lock<T>(lock: &Mutex<T>) -> MutexGuard<'_, T> {
-    match lock.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    }
+    lock.write().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 async fn session_manager_loop(
@@ -395,6 +377,7 @@ async fn session_manager_loop(
             Some(ret) = return_rx.recv() => {
                 // Put runtime back into the slot after turn completion
                 if let Some(slot) = slots.get_mut(&ret.session_id) {
+                    *write_lock(&slot.context_stats) = ret.runtime.context_stats();
                     slot.runtime = Some(ret.runtime);
                     slot.subscriber = ret.subscriber;
                     slot.running_turn = None;
@@ -444,6 +427,7 @@ fn create_slot_for_session(
 
     let subscriber = runtime.subscribe();
     let snapshots = rebuild_session_snapshots_from_tape(runtime.tape());
+    let context_stats = runtime.context_stats();
 
     Ok(SessionSlot {
         runtime: Some(runtime),
@@ -451,6 +435,7 @@ fn create_slot_for_session(
         session_path,
         history: Arc::new(RwLock::new(snapshots.history)),
         current_turn: Arc::new(RwLock::new(snapshots.current_turn)),
+        context_stats: Arc::new(RwLock::new(context_stats)),
         running_turn: None,
         status: SlotStatus::Idle,
     })
@@ -579,6 +564,7 @@ fn handle_submit_turn(
 
     let runtime =
         slot.runtime.take().ok_or_else(|| RuntimeWorkerError::internal("runtime not available"))?;
+    *write_lock(&slot.context_stats) = runtime.context_stats();
     let subscriber = slot.subscriber;
     let turn_control = runtime.turn_control();
     slot.running_turn = Some(RunningTurnHandle { control: turn_control.clone() });
@@ -597,6 +583,7 @@ fn handle_submit_turn(
     let broadcast_tx = config.broadcast_tx.clone();
     let current_turn_snapshot = slot.current_turn.clone();
     let history_snapshot = slot.history.clone();
+    let context_stats_snapshot = slot.context_stats.clone();
     let trace_store = config.store.clone();
     let sid = session_id.to_string();
     let return_tx = return_tx.clone();
@@ -605,55 +592,23 @@ fn handle_submit_turn(
     let _ = broadcast_tx
         .send(SsePayload::Status { session_id: sid.clone(), status: TurnStatus::Waiting });
 
-    let pending_runtime = Arc::new(Mutex::new(Some(PendingRuntime { runtime, subscriber })));
-    let worker_runtime = pending_runtime.clone();
-    let worker_name = format!("aia-turn-{session_id}");
+    tokio::spawn(async move {
+        let runtime_return = run_turn_worker(
+            runtime,
+            subscriber,
+            prompt,
+            turn_control,
+            broadcast_tx,
+            current_turn_snapshot,
+            history_snapshot,
+            context_stats_snapshot,
+            trace_store,
+            sid,
+        )
+        .await;
 
-    let spawn_result = thread::Builder::new().name(worker_name).spawn(move || {
-        let Some(PendingRuntime { runtime, subscriber }) = mutex_lock(&worker_runtime).take()
-        else {
-            let _ = broadcast_tx.send(SsePayload::Error {
-                session_id: sid.clone(),
-                message: "turn worker runtime missing".into(),
-            });
-            return;
-        };
-
-        let runtime_return =
-            match tokio::runtime::Builder::new_current_thread().enable_all().build() {
-                Ok(local_runtime) => local_runtime.block_on(run_turn_worker(
-                    runtime,
-                    subscriber,
-                    prompt,
-                    turn_control,
-                    broadcast_tx,
-                    current_turn_snapshot,
-                    history_snapshot,
-                    trace_store,
-                    sid,
-                )),
-                Err(error) => {
-                    *write_lock(&current_turn_snapshot) = None;
-                    let message = format!("turn worker runtime build failed: {error}");
-                    let _ =
-                        broadcast_tx.send(SsePayload::Error { session_id: sid.clone(), message });
-                    RuntimeReturn { session_id: sid, runtime, subscriber }
-                }
-            };
-
-        let _ = return_tx.blocking_send(runtime_return);
+        let _ = return_tx.send(runtime_return).await;
     });
-
-    if let Err(error) = spawn_result {
-        if let Some(PendingRuntime { runtime, subscriber }) = mutex_lock(&pending_runtime).take() {
-            slot.runtime = Some(runtime);
-            slot.subscriber = subscriber;
-        }
-        slot.running_turn = None;
-        slot.status = SlotStatus::Idle;
-        *write_lock(&slot.current_turn) = None;
-        return Err(RuntimeWorkerError::internal(format!("turn worker spawn failed: {error}")));
-    }
 
     Ok(())
 }
@@ -666,6 +621,7 @@ async fn run_turn_worker(
     broadcast_tx: broadcast::Sender<SsePayload>,
     current_turn_snapshot: Arc<RwLock<Option<CurrentTurnSnapshot>>>,
     history_snapshot: Arc<RwLock<Vec<TurnLifecycle>>>,
+    context_stats_snapshot: Arc<RwLock<ContextStats>>,
     trace_store: Arc<AiaStore>,
     session_id: SessionId,
 ) -> RuntimeReturn {
@@ -699,6 +655,7 @@ async fn run_turn_worker(
                 .send(SsePayload::Stream { session_id: stream_session_id.clone(), event });
         })
         .await;
+    *write_lock(&context_stats_snapshot) = runtime.context_stats();
 
     match result {
         Ok(_) => match collect_runtime_events(&mut runtime, subscriber) {
@@ -817,20 +774,7 @@ fn handle_get_session_info(
         return Ok(runtime.context_stats());
     }
 
-    let tape = SessionTape::load_jsonl_or_default(&slot.session_path).map_err(|error| {
-        RuntimeWorkerError::internal(format!("session tape load failed: {error}"))
-    })?;
-    let view = tape.default_view();
-    let anchors = tape.anchors();
-    Ok(ContextStats {
-        total_entries: tape.entries().len(),
-        anchor_count: anchors.len(),
-        entries_since_last_anchor: view.entries.len(),
-        last_input_tokens: None,
-        context_limit: None,
-        output_limit: None,
-        pressure_ratio: None,
-    })
+    Ok(read_lock(&slot.context_stats).clone())
 }
 
 fn handle_create_handoff(
@@ -861,6 +805,7 @@ fn handle_create_handoff(
         .tape()
         .save_jsonl(&slot.session_path)
         .map_err(|e| RuntimeWorkerError::internal(format!("session save failed: {e}")))?;
+    refresh_context_stats_snapshot(&slot.context_stats, runtime);
     Ok(handoff.anchor.entry_id)
 }
 
@@ -884,6 +829,7 @@ fn handle_auto_compress_session(
         .tape()
         .save_jsonl(&slot.session_path)
         .map_err(|e| RuntimeWorkerError::internal(format!("session save failed: {e}")))?;
+    refresh_context_stats_snapshot(&slot.context_stats, runtime);
 
     if compressed {
         let events = collect_runtime_events(runtime, slot.subscriber)?;
@@ -1007,6 +953,7 @@ fn sync_all_runtimes_to_registry(
             runtime.replace_model(new_model, identity.clone());
             runtime.set_prompt_cache(prompt_cache);
             *runtime.tape_mut() = candidate_tape;
+            refresh_context_stats_snapshot(&slot.context_stats, runtime);
         }
     }
 
@@ -1105,6 +1052,13 @@ fn update_current_turn_status(
     if let Some(current) = write_lock(snapshot).as_mut() {
         current.status = status;
     }
+}
+
+fn refresh_context_stats_snapshot(
+    snapshot: &Arc<RwLock<ContextStats>>,
+    runtime: &AgentRuntime<ServerModel, ToolRegistry>,
+) {
+    *write_lock(snapshot) = runtime.context_stats();
 }
 
 fn update_current_turn_from_stream(
@@ -1332,9 +1286,6 @@ mod tests {
     use std::sync::{Arc, RwLock};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use agent_core::{Message, Role};
-    use session_tape::SessionTape;
-
     use crate::runtime_worker::RunningTurnHandle;
     use crate::sse::TurnStatus;
 
@@ -1388,38 +1339,40 @@ mod tests {
     }
 
     #[test]
-    fn get_session_info_falls_back_to_tape_when_turn_is_running() {
-        let session_path = temp_session_path("context-stats");
-        let mut tape = SessionTape::new();
-        tape.append(Message::new(Role::User, "hello"));
-        let _ = tape.anchor("summary", Some(serde_json::json!({"summary": "kept"})));
-        tape.append(Message::new(Role::Assistant, "world"));
-        tape.save_jsonl(&session_path).expect("session tape should save");
-
+    fn get_session_info_uses_cached_stats_when_turn_is_running() {
         let mut slots = std::collections::HashMap::new();
         slots.insert(
             "session-1".to_string(),
             super::SessionSlot {
                 runtime: None,
                 subscriber: 0,
-                session_path: session_path.clone(),
+                session_path: temp_session_path("context-stats-missing"),
                 history: Arc::new(RwLock::new(Vec::new())),
                 current_turn: Arc::new(RwLock::new(None)),
+                context_stats: Arc::new(RwLock::new(agent_runtime::ContextStats {
+                    total_entries: 3,
+                    anchor_count: 1,
+                    entries_since_last_anchor: 1,
+                    last_input_tokens: Some(42),
+                    context_limit: Some(1024),
+                    output_limit: Some(256),
+                    pressure_ratio: Some(42.0 / 1024.0),
+                })),
                 running_turn: None,
                 status: super::SlotStatus::Running,
             },
         );
 
         let stats =
-            handle_get_session_info(&slots, "session-1").expect("session info should fall back");
+            handle_get_session_info(&slots, "session-1").expect("session info should use cache");
 
         assert_eq!(stats.total_entries, 3);
         assert_eq!(stats.anchor_count, 1);
         assert_eq!(stats.entries_since_last_anchor, 1);
-        assert_eq!(stats.last_input_tokens, None);
-        assert_eq!(stats.pressure_ratio, None);
-
-        let _ = std::fs::remove_file(session_path);
+        assert_eq!(stats.last_input_tokens, Some(42));
+        assert_eq!(stats.context_limit, Some(1024));
+        assert_eq!(stats.output_limit, Some(256));
+        assert_eq!(stats.pressure_ratio, Some(42.0 / 1024.0));
     }
 
     #[test]
@@ -1478,6 +1431,15 @@ mod tests {
                 session_path: std::path::PathBuf::new(),
                 history: Arc::new(RwLock::new(Vec::new())),
                 current_turn: current_turn.clone(),
+                context_stats: Arc::new(RwLock::new(agent_runtime::ContextStats {
+                    total_entries: 0,
+                    anchor_count: 0,
+                    entries_since_last_anchor: 0,
+                    last_input_tokens: None,
+                    context_limit: None,
+                    output_limit: None,
+                    pressure_ratio: None,
+                })),
                 running_turn: Some(handle),
                 status: super::SlotStatus::Running,
             },

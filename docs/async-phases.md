@@ -144,18 +144,20 @@
 
 ### Phase 4：Server 原生 Async Turn Loop
 
-**目标**：最终去掉 `apps/agent-server` 在 turn 执行上的 `spawn_blocking` 包装，让 session manager 直接运行 async runtime turn。
+**目标**：最终去掉 `apps/agent-server` 在 turn 执行和 session manager 承载上的 blocking / 专用线程包装，让 session manager 直接运行 Tokio async task 驱动的 runtime turn。
 
 **范围**：
 
 - `apps/agent-server`
   - `handle_submit_turn` 从 blocking worker 切到原生 async task
+  - session manager 本身不再依赖额外 `std::thread` / `LocalSet` 宿主线程
   - 运行态 `session/info` 可直接读取 live runtime stats 或运行态快照
-  - 重新梳理 running turn handle、runtime ownership、return path
+  - 继续梳理 running turn handle、runtime ownership、return path
 
 **阶段完成标准**：
 
 - turn 执行不再依赖 `spawn_blocking`
+- session manager 不再依赖额外 `std::thread` / `LocalSet`
 - 运行态 `session/info` 不再退化为全 `null`
 - session 独占 / cancel / SSE 行为保持正确
 - `cargo test` / `cargo check` 通过
@@ -194,9 +196,9 @@
 - Responses / Chat Completions 的 SSE 读取已改为 async chunk streaming，并继续保留 abort 轮询与取消语义
 - `builtin-tools::shell` 已把输出聚合与 abort 轮询改为 async 事件泵，避免 async tool 调用卡在同步 `recv_timeout`
 - `builtin-tools::read` / `write` / `edit` 已切到 `tokio::fs`，`glob` / `grep` 已改为 async 入口 + abort 感知的阻塞池搜索，避免大仓库文件/搜索工具继续直接阻塞 current-thread runtime
-- `apps/agent-server` 的 turn 执行已去掉 `tokio::spawn_blocking`，当前通过独立 current-thread Tokio worker thread 承载 async runtime turn，并在结束后归还 runtime ownership
+- `apps/agent-server` 的 session manager 与 turn 执行都已切到原生 Tokio async task：不再使用 `tokio::spawn_blocking`、`std::thread::Builder`、`LocalSet` 或 `spawn_local` 承载 turn 主链；运行中 `session/info` 也改为直接读取内存中的 `ContextStats` 快照
 
 因此，下一步最高优先级变为：
 
-1. 继续完成 Phase 4，把 `apps/agent-server` 从“async turn worker thread + runtime handoff”推进到更原生的 live runtime stats / ownership 方案
+1. 继续完成 Phase 4 的剩余收口：进一步压缩 `apps/agent-server` 内部的 runtime ownership / return-path 复杂度，并评估哪些 session 驱动辅助可以上移到共享层
 2. 在 async 主链与工具边界进一步稳定后，再优先推进统一工具协议映射与 MCP 接入，而不是继续堆厚客户端界面
