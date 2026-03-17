@@ -13,7 +13,7 @@ use agent_core::{
     RequestTimeoutConfig, StreamEvent, ToolRegistry,
 };
 use agent_runtime::{AgentRuntime, ContextStats, RuntimeEvent, RuntimeSubscriberId, TurnLifecycle};
-use agent_store::{AiaStore, LlmTraceStore, SessionRecord, generate_session_id, iso8601_now};
+use agent_store::{AiaStore, LlmTraceStore, SessionRecord, generate_session_id};
 use builtin_tools::build_tool_registry;
 use provider_registry::ProviderRegistry;
 use session_tape::{SessionProviderBinding, SessionTape};
@@ -233,18 +233,9 @@ fn handle_create_session(
     title: Option<String>,
 ) -> Result<SessionRecord, RuntimeWorkerError> {
     let session_id = generate_session_id();
-    let now = iso8601_now();
     let title = title.unwrap_or_else(|| aia_config::DEFAULT_SESSION_TITLE.to_string());
-
     let model_name = read_lock(&config.provider_info_snapshot).model.clone();
-
-    let record = SessionRecord {
-        id: session_id.clone(),
-        title: title.clone(),
-        created_at: now.clone(),
-        updated_at: now,
-        model: model_name,
-    };
+    let record = SessionRecord::new(session_id.clone(), title.clone(), model_name);
 
     config
         .store

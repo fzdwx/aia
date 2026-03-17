@@ -12,6 +12,19 @@ pub struct SessionRecord {
     pub model: String,
 }
 
+impl SessionRecord {
+    pub fn new(id: impl Into<String>, title: impl Into<String>, model: impl Into<String>) -> Self {
+        let now = iso8601_now();
+        Self {
+            id: id.into(),
+            title: title.into(),
+            created_at: now.clone(),
+            updated_at: now,
+            model: model.into(),
+        }
+    }
+}
+
 impl AiaStore {
     pub(crate) fn init_session_schema(&self) -> Result<(), AiaStoreError> {
         self.with_conn(|conn| {
@@ -56,6 +69,18 @@ impl AiaStore {
             let mut rows = stmt.query_map([id], read_session_record)?;
             match rows.next() {
                 Some(row) => Ok(Some(row?)),
+                None => Ok(None),
+            }
+        })
+    }
+
+    pub fn first_session_id(&self) -> Result<Option<String>, AiaStoreError> {
+        self.with_conn(|conn| {
+            let mut stmt =
+                conn.prepare("SELECT id FROM sessions ORDER BY created_at ASC LIMIT 1")?;
+            let mut rows = stmt.query([])?;
+            match rows.next()? {
+                Some(row) => Ok(Some(row.get(0)?)),
                 None => Ok(None),
             }
         })
@@ -190,14 +215,7 @@ mod tests {
     #[test]
     fn crud_operations_work() {
         let store = AiaStore::in_memory().expect("store init");
-        let now = iso8601_now();
-        let record = SessionRecord {
-            id: "20260315_abcd1234".to_string(),
-            title: "Test session".to_string(),
-            created_at: now.clone(),
-            updated_at: now.clone(),
-            model: "gpt-4.1".to_string(),
-        };
+        let record = SessionRecord::new("20260315_abcd1234", "Test session", "gpt-4.1");
 
         store.create_session(&record).expect("create");
 
@@ -283,19 +301,39 @@ mod tests {
         })
         .join();
 
-        let now = iso8601_now();
-        let record = SessionRecord {
-            id: "20260316_poisoned".to_string(),
-            title: "Recovered session".to_string(),
-            created_at: now.clone(),
-            updated_at: now,
-            model: "gpt-4.1".to_string(),
-        };
+        let record = SessionRecord::new("20260316_poisoned", "Recovered session", "gpt-4.1");
 
         store.create_session(&record).expect("create after poison");
         let sessions = store.list_sessions().expect("list after poison");
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0], record);
+    }
+
+    #[test]
+    fn first_session_id_returns_earliest_created_session() {
+        let store = AiaStore::in_memory().expect("store init");
+        store
+            .create_session(&SessionRecord {
+                id: "20260315_second".to_string(),
+                title: "Second".to_string(),
+                created_at: "2026-03-15T00:00:01Z".to_string(),
+                updated_at: "2026-03-15T00:00:01Z".to_string(),
+                model: "gpt-4.1".to_string(),
+            })
+            .expect("create second");
+        store
+            .create_session(&SessionRecord {
+                id: "20260315_first".to_string(),
+                title: "First".to_string(),
+                created_at: "2026-03-15T00:00:00Z".to_string(),
+                updated_at: "2026-03-15T00:00:00Z".to_string(),
+                model: "gpt-4.1".to_string(),
+            })
+            .expect("create first");
+
+        let first = store.first_session_id().expect("first session");
+
+        assert_eq!(first.as_deref(), Some("20260315_first"));
     }
 
     #[test]

@@ -10,7 +10,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use agent_store::{AiaStore, SessionRecord, generate_session_id, iso8601_now};
+use agent_store::{AiaStore, SessionRecord, generate_session_id};
 use axum::{
     Router,
     routing::{delete, get, post, put},
@@ -73,23 +73,20 @@ async fn run() -> Result<(), ServerInitError> {
     std::fs::create_dir_all(&sessions_dir)
         .map_err(|error| ServerInitError::new("sessions 目录创建", error.to_string()))?;
 
-    let sessions = store
-        .list_sessions()
-        .map_err(|error| ServerInitError::new("session 列表加载", error.to_string()))?;
-    if sessions.is_empty() {
+    let first_session_id = store
+        .first_session_id()
+        .map_err(|error| ServerInitError::new("session 首条记录加载", error.to_string()))?;
+    if first_session_id.is_none() {
         let session_id = generate_session_id();
-        let now = iso8601_now();
         let model_name = registry
             .active_provider()
             .and_then(|provider| provider.active_model.clone())
             .unwrap_or_default();
-        let record = SessionRecord {
-            id: session_id,
-            title: aia_config::DEFAULT_SESSION_TITLE.to_string(),
-            created_at: now.clone(),
-            updated_at: now,
-            model: model_name,
-        };
+        let record = SessionRecord::new(
+            session_id,
+            aia_config::DEFAULT_SESSION_TITLE.to_string(),
+            model_name,
+        );
         store
             .create_session(&record)
             .map_err(|error| ServerInitError::new("默认 session 创建", error.to_string()))?;

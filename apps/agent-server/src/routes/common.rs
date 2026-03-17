@@ -62,7 +62,6 @@ pub(crate) fn resolve_session_id(
 
     state
         .store
-        .list_sessions()
-        .map(|sessions| sessions.first().map(|session| session.id.clone()))
+        .first_session_id()
         .map_err(|error| RuntimeWorkerError::internal(format!("session lookup failed: {error}")))
 }
