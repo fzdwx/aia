@@ -61,11 +61,12 @@ These commands map to their corresponding tools. For example, `vp dev --port 300
 
 ## Common Pitfalls
 
-- **Using the package manager directly:** Do not use pnpm, npm, or Yarn directly. Vite+ can handle all package manager operations.
-- **Always use Vite commands to run tools:** Don't attempt to run `vp vitest` or `vp oxlint`. They do not exist. Use `vp test` and `vp lint` instead.
-- **Running scripts:** Vite+ commands take precedence over `package.json` scripts. If there is a `test` script defined in `scripts` that conflicts with the built-in `vp test` command, run it using `vp run test`.
-- **Do not install Vitest, Oxlint, Oxfmt, or tsdown directly:** Vite+ wraps these tools. They must not be installed directly. You cannot upgrade these tools by installing their latest versions. Always use Vite+ commands.
-- **Use Vite+ wrappers for one-off binaries:** Use `vp dlx` instead of package-manager-specific `dlx`/`npx` commands.
+- **Package manager state is still managed by Vite+:** 依赖安装、增删包、锁文件相关操作优先使用 `vp install` / `vp add` / `vp remove`，不要直接用 `pnpm` / `npm` / `yarn` 改依赖状态。
+- **Use the commands that actually exist in this package:** 这个目录既有 `vp` 命令，也有直接脚本。当前验证路径里，前端测试可以使用 `vp test`，也可以使用 `pnpm run test`（它会执行当前 `package.json` 里的 `test` 脚本）；TypeScript 类型检查直接使用 `tsc --noEmit`（或 `./node_modules/.bin/tsc --noEmit`）。不要把所有命令都机械改写成同一种入口。
+- **`vp` may not be on global `PATH`:** Always `cd apps/web` first. If `vp` is not found globally in the current shell/runtime, use the project-local binary `./node_modules/.bin/vp` instead. 在本仓库里，agent 执行前端校验时优先选择“能明确表达真实工具语义”的命令，并避免依赖宿主机全局安装状态。
+- **Running scripts:** `package.json` 里的脚本代表当前目录的真实行为：`test` / `test:watch` 目前走 `bun test`，`typecheck` 目前走 `tsc --noEmit`；选择命令前先看 `package.json` 的当前定义，不要假设它们天然等价于某个 `vp` 子命令。
+- **Do not install Vitest, Oxlint, Oxfmt, or tsdown directly:** Vite+ wraps these tools. They must not be installed directly. You cannot upgrade these tools by installing their latest versions. Always use Vite+ commands where those tools are actually the intended entrypoint.
+- **Use Vite+ wrappers for one-off binaries when appropriate:** 优先用 `vp exec` 执行本地前端工具；如果只是当前仓库已经明确用裸 `tsc`，也可直接使用 `./node_modules/.bin/tsc`。
 - **Import JavaScript modules from `vite-plus`:** Instead of importing from `vite` or `vitest`, all modules should be imported from the project's `vite-plus` dependency. For example, `import { defineConfig } from 'vite-plus';` or `import { expect, test, vi } from 'vite-plus/test';`. You must not install `vitest` to import test utilities.
 - **Type-Aware Linting:** There is no need to install `oxlint-tsgolint`, `vp lint --type-aware` works out of the box.
 

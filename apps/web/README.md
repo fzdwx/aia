@@ -30,12 +30,45 @@
 
 ## 常用命令
 
+先进入目录：
+
 ```bash
-vp install
-vp dev
-vp check
-vp build
-vp preview
+cd apps/web
 ```
+
+如果全局 `vp` 不在当前环境的 `PATH` 中，可使用项目本地 binary：`./node_modules/.bin/vp`。
+
+### 安装与开发
+
+```bash
+./node_modules/.bin/vp install
+./node_modules/.bin/vp dev
+./node_modules/.bin/vp build
+./node_modules/.bin/vp preview
+```
+
+### 校验
+
+```bash
+./node_modules/.bin/vp test
+pnpm run test
+./node_modules/.bin/tsc --noEmit
+pnpm run typecheck
+```
+
+其中：
+
+- `./node_modules/.bin/vp test` 是直接调用当前项目本地的 Vite+ 测试入口
+- `pnpm run test` 会执行当前 `package.json` 中的 `test` 脚本；按当前仓库配置，它实际运行的是 `bun test`
+- `./node_modules/.bin/tsc --noEmit` 与 `pnpm run typecheck` 当前都对应 TypeScript 类型检查
+
+### 当前 `package.json` 脚本语义
+
+- `test`：当前实际执行 `bun test`
+- `test:watch`：当前实际执行 `bun test --watch`
+- `typecheck`：当前实际执行 `tsc --noEmit`
+- `lint` / `format` / `dev`：当前脚本内部仍走 `vp`
+
+在运行命令前，以 `apps/web/package.json` 的当前定义为准，不要假设所有脚本都等价于 `vp` 子命令。
 
 如需运行前后端联调，优先使用仓库根目录下已有的联动命令，而不是在 Web 子目录各自发明流程。

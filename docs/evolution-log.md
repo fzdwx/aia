@@ -18,7 +18,7 @@
 **Diagnosis**：`apps/web/src/components/chat-messages.tsx` 里 tool 展示逻辑继续往单文件堆：标题摘要、参数展开、不同 tool details 的展示规则全耦合在组件内部，既不利于满足“参数进标题、详情按 tool 定制”的新需求，也会让后续继续加 tool renderer 时放大 UI 文件体积与漂移风险。
 **Decision**：把前端 tool 展示收口为聊天特性级 renderer 注册器，放到 `apps/web/src/features/chat/tool-rendering/`，由 `chat-messages` 只负责列表与交互壳，具体“标题怎么摘要 / 展开后怎么渲染 details”交给每个 tool renderer；这样既满足当前展示需求，也避免继续把协议细节和视图逻辑挤进通用 `lib` 或单一组件文件。
 **Changes**：
-- `apps/web/src/features/chat/tool-rendering/index.tsx`：新增聊天特性级 tool renderer 注册器，已接入 `read`、`write`、`edit`、`glob`、`grep`、`shell`、`apply_patch`、`tape_info`、`tape_handoff` 的标题/详情渲染规则；参数摘要移到标题，详情改为按 tool 的 `details` 定制展示。
+- `apps/web/src/features/chat/message-sections.tsx`、`apps/web/src/components/chat-messages.tsx`：继续把 `ThinkingBlock`、`TurnView`、`StreamingView`、`StatusIndicator`、`CompressionNotice`、`SessionHydratingIndicator` 等消息区视图壳层迁到聊天特性目录，`chat-messages` 进一步收敛为“读取 store + 消息编排 + 滚动恢复”主线；同时移除不再使用的旧 `tool-rendering/default-renderer.tsx`。
 - `apps/web/AGENTS.md`、`apps/web/README.md`：按 `apps/web/package.json` 的真实脚本语义重写前端命令说明；补记“全局 `vp` 可能缺失时可改用项目本地 `./node_modules/.bin/vp`”，同时明确 `pnpm run test` 在当前仓库里确实可用（它会执行现有 `test` 脚本，即 `bun test`），类型检查当前可走 `tsc --noEmit` / `pnpm run typecheck`，不要把所有命令都机械等同成单一入口。
 - `apps/web/src/features/chat/tool-rendering/index.test.tsx`：补充注册器回归测试，锁住 read/shell/default renderer 的标题摘要行为。
 - `apps/web/src/components/chat-messages.tsx`：工具行已改为调用 renderer 注册器生成标题与详情，移除内联 `Arguments` 展开块；耗时显示也已放到行尾，流式 active tool 标题同样走注册器。
