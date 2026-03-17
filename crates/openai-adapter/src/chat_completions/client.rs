@@ -1,7 +1,11 @@
 use agent_core::{AbortSignal, Completion, CompletionRequest, LanguageModel, StreamEvent};
 use async_trait::async_trait;
 
-use crate::{OpenAiAdapterError, stream_lines_with_abort};
+use crate::{
+    OpenAiAdapterError,
+    http::{apply_user_agent, http_client, request_failure, validate_request_model},
+    stream_lines_with_abort,
+};
 
 use super::{OpenAiChatCompletionsModel, streaming::ChatCompletionsStreamingState};
 
@@ -15,17 +19,17 @@ impl LanguageModel for OpenAiChatCompletionsModel {
         abort: &AbortSignal,
         sink: &mut (dyn FnMut(StreamEvent) + Send),
     ) -> Result<Completion, Self::Error> {
-        self.validate_request_model(&request)?;
+        validate_request_model(&self.config().model, &request)?;
 
-        let client = self.http_client(&request)?;
-        let response = self
-            .apply_user_agent(
-                client
-                    .post(self.endpoint_url())
-                    .bearer_auth(&self.config.api_key)
-                    .json(&self.build_streaming_request_body(&request)),
-                request.user_agent.as_deref(),
-            )
+        let client = http_client(&request)?;
+        let request_builder = apply_user_agent(
+            client
+                .post(self.endpoint_url())
+                .bearer_auth(&self.config.api_key)
+                .json(&self.build_streaming_request_body(&request)),
+            request.user_agent.as_deref(),
+        );
+        let response = request_builder
             .send()
             .await
             .map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
@@ -36,7 +40,7 @@ impl LanguageModel for OpenAiChatCompletionsModel {
                 .text()
                 .await
                 .map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
-            return Err(self.request_failure(status, &body));
+            return Err(request_failure(&self.endpoint_url(), status, &body));
         }
 
         let mut state = ChatCompletionsStreamingState::default();

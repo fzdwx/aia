@@ -582,3 +582,16 @@
 **Verification**：`cargo fmt --all`、`cargo check -p agent-store`、`cargo test -p agent-store -- --nocapture` 通过。
 **Commit**：未提交
 **Next direction**：继续检查 `openai-adapter` 共享 streaming/helper，或继续评估 `agent-store` / `apps/agent-server` 之间仍适合下沉到共享层的查询与投影逻辑。
+
+## 2026-03-17 Session 32
+
+**Diagnosis**：`openai-adapter` 的 Responses 与 Chat Completions 已按目录拆开，但 `request.rs` / `client.rs` 里仍各自平行维护 model 校验、HTTP client 构建、user-agent 注入、失败错误组装和 prompt-cache 字段拼装；这种完全同构的 helper 继续留在两边，只会增加后续演化时的重复改动面。
+**Decision**：把这批协议无关的 HTTP/request helper 下沉到 adapter 顶层共享模块，保留协议特有的 URL、body 形状、stop reason / finish reason 映射在各自子模块；这样既减少重复，又不混淆 Responses / Chat Completions 的协议边界。
+**Changes**：
+- `crates/openai-adapter/src/http.rs`：新增共享 helper，统一处理请求模型校验、endpoint URL 拼接、失败错误构造、HTTP client 构建、user-agent 注入和 prompt-cache 字段写入。
+- `crates/openai-adapter/src/responses/request.rs`、`crates/openai-adapter/src/chat_completions/request.rs`：删除重复 HTTP/request helper，只保留协议特有 body 构造与 stop reason 映射。
+- `crates/openai-adapter/src/responses/client.rs`、`crates/openai-adapter/src/chat_completions/client.rs`：改为直接复用共享 helper，继续保留各自 streaming state 和协议特有 endpoint/body。
+- `docs/status.md`、`docs/architecture.md`：同步记录 adapter 共享 HTTP helper 已完成下沉。
+**Verification**：`cargo fmt --all`、`cargo check -p openai-adapter`、`cargo test -p openai-adapter -- --nocapture` 通过。
+**Commit**：未提交
+**Next direction**：继续看 `crates/openai-adapter/src/streaming.rs` 与两条协议各自 `streaming.rs` 的共享增量解析 helper，或转去把 `agent-store` / `apps/agent-server` 间还能下沉的查询/投影逻辑继续抽到共享层。

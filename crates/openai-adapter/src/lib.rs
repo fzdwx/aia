@@ -1,5 +1,6 @@
 mod chat_completions;
 mod error;
+mod http;
 mod mapping;
 mod payloads;
 mod responses;
