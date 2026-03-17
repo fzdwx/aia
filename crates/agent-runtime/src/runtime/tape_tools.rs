@@ -5,6 +5,8 @@ use agent_core::{
     ToolDefinition, ToolExecutionContext, ToolExecutor, ToolOutputDelta, ToolRegistry, ToolResult,
 };
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::AgentRuntime;
@@ -77,6 +79,10 @@ impl RuntimeToolContext for RuntimeToolContextBridge {
 
 struct TapeInfoTool;
 
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct TapeInfoToolArgs {}
+
 #[async_trait]
 impl Tool for TapeInfoTool {
     fn name(&self) -> &str {
@@ -85,6 +91,7 @@ impl Tool for TapeInfoTool {
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition::new(self.name(), "Return context usage statistics for the current session.")
+            .with_parameters_schema::<TapeInfoToolArgs>()
     }
 
     async fn call(
@@ -93,6 +100,7 @@ impl Tool for TapeInfoTool {
         _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
     ) -> Result<ToolResult, CoreError> {
+        let _: TapeInfoToolArgs = tool_call.parse_arguments()?;
         let runtime = context
             .runtime
             .as_ref()
@@ -115,6 +123,15 @@ impl Tool for TapeInfoTool {
 
 struct TapeHandoffTool;
 
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct TapeHandoffToolArgs {
+    #[schemars(description = "A concise summary of the conversation so far to carry forward.")]
+    summary: String,
+    #[schemars(description = "Optional name for the anchor (default: \"handoff\").")]
+    name: Option<String>,
+}
+
 #[async_trait]
 impl Tool for TapeHandoffTool {
     fn name(&self) -> &str {
@@ -126,12 +143,7 @@ impl Tool for TapeHandoffTool {
             self.name(),
             "Create an anchor to truncate history and carry forward a summary as minimal inherited state.",
         )
-        .with_parameter(
-            "summary",
-            "A concise summary of the conversation so far to carry forward.",
-            true,
-        )
-        .with_parameter("name", "Optional name for the anchor (default: \"handoff\").", false)
+        .with_parameters_schema::<TapeHandoffToolArgs>()
     }
 
     async fn call(
@@ -140,16 +152,14 @@ impl Tool for TapeHandoffTool {
         _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
     ) -> Result<ToolResult, CoreError> {
+        let args: TapeHandoffToolArgs = tool_call.parse_arguments()?;
         let runtime = context
             .runtime
             .as_ref()
             .ok_or_else(|| CoreError::new("runtime tool context unavailable"))?;
-        let summary =
-            tool_call.arguments.get("summary").and_then(|value| value.as_str()).unwrap_or("");
-        let name =
-            tool_call.arguments.get("name").and_then(|value| value.as_str()).unwrap_or("handoff");
+        let name = args.name.as_deref().unwrap_or("handoff");
 
-        runtime.record_handoff(name, summary)?;
+        runtime.record_handoff(name, &args.summary)?;
         Ok(ToolResult::from_call(tool_call, format!("anchor added: {name}")))
     }
 }
@@ -160,4 +170,45 @@ pub(super) fn runtime_tool_definitions() -> Vec<ToolDefinition> {
 
 pub(super) fn is_runtime_tool(name: &str) -> bool {
     build_runtime_tool_registry().contains(name)
+}
+
+#[cfg(test)]
+mod tests {
+    use agent_core::ToolDefinition;
+
+    use super::{
+        TapeHandoffTool, TapeHandoffToolArgs, TapeInfoTool, TapeInfoToolArgs,
+        runtime_tool_definitions,
+    };
+    use crate::runtime::tape_tools::Tool;
+
+    #[test]
+    fn runtime_tool_definitions_match_schemars_output() {
+        let definitions = runtime_tool_definitions();
+        assert_eq!(definitions.len(), 2);
+
+        let tape_info = TapeInfoTool.definition();
+        assert!(definitions.iter().any(|definition| definition == &tape_info));
+        assert_eq!(
+            tape_info.parameters,
+            ToolDefinition::new(
+                "tape_info",
+                "Return context usage statistics for the current session.",
+            )
+            .with_parameters_schema::<TapeInfoToolArgs>()
+            .parameters
+        );
+
+        let tape_handoff = TapeHandoffTool.definition();
+        assert!(definitions.iter().any(|definition| definition == &tape_handoff));
+        assert_eq!(
+            tape_handoff.parameters,
+            ToolDefinition::new(
+                "tape_handoff",
+                "Create an anchor to truncate history and carry forward a summary as minimal inherited state.",
+            )
+            .with_parameters_schema::<TapeHandoffToolArgs>()
+            .parameters
+        );
+    }
 }
