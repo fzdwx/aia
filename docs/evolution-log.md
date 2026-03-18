@@ -37,6 +37,18 @@
 **Commit**：未提交。
 **Next direction**：继续补飞书 reaction 失败/丢状态时的兜底回收策略（必要时通过 list 接口按 `emoji_type` + operator 回扫），并评估是否要把 p2p `chat_id` 也用于新的会话绑定键，彻底摆脱 app-scoped `open_id` 对私聊状态的影响。
 
+## 2026-03-18 Session 65
+
+**Diagnosis**：飞书桥接虽然已经能稳定接入、回复和恢复当前执行态，但出站形态仍停在“等 turn 结束后发一条最终文本”，这既浪费了现有 `StreamEvent` 增量事件，也让飞书侧体验明显落后于 Web 和 `openclaw-lark` 的卡片流式输出。
+**Decision**：不把 CardKit 整套状态机一次性照搬进来，而是在当前 bridge 上先落一个 repo-appropriate 版本：保留现有长连接与 reaction 生命周期，先把回复升级为可更新的 interactive card；收到 `CurrentTurnStarted/Status/Stream/TurnCompleted/Error` 后在服务端维护轻量卡片状态，按节流策略 PATCH 同一条卡片消息，最终收口为结构更清晰的完成卡片。卡片创建或更新失败时继续回退到最终文本，保证消息链路不因展示层失败而中断。
+**Changes**：
+- `apps/agent-server/src/channel_runtime.rs`：新增飞书流式卡片状态、流事件投影、interactive card 发送/更新 helper，以及基于 `SsePayload` 的流式消费循环；异步飞书回复现在先发 interactive card，再按 `thinking/text/tool` 增量节流刷新，失败时退回最终文本。
+- `apps/agent-server/src/channel_runtime.rs` 测试：补齐卡片 payload 结构与流事件累计回归测试，锁住“标题 + 用户消息 + 可折叠思考过程 + 工具状态 + footer”的卡片布局语义。
+- `docs/status.md`：同步记录飞书流式卡片已经落地，以及当前卡片展示边界。
+**Verification**：`cargo test -p agent-server streaming_card`、`cargo test -p agent-server` 通过。工作区级 `cargo check -p agent-server` 仍受既有 workspace 老问题阻塞，未由本轮引入。
+**Commit**：未提交。
+**Next direction**：如果后续继续向 `openclaw-lark` 靠拢，下一步优先评估是否切到 CardKit entity + `element_id` 级流式更新，而不是持续依赖 interactive message PATCH；同时继续补 markdown 样式优化与图片资源解析，提升飞书卡片可读性。
+
 ## 2026-03-18 Session 61
 
 **Diagnosis**：仓库已有统一的 `session_manager.submit_turn(...)` + SSE/runtime 主链，也已有 provider settings 模式，但还缺一条“外部聊天平台消息 → 现有会话主链”的稳定桥接层；如果直接把飞书协议细节塞进 `session_manager` 或只做前端配置页，都无法真正形成可复用的 channel 能力。
