@@ -24,10 +24,16 @@ use crate::{
 const FEISHU_EVENT_KIND: &str = "im.message.receive_v1";
 const FEISHU_WS_ENDPOINT_URI: &str = "/callback/ws/endpoint";
 const FEISHU_P2P_CHAT_QUERY_URI: &str = "/open-apis/im/v1/chat_p2p/batch_query";
+const FEISHU_CARDKIT_CARDS_URI: &str = "/open-apis/cardkit/v1/cards";
+const FEISHU_CARDKIT_CARD_UPDATE_URI: &str = "/open-apis/cardkit/v1/cards/{card_id}";
+const FEISHU_CARDKIT_CARD_SETTINGS_URI: &str = "/open-apis/cardkit/v1/cards/{card_id}/settings";
+const FEISHU_CARDKIT_CARD_ELEMENT_CONTENT_URI: &str =
+    "/open-apis/cardkit/v1/cards/{card_id}/elements/{element_id}/content";
 const FEISHU_MESSAGE_REACTIONS_URI: &str = "/open-apis/im/v1/messages/{message_id}/reactions";
 const FEISHU_MESSAGES_URI: &str = "/open-apis/im/v1/messages";
 const FEISHU_PROCESSING_EMOJI_TYPE: &str = "Typing";
 const FEISHU_CARD_UPDATE_INTERVAL_MS: u64 = 700;
+const FEISHU_CARDKIT_STREAMING_ELEMENT_ID: &str = "streaming_content";
 const FEISHU_HEADER_TYPE: &str = "type";
 const FEISHU_HEADER_MESSAGE_ID: &str = "message_id";
 const FEISHU_HEADER_SUM: &str = "sum";
@@ -472,22 +478,9 @@ async fn stream_turn_to_feishu_reply(
 
     let started_at_ms = current_timestamp_ms();
     let mut card_state = FeishuStreamingCardState::new(prompt.to_string(), started_at_ms);
-    let initial_card = build_feishu_card_payload(&card_state);
-    let mut card_message_id = send_card_message(
-        profile,
-        reply_target,
-        &initial_card,
-        request_uuid_seed,
-    )
-    .await
-    .map(Some)
-    .unwrap_or_else(|error| {
-        eprintln!(
-            "创建飞书流式卡片失败，退回最终文本回复 profile_id={} message_id={} error={error}",
-            profile.id, request_uuid_seed
-        );
-        None
-    });
+    let mut reply_mode =
+        create_feishu_streaming_reply_mode(profile, reply_target, &card_state, request_uuid_seed)
+            .await;
     let mut last_card_update_at_ms = started_at_ms;
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
@@ -503,9 +496,9 @@ async fn stream_turn_to_feishu_reply(
                 if sid == session_id =>
             {
                 update_feishu_card_state_from_snapshot(&mut card_state, &current_turn);
-                card_message_id = maybe_update_card(
+                reply_mode = maybe_update_reply(
                     profile,
-                    card_message_id,
+                    reply_mode,
                     &card_state,
                     &mut last_card_update_at_ms,
                     false,
@@ -514,9 +507,9 @@ async fn stream_turn_to_feishu_reply(
             }
             SsePayload::Status { session_id: sid, status } if sid == session_id => {
                 card_state.status = status;
-                card_message_id = maybe_update_card(
+                reply_mode = maybe_update_reply(
                     profile,
-                    card_message_id,
+                    reply_mode,
                     &card_state,
                     &mut last_card_update_at_ms,
                     false,
@@ -525,9 +518,9 @@ async fn stream_turn_to_feishu_reply(
             }
             SsePayload::Stream { session_id: sid, event } if sid == session_id => {
                 apply_stream_event_to_feishu_card_state(&mut card_state, &event);
-                card_message_id = maybe_update_card(
+                reply_mode = maybe_update_reply(
                     profile,
-                    card_message_id,
+                    reply_mode,
                     &card_state,
                     &mut last_card_update_at_ms,
                     false,
@@ -551,16 +544,16 @@ async fn stream_turn_to_feishu_reply(
                     crate::sse::TurnStatus::Generating
                 };
 
-                if let Some(message_id) = maybe_update_card(
+                if maybe_update_reply(
                     profile,
-                    card_message_id,
+                    reply_mode,
                     &card_state,
                     &mut last_card_update_at_ms,
                     true,
                 )
                 .await
+                .is_some()
                 {
-                    let _ = message_id;
                 } else {
                     let fallback = card_state.final_text();
                     send_reply_message(profile, reply_target, &fallback, request_uuid_seed).await?;
@@ -577,16 +570,16 @@ async fn stream_turn_to_feishu_reply(
                         format!("处理消息失败：{message}")
                     };
 
-                if let Some(message_id) = maybe_update_card(
+                if maybe_update_reply(
                     profile,
-                    card_message_id,
+                    reply_mode,
                     &card_state,
                     &mut last_card_update_at_ms,
                     true,
                 )
                 .await
+                .is_some()
                 {
-                    let _ = message_id;
                 } else {
                     let fallback = card_state.final_text();
                     send_reply_message(profile, reply_target, &fallback, request_uuid_seed).await?;
@@ -596,6 +589,68 @@ async fn stream_turn_to_feishu_reply(
             _ => {}
         }
     }
+}
+
+async fn create_feishu_streaming_reply_mode(
+    profile: &ChannelProfile,
+    reply_target: &FeishuMessageTarget,
+    card_state: &FeishuStreamingCardState,
+    request_uuid_seed: &str,
+) -> Option<FeishuStreamingReplyMode> {
+    match create_cardkit_entity(profile, &build_feishu_cardkit_shell()).await {
+        Ok(card_id) => {
+            match send_cardkit_message(profile, reply_target, &card_id, request_uuid_seed).await {
+                Ok(message_id) => {
+                    Some(FeishuStreamingReplyMode::CardKit { card_id, message_id, sequence: 1 })
+                }
+                Err(error) => {
+                    eprintln!(
+                        "发送飞书 CardKit 引用消息失败，退回 interactive patch profile_id={} message_id={} error={error}",
+                        profile.id, request_uuid_seed
+                    );
+                    create_interactive_patch_mode(
+                        profile,
+                        reply_target,
+                        card_state,
+                        request_uuid_seed,
+                    )
+                    .await
+                }
+            }
+        }
+        Err(error) => {
+            eprintln!(
+                "创建飞书 CardKit 实体失败，退回 interactive patch profile_id={} message_id={} error={error}",
+                profile.id, request_uuid_seed
+            );
+            create_interactive_patch_mode(profile, reply_target, card_state, request_uuid_seed)
+                .await
+        }
+    }
+}
+
+async fn create_interactive_patch_mode(
+    profile: &ChannelProfile,
+    reply_target: &FeishuMessageTarget,
+    card_state: &FeishuStreamingCardState,
+    request_uuid_seed: &str,
+) -> Option<FeishuStreamingReplyMode> {
+    send_card_message(
+        profile,
+        reply_target,
+        &build_feishu_card_payload(card_state),
+        request_uuid_seed,
+    )
+    .await
+    .map(|message_id| FeishuStreamingReplyMode::InteractivePatch { message_id })
+    .map(Some)
+    .unwrap_or_else(|error| {
+        eprintln!(
+            "创建飞书流式卡片失败，退回最终文本回复 profile_id={} message_id={} error={error}",
+            profile.id, request_uuid_seed
+        );
+        None
+    })
 }
 
 async fn prepare_session_for_turn(
@@ -752,6 +807,219 @@ async fn send_card_message(
         .ok_or_else(|| "发送飞书卡片失败: 缺少 message_id".to_string())
 }
 
+async fn send_cardkit_message(
+    profile: &ChannelProfile,
+    target: &FeishuMessageTarget,
+    card_id: &str,
+    request_uuid_seed: &str,
+) -> Result<String, String> {
+    let tenant_access_token = fetch_tenant_access_token(profile).await?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let request = prepare_send_cardkit_request(profile, target, card_id, request_uuid_seed);
+    let response = client
+        .post(request.url)
+        .header("Authorization", format!("Bearer {tenant_access_token}"))
+        .header("Content-Type", "application/json; charset=utf-8")
+        .json(&request.body)
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "发送飞书 CardKit 引用消息失败: {} {}",
+            response.status(),
+            response.text().await.unwrap_or_default()
+        ));
+    }
+
+    let payload: FeishuMessageResponse =
+        response.json().await.map_err(|error| error.to_string())?;
+    if payload.code != 0 {
+        return Err(format!("发送飞书 CardKit 引用消息失败: {}", payload.msg));
+    }
+    payload
+        .data
+        .and_then(|data| data.message_id)
+        .filter(|message_id| !message_id.is_empty())
+        .ok_or_else(|| "发送飞书 CardKit 引用消息失败: 缺少 message_id".to_string())
+}
+
+async fn create_cardkit_entity(
+    profile: &ChannelProfile,
+    card: &serde_json::Value,
+) -> Result<String, String> {
+    let tenant_access_token = fetch_tenant_access_token(profile).await?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let base_url = profile.config.base_url.trim_end_matches('/');
+    let response = client
+        .post(format!("{base_url}{FEISHU_CARDKIT_CARDS_URI}"))
+        .header("Authorization", format!("Bearer {tenant_access_token}"))
+        .header("Content-Type", "application/json; charset=utf-8")
+        .json(&json!({
+            "type": "card_json",
+            "data": serde_json::to_string(card).map_err(|error| error.to_string())?,
+        }))
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "创建飞书 CardKit 实体失败: {} {}",
+            response.status(),
+            response.text().await.unwrap_or_default()
+        ));
+    }
+
+    let payload: FeishuCardKitCreateResponse =
+        response.json().await.map_err(|error| error.to_string())?;
+    if payload.code != 0 {
+        return Err(format!("创建飞书 CardKit 实体失败: {}", payload.msg));
+    }
+    payload
+        .data
+        .and_then(|data| data.card_id)
+        .filter(|card_id: &String| !card_id.is_empty())
+        .ok_or_else(|| "创建飞书 CardKit 实体失败: 缺少 card_id".to_string())
+}
+
+async fn stream_cardkit_content(
+    profile: &ChannelProfile,
+    card_id: &str,
+    content: &str,
+    sequence: u64,
+) -> Result<(), String> {
+    let tenant_access_token = fetch_tenant_access_token(profile).await?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let base_url = profile.config.base_url.trim_end_matches('/');
+    let response = client
+        .put(format!(
+            "{base_url}/{}",
+            FEISHU_CARDKIT_CARD_ELEMENT_CONTENT_URI
+                .replace("{card_id}", card_id)
+                .replace("{element_id}", FEISHU_CARDKIT_STREAMING_ELEMENT_ID)
+                .trim_start_matches('/')
+        ))
+        .header("Authorization", format!("Bearer {tenant_access_token}"))
+        .header("Content-Type", "application/json; charset=utf-8")
+        .json(&build_cardkit_stream_payload(content, sequence))
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "流式更新飞书 CardKit 内容失败: {} {}",
+            response.status(),
+            response.text().await.unwrap_or_default()
+        ));
+    }
+
+    let payload: FeishuSimpleResponse = response.json().await.map_err(|error| error.to_string())?;
+    if payload.code != 0 {
+        return Err(format!("流式更新飞书 CardKit 内容失败: {}", payload.msg));
+    }
+    Ok(())
+}
+
+async fn set_cardkit_streaming_mode(
+    profile: &ChannelProfile,
+    card_id: &str,
+    streaming_mode: bool,
+    sequence: u64,
+) -> Result<(), String> {
+    let tenant_access_token = fetch_tenant_access_token(profile).await?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let base_url = profile.config.base_url.trim_end_matches('/');
+    let response = client
+        .patch(format!(
+            "{base_url}/{}",
+            FEISHU_CARDKIT_CARD_SETTINGS_URI.replace("{card_id}", card_id).trim_start_matches('/')
+        ))
+        .header("Authorization", format!("Bearer {tenant_access_token}"))
+        .header("Content-Type", "application/json; charset=utf-8")
+        .json(&json!({
+            "settings": serde_json::to_string(&json!({ "streaming_mode": streaming_mode }))
+                .map_err(|error| error.to_string())?,
+            "sequence": sequence,
+        }))
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "切换飞书 CardKit streaming_mode 失败: {} {}",
+            response.status(),
+            response.text().await.unwrap_or_default()
+        ));
+    }
+
+    let payload: FeishuSimpleResponse = response.json().await.map_err(|error| error.to_string())?;
+    if payload.code != 0 {
+        return Err(format!("切换飞书 CardKit streaming_mode 失败: {}", payload.msg));
+    }
+    Ok(())
+}
+
+async fn update_cardkit_card(
+    profile: &ChannelProfile,
+    card_id: &str,
+    card: &serde_json::Value,
+    sequence: u64,
+) -> Result<(), String> {
+    let tenant_access_token = fetch_tenant_access_token(profile).await?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let base_url = profile.config.base_url.trim_end_matches('/');
+    let response = client
+        .put(format!(
+            "{base_url}/{}",
+            FEISHU_CARDKIT_CARD_UPDATE_URI.replace("{card_id}", card_id).trim_start_matches('/')
+        ))
+        .header("Authorization", format!("Bearer {tenant_access_token}"))
+        .header("Content-Type", "application/json; charset=utf-8")
+        .json(&json!({
+            "card": {
+                "type": "card_json",
+                "data": serde_json::to_string(card).map_err(|error| error.to_string())?,
+            },
+            "sequence": sequence,
+        }))
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "更新飞书 CardKit 卡片失败: {} {}",
+            response.status(),
+            response.text().await.unwrap_or_default()
+        ));
+    }
+
+    let payload: FeishuSimpleResponse = response.json().await.map_err(|error| error.to_string())?;
+    if payload.code != 0 {
+        return Err(format!("更新飞书 CardKit 卡片失败: {}", payload.msg));
+    }
+    Ok(())
+}
+
 async fn update_card_message(
     profile: &ChannelProfile,
     message_id: &str,
@@ -789,40 +1057,94 @@ async fn update_card_message(
     Ok(())
 }
 
-async fn maybe_update_card(
+async fn maybe_update_reply(
     profile: &ChannelProfile,
-    card_message_id: Option<String>,
+    reply_mode: Option<FeishuStreamingReplyMode>,
     state: &FeishuStreamingCardState,
     last_card_update_at_ms: &mut u64,
     force: bool,
-) -> Option<String> {
-    let Some(message_id) = card_message_id else {
+) -> Option<FeishuStreamingReplyMode> {
+    let Some(reply_mode) = reply_mode else {
         return None;
     };
     let now_ms = current_timestamp_ms();
     if !force && now_ms.saturating_sub(*last_card_update_at_ms) < FEISHU_CARD_UPDATE_INTERVAL_MS {
-        return Some(message_id);
+        return Some(reply_mode);
     }
 
-    let card = build_feishu_card_payload(state);
-    match update_card_message(profile, &message_id, &card).await {
-        Ok(()) => {
-            *last_card_update_at_ms = now_ms;
-            Some(message_id)
-        }
-        Err(error) => {
-            if force {
-                eprintln!(
-                    "更新飞书最终卡片失败，保留已有卡片避免重复消息 profile_id={} message_id={} error={error}",
-                    profile.id, message_id
-                );
-                Some(message_id)
+    match reply_mode {
+        FeishuStreamingReplyMode::CardKit { card_id, message_id, mut sequence } => {
+            let result = if force {
+                sequence += 1;
+                if let Err(error) =
+                    set_cardkit_streaming_mode(profile, &card_id, false, sequence).await
+                {
+                    Err(error)
+                } else {
+                    sequence += 1;
+                    update_cardkit_card(
+                        profile,
+                        &card_id,
+                        &build_feishu_card_payload(state),
+                        sequence,
+                    )
+                    .await
+                }
             } else {
-                eprintln!(
-                    "更新飞书流式卡片失败，退回最终文本回复 profile_id={} message_id={} error={error}",
-                    profile.id, message_id
-                );
-                None
+                sequence += 1;
+                stream_cardkit_content(
+                    profile,
+                    &card_id,
+                    &build_feishu_cardkit_stream_markdown(state),
+                    sequence,
+                )
+                .await
+            };
+
+            match result {
+                Ok(()) => {
+                    *last_card_update_at_ms = now_ms;
+                    Some(FeishuStreamingReplyMode::CardKit { card_id, message_id, sequence })
+                }
+                Err(error) => {
+                    if force {
+                        eprintln!(
+                            "更新飞书最终 CardKit 卡片失败，退回最终文本回复 profile_id={} card_id={} error={error}",
+                            profile.id, card_id
+                        );
+                        None
+                    } else {
+                        eprintln!(
+                            "流式更新飞书 CardKit 失败，切回 interactive patch profile_id={} card_id={} error={error}",
+                            profile.id, card_id
+                        );
+                        Some(FeishuStreamingReplyMode::InteractivePatch { message_id })
+                    }
+                }
+            }
+        }
+        FeishuStreamingReplyMode::InteractivePatch { message_id } => {
+            let card = build_feishu_card_payload(state);
+            match update_card_message(profile, &message_id, &card).await {
+                Ok(()) => {
+                    *last_card_update_at_ms = now_ms;
+                    Some(FeishuStreamingReplyMode::InteractivePatch { message_id })
+                }
+                Err(error) => {
+                    if force {
+                        eprintln!(
+                            "更新飞书最终卡片失败，退回最终文本回复 profile_id={} message_id={} error={error}",
+                            profile.id, message_id
+                        );
+                        None
+                    } else {
+                        eprintln!(
+                            "更新飞书流式卡片失败，退回最终文本回复 profile_id={} message_id={} error={error}",
+                            profile.id, message_id
+                        );
+                        None
+                    }
+                }
             }
         }
     }
@@ -1080,6 +1402,12 @@ struct PreparedFeishuSendRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+enum FeishuStreamingReplyMode {
+    CardKit { card_id: String, message_id: String, sequence: u64 },
+    InteractivePatch { message_id: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum FeishuStreamingToolStatus {
     Running,
     Completed,
@@ -1146,17 +1474,6 @@ impl FeishuStreamingCardState {
 
 fn build_feishu_card_payload(state: &FeishuStreamingCardState) -> serde_json::Value {
     let mut elements = Vec::<serde_json::Value>::new();
-
-    elements.push(json!({
-        "tag": "markdown",
-        "content": format!("### {}", feishu_status_title(state)),
-    }));
-
-    elements.push(json!({
-        "tag": "markdown",
-        "content": format!("**用户消息**\n{}", feishu_markdown_text(&state.user_message)),
-        "text_size": "notation",
-    }));
 
     if !state.reasoning.trim().is_empty() {
         elements.push(json!({
@@ -1245,6 +1562,66 @@ fn build_feishu_card_payload(state: &FeishuStreamingCardState) -> serde_json::Va
     })
 }
 
+fn build_feishu_cardkit_shell() -> serde_json::Value {
+    json!({
+        "schema": "2.0",
+        "config": {
+            "streaming_mode": true,
+            "summary": {
+                "content": "飞书会话处理中…"
+            }
+        },
+        "body": {
+            "elements": [{
+                "tag": "markdown",
+                "content": "",
+                "element_id": FEISHU_CARDKIT_STREAMING_ELEMENT_ID,
+                "text_align": "left",
+                "text_size": "normal_v2",
+                "margin": "0px 0px 0px 0px"
+            }]
+        }
+    })
+}
+
+fn build_feishu_cardkit_stream_markdown(state: &FeishuStreamingCardState) -> String {
+    let mut sections = Vec::<String>::new();
+
+    if !state.answer.trim().is_empty() {
+        sections.push(feishu_markdown_text(&state.answer));
+    } else if !state.reasoning.trim().is_empty() {
+        sections.push(format!("💭 {}", feishu_markdown_text(&state.reasoning)));
+    } else {
+        sections.push("_正在思考…_".into());
+    }
+
+    if !state.tools.is_empty() {
+        let tool_lines = state
+            .tools
+            .iter()
+            .map(|tool| {
+                let icon = match tool.status {
+                    FeishuStreamingToolStatus::Running => "🔄",
+                    FeishuStreamingToolStatus::Completed => "✅",
+                    FeishuStreamingToolStatus::Failed => "❌",
+                };
+                format!("{icon} **{}**", tool.tool_name)
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        sections.push(tool_lines);
+    }
+
+    sections.join("\n\n")
+}
+
+fn build_cardkit_stream_payload(content: &str, sequence: u64) -> serde_json::Value {
+    json!({
+        "content": content,
+        "sequence": sequence,
+    })
+}
+
 fn apply_stream_event_to_feishu_card_state(
     state: &mut FeishuStreamingCardState,
     event: &agent_core::StreamEvent,
@@ -1328,22 +1705,6 @@ fn find_or_insert_tool_state<'a>(
     &mut state.tools[last_index]
 }
 
-fn feishu_status_title(state: &FeishuStreamingCardState) -> &'static str {
-    if state.failed {
-        "飞书会话处理失败"
-    } else if state.finished_at_ms.is_some() {
-        "飞书会话处理完成"
-    } else {
-        match state.status {
-            crate::sse::TurnStatus::Waiting => "飞书会话已接收",
-            crate::sse::TurnStatus::Thinking => "飞书会话正在思考",
-            crate::sse::TurnStatus::Working => "飞书会话正在调用工具",
-            crate::sse::TurnStatus::Generating => "飞书会话正在生成回复",
-            crate::sse::TurnStatus::Cancelled => "飞书会话已取消",
-        }
-    }
-}
-
 fn feishu_status_footer(state: &FeishuStreamingCardState) -> &'static str {
     if state.failed {
         "失败"
@@ -1414,6 +1775,42 @@ fn prepare_send_card_request(
     let base_url = profile.config.base_url.trim_end_matches('/');
     let content = serde_json::to_string(card).unwrap_or_else(|_| "{}".into());
     let uuid = format!("aia-card-{request_uuid_seed}");
+    if let Some(reply_to_message_id) = &target.reply_to_message_id {
+        return PreparedFeishuSendRequest {
+            url: format!("{base_url}{FEISHU_MESSAGES_URI}/{reply_to_message_id}/reply"),
+            body: json!({
+                "msg_type": "interactive",
+                "content": content,
+                "reply_in_thread": target.reply_in_thread,
+                "uuid": uuid,
+            }),
+        };
+    }
+
+    PreparedFeishuSendRequest {
+        url: format!("{base_url}{FEISHU_MESSAGES_URI}?receive_id_type={}", target.receive_id_type),
+        body: json!({
+            "receive_id": target.receive_id,
+            "msg_type": "interactive",
+            "content": content,
+            "uuid": uuid,
+        }),
+    }
+}
+
+fn prepare_send_cardkit_request(
+    profile: &ChannelProfile,
+    target: &FeishuMessageTarget,
+    card_id: &str,
+    request_uuid_seed: &str,
+) -> PreparedFeishuSendRequest {
+    let base_url = profile.config.base_url.trim_end_matches('/');
+    let content = serde_json::to_string(&json!({
+        "type": "card",
+        "data": { "card_id": card_id }
+    }))
+    .unwrap_or_else(|_| "{}".into());
+    let uuid = format!("aia-cardkit-{request_uuid_seed}");
     if let Some(reply_to_message_id) = &target.reply_to_message_id {
         return PreparedFeishuSendRequest {
             url: format!("{base_url}{FEISHU_MESSAGES_URI}/{reply_to_message_id}/reply"),
@@ -1519,6 +1916,18 @@ struct FeishuMessageResponse {
 #[derive(Debug, Deserialize)]
 struct FeishuMessageResponseData {
     message_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FeishuCardKitCreateResponse {
+    code: i32,
+    msg: String,
+    data: Option<FeishuCardKitCreateResponseData>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FeishuCardKitCreateResponseData {
+    card_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2250,6 +2659,10 @@ mod tests {
         assert_eq!(card["schema"], "2.0");
         assert_eq!(card["config"]["update_multi"], true);
         let elements = card["body"]["elements"].as_array().expect("card elements");
+        assert!(elements.iter().all(|element| {
+            element["content"] != "### 飞书会话处理完成"
+                && element["content"] != "**用户消息**\n用户问题"
+        }));
         assert!(elements.iter().any(|element| {
             element["tag"] == "collapsible_panel"
                 && element["elements"][0]["content"] == "先分析上下文"
@@ -2261,6 +2674,54 @@ mod tests {
             element["tag"] == "markdown"
                 && element["content"].as_str().is_some_and(|content| content.contains("grep"))
         }));
+    }
+
+    #[test]
+    fn cardkit_streaming_shell_uses_single_streaming_element() {
+        let card = build_feishu_cardkit_shell();
+
+        assert_eq!(card["schema"], "2.0");
+        assert_eq!(card["config"]["streaming_mode"], true);
+        let elements = card["body"]["elements"].as_array().expect("card elements");
+        assert_eq!(elements.len(), 1);
+        assert_eq!(elements[0]["tag"], "markdown");
+        assert_eq!(elements[0]["element_id"], FEISHU_CARDKIT_STREAMING_ELEMENT_ID);
+    }
+
+    #[test]
+    fn prepare_send_cardkit_request_uses_card_reference_payload() {
+        let mut profile = sample_profile();
+        profile.config.base_url = "https://open.feishu.cn".into();
+        let target = FeishuMessageTarget {
+            receive_id: "oc_p2p_chat_1".into(),
+            receive_id_type: "chat_id".into(),
+            reply_to_message_id: None,
+            reply_in_thread: false,
+        };
+
+        let request = prepare_send_cardkit_request(&profile, &target, "card_123", "msg-1");
+
+        assert_eq!(
+            request.url,
+            "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id"
+        );
+        assert_eq!(request.body["msg_type"], "interactive");
+        assert_eq!(
+            request.body["content"],
+            serde_json::to_string(&json!({
+                "type": "card",
+                "data": { "card_id": "card_123" }
+            }))
+            .expect("serialize card ref")
+        );
+    }
+
+    #[test]
+    fn build_cardkit_stream_payload_preserves_full_text_and_sequence() {
+        let payload = build_cardkit_stream_payload("完整累计文本", 3);
+
+        assert_eq!(payload["content"], "完整累计文本");
+        assert_eq!(payload["sequence"], 3);
     }
 
     #[test]
