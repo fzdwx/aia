@@ -22,6 +22,9 @@ use crate::{
 
 const FEISHU_EVENT_KIND: &str = "im.message.receive_v1";
 const FEISHU_WS_ENDPOINT_URI: &str = "/callback/ws/endpoint";
+const FEISHU_P2P_CHAT_QUERY_URI: &str = "/open-apis/im/v1/chat_p2p/batch_query";
+const FEISHU_MESSAGE_REACTIONS_URI: &str = "/open-apis/im/v1/messages/{message_id}/reactions";
+const FEISHU_PROCESSING_EMOJI_TYPE: &str = "Typing";
 const FEISHU_HEADER_TYPE: &str = "type";
 const FEISHU_HEADER_MESSAGE_ID: &str = "message_id";
 const FEISHU_HEADER_SUM: &str = "sum";
@@ -44,6 +47,12 @@ struct FeishuRuntimeDeps {
 struct RunningFeishuWorker {
     fingerprint: String,
     handle: JoinHandle<()>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RuntimeWorkerState {
+    fingerprint: String,
+    finished: bool,
 }
 
 pub struct FeishuRuntimeSupervisor {
@@ -76,7 +85,15 @@ impl FeishuRuntimeSupervisor {
         let existing = self
             .workers
             .iter()
-            .map(|(profile_id, worker)| (profile_id.clone(), worker.fingerprint.clone()))
+            .map(|(profile_id, worker)| {
+                (
+                    profile_id.clone(),
+                    RuntimeWorkerState {
+                        fingerprint: worker.fingerprint.clone(),
+                        finished: worker.handle.is_finished(),
+                    },
+                )
+            })
             .collect::<HashMap<_, _>>();
         let (stop_ids, start_profiles) = reconcile_runtime_workers(&existing, &profiles);
 
@@ -375,7 +392,7 @@ async fn handle_event(
         return Ok(());
     }
 
-    let reply_target = resolve_reply_target(profile, &event);
+    let reply_target = resolve_reply_target(profile, &event).await?;
     let turn_prompt = build_turn_prompt(&prompt, &event);
     spawn_turn_reply_job(
         profile.clone(),
@@ -397,6 +414,16 @@ fn spawn_turn_reply_job(
     request_uuid_seed: String,
 ) {
     tokio::spawn(async move {
+        let reaction_id = add_processing_reaction(&profile, &request_uuid_seed)
+            .await
+            .map_err(|error| {
+                eprintln!(
+                    "添加飞书处理中表情失败 profile_id={} message_id={} error={error}",
+                    profile.id, request_uuid_seed
+                );
+                error
+            })
+            .ok();
         let reply = async {
             prepare_session_for_turn(&deps.session_manager, &session_id).await?;
             submit_turn_and_wait(&deps, session_id.clone(), prompt).await
@@ -416,6 +443,16 @@ fn spawn_turn_reply_job(
             eprintln!(
                 "发送飞书异步回复失败 profile_id={} message_id={} error={error}",
                 profile.id, request_uuid_seed
+            );
+        }
+
+        if let Some(reaction_id) = reaction_id
+            && let Err(error) =
+                remove_message_reaction(&profile, &request_uuid_seed, &reaction_id).await
+        {
+            eprintln!(
+                "移除飞书处理中表情失败 profile_id={} message_id={} reaction_id={} error={error}",
+                profile.id, request_uuid_seed, reaction_id
             );
         }
     });
@@ -545,22 +582,12 @@ async fn send_reply_message(
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(|error| error.to_string())?;
-    let base_url = profile.config.base_url.trim_end_matches('/');
-    let url = format!(
-        "{base_url}/open-apis/im/v1/messages/{}/reply",
-        target.reply_to_message_id.as_deref().unwrap_or_default()
-    );
-    let body = json!({
-        "msg_type": "text",
-        "content": json!({ "text": text }).to_string(),
-        "reply_in_thread": target.reply_in_thread,
-        "uuid": format!("aia-{}", request_uuid_seed),
-    });
+    let request = prepare_send_message_request(profile, target, text, request_uuid_seed);
     let response = client
-        .post(url)
+        .post(request.url)
         .header("Authorization", format!("Bearer {tenant_access_token}"))
         .header("Content-Type", "application/json; charset=utf-8")
-        .json(&body)
+        .json(&request.body)
         .send()
         .await
         .map_err(|error| error.to_string())?;
@@ -573,6 +600,135 @@ async fn send_reply_message(
         ));
     }
     Ok(())
+}
+
+async fn add_processing_reaction(
+    profile: &ChannelProfile,
+    message_id: &str,
+) -> Result<String, String> {
+    let tenant_access_token = fetch_tenant_access_token(profile).await?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let url = feishu_message_reactions_url(profile, message_id);
+    let response = client
+        .post(url)
+        .header("Authorization", format!("Bearer {tenant_access_token}"))
+        .header("Content-Type", "application/json; charset=utf-8")
+        .json(&json!({
+            "reaction_type": {
+                "emoji_type": FEISHU_PROCESSING_EMOJI_TYPE,
+            }
+        }))
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "添加飞书处理中表情失败: {} {}",
+            response.status(),
+            response.text().await.unwrap_or_default()
+        ));
+    }
+
+    let payload: FeishuReactionCreateResponse =
+        response.json().await.map_err(|error| error.to_string())?;
+    if payload.code != 0 {
+        return Err(format!("添加飞书处理中表情失败: {}", payload.msg));
+    }
+    payload
+        .data
+        .and_then(|data| data.reaction_id)
+        .ok_or_else(|| "添加飞书处理中表情失败: 缺少 reaction_id".to_string())
+}
+
+async fn remove_message_reaction(
+    profile: &ChannelProfile,
+    message_id: &str,
+    reaction_id: &str,
+) -> Result<(), String> {
+    let tenant_access_token = fetch_tenant_access_token(profile).await?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let url = format!("{}/{}", feishu_message_reactions_url(profile, message_id), reaction_id);
+    let response = client
+        .delete(url)
+        .header("Authorization", format!("Bearer {tenant_access_token}"))
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "移除飞书处理中表情失败: {} {}",
+            response.status(),
+            response.text().await.unwrap_or_default()
+        ));
+    }
+
+    let payload: FeishuSimpleResponse = response.json().await.map_err(|error| error.to_string())?;
+    if payload.code != 0 {
+        return Err(format!("移除飞书处理中表情失败: {}", payload.msg));
+    }
+    Ok(())
+}
+
+fn feishu_message_reactions_url(profile: &ChannelProfile, message_id: &str) -> String {
+    let base_url = profile.config.base_url.trim_end_matches('/');
+    format!(
+        "{base_url}/{}",
+        FEISHU_MESSAGE_REACTIONS_URI.replace("{message_id}", message_id).trim_start_matches('/')
+    )
+}
+
+async fn resolve_p2p_chat_id(profile: &ChannelProfile, open_id: &str) -> Result<String, String> {
+    if open_id.trim().is_empty() {
+        return Err("p2p 消息缺少 sender.open_id，无法解析 chat_id".into());
+    }
+    let tenant_access_token = fetch_tenant_access_token(profile).await?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let base_url = profile.config.base_url.trim_end_matches('/');
+    let response = client
+        .post(format!(
+            "{base_url}/{}?user_id_type=open_id",
+            FEISHU_P2P_CHAT_QUERY_URI.trim_start_matches('/')
+        ))
+        .header("Authorization", format!("Bearer {tenant_access_token}"))
+        .header("Content-Type", "application/json; charset=utf-8")
+        .json(&json!({
+            "chatter_ids": [open_id],
+        }))
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "解析飞书单聊 chat_id 失败: {} {}",
+            response.status(),
+            response.text().await.unwrap_or_default()
+        ));
+    }
+
+    let payload: FeishuP2pChatQueryResponse =
+        response.json().await.map_err(|error| error.to_string())?;
+    if payload.code != 0 {
+        return Err(format!("解析飞书单聊 chat_id 失败: {}", payload.msg));
+    }
+    payload
+        .data
+        .and_then(|data| data.p2p_chats)
+        .and_then(|mut chats| chats.drain(..).next())
+        .map(|chat| chat.chat_id)
+        .filter(|chat_id| !chat_id.is_empty())
+        .ok_or_else(|| format!("未找到 open_id={} 对应的飞书单聊 chat_id", open_id))
 }
 
 async fn fetch_tenant_access_token(profile: &ChannelProfile) -> Result<String, String> {
@@ -657,20 +813,78 @@ fn resolve_conversation_key(
     })
 }
 
-fn resolve_reply_target(profile: &ChannelProfile, event: &EventBody) -> FeishuMessageTarget {
-    FeishuMessageTarget {
-        receive_id: event
+async fn resolve_reply_target(
+    profile: &ChannelProfile,
+    event: &EventBody,
+) -> Result<FeishuMessageTarget, String> {
+    let is_p2p = event.message.chat_type == "p2p";
+    let receive_id = if is_p2p {
+        if let Some(chat_id) = resolve_p2p_chat_id_from_event(event) {
+            chat_id.to_string()
+        } else {
+            resolve_p2p_chat_id(profile, &event.sender.sender_id.open_id).await?
+        }
+    } else {
+        event
             .message
             .chat_id
             .clone()
-            .unwrap_or_else(|| event.sender.sender_id.open_id.clone()),
-        receive_id_type: if event.message.chat_type == "p2p" {
-            "open_id".into()
-        } else {
-            "chat_id".into()
-        },
-        reply_to_message_id: Some(event.message.message_id.clone()),
-        reply_in_thread: profile.config.thread_mode,
+            .or_else(|| event.chat.as_ref().map(|chat| chat.chat_id.clone()))
+            .filter(|chat_id| !chat_id.is_empty())
+            .ok_or_else(|| "群聊消息缺少 chat_id".to_string())?
+    };
+
+    Ok(FeishuMessageTarget {
+        receive_id,
+        receive_id_type: "chat_id".into(),
+        reply_to_message_id: (!is_p2p).then_some(event.message.message_id.clone()),
+        reply_in_thread: !is_p2p && profile.config.thread_mode,
+    })
+}
+
+fn resolve_p2p_chat_id_from_event(event: &EventBody) -> Option<&str> {
+    event.message.chat_id.as_deref().filter(|chat_id| !chat_id.is_empty()).or_else(|| {
+        event.chat.as_ref().map(|chat| chat.chat_id.as_str()).filter(|chat_id| !chat_id.is_empty())
+    })
+}
+
+struct PreparedFeishuSendRequest {
+    url: String,
+    body: serde_json::Value,
+}
+
+fn prepare_send_message_request(
+    profile: &ChannelProfile,
+    target: &FeishuMessageTarget,
+    text: &str,
+    request_uuid_seed: &str,
+) -> PreparedFeishuSendRequest {
+    let base_url = profile.config.base_url.trim_end_matches('/');
+    let content = json!({ "text": text }).to_string();
+    let uuid = format!("aia-{request_uuid_seed}");
+    if let Some(reply_to_message_id) = &target.reply_to_message_id {
+        return PreparedFeishuSendRequest {
+            url: format!("{base_url}/open-apis/im/v1/messages/{reply_to_message_id}/reply"),
+            body: json!({
+                "msg_type": "text",
+                "content": content,
+                "reply_in_thread": target.reply_in_thread,
+                "uuid": uuid,
+            }),
+        };
+    }
+
+    PreparedFeishuSendRequest {
+        url: format!(
+            "{base_url}/open-apis/im/v1/messages?receive_id_type={}",
+            target.receive_id_type
+        ),
+        body: json!({
+            "receive_id": target.receive_id,
+            "msg_type": "text",
+            "content": content,
+            "uuid": uuid,
+        }),
     }
 }
 
@@ -738,6 +952,41 @@ struct TenantAccessTokenResponse {
     code: i32,
     msg: String,
     tenant_access_token: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct FeishuSimpleResponse {
+    code: i32,
+    msg: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct FeishuReactionCreateResponse {
+    code: i32,
+    msg: String,
+    data: Option<FeishuReactionCreateData>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FeishuReactionCreateData {
+    reaction_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FeishuP2pChatQueryResponse {
+    code: i32,
+    msg: String,
+    data: Option<FeishuP2pChatQueryData>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FeishuP2pChatQueryData {
+    p2p_chats: Option<Vec<FeishuP2pChatItem>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FeishuP2pChatItem {
+    chat_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1030,7 +1279,7 @@ fn profile_fingerprint(profile: &ChannelProfile) -> String {
 }
 
 fn reconcile_runtime_workers(
-    existing: &HashMap<String, String>,
+    existing: &HashMap<String, RuntimeWorkerState>,
     desired_profiles: &[ChannelProfile],
 ) -> (Vec<String>, Vec<ChannelProfile>) {
     let desired_fingerprints = desired_profiles
@@ -1040,14 +1289,18 @@ fn reconcile_runtime_workers(
 
     let stop_ids = existing
         .iter()
-        .filter_map(|(profile_id, fingerprint)| match desired_fingerprints.get(profile_id) {
-            Some(desired) if desired == fingerprint => None,
+        .filter_map(|(profile_id, state)| match desired_fingerprints.get(profile_id) {
+            Some(desired) if desired == &state.fingerprint && !state.finished => None,
             _ => Some(profile_id.clone()),
         })
         .collect::<Vec<_>>();
     let start_profiles = desired_profiles
         .iter()
-        .filter(|profile| existing.get(&profile.id) != Some(&profile_fingerprint(profile)))
+        .filter(|profile| {
+            existing.get(&profile.id).is_none_or(|state| {
+                state.finished || state.fingerprint != profile_fingerprint(profile)
+            })
+        })
         .cloned()
         .collect::<Vec<_>>();
 
@@ -1294,8 +1547,14 @@ mod tests {
     #[test]
     fn reconcile_runtime_workers_restarts_changed_profiles() {
         let existing = HashMap::from([
-            ("default".to_string(), "same".to_string()),
-            ("legacy".to_string(), "old".to_string()),
+            (
+                "default".to_string(),
+                RuntimeWorkerState { fingerprint: "same".to_string(), finished: false },
+            ),
+            (
+                "legacy".to_string(),
+                RuntimeWorkerState { fingerprint: "old".to_string(), finished: false },
+            ),
         ]);
         let mut desired = vec![sample_profile()];
         desired[0].id = "default".into();
@@ -1307,5 +1566,102 @@ mod tests {
         assert!(stop_ids.contains(&"legacy".to_string()));
         assert_eq!(start_profiles.len(), 1);
         assert_eq!(start_profiles[0].id, "default");
+    }
+
+    #[test]
+    fn reconcile_runtime_workers_restarts_finished_workers_even_if_fingerprint_matches() {
+        let mut profile = sample_profile();
+        profile.id = "default".into();
+        let fingerprint = profile_fingerprint(&profile);
+        let existing = HashMap::from([(
+            "default".to_string(),
+            RuntimeWorkerState { fingerprint, finished: true },
+        )]);
+
+        let (stop_ids, start_profiles) = reconcile_runtime_workers(&existing, &[profile.clone()]);
+
+        assert_eq!(stop_ids, vec!["default".to_string()]);
+        assert_eq!(start_profiles, vec![profile]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn resolve_reply_target_uses_chat_id_from_event_chat_for_p2p() {
+        let profile = sample_profile();
+        let event = EventBody {
+            sender: Sender {
+                sender_id: SenderId { open_id: "ou_p2p_user".into() },
+                sender_type: "user".into(),
+            },
+            message: Message {
+                message_id: "om_456".into(),
+                message_type: "text".into(),
+                content: r#"{"text":"hello"}"#.into(),
+                chat_type: "p2p".into(),
+                chat_id: None,
+                thread_id: None,
+                mentions: vec![],
+            },
+            chat: Some(Chat { chat_id: "oc_p2p_chat_1".into() }),
+        };
+
+        let target = resolve_reply_target(&profile, &event).await.expect("p2p target");
+        assert_eq!(target.receive_id, "oc_p2p_chat_1");
+        assert_eq!(target.receive_id_type, "chat_id");
+        assert_eq!(target.reply_to_message_id, None);
+        assert!(!target.reply_in_thread);
+    }
+
+    #[test]
+    fn prepare_send_message_request_uses_create_for_direct_messages() {
+        let mut profile = sample_profile();
+        profile.config.base_url = "https://open.feishu.cn".into();
+        let target = FeishuMessageTarget {
+            receive_id: "oc_p2p_chat_1".into(),
+            receive_id_type: "chat_id".into(),
+            reply_to_message_id: None,
+            reply_in_thread: false,
+        };
+
+        let request = prepare_send_message_request(&profile, &target, "你好", "msg-1");
+
+        assert_eq!(
+            request.url,
+            "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id"
+        );
+        assert_eq!(request.body["receive_id"], "oc_p2p_chat_1");
+        assert_eq!(request.body["uuid"], "aia-msg-1");
+    }
+
+    #[test]
+    fn resolve_p2p_chat_id_from_event_prefers_message_then_chat_payload() {
+        let event = EventBody {
+            sender: Sender {
+                sender_id: SenderId { open_id: "ou_p2p_user".into() },
+                sender_type: "user".into(),
+            },
+            message: Message {
+                message_id: "om_789".into(),
+                message_type: "text".into(),
+                content: r#"{"text":"hello"}"#.into(),
+                chat_type: "p2p".into(),
+                chat_id: Some("oc_p2p_chat_message".into()),
+                thread_id: None,
+                mentions: vec![],
+            },
+            chat: Some(Chat { chat_id: "oc_p2p_chat_fallback".into() }),
+        };
+
+        assert_eq!(resolve_p2p_chat_id_from_event(&event), Some("oc_p2p_chat_message"));
+    }
+
+    #[test]
+    fn feishu_message_reactions_url_builds_expected_path() {
+        let mut profile = sample_profile();
+        profile.config.base_url = "https://open.feishu.cn".into();
+
+        assert_eq!(
+            feishu_message_reactions_url(&profile, "om_message_1"),
+            "https://open.feishu.cn/open-apis/im/v1/messages/om_message_1/reactions"
+        );
     }
 }
