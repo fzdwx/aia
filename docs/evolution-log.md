@@ -9,7 +9,7 @@
 - `crates/agent-core/tests/tool_args_schema_compile_fail.rs`、`crates/agent-core/tests/ui/tool_args_schema/*.rs`：新增 `ToolArgsSchema` 诊断测试入口与 3 个失败样例，覆盖容器级非法 `tool_schema(...)` 键、字段级非法键、以及无符号负数 `minimum`。
 - `docs/tool-schema-derive.md`、`docs/status.md`：同步记录 derive 宏当前已用 compile-fail 测试锁住关键诊断文案。
 **Verification**：`cargo test -p agent-core`、`cargo test -p builtin-tools`、`cargo test -p agent-runtime`、`cargo test -p openai-adapter`、`cargo check` 通过。
-**Commit**：未提交。
+**Commit**：`6fd5c53` `test: lock tool schema derive diagnostics`
 **Next direction**：如果后续 `ToolArgsSchema` 再扩展到更多容器类型或 serde 语义，继续优先补 compile-fail 诊断测试，而不是只补成功路径测试。
 
 ## 2026-03-18 Session 51
