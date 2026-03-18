@@ -1,4 +1,3 @@
-use agent_prompts::AUTO_COMPRESSION_THRESHOLD;
 use axum::{
     Json,
     extract::State,
@@ -20,7 +19,7 @@ use crate::{
     state::SharedState,
 };
 
-use super::common::{require_session_id, runtime_worker_error_response};
+use super::common::{prepare_session_for_turn, require_session_id, runtime_worker_error_response};
 
 #[derive(Deserialize)]
 pub(crate) struct TurnRequest {
@@ -61,16 +60,8 @@ pub(crate) async fn submit_turn(
         Err(response) => return response,
     };
 
-    match state.session_manager.get_session_info(session_id.clone()).await {
-        Ok(stats) => {
-            if stats.pressure_ratio.is_some_and(|ratio| ratio >= AUTO_COMPRESSION_THRESHOLD)
-                && let Err(error) =
-                    state.session_manager.auto_compress_session(session_id.clone()).await
-            {
-                return runtime_worker_error_response(error);
-            }
-        }
-        Err(error) => return runtime_worker_error_response(error),
+    if let Err(error) = prepare_session_for_turn(state.as_ref(), &session_id).await {
+        return runtime_worker_error_response(error);
     }
 
     let _ = state

@@ -132,6 +132,7 @@
 - 完成工具参数 schema 对外收口：当前 `builtin-tools` 与 runtime tape tools 已统一通过手写裸 JSON 或 derive schema helper 暴露稳定外部契约；`apply_patch` 参数也已从未标记枚举收口为单 struct + `patch` / `patchText` 可选别名字段模型，在保持原有兼容语义的同时复用 derive 能力；共享 schema 归一化仍保留为后备能力，用于清洗手写 JSON 与 derive helper 的输出细节
 - 完成 compression 日志独立视图：`apps/agent-server` 的 trace 列表/汇总已支持按 `request_kind` 过滤，`apps/web` 把普通对话 trace 与上下文压缩日志拆成独立视图，不再混合展示
 - 完成 trace 首屏请求合并与查询提速：`apps/agent-server` 新增 `/api/traces/overview` 单次概览读取，`apps/web` 的 trace store 会合并同页重复刷新，`agent-store` 也已为 trace 列表/汇总热点查询补齐复合索引
+- 完成 `agent-server` 基础 CLI 双入口：二进制默认仍启动 HTTP+SSE server，同时新增 `self` 子命令读取 `docs/self.md` 并直接进入终端对话；其 turn 提交、自动预压缩与事件消费复用同一套 session manager / runtime 主链，而不是另造一条 CLI 专用 agent loop
 
 ## 正在进行
 

@@ -10,6 +10,7 @@ pub(crate) use provider::{
     create_provider, delete_provider, get_providers, list_providers, switch_provider,
     update_provider,
 };
+pub(crate) use common::prepare_session_for_turn;
 pub(crate) use session::{
     auto_compress_session, create_handoff, create_session, delete_session, get_current_turn,
     get_history, get_session_info, list_sessions,

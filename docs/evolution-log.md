@@ -1,5 +1,17 @@
 # 演进日志
 
+## 2026-03-18 Session 56
+
+**Diagnosis**：`agent-server` 目前只有 HTTP+SSE 服务端入口，虽然它已经是规范控制面，但仓库内还缺一个“直接读 `docs/self.md` 并立刻开始对话”的本地驱动模式；这使自我进化场景仍要依赖 Web 或外部客户端，反馈链偏长。
+**Decision**：不新造第二套 CLI runtime，而是在 `agent-server` 二进制上补一个最小子命令层：默认保持 server 启动行为，新增 `self` 子命令读取 `docs/self.md`，创建专用 session，并复用现有 session manager、自动预压缩和 SSE/broadcast 事件流来驱动终端对话输出。这样增加能力而不破坏“server 是 canonical control surface”的边界。
+**Changes**：
+- `apps/agent-server/src/main.rs`：把启动流程拆成共享 bootstrap + `serve` / `self` 两个入口；新增 `self` 终端对话循环、`docs/self.md` 读取与基于 broadcast 事件的流式输出渲染；默认无子命令时仍启动 server。
+- `apps/agent-server/src/routes/common.rs`、`apps/agent-server/src/routes/turn.rs`：把 turn 前自动压缩逻辑收口到共享 `prepare_session_for_turn(...)` helper，供 HTTP 路由与 `self` CLI 复用。
+- `README.md`、`docs/architecture.md`、`docs/requirements.md`、`docs/status.md`：同步记录 `agent-server self` 用法和该 CLI 仍复用同一 runtime/session-manager 主链的边界。
+**Verification**：`cargo test -p agent-server`、`cargo check -p agent-server` 通过；`printf '/quit\n' | cargo run -p agent-server -- self` 已冒烟确认会读取 `docs/self.md`、创建 session 并进入终端对话。
+**Commit**：未提交。
+**Next direction**：如果这个 CLI 模式稳定，可继续补 `/quit` 之外的便捷命令（如 `/compress`、`/handoff`、`/status`），但仍应复用已有 session manager 命令面，而不是在 CLI 层旁路操作 runtime。
+
 ## 2026-03-18 Session 55
 
 **Diagnosis**：`ToolArgsSchema` derive 宏最近连续扩了能力和错误文案，但仓库里还没有 compile-fail 级别的回归测试去锁住这些诊断；一旦后续继续扩字段类型或属性键，最容易先悄悄退化的就是“写错时能否给出明确错误提示”。

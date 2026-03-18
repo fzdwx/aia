@@ -69,6 +69,11 @@ the web app currently uses Vite+ tooling and a `pnpm` lockfile. see `apps/web/AG
 
 `apps/agent-server` now hosts a dedicated runtime worker that owns `AgentRuntime`, provider state, and session persistence. HTTP routes communicate with that worker through message passing for mutating operations and use shared snapshots for lightweight reads.
 
+the `agent-server` binary now has two entry modes:
+
+- `cargo run -p agent-server` starts the default HTTP + SSE server on `3434`
+- `cargo run -p agent-server -- self` reads `docs/self.md`, creates a dedicated local session, and starts a terminal chat loop against the same runtime/session-manager path used by the server
+
 that means:
 
 - long shell/model turns no longer block provider or session info reads

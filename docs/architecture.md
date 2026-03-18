@@ -192,6 +192,7 @@ README 里真正难的是这些能力：
 负责 Web ↔ 运行时桥接：
 
 - 基于 axum 构建 HTTP + SSE 服务器，监听端口 3434
+- `agent-server` 二进制默认仍启动 HTTP + SSE server，但现在也提供 `self` 子命令：读取 `docs/self.md` 后直接走同一套 session manager / runtime turn 主链进行终端对话，用于自我进化与无前端场景下的本地驱动
 - 启动时从 `.aia/providers.json`、`.aia/session.jsonl`、`.aia/store.sqlite3` 恢复本地状态
 - 通过后台 runtime worker 独占 `AgentRuntime`、provider registry 与 session 落盘状态
 - HTTP 路由已按 `provider`、`session`、`trace`、`turn` 领域模块拆分，共享错误响应、session 解析与 JSON helper 收口到 `routes::common`，避免 app 壳控制面继续堆在单个超大入口文件里
