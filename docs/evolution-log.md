@@ -86,6 +86,18 @@
 **Commit**：未提交。
 **Next direction**：如果继续向 `openclaw-lark` 靠拢，下一步可以考虑把飞书 reply pipeline 真正抽成 per-dispatch controller，并在不可用消息、回忆/删除、CardKit orphan cleanup 等边界上进一步补强。
 
+## 2026-03-18 Session 69
+
+**Diagnosis**：在补完 `turn_id` 关联之后，飞书桥接虽然已具备单 turn / 跨 turn 的正确关联语义，但回复逻辑仍主要停留在“一个循环里维护几组局部变量”的阶段，和 `openclaw-lark` 的 per-dispatch controller 组织方式仍有距离；同时流中文本与终态段落此前仍共用单个 `answer` 字段，不够贴近参考实现的 `accumulatedText/completedText` 分离模型。
+**Decision**：继续往 `openclaw-lark` 靠，但不生搬其完整 TypeScript 架构：把 aia 的飞书回复链收口为一个轻量的 per-dispatch controller，独立持有 `reply_mode`、卡片状态和 flush 时钟；状态层拆成 `streaming_text + completed_segments`，流中优先展示累计正文，完成态再提升为最终段落集合。这样可以在保持当前 Rust 边界的同时，更接近参考实现的控制器和累计语义。
+**Changes**：
+- `apps/agent-server/src/channel_runtime.rs`：新增 `FeishuStreamingReplyController`，把 `CurrentTurnStarted/Status/Stream/TurnCompleted/Error` 的处理收口到 controller；流中状态改为 `streaming_text`，完成态改为 `completed_segments`，并新增 `finalize_feishu_card_state(...)` / `extract_assistant_segments_from_turn(...)` helper。
+- `apps/agent-server/src/channel_runtime.rs` 测试：补齐“流中文本优先显示”“完成态段落优先覆盖流中文本”的语义测试，并更新既有卡片测试到新状态模型。
+- `docs/status.md`：同步记录当前已对齐到 per-dispatch controller 与 `accumulated/completed` 分离模型，而不仅是功能层面的 CardKit 支持。
+**Verification**：`cargo fmt --all`、`cargo test -p agent-server` 通过。
+**Commit**：未提交。
+**Next direction**：继续补 `openclaw-lark` 剩余的两类边界：一是 `UnavailableGuard` / recalled message guard，二是更完整的 flush controller（reflush / long-gap batching / CardKit rate-limit 退让），让飞书回复管线在高频流式更新下也更接近参考实现。
+
 ## 2026-03-18 Session 61
 
 **Diagnosis**：仓库已有统一的 `session_manager.submit_turn(...)` + SSE/runtime 主链，也已有 provider settings 模式，但还缺一条“外部聊天平台消息 → 现有会话主链”的稳定桥接层；如果直接把飞书协议细节塞进 `session_manager` 或只做前端配置页，都无法真正形成可复用的 channel 能力。
