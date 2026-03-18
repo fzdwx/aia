@@ -98,6 +98,19 @@
 **Commit**：未提交。
 **Next direction**：继续补 `openclaw-lark` 剩余的两类边界：一是 `UnavailableGuard` / recalled message guard，二是更完整的 flush controller（reflush / long-gap batching / CardKit rate-limit 退让），让飞书回复管线在高频流式更新下也更接近参考实现。
 
+## 2026-03-18 Session 70
+
+**Diagnosis**：用户澄清的真实场景不是“运行中删除 session”，而是后台先把 idle session 删除掉后，飞书同一外部会话后续又来了新消息。代码检查确认这会命中一个 stale binding 黑洞：删除 session 只清 `sessions`/jsonl/slot，不清 `channel_session_bindings`；飞书入口又会先命中旧 binding，继续返回已删除 `session_id`，随后在 `prepare_session_for_turn(...)` 阶段报 `session not found`，最后只记日志、不回消息。
+**Decision**：做两层根修而不是只补一处：一是在真正删除 session 时同步删除该 `session_id` 对应的 channel binding；二是在飞书 `resolve_session_id(...)` 里加活性检查，即使历史版本已留下脏 binding，也能在发现绑定指向已删 session 时自动新建 session 并回写 binding，自愈恢复回复链。
+**Changes**：
+- `crates/agent-store/src/channel.rs`：新增按 `session_id` 删除 `channel_session_bindings` 的异步 API，并补存储层回归测试。
+- `apps/agent-server/src/session_manager.rs`：成功删除 session 后同步调用 binding 清理，不再只删 `sessions` 表和 jsonl。
+- `apps/agent-server/src/channel_runtime.rs`：`resolve_session_id(...)` 在命中 binding 后先用 `session_manager.get_session_info(...)` 验活；若 session 已不存在，则自动创建新 session 并覆盖旧 binding。补齐“后台删除后 stale binding 自动恢复”的回归测试。
+- `docs/status.md`：同步记录本次后台删除自愈修复。
+**Verification**：`cargo test -p agent-store delete_channel_bindings_by_session_id_removes_binding`、`cargo test -p agent-server resolve_session_id_recreates_deleted_bound_session`、`cargo test -p agent-server` 通过。
+**Commit**：未提交。
+**Next direction**：如果继续向 `openclaw-lark` 看齐，下一步应补上真正的 `UnavailableGuard`：当源消息在飞书侧被撤回/删除时，通过下一次 API 调用识别终止条件，及时停止 reply pipeline，而不是只依赖本地 session/binding 自愈。
+
 ## 2026-03-18 Session 61
 
 **Diagnosis**：仓库已有统一的 `session_manager.submit_turn(...)` + SSE/runtime 主链，也已有 provider settings 模式，但还缺一条“外部聊天平台消息 → 现有会话主链”的稳定桥接层；如果直接把飞书协议细节塞进 `session_manager` 或只做前端配置页，都无法真正形成可复用的 channel 能力。
