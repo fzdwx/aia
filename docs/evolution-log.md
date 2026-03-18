@@ -9,7 +9,7 @@
 - `apps/agent-server/src/routes/common.rs`、`apps/agent-server/src/routes/turn.rs`：把 turn 前自动压缩逻辑收口到共享 `prepare_session_for_turn(...)` helper，供 HTTP 路由与 `self` CLI 复用。
 - `README.md`、`docs/architecture.md`、`docs/requirements.md`、`docs/status.md`：同步记录 `agent-server self` 用法和该 CLI 仍复用同一 runtime/session-manager 主链的边界。
 **Verification**：`cargo test -p agent-server`、`cargo check -p agent-server` 通过；`printf '/quit\n' | cargo run -p agent-server -- self` 已冒烟确认会读取 `docs/self.md`、创建 session 并进入终端对话。
-**Commit**：未提交。
+**Commit**：`ff8a0f4` `feat: add agent-server self chat mode`
 **Next direction**：如果这个 CLI 模式稳定，可继续补 `/quit` 之外的便捷命令（如 `/compress`、`/handoff`、`/status`），但仍应复用已有 session manager 命令面，而不是在 CLI 层旁路操作 runtime。
 
 ## 2026-03-18 Session 55
