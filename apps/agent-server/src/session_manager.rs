@@ -312,12 +312,13 @@ async fn handle_submit_turn(
     let _ = config.store.update_session_async(session_id.to_string(), None, None).await;
 
     // Initialize current turn snapshot
-    *write_lock(&slot.current_turn) = Some(CurrentTurnSnapshot {
+    let current_turn = CurrentTurnSnapshot {
         started_at_ms: now_timestamp_ms(),
         user_message: prompt.clone(),
         status: TurnStatus::Waiting,
         blocks: Vec::new(),
-    });
+    };
+    *write_lock(&slot.current_turn) = Some(current_turn.clone());
 
     let broadcast_tx = config.broadcast_tx.clone();
     let current_turn_snapshot = slot.current_turn.clone();
@@ -328,6 +329,8 @@ async fn handle_submit_turn(
     let return_tx = return_tx.clone();
     let turn_control = turn_control.clone();
 
+    let _ =
+        broadcast_tx.send(SsePayload::CurrentTurnStarted { session_id: sid.clone(), current_turn });
     let _ = broadcast_tx
         .send(SsePayload::Status { session_id: sid.clone(), status: TurnStatus::Waiting });
 

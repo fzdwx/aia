@@ -126,6 +126,10 @@ export type SseEvent =
   | { type: "stream"; data: StreamEvent & { session_id: string } }
   | { type: "status"; data: { session_id: string; status: TurnStatus } }
   | {
+      type: "current_turn_started"
+      data: CurrentTurnSnapshot & { session_id: string }
+    }
+  | {
       type: "turn_completed"
       data: TurnLifecycle & { session_id: string }
     }

@@ -270,6 +270,7 @@ export function connectEvents(onEvent: (event: SseEvent) => void): () => void {
 
   es.addEventListener("stream", handle("stream"))
   es.addEventListener("status", handle("status"))
+  es.addEventListener("current_turn_started", handle("current_turn_started"))
   es.addEventListener("turn_completed", handle("turn_completed"))
   es.addEventListener("context_compressed", handle("context_compressed"))
   es.addEventListener("sync_required", handle("sync_required"))

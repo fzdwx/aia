@@ -86,6 +86,124 @@ describe("chat store submitTurn", () => {
     })
   })
 
+  test("current_turn_started renders external inbound message immediately", () => {
+    useChatStore.setState({
+      activeSessionId: "session-1",
+      streamingTurn: null,
+      chatState: "idle",
+    })
+
+    useChatStore.getState().handleSseEvent({
+      type: "current_turn_started",
+      data: {
+        session_id: "session-1",
+        started_at_ms: 30,
+        user_message: "飞书里来的问题",
+        status: "waiting",
+        blocks: [],
+      },
+    })
+
+    const state = useChatStore.getState()
+    assert.deepEqual(state.streamingTurn, {
+      userMessage: "飞书里来的问题",
+      status: "waiting",
+      blocks: [],
+    })
+    expect(state.chatState).toBe("active")
+  })
+
+  test("waiting status without pending prompt recovers current turn from server", async () => {
+    const originalFetchImpl = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString()
+      if (url.includes("/api/session/current-turn")) {
+        return new Response(
+          JSON.stringify({
+            started_at_ms: 30,
+            user_message: "飞书外部消息",
+            status: "working",
+            blocks: [{ kind: "text", content: "已恢复中的输出" }],
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }) as FetchMock
+
+    useChatStore.setState({
+      activeSessionId: "session-1",
+      streamingTurn: null,
+      _pendingPrompt: null,
+      chatState: "idle",
+    })
+
+    useChatStore.getState().handleSseEvent({
+      type: "status",
+      data: { session_id: "session-1", status: "waiting" },
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    assert.deepEqual(useChatStore.getState().streamingTurn, {
+      userMessage: "飞书外部消息",
+      status: "working",
+      blocks: [{ type: "text", content: "已恢复中的输出" }],
+    })
+
+    globalThis.fetch = originalFetchImpl
+  })
+
+  test("stream event without local snapshot recovers current turn", async () => {
+    const originalFetchImpl = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString()
+      if (url.includes("/api/session/current-turn")) {
+        return new Response(
+          JSON.stringify({
+            started_at_ms: 42,
+            user_message: "恢复中的问题",
+            status: "generating",
+            blocks: [{ kind: "thinking", content: "先恢复上下文" }],
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }) as FetchMock
+
+    useChatStore.setState({
+      activeSessionId: "session-1",
+      streamingTurn: null,
+      chatState: "idle",
+    })
+
+    useChatStore.getState().handleSseEvent({
+      type: "stream",
+      data: {
+        session_id: "session-1",
+        kind: "text_delta",
+        text: "后续增量",
+      },
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    assert.deepEqual(useChatStore.getState().streamingTurn, {
+      userMessage: "恢复中的问题",
+      status: "generating",
+      blocks: [{ type: "thinking", content: "先恢复上下文" }],
+    })
+
+    globalThis.fetch = originalFetchImpl
+  })
+
   test("ignores duplicate global error after failed turn is already appended", () => {
     useChatStore.setState({
       turns: [

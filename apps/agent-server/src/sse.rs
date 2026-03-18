@@ -4,6 +4,8 @@ use axum::response::sse::Event;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use crate::runtime_worker::CurrentTurnSnapshot;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnStatus {
@@ -18,6 +20,7 @@ pub enum TurnStatus {
 pub enum SsePayload {
     Stream { session_id: String, event: StreamEvent },
     Status { session_id: String, status: TurnStatus },
+    CurrentTurnStarted { session_id: String, current_turn: CurrentTurnSnapshot },
     TurnCompleted { session_id: String, turn: TurnLifecycle },
     ContextCompressed { session_id: String, summary: String },
     SyncRequired { reason: String, skipped_messages: u64 },
@@ -31,6 +34,13 @@ pub enum SsePayload {
 struct StatusData {
     session_id: String,
     status: TurnStatus,
+}
+
+#[derive(Serialize)]
+struct CurrentTurnStartedData {
+    session_id: String,
+    #[serde(flatten)]
+    current_turn: CurrentTurnSnapshot,
 }
 
 #[derive(Serialize)]
@@ -99,6 +109,12 @@ impl SsePayload {
             Self::Status { session_id, status } => Ok(Event::default()
                 .event("status")
                 .data(serialize_sse_data("status", &StatusData { session_id, status }))),
+            Self::CurrentTurnStarted { session_id, current_turn } => {
+                Ok(Event::default().event("current_turn_started").data(serialize_sse_data(
+                    "current_turn_started",
+                    &CurrentTurnStartedData { session_id, current_turn },
+                )))
+            }
             Self::TurnCompleted { session_id, turn } => {
                 Ok(Event::default().event("turn_completed").data(serialize_sse_data(
                     "turn_completed",
@@ -140,6 +156,8 @@ impl SsePayload {
 mod tests {
     use agent_core::StreamEvent;
     use agent_runtime::{TurnLifecycle, TurnOutcome};
+
+    use crate::runtime_worker::CurrentTurnSnapshot;
 
     use super::{SsePayload, TurnStatus, serialize_sse_data};
 
@@ -193,6 +211,21 @@ mod tests {
         };
 
         let event = SsePayload::TurnCompleted { session_id: "s1".into(), turn }.into_axum_event();
+        assert!(event.is_ok());
+    }
+
+    #[test]
+    fn current_turn_started_payload_can_convert_to_event() {
+        let event = SsePayload::CurrentTurnStarted {
+            session_id: "s1".into(),
+            current_turn: CurrentTurnSnapshot {
+                started_at_ms: 1,
+                user_message: "外部消息".into(),
+                status: TurnStatus::Waiting,
+                blocks: vec![],
+            },
+        }
+        .into_axum_event();
         assert!(event.is_ok());
     }
 

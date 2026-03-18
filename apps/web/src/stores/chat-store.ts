@@ -445,6 +445,33 @@ export const useChatStore = create<ChatStore>((set, get) => {
     }
   }
 
+  async function recoverStreamingTurn(sessionId: string) {
+    try {
+      const currentTurn = await fetchCurrentTurn(sessionId)
+      if (!currentTurn) return
+      if (get().activeSessionId !== sessionId) return
+      set((state) => {
+        const nextStreamingTurn = currentTurnToStreamingTurn(currentTurn)
+        return {
+          chatState: "active",
+          streamingTurn: nextStreamingTurn,
+          _sessionSnapshots: upsertSessionSnapshot(
+            state._sessionSnapshots,
+            sessionId,
+            {
+              ...(state._sessionSnapshots[sessionId] ?? EMPTY_SESSION_SNAPSHOT),
+              streamingTurn: nextStreamingTurn,
+              chatState: "active",
+            },
+            state.sessions
+          ),
+        }
+      })
+    } catch (error) {
+      void error
+    }
+  }
+
   return {
     sessions: [],
     activeSessionId: null,
@@ -534,6 +561,27 @@ export const useChatStore = create<ChatStore>((set, get) => {
       }
 
       switch (event.type) {
+        case "current_turn_started": {
+          if (event.data.session_id !== activeId) break
+          const nextStreamingTurn = currentTurnToStreamingTurn(event.data)
+          set((state) => ({
+            _pendingPrompt: null,
+            chatState: "active",
+            streamingTurn: nextStreamingTurn,
+            _sessionSnapshots: upsertSessionSnapshot(
+              state._sessionSnapshots,
+              activeId,
+              {
+                ...(state._sessionSnapshots[activeId ?? ""] ??
+                  EMPTY_SESSION_SNAPSHOT),
+                streamingTurn: nextStreamingTurn,
+                chatState: "active",
+              },
+              state.sessions
+            ),
+          }))
+          break
+        }
         case "status": {
           if (event.data.session_id !== activeId) break
 
@@ -564,30 +612,35 @@ export const useChatStore = create<ChatStore>((set, get) => {
                 }
               })
             } else {
-              const prompt = get()._pendingPrompt ?? ""
-              set((state) => {
-                const nextStreamingTurn: StreamingTurn = {
-                  userMessage: prompt,
-                  status: "waiting",
-                  blocks: [],
-                }
-                return {
-                  _pendingPrompt: null,
-                  chatState: "active",
-                  streamingTurn: nextStreamingTurn,
-                  _sessionSnapshots: upsertSessionSnapshot(
-                    state._sessionSnapshots,
-                    activeId,
-                    {
-                      ...(state._sessionSnapshots[activeId ?? ""] ??
-                        EMPTY_SESSION_SNAPSHOT),
-                      streamingTurn: nextStreamingTurn,
-                      chatState: "active",
-                    },
-                    state.sessions
-                  ),
-                }
-              })
+              const prompt = get()._pendingPrompt
+              if (prompt) {
+                set((state) => {
+                  const nextStreamingTurn: StreamingTurn = {
+                    userMessage: prompt,
+                    status: "waiting",
+                    blocks: [],
+                  }
+                  return {
+                    _pendingPrompt: null,
+                    chatState: "active",
+                    streamingTurn: nextStreamingTurn,
+                    _sessionSnapshots: upsertSessionSnapshot(
+                      state._sessionSnapshots,
+                      activeId,
+                      {
+                        ...(state._sessionSnapshots[activeId ?? ""] ??
+                          EMPTY_SESSION_SNAPSHOT),
+                        streamingTurn: nextStreamingTurn,
+                        chatState: "active",
+                      },
+                      state.sessions
+                    ),
+                  }
+                })
+              } else if (activeId) {
+                set({ _pendingPrompt: null, chatState: "active" })
+                void recoverStreamingTurn(activeId)
+              }
             }
           } else {
             const prev = get().streamingTurn
@@ -608,6 +661,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
                   ),
                 }
               })
+            } else if (activeId) {
+              void recoverStreamingTurn(activeId)
             }
           }
           break
@@ -617,7 +672,12 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
           const data = event.data
           const prev = get().streamingTurn
-          if (!prev) break
+          if (!prev) {
+            if (activeId) {
+              void recoverStreamingTurn(activeId)
+            }
+            break
+          }
 
           const blocks = [...prev.blocks]
 
