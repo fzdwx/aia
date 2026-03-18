@@ -24,7 +24,14 @@ export function createReadRenderer(): ToolRenderer {
 
       if (linesRead == null) return null
 
-      return <>{createMetaBadge(`${offset} ~ ${linesRead}`)}</>
+      if (linesRead <= 0) {
+        return <>{createMetaBadge("0L")}</>
+      }
+
+      const startLine = offset + 1
+      const endLine = offset + linesRead
+
+      return <>{createMetaBadge(`L${startLine}-${endLine}`)}</>
     },
     renderDetails(data) {
       const content = getStringValue(data.details, "diff") ?? data.outputContent

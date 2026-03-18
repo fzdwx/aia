@@ -1,5 +1,18 @@
 # 演进日志
 
+## 2026-03-18 Session 57
+
+**Diagnosis**：`apps/web` 的聊天区在 session 切换时仍有一个首帧滚动抖动：恢复逻辑放在普通 `useEffect` 里并借 `requestAnimationFrame` 再滚到底，导致 DOM 先以旧位置绘制一帧，再跳到最新消息；与此同时，工具时间线里的 `read` meta 也把 `offset` 和 `lines_read` 直接拼成 `120 ~ 40` 这类易误读文案。
+**Decision**：不扩 UI 结构，只做一轮小而硬的稳定性收口：把 session 切换后的底部恢复提前到 `useLayoutEffect` 同步执行，先消掉可感知抖动；同时把 `read` renderer 的 meta 改成真实 1-based 行号范围，并补前端回归测试锁住该展示语义。
+**Changes**：
+- `apps/web/src/components/chat-messages.tsx`：session 切换后的底部恢复从 `useEffect + requestAnimationFrame` 改为 `useLayoutEffect` 同步设置 `scrollTop`，减少首帧闪跳。
+- `apps/web/src/features/chat/tool-rendering/renderers/file-tools.tsx`：`read` 工具 meta 改为显示 `L起始-结束` 的真实行号范围，并处理 0 行结果。
+- `apps/web/src/features/chat/tool-rendering/index.test.tsx`：新增对 `read` meta 文案的精确断言，锁住 `L121-160` 这种范围展示。
+- `docs/status.md`：同步记录本轮 Web 滚动稳定性与 `read` 工具 meta 展示修正。
+**Verification**：`cd apps/web && ./node_modules/.bin/vp test src/features/chat/tool-rendering/index.test.tsx`、`cd apps/web && ./node_modules/.bin/tsc --noEmit`、`cd apps/web && ./node_modules/.bin/vp build` 通过。
+**Commit**：`86df819` `fix: stabilize chat session scroll restore`
+**Next direction**：如果继续打磨聊天体验，下一步优先给 session 切换滚动恢复补组件级测试或最小交互测试，锁住“切换后首帧直接停在最新消息”这条无闪烁语义。
+
 ## 2026-03-18 Session 56
 
 **Diagnosis**：`agent-server` 目前只有 HTTP+SSE 服务端入口，虽然它已经是规范控制面，但仓库内还缺一个“直接读 `docs/self.md` 并立刻开始对话”的本地驱动模式；这使自我进化场景仍要依赖 Web 或外部客户端，反馈链偏长。

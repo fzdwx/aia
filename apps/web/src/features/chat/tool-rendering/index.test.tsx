@@ -1,3 +1,4 @@
+import { Children, isValidElement } from "react"
 import { describe, expect, test } from "vite-plus/test"
 
 import { toolRendererRegistry } from "./index"
@@ -35,6 +36,20 @@ describe("tool renderer registry", () => {
     })
 
     expect(meta).not.toBe(null)
+    expect(isValidElement(meta)).toBe(true)
+    if (!isValidElement(meta)) {
+      throw new Error("expected read meta to be a React element")
+    }
+
+    const badges = Children.toArray(meta.props.children)
+    expect(badges).toHaveLength(1)
+    const badge = badges[0]
+    expect(isValidElement(badge)).toBe(true)
+    if (!isValidElement(badge)) {
+      throw new Error("expected read meta badge to be a React element")
+    }
+
+    expect(badge.props.children).toBe("L121-160")
   })
 
   test("renders grep tool title as pattern only", () => {

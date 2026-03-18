@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import {
   CompressionNotice,
   MemoizedStreamingView,
@@ -159,21 +159,17 @@ export function ChatMessages() {
     }
   }, [activeSessionId])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const container = containerRef.current
     if (!container) return
 
     if (restoreSessionScrollRef.current) {
-      requestAnimationFrame(() => {
-        const nextContainer = containerRef.current
-        if (!nextContainer) return
-        bottomRef.current?.scrollIntoView({ behavior: "auto" })
-        setScrollTop(nextContainer.scrollTop)
-        if (activeSessionId) {
-          scrollPositionsRef.current[activeSessionId] = nextContainer.scrollTop
-        }
-        restoreSessionScrollRef.current = false
-      })
+      container.scrollTop = container.scrollHeight
+      setScrollTop(container.scrollTop)
+      if (activeSessionId) {
+        scrollPositionsRef.current[activeSessionId] = container.scrollTop
+      }
+      restoreSessionScrollRef.current = false
       previousSessionIdRef.current = activeSessionId
       previousTurnCountRef.current = turns.length
       previousStreamingBlockCountRef.current = streamingTurn?.blocks.length ?? 0
