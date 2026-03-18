@@ -73,6 +73,7 @@ the `agent-server` binary now has two entry modes:
 
 - `cargo run -p agent-server` starts the default HTTP + SSE server on `3434`
 - `cargo run -p agent-server -- self` reads `docs/self.md`, creates a dedicated local session, and starts a terminal chat loop against the same runtime/session-manager path used by the server
+- in `self` mode, `/help`, `/status`, `/compress`, and `/handoff <name> <summary>` now reuse the existing session-manager command surface instead of shelling out or bypassing runtime state; malformed built-in commands are rejected locally instead of being forwarded as model prompts
 
 that means:
 

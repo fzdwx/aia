@@ -133,6 +133,7 @@
 - 完成 compression 日志独立视图：`apps/agent-server` 的 trace 列表/汇总已支持按 `request_kind` 过滤，`apps/web` 把普通对话 trace 与上下文压缩日志拆成独立视图，不再混合展示
 - 完成 trace 首屏请求合并与查询提速：`apps/agent-server` 新增 `/api/traces/overview` 单次概览读取，`apps/web` 的 trace store 会合并同页重复刷新，`agent-store` 也已为 trace 列表/汇总热点查询补齐复合索引
 - 完成 `agent-server` 基础 CLI 双入口：二进制默认仍启动 HTTP+SSE server，同时新增 `self` 子命令读取 `docs/self.md` 并直接进入终端对话；其 turn 提交、自动预压缩与事件消费复用同一套 session manager / runtime 主链，而不是另造一条 CLI 专用 agent loop
+- 完成 `agent-server self` 首批内建命令：`/help`、`/status`、`/compress`、`/handoff <name> <summary>` 已接到现有 session manager 命令面，便于在终端自我进化模式下查看命令说明、上下文压力、手动压缩和创建 handoff，而不必回到 Web；格式错误的内建命令也会在本地直接返回 usage，而不是误发给模型
 - 完成 Web 聊天区一次 session 切换滚动抖动收口：`ChatMessages` 在切换 session 时改为用 `useLayoutEffect` 同步恢复到底部，避免首帧先渲染旧滚动位置再跳动到最新消息
 - 完成 `read` 工具元信息文案纠偏：聊天内工具时间线里，`read` 的 meta 改为显示真实 1-based 行号范围（如 `L121-160`），不再把 `offset` 和 `lines_read` 误显示成含糊区间
 

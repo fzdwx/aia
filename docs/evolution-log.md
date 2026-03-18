@@ -1,5 +1,16 @@
 # 演进日志
 
+## 2026-03-18 Session 58
+
+**Diagnosis**：`agent-server self` 虽然已经能直接开始终端对话，但进入会话后除了继续发 prompt 和退出之外几乎没有控制面；像查看上下文压力、手动压缩、创建 handoff 这类自我进化场景下的高频动作，仍要切回 Web 或手工拼 HTTP。
+**Decision**：继续坚持“复用同一条 server/runtime 控制面而不是造 CLI 旁路”的方向，在 `self_chat` 里补一个很薄的命令分发层：`/status`、`/compress`、`/handoff <name> <summary>` 统一走现有 session manager handle。这样终端模式更实用，但边界仍干净。
+**Changes**：
+- `apps/agent-server/src/self_chat.rs`：新增 `SelfCommand` 解析与 3 个命令处理 helper；`/status` 读取 `ContextStats`，`/compress` 触发共享自动压缩入口，`/handoff` 走现有 handoff 命令。
+- `README.md`、`docs/architecture.md`、`docs/status.md`：同步记录 `self` 模式下新支持的命令集合与“仍复用 session manager 命令面”的边界。
+**Verification**：待执行 `cargo test -p agent-server`、`cargo check -p agent-server`，并手动验证 `agent-server self` 中 `/status`、`/compress`、`/handoff ...` 可用。
+**Commit**：未提交。
+**Next direction**：如果继续增强 `self` 模式，可把命令解析再拆到独立 `self_chat/commands.rs`，并继续补 `/history` 或 `/provider` 这类只读控制命令。
+
 ## 2026-03-18 Session 57
 
 **Diagnosis**：`apps/web` 的聊天区在 session 切换时仍有一个首帧滚动抖动：恢复逻辑放在普通 `useEffect` 里并借 `requestAnimationFrame` 再滚到底，导致 DOM 先以旧位置绘制一帧，再跳到最新消息；与此同时，工具时间线里的 `read` meta 也把 `offset` 和 `lines_read` 直接拼成 `120 ~ 40` 这类易误读文案。

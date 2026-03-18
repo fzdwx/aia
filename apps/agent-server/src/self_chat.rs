@@ -2,6 +2,7 @@ use std::{
     io::Write,
     path::Path,
     sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use agent_core::StreamEvent;
@@ -17,14 +18,14 @@ use crate::{
     state::AppState,
 };
 
-const SELF_SESSION_TITLE: &str = "Self evolution";
+const SELF_SESSION_TITLE_PREFIX: &str = "Self evolution";
 
 pub async fn run_self_chat(state: Arc<AppState>) -> Result<(), ServerInitError> {
     let self_prompt = load_self_prompt().await?;
     let mut events = state.broadcast_tx.subscribe();
     let session = state
         .session_manager
-        .create_session(Some(SELF_SESSION_TITLE.to_string()))
+        .create_session(Some(build_self_session_title()))
         .await
         .map_err(|error| ServerInitError::new("self session 创建", error.message))?;
 
@@ -36,7 +37,7 @@ pub async fn run_self_chat(state: Arc<AppState>) -> Result<(), ServerInitError> 
 
     println!("[self] session: {}", session.id);
     println!("[self] provider: {}/{}", provider_info.name, provider_info.model);
-    println!("[self] commands: /exit, /quit");
+    print_help();
 
     submit_prompt_and_wait(&state, &mut events, &session.id, self_prompt).await?;
 
@@ -60,11 +61,33 @@ pub async fn run_self_chat(state: Arc<AppState>) -> Result<(), ServerInitError> 
         if prompt.is_empty() {
             continue;
         }
-        if matches!(prompt, "/exit" | "/quit") {
-            break;
-        }
 
-        submit_prompt_and_wait(&state, &mut events, &session.id, prompt.to_string()).await?;
+        match parse_self_command(prompt) {
+            SelfCommand::Exit => break,
+            SelfCommand::Help => {
+                print_help();
+                continue;
+            }
+            SelfCommand::Status => {
+                print_session_status(&state, &session.id).await?;
+                continue;
+            }
+            SelfCommand::Compress => {
+                run_manual_compress(&state, &session.id).await?;
+                continue;
+            }
+            SelfCommand::Handoff { name, summary } => {
+                run_handoff(&state, &session.id, name, summary).await?;
+                continue;
+            }
+            SelfCommand::Invalid(message) => {
+                eprintln!("{message}");
+                continue;
+            }
+            SelfCommand::Prompt(prompt) => {
+                submit_prompt_and_wait(&state, &mut events, &session.id, prompt).await?;
+            }
+        }
     }
 
     Ok(())
@@ -86,6 +109,137 @@ pub(crate) fn build_self_prompt(path: &Path, content: &str) -> String {
         path.display(),
         content.trim()
     )
+}
+
+fn build_self_session_title() -> String {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    format!("{SELF_SESSION_TITLE_PREFIX} {timestamp}")
+}
+
+enum SelfCommand {
+    Exit,
+    Help,
+    Status,
+    Compress,
+    Handoff { name: String, summary: String },
+    Invalid(String),
+    Prompt(String),
+}
+
+fn parse_self_command(input: &str) -> SelfCommand {
+    match input {
+        "/exit" | "/quit" => SelfCommand::Exit,
+        "/help" => SelfCommand::Help,
+        "/status" => SelfCommand::Status,
+        "/compress" => SelfCommand::Compress,
+        _ => {
+            if input == "/status" || input.starts_with("/status ") {
+                return SelfCommand::Invalid("usage: /status".to_string());
+            }
+            if input == "/compress" || input.starts_with("/compress ") {
+                return SelfCommand::Invalid("usage: /compress".to_string());
+            }
+            if input == "/exit"
+                || input.starts_with("/exit ")
+                || input == "/quit"
+                || input.starts_with("/quit ")
+            {
+                return SelfCommand::Invalid("usage: /exit | /quit".to_string());
+            }
+            if input == "/help" || input.starts_with("/help ") {
+                return SelfCommand::Invalid("usage: /help".to_string());
+            }
+            if input == "/handoff" || input.starts_with("/handoff") {
+                let Some(rest) = input.strip_prefix("/handoff ") else {
+                    return SelfCommand::Invalid(
+                        "usage: /handoff <name> <summary>".to_string(),
+                    );
+                };
+                let trimmed = rest.trim();
+                if let Some((name, summary)) = trimmed.split_once(' ') {
+                    let handoff_name = name.trim();
+                    let handoff_summary = summary.trim();
+                    if !handoff_name.is_empty() && !handoff_summary.is_empty() {
+                        return SelfCommand::Handoff {
+                            name: handoff_name.to_string(),
+                            summary: handoff_summary.to_string(),
+                        };
+                    }
+                }
+                return SelfCommand::Invalid("usage: /handoff <name> <summary>".to_string());
+            }
+            SelfCommand::Prompt(input.to_string())
+        }
+    }
+}
+
+fn print_help() {
+    println!("[self] commands: /help, /exit, /quit, /status, /compress, /handoff <name> <summary>");
+}
+
+async fn print_session_status(
+    state: &Arc<AppState>,
+    session_id: &str,
+) -> Result<(), ServerInitError> {
+    let stats = state
+        .session_manager
+        .get_session_info(session_id.to_string())
+        .await
+        .map_err(|error| ServerInitError::new("session 状态读取", error.message))?;
+    let pressure = stats
+        .pressure_ratio
+        .map(|ratio| format!("{:.1}%", ratio * 100.0))
+        .unwrap_or_else(|| "unknown".to_string());
+    let input_tokens = stats
+        .last_input_tokens
+        .map(|tokens| tokens.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    println!(
+        "[status] entries={} anchors={} since_last_anchor={} input_tokens={} pressure={}",
+        stats.total_entries,
+        stats.anchor_count,
+        stats.entries_since_last_anchor,
+        input_tokens,
+        pressure
+    );
+    Ok(())
+}
+
+async fn run_manual_compress(
+    state: &Arc<AppState>,
+    session_id: &str,
+) -> Result<(), ServerInitError> {
+    let compressed = state
+        .session_manager
+        .auto_compress_session(session_id.to_string())
+        .await
+        .map_err(|error| ServerInitError::new("手动压缩", error.message))?;
+
+    if compressed {
+        println!("[compress] ok");
+    } else {
+        println!("[compress] skipped");
+    }
+    Ok(())
+}
+
+async fn run_handoff(
+    state: &Arc<AppState>,
+    session_id: &str,
+    name: String,
+    summary: String,
+) -> Result<(), ServerInitError> {
+    let entry_id = state
+        .session_manager
+        .create_handoff(session_id.to_string(), name.clone(), summary)
+        .await
+        .map_err(|error| ServerInitError::new("handoff 创建", error.message))?;
+    println!("[handoff] {name} -> entry {entry_id}");
+    Ok(())
 }
 
 async fn submit_prompt_and_wait(
@@ -244,7 +398,10 @@ fn render_stream_event(
 mod tests {
     use std::path::Path;
 
-    use super::build_self_prompt;
+    use super::{
+        SELF_SESSION_TITLE_PREFIX, SelfCommand, build_self_prompt, build_self_session_title,
+        parse_self_command,
+    };
 
     #[test]
     fn self_prompt_wraps_docs_self_contents() {
@@ -252,5 +409,64 @@ mod tests {
         assert!(prompt.contains("docs/self.md"));
         assert!(prompt.contains("hello self"));
         assert!(prompt.contains("直接开始本轮对话"));
+    }
+
+    #[test]
+    fn self_session_title_includes_timestamp_suffix() {
+        let title = build_self_session_title();
+        assert!(title.starts_with(SELF_SESSION_TITLE_PREFIX));
+
+        let suffix = title
+            .strip_prefix(SELF_SESSION_TITLE_PREFIX)
+            .expect("title should keep self prefix")
+            .trim();
+        assert!(!suffix.is_empty());
+        assert!(suffix.parse::<u64>().is_ok());
+    }
+
+    #[test]
+    fn parse_self_command_understands_builtins() {
+        assert!(matches!(parse_self_command("/exit"), SelfCommand::Exit));
+        assert!(matches!(parse_self_command("/quit"), SelfCommand::Exit));
+        assert!(matches!(parse_self_command("/help"), SelfCommand::Help));
+        assert!(matches!(parse_self_command("/status"), SelfCommand::Status));
+        assert!(matches!(parse_self_command("/compress"), SelfCommand::Compress));
+    }
+
+    #[test]
+    fn parse_self_command_extracts_handoff_arguments() {
+        let command = parse_self_command("/handoff wake-up summarize latest work");
+        match command {
+            SelfCommand::Handoff { name, summary } => {
+                assert_eq!(name, "wake-up");
+                assert_eq!(summary, "summarize latest work");
+            }
+            _ => panic!("expected handoff command"),
+        }
+    }
+
+    #[test]
+    fn parse_self_command_keeps_unknown_slash_input_as_prompt() {
+        let command = parse_self_command("/unknown hello");
+        match command {
+            SelfCommand::Prompt(prompt) => assert_eq!(prompt, "/unknown hello"),
+            _ => panic!("expected plain prompt"),
+        }
+    }
+
+    #[test]
+    fn parse_self_command_rejects_malformed_builtin_usage() {
+        assert!(matches!(
+            parse_self_command("/handoff"),
+            SelfCommand::Invalid(message) if message == "usage: /handoff <name> <summary>"
+        ));
+        assert!(matches!(
+            parse_self_command("/handoff wake-up"),
+            SelfCommand::Invalid(message) if message == "usage: /handoff <name> <summary>"
+        ));
+        assert!(matches!(
+            parse_self_command("/status now"),
+            SelfCommand::Invalid(message) if message == "usage: /status"
+        ));
     }
 }
