@@ -1,5 +1,18 @@
 # 演进日志
 
+## 2026-03-18 Session 62
+
+**Diagnosis**：飞书 channel 的控制面、去重和会话映射都已经落地，但真正的长连接运行态仍是空函数；同时现有 webhook/事件处理路径会把“等待模型完成并回飞书”放在入口确认链上，不符合飞书长连接需要快速确认的约束。
+**Decision**：在 `apps/agent-server` 内补一层薄的飞书长连接 supervisor，而不是把平台协议塞进 runtime：`sync_feishu_runtime(...)` 负责按 channel 配置启停 worker；worker 通过飞书 endpoint 获取长连接地址、维持 websocket 与二进制帧协议、快速确认事件；原有消息解析、SQLite 幂等去重、session 绑定、`session_manager.submit_turn(...)` 与回复发送逻辑继续复用，但改成“先确认、再后台异步 turn + reply”。同时移除 webhook 过渡路由，避免长期维护两套入口。
+**Changes**：
+- `apps/agent-server/src/channel_runtime.rs`、`apps/agent-server/Cargo.toml`：新增飞书长连接 supervisor、worker 重连/ping、二进制帧编解码、endpoint 拉取，以及“确认帧先返回、turn 与回复异步执行”的桥接路径；补齐帧 round-trip 与 worker 对账测试。
+- `apps/agent-server/src/{state.rs,bootstrap.rs}`：`AppState` 新增飞书运行态持有者，server 启动后会立刻按当前 channel 配置同步长连接 worker。
+- `apps/agent-server/src/{routes.rs,server.rs}`、`apps/agent-server/src/routes/channel_event.rs`：移除 `/api/channels/feishu/events` webhook 过渡入口，保留 `/api/channels` 作为控制面；channel CRUD 仍通过 `sync_feishu_runtime(...)` 热更新运行态。
+- `README.md`、`docs/{requirements.md,architecture.md,status.md}`：同步把飞书接入状态更新为“正式长连接 + 快速确认/异步回复”，不再描述 webhook 过渡入口。
+**Verification**：`cargo fmt --all`、`cargo test -p agent-server`、`cargo test -p channel-registry`、`cargo test -p agent-store` 通过；Rust 文件级 `lsp_diagnostics` 仍因环境缺少 `rust-analyzer` 无法执行。`cargo check -p agent-server` 继续命中本轮之前就存在的工作区级异常：单独 `aia-config` / `channel-registry` / `agent-store` 与 `agent-server` 测试均可通过，但 `cargo check` 会错误报出 `aia_config::default_channels_path` 与基础 crate 缺失，需要后续单独排查该旧问题。
+**Commit**：未提交。
+**Next direction**：优先补飞书群聊权限边界（mention gate、群白名单、可用范围），并评估是否需要把长连接二进制帧 helper 再拆成独立内部模块，避免 `channel_runtime.rs` 继续膨胀。
+
 ## 2026-03-18 Session 61
 
 **Diagnosis**：仓库已有统一的 `session_manager.submit_turn(...)` + SSE/runtime 主链，也已有 provider settings 模式，但还缺一条“外部聊天平台消息 → 现有会话主链”的稳定桥接层；如果直接把飞书协议细节塞进 `session_manager` 或只做前端配置页，都无法真正形成可复用的 channel 能力。

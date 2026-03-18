@@ -4,7 +4,7 @@
 
 - 阶段：核心工作区搭建之后的当前细分步骤：Web 界面 ↔ 运行时桥接收口
 - 最新前端进展：`apps/web` 已补齐与 `Settings` 平行的 `Channels` 配置页，当前支持飞书 channel 的列表、创建、编辑、删除与启停；入口已接入侧边栏 `Trace/Channels/Settings` 同组导航，前端 store 与 `/api/channels` CRUD 调用链也已打通。
-- 最新后端进展：新增 `channel-registry` 共享库与 `agent-store` 的 channel 映射/幂等表；`apps/agent-server` 已补齐 `/api/channels` 控制面。飞书 channel 的目标接入模式明确为长连接；当前仓库仍暂保留 `/api/channels/feishu/events` 作为过渡入口，以便先验证消息去重、会话映射与 `session_manager.submit_turn(...)` 主链复用。
+- 最新后端进展：新增 `channel-registry` 共享库与 `agent-store` 的 channel 映射/幂等表；`apps/agent-server` 已补齐 `/api/channels` 控制面，并把飞书 channel 从过渡 webhook 入口收口为正式长连接 worker。当前长连接会按 profile 启停与重连，收到事件后先快速确认，再异步走既有 `session_manager.submit_turn(...)` 主链与飞书回复链路。
 - 当前步骤：在 Web + server 主路径稳定的基础上，继续收口“可作为其他客户端驱动接口”的 server 形态，并把全异步主链推进到 Phase 4 的原生 async 收口态：`builtin-tools` 的文件/搜索工具、`agent-core` / `agent-runtime` 的 async + `Send` 边界，以及 `apps/agent-server` 的 session manager / turn 执行都已切到 Tokio async task；当前又完成了一轮事件桥接可靠性收口：`/api/events` 在 `tokio::broadcast` 消费者落后时不再静默吞掉 `Lagged` 错误，而会显式发出 `sync_required` 事件；`apps/web` 收到该事件后会主动重拉 session 列表与当前 active session 的 `history/current-turn/info`，把 SSE 在线分发层与 session tape / snapshot 的持久化恢复边界真正接上。与此同时，`LanguageModel` 已收口为单一 `complete_streaming(request, abort, sink)` 入口，`agent-runtime` 对外 turn 入口也已收口为单一异步 `handle_turn_streaming(user_input, control, sink)`，上下文压缩入口也已只保留异步 `auto_compress_now()`，并且压缩请求现在会生成独立 trace context、落到本地 trace store；Web 侧又进一步把普通对话 trace 与 compression 日志拆成独立视图，避免压缩调用继续混进现有 trace 列表；与此同时，trace 首屏数据也已改成单次 `/api/traces/overview` 读取，前端同页重复刷新会被 store 合并，`agent-store` 还为 `span_kind/request_kind/trace_id/started_at_ms`、`trace_id` 与 `duration_ms` 热路径补上复合索引，减少单连接 SQLite 下的全表扫描与串行放大；`runtime::tool_calls` 里的 runtime-tool / 普通 tool 生命周期记账逻辑不仅已收口到共享 helper，也已进一步按 `tool_calls::{execute,lifecycle,types}` 模块化；`agent-core::CompletionRequest`、`agent-runtime` 与 `openai-adapter` 现已补齐 `parallel_tool_calls` 共享开关，Responses / Chat Completions 请求会显式发送该字段，而 runtime 也开始按“只读类工具可并行、写入/交互类工具串行”执行同一批工具调用；`agent-store` 的 SQLite 访问也已统一经由 `AiaStore::with_conn(...)` 显式包住锁边界，并新增了共享 `first_session_id()` / `SessionRecord::new(...)` helper，减少 `apps/agent-server` 在默认 session 解析和 session 记录构造上的重复样板；现在 trace 列表页又改为优先读取 `request_summary.user_message`，避免在列表接口里为每一行都反序列化完整 `provider_request` 大 JSON，同时 `apps/agent-server` 也开始按 `request_kind` 独立过滤普通 trace 与 compression 日志；`apps/agent-server` 的 live current-turn 更新与 tape→snapshot 重建也已开始共用 `runtime_worker::projection` helper，避免 `CurrentTurnBlock` / `CurrentToolOutput` 投影语义继续在 `session_manager` 与 `runtime_worker` 两边漂移；`openai-adapter` 里两条协议共享的 HTTP/request helper、协议专属 payload 类型，以及流式请求驱动 / SSE transcript 解析也已分别收口到共享模块与协议子模块；旧的 `complete` / `complete_streaming_with_abort` / `handle_turn*` / `block_on_sync(auto_compress_now_async)` 同步包装已移除，跨协议共用的 `payloads.rs` 也已拆散；下一批热点集中在 `openai-adapter` 剩余协议特有的 delta/tool-call 累积细节，以及 `agent-store` / `apps/agent-server` 之间还能继续下沉的共享查询/投影逻辑
 
 ## 已完成
@@ -50,7 +50,8 @@
 - 完成 Web 端 Channels 配置链路：`AppView`/Sidebar/MainContent 已接入 `channels` 视图，前端 store 与 `/api/channels` 的 list/create/update/delete 已连通，当前先只支持飞书 channel
 - 完成 `channel-registry`：飞书 channel 静态配置当前已统一落盘到 `.aia/channels.json`
 - 完成 `agent-store` 的 channel 动态索引：外部会话键 → `session_id` 映射与 `message_id` 幂等去重已进入 SQLite
-- 完成飞书 channel 过渡桥接：当前 `/api/channels/feishu/events` 已能把飞书文本消息接入现有会话主链，并支持群聊 thread 模式与私聊回复；但正式目标仍是长连接模式而不是长期保留 webhook
+- 完成飞书 channel 正式长连接桥接：`apps/agent-server` 当前会按 channel 配置维护飞书长连接 worker，复用既有消息解析、会话映射、SQLite 幂等去重、`session_manager.submit_turn(...)` 与回复发送链路；原 webhook 过渡入口已移除
+- 完成飞书入口确认路径收口：长连接事件收到后会先回确认帧，再异步执行自动压缩、turn 提交、等待 SSE 完成与飞书回复，避免把平台 3 秒确认窗口直接绑死在模型/工具执行时长上
 - 完成 provider 变更的事务式提交：候选 registry 校验、registry 落盘、session tape 落盘全部成功后才提交到内存 runtime / tape
 - 完成 provider 持久化失败路径回归测试，保证落盘失败不会留下 registry / runtime / tape 分叉状态
 - 完成 Web 端 Markdown 渲染入口收敛为共享前端组件，并统一消息排版样式
@@ -151,7 +152,7 @@
 - 观察内嵌 `brush` 作为 shell 运行时的实际稳定性、命令兼容性与中断语义
 - 继续把 trace 数据模型从“本地 span store + event timeline”推进到更完整的 resources / richer events 模型，但暂不抢在工具协议映射与 MCP 之前做 exporter / collector 集成
 - 继续观察 provider settings 与 channels settings 这两条配置面板在同一信息架构下的扩展性，避免后续新增更多配置面时把状态流和表单模式做散
-- 优先把飞书 channel 从当前过渡 webhook 入口收敛为正式长连接模式，并同步补齐更细的 mention / 群权限策略
+- 继续补强飞书 channel 的 mention / 群权限策略、可用范围与白名单控制，避免长连接主链落地后权限边界仍然过粗
 - 验证 stop/cancel 目前对长时间 shell / 外部 provider streaming 的实际覆盖率；当前已打通 server→runtime→tool context，并进一步补上 OpenAI streaming 读取中的取消检查与 shell 作业 `TERM` 中断，后续仍需继续观察 provider/运行时在不同上游和复杂 shell pipeline 下的真实中断覆盖率
 - 当前 OpenAI adapter 已切到 async `reqwest` + async chunk streaming；后续观察重点转为不同上游是否仍在连接建立、TLS、代理缓冲或服务端长时间不刷新的窗口里残留取消迟滞
 - 全异步主链已完成 Phase 1-4：`shell`、文件工具、搜索工具、session manager / turn worker、runtime 公共 turn / 压缩 API、trace/session store 访问与 provider I/O 都已统一到 async 调用面；当前后续重点转为 runtime ownership / return-path 简化、共享层继续抽象，以及剩余实现样板的继续压缩
