@@ -27,7 +27,7 @@ README 里真正难的是这些能力：
 - `provider-registry`：provider 资料、活动项与本地持久化
 - `openai-adapter`：首个真实模型适配层，负责把统一请求映射到 Responses 风格接口，并已切到原生 async `reqwest` 主链
 - `agent-store`：本地 SQLite session / trace 存储与查询
-- `apps/agent-server`：最小应用壳，负责把共享运行时桥接到 HTTP + SSE
+- `apps/agent-server`：最小应用壳，负责把共享运行时桥接到 HTTP + SSE，并承接外部 channel 的薄长连接 ingress bridge
 - `apps/web`：主界面承接层，消费服务端事件流并负责交互展示
 
 ## 模块边界
@@ -216,8 +216,8 @@ README 里真正难的是这些能力：
 - 全局 `broadcast::channel` 向所有 SSE 客户端推送事件
 - SSE 在线分发层显式暴露“需要重同步”语义：当 `broadcast` 接收端因慢客户端而 `Lagged` 时，`/api/events` 不再静默吞掉错误，而是发出 `sync_required` 事件；Web 侧据此补拉 session 列表，并重拉当前 session 的历史、当前 turn 与上下文压力，把实时分发层与持久化恢复边界连接起来
 - 暴露 provider、session、turn、cancel、handoff、trace 等 HTTP API
-- 现已额外暴露 `channels` 控制面：`/api/channels` 负责飞书 channel 的列表、创建、更新、删除；飞书的目标接入形态明确为长连接模式，当前仓库内仍暂保留 `/api/channels/feishu/events` 作为过渡期事件入口，直到长连接 bridge 完整替换为止
-- channel 桥接遵循“薄 ingress bridge”原则：无论最终是长连接还是过渡期 webhook，平台事件解析、幂等去重、external conversation → `session_id` 映射、`session_manager.submit_turn(...)` 复用与飞书回复都停留在 app 壳桥接层，不把平台协议细节塞进 `session_manager`
+- 现已额外暴露 `channels` 控制面：`/api/channels` 负责飞书 channel 的列表、创建、更新、删除；飞书事件入口已收口为 app 壳内部持有的长连接 worker，不再继续暴露 webhook 过渡路由
+- channel 桥接遵循“薄 ingress bridge”原则：平台事件解析、幂等去重、external conversation → `session_id` 映射、`session_manager.submit_turn(...)` 复用与飞书回复都停留在 app 壳桥接层，不把平台协议细节塞进 `session_manager`；长连接收到事件后会先快速确认，再把压缩/turn/回复异步串到既有主链，避免平台重推压力直接挤进运行时确认路径
 - `POST /api/turn` 仍保持 fire-and-forget，但真正的 turn 执行、事件回收与 session 条目追加都在 worker 内串行完成
 - turn 执行与 session manager 已切到原生 Tokio async task：`apps/agent-server` 不再依赖 `tokio::spawn_blocking`、`std::thread::Builder`、`LocalSet` 或 `spawn_local` 承载 turn 主链；worker 直接 await `AgentRuntime::handle_turn_streaming(...)`，压缩路径也直接 await `AgentRuntime::auto_compress_now()`，运行中 `session/info` 通过 slot 内的 `ContextStats` 快照读取 live stats，turn 结束后仍沿用显式 runtime ownership 归还路径
 - 运行中的条目会实时 append 到 `.aia/session.jsonl`

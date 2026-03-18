@@ -75,7 +75,7 @@
 - Web 流式 turn 已与共享运行时失败语义对齐：当前轮失败会通过 SSE 发出错误事件，但不会直接结束整个交互会话
 - cached prompt usage 已贯通到 `completion.usage`、trace 存储、trace 汇总与 Web 聊天/诊断展示
 - `apps/agent-server` 当前由后台 runtime worker 独占运行时，provider / history / current-turn 读取走共享快照
-- `apps/agent-server` 当前已补齐 channel 控制面；飞书 channel 的目标接入模式明确为长连接，当前仓库里仍保留 webhook 过渡入口以维持主链可验证，但后续应收敛到单一长连接接入形态
+- `apps/agent-server` 当前已补齐 channel 控制面；飞书 channel 已收敛到正式长连接接入形态，不再继续维护 webhook 过渡入口
 - `agent-store` 当前已承担外部 conversation → `session_id` 映射与 channel message receipt 幂等去重
 - `apps/agent-server` 的 turn 执行已去掉 `tokio::spawn_blocking`，session manager 与 turn worker 当前都由原生 Tokio async task 承载，不再依赖独立 current-thread Tokio worker thread
 - `apps/agent-server` 的 trace 查询路由已去掉 per-request `spawn_blocking` 包装，当前直接复用共享 SQLite store 读取路径
@@ -97,7 +97,7 @@
 ### 下一阶段优先事项
 
 - 继续补强 stop/cancel 在不同 provider 与复杂 shell pipeline 下的实际覆盖率
-- 继续补强飞书 channel 的生产级接入细节，优先把当前过渡 webhook 入口收敛为正式长连接模式，并补齐更细的群聊权限策略
+- 继续补强飞书 channel 的生产级接入细节，优先补齐更细的群聊权限策略、mention gate 边界与可用范围控制
 - 继续把 runtime 驱动辅助从 `apps/agent-server` 上移到共享层
 - 在工具协议边界进一步收稳后，推进统一工具规范向外部协议映射与 MCP 接入
 - 在现有 Web / server 主路径稳定的前提下，继续补强 trace 数据模型与桌面壳复用基础

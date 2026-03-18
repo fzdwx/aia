@@ -38,6 +38,7 @@ this repository currently runs as a library-first rust workspace with a web-firs
 ## current behavior
 
 - provider state persists under `.aia/providers.json`
+- channel state persists under `.aia/channels.json`
 - session replay data appends to `.aia/session.jsonl`
 - local SQLite state persists under `.aia/store.sqlite3`
 - server startup derives these defaults through `crates/aia-config`
@@ -50,13 +51,14 @@ this repository currently runs as a library-first rust workspace with a web-firs
 - trace list loading now reads lightweight request summaries instead of deserializing full upstream request payloads for every row
 - context compression calls now emit their own trace records and can be inspected in a dedicated compression-log view instead of being mixed into the regular trace list
 - trace workbench now loads its filtered summary + page data through a single overview request; overview page results are truly item-paginated, while summary data is served from a SQLite overview-summary snapshot instead of being recomputed on every request
+- feishu channels now run through a long-lived websocket bridge in `apps/agent-server`; inbound events are acknowledged quickly and the actual agent turn + reply path continues asynchronously through the existing session manager/runtime chain
 
 ## web workspace
 
 `apps/web` is no longer a placeholder. it now contains the main workbench UI for:
 
 - provider management
-- channel management (currently Feishu only)
+- channel management (currently Feishu only, backed by long connection ingress)
 - session list and history hydration
 - streaming assistant / thinking / tool output rendering
 - current turn recovery and cancellation
