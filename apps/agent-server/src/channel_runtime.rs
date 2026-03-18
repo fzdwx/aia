@@ -692,7 +692,9 @@ async fn resolve_session_id(
         .await
         .map_err(|error| error.to_string())?
     {
-        return Ok(binding.session_id);
+        if deps.session_manager.get_session_info(binding.session_id.clone()).await.is_ok() {
+            return Ok(binding.session_id);
+        }
     }
 
     let title = build_session_title(profile, event);
@@ -2449,14 +2451,23 @@ fn skip_unknown_field(input: &[u8], cursor: &mut usize, wire_type: u64) -> Resul
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::{collections::HashMap, sync::Arc};
 
     use channel_registry::ChannelProfile;
+    use std::sync::RwLock;
 
     use super::*;
 
     fn sample_profile() -> ChannelProfile {
         ChannelProfile::new_feishu("default", "默认飞书", "cli_app", "secret")
+    }
+
+    fn temp_runtime_dir(name: &str) -> std::path::PathBuf {
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        std::env::temp_dir().join(format!("aia-feishu-runtime-{name}-{suffix}"))
     }
 
     fn group_event() -> EventBody {
@@ -2476,6 +2487,74 @@ mod tests {
             },
             chat: None,
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn resolve_session_id_recreates_deleted_bound_session() {
+        let temp_root = temp_runtime_dir("stale-binding");
+        let sessions_dir = temp_root.join("sessions");
+        std::fs::create_dir_all(&sessions_dir).expect("sessions dir should exist");
+        let store = Arc::new(
+            agent_store::AiaStore::new(temp_root.join("store.sqlite3"))
+                .expect("sqlite store should initialize"),
+        );
+        let registry = provider_registry::ProviderRegistry::default();
+        let broadcast_tx = tokio::sync::broadcast::channel(32).0;
+        let session_manager = crate::session_manager::spawn_session_manager(
+            crate::session_manager::SessionManagerConfig {
+                sessions_dir,
+                store: store.clone(),
+                registry: registry.clone(),
+                store_path: temp_root.join("providers.json"),
+                broadcast_tx: broadcast_tx.clone(),
+                provider_registry_snapshot: Arc::new(RwLock::new(registry)),
+                provider_info_snapshot: Arc::new(RwLock::new(crate::session_manager::ProviderInfoSnapshot {
+                    name: "bootstrap".into(),
+                    model: "bootstrap".into(),
+                    connected: true,
+                })),
+                workspace_root: temp_root.clone(),
+                user_agent: "test-agent".into(),
+            },
+        );
+
+        let session = session_manager
+            .create_session(Some("Deleted session".into()))
+            .await
+            .expect("session should be created");
+        let key = ExternalConversationKey {
+            channel_kind: "feishu".into(),
+            profile_id: "default".into(),
+            scope: "group".into(),
+            conversation_key: "oc_group_1".into(),
+        };
+        store
+            .upsert_channel_binding_async(ChannelSessionBinding::new(key.clone(), session.id.clone()))
+            .await
+            .expect("binding should save");
+        session_manager
+            .delete_session(session.id.clone())
+            .await
+            .expect("session should delete");
+
+        let deps = FeishuRuntimeDeps {
+            store: store.clone(),
+            session_manager: session_manager.clone(),
+            broadcast_tx,
+        };
+        let recreated_session_id = resolve_session_id(&sample_profile(), &deps, &key, &group_event())
+            .await
+            .expect("deleted binding should self-heal");
+
+        assert_ne!(recreated_session_id, session.id);
+        let rebound = store
+            .get_channel_binding_async(key)
+            .await
+            .expect("binding should load")
+            .expect("binding should exist");
+        assert_eq!(rebound.session_id, recreated_session_id);
+
+        let _ = std::fs::remove_dir_all(temp_root);
     }
 
     #[test]
