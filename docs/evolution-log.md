@@ -13,6 +13,30 @@
 **Commit**：未提交。
 **Next direction**：优先补飞书群聊权限边界（mention gate、群白名单、可用范围），并评估是否需要把长连接二进制帧 helper 再拆成独立内部模块，避免 `channel_runtime.rs` 继续膨胀。
 
+## 2026-03-18 Session 63
+
+**Diagnosis**：飞书长连接主链虽然已经落地，但还有三个直接影响可用性的缺口：私聊回复仍总是走 `message.reply` 语义，导致在飞书里容易被折成话题；外部 channel 触发的 turn 只有 `status` / `stream` / `turn_completed`，前端没有“当前 turn 已启动”的初始快照，所以外部消息常常要刷新后才出现；另外 runtime supervisor 只按 fingerprint 判断，不识别“同 fingerprint 但 worker 已退出”的情况，导致某些配置生效仍像是要重启。
+**Decision**：保持现有薄桥接边界不变，在最小修改面内补齐三处：一是把私聊出站改成 `message.create(receive_id_type=open_id)`，只在群聊保留 reply/thread；二是新增 `current_turn_started` SSE 事件，并让 web 在缺少本地 `streamingTurn` 时主动从 `current-turn` 恢复，覆盖即时渲染和流式恢复；三是把飞书 worker 对账从“仅 fingerprint”改成“fingerprint + handle 是否已退出”，确保 CRUD 热同步能重新拉起死掉的 worker。
+**Changes**：
+- `apps/agent-server/src/channel_runtime.rs`：新增飞书出站请求构造 helper；私聊 `FeishuMessageTarget` 不再附带 `reply_to_message_id` / `reply_in_thread`；runtime worker 对账现在会重启已退出但 fingerprint 未变的 worker；补齐相关单测。
+- `apps/agent-server/src/{session_manager.rs,sse.rs}`：新增 `current_turn_started` 事件，在 current turn 初始化后立即广播完整快照。
+- `apps/web/src/{lib/types.ts,lib/api.ts,stores/chat-store.ts,stores/chat-store.test.ts}`：前端接入 `current_turn_started`；当 `status` / `stream` 到达但本地没有 `streamingTurn` 时，主动调用 `/api/session/current-turn` 恢复当前执行态；补齐外部消息即时显示与流式恢复测试。
+- `docs/status.md`：同步记录本轮飞书私聊、即时渲染、流式恢复与热更新修复进展。
+**Verification**：`cargo fmt --all`、`cargo test -p agent-server`、`./node_modules/.bin/vp fmt "src/**/*.{ts,tsx}"`、`./node_modules/.bin/vp test src/stores/chat-store.test.ts`、`./node_modules/.bin/tsc --noEmit` 通过。`cargo check -p agent-server` 仍命中本轮之前就存在的 workspace 级老问题（`aia_config::default_channels_path` / `agent_core` / `session_tape` 缺失）；`./node_modules/.bin/vp check` 仍被仓库里未改动文件的既有 lint 问题阻塞（`apps/web/src/components/chat-messages.tsx`、`apps/web/src/lib/trace-presentation.ts`）。
+**Commit**：未提交。
+**Next direction**：继续收口飞书群聊权限边界与 mention gate，并考虑把“当前 turn 启动 / 恢复”事件进一步推广成更通用的外部 channel 投影协议，而不是只服务飞书一条链路。
+
+## 2026-03-18 Session 64
+
+**Diagnosis**：线上飞书异步回复出现 `open_id cross app`，说明当前私聊回发仍错误依赖 `sender.open_id`；同时产品又新增了“开始处理就加 emotion、处理完成后移除”的体验要求，而现有 bridge 里完全没有 reaction 生命周期。
+**Decision**：继续把修复保持在 app 壳桥接层内，不碰 runtime 核心：私聊回发目标改成官方 echo-bot 推荐的 `chat_id` 路径，优先取事件里的 p2p `chat_id`，缺失时再调用 `chat_p2p/batch_query` 解析；并新增 message reaction helper，在开始处理时为原消息添加 `Typing` 表情，完成后按返回的 `reaction_id` 删除。
+**Changes**：
+- `apps/agent-server/src/channel_runtime.rs`：新增 p2p `chat_id` 提取与 `chat_p2p/batch_query` 解析逻辑；私聊 `FeishuMessageTarget` 统一改为 `receive_id_type=chat_id`；新增飞书 reaction create/delete helper，并把 `Typing` 表情串到异步处理生命周期；补齐相关单测。
+- `docs/status.md`：同步把私聊目标标识修正为 `chat_id`，并记录处理中表情生命周期。
+**Verification**：`cargo fmt --all`、`cargo test -p agent-server` 通过。`cargo check -p agent-server` 仍命中本轮之前就存在的 workspace 级老问题（`aia_config::default_channels_path` / `agent_core` / `session_tape` 缺失），未由本次修复引入。
+**Commit**：未提交。
+**Next direction**：继续补飞书 reaction 失败/丢状态时的兜底回收策略（必要时通过 list 接口按 `emoji_type` + operator 回扫），并评估是否要把 p2p `chat_id` 也用于新的会话绑定键，彻底摆脱 app-scoped `open_id` 对私聊状态的影响。
+
 ## 2026-03-18 Session 61
 
 **Diagnosis**：仓库已有统一的 `session_manager.submit_turn(...)` + SSE/runtime 主链，也已有 provider settings 模式，但还缺一条“外部聊天平台消息 → 现有会话主链”的稳定桥接层；如果直接把飞书协议细节塞进 `session_manager` 或只做前端配置页，都无法真正形成可复用的 channel 能力。
