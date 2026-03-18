@@ -34,6 +34,7 @@
 - 取消 / stop 语义需要贯穿 server、runtime、provider streaming 与工具执行路径
 - 本地 trace 诊断需要能还原 agent loop、LLM 请求与工具执行的关系
 - 本地 trace 诊断还需要能单独查看上下文压缩调用与压缩摘要日志，而不只是把它们混进普通对话请求里
+- `/api/traces/overview` 这类诊断接口的分页必须真正约束返回列表项数量；不能再出现“按 loop 分页但把整组 item 全展开返回”的伪分页语义。与此同时，overview 汇总应在本地存储层有可复用快照，而不是每次请求都全表重算。
 
 ## 当前阶段边界
 

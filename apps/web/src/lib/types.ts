@@ -273,7 +273,7 @@ export type TraceListItem = {
 
 export type TraceListPage = {
   items: TraceListItem[]
-  total_loops: number
+  total_items: number
   page: number
   page_size: number
 }

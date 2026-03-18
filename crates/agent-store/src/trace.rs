@@ -140,7 +140,7 @@ pub struct LlmTraceSummary {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LlmTraceListPage {
     pub items: Vec<LlmTraceListItem>,
-    pub total_loops: u64,
+    pub total_items: u64,
     pub page: usize,
     pub page_size: usize,
 }

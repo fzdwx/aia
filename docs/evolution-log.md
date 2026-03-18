@@ -1,5 +1,18 @@
 # 演进日志
 
+## 2026-03-18 Session 60
+
+**Diagnosis**：`/api/traces/overview` 虽然表面接受 `page` / `page_size`，但实际分页单位是 `trace_id` loop，再把整组 span 全展开返回；这会让响应里的 `items` 数量明显超过 `page_size`，属于伪分页。同时 overview summary 仍每次现算，随着 trace 增长会持续放大单连接 SQLite 负担。
+**Decision**：直接修底层语义，而不是只改命名：`agent-store` 的 trace page 改为真正按返回 `CLIENT` item 分页；overview summary 另建 SQLite 快照表，在 trace 记录写入时同步刷新对应 `request_kind` 与全局汇总。这样既满足真实分页，也把 summary 从“每次重算”改成“写时维护、读时直取”。
+**Changes**：
+- `crates/agent-store/src/trace/{schema.rs,store.rs,tests.rs}`、`crates/agent-store/src/trace.rs`：新增 `llm_trace_overview_summaries` 快照表；trace 写入时同步刷新汇总快照；`list_page*` 改为真正按 `CLIENT` item 分页；`LlmTraceListPage.total_loops` 收口为 `total_items`；相关 Rust 回归测试同步更新并新增“按返回项分页”断言。
+- `apps/agent-server/src/routes/tests.rs`：路由测试改为验证 `overview` / `list` 返回 `total_items`，不再假设 loop 级分页。
+- `apps/web/src/{lib/types.ts,stores/trace-store.ts,stores/trace-store.test.ts,components/trace-panel.tsx}`：前端类型与 store 改为消费 `total_items`，页数计算同步按真正返回项数量进行。
+- `docs/requirements.md`、`docs/architecture.md`、`docs/status.md`：同步记录“overview 必须真实分页 + summary 持久化快照”这一新边界。
+**Verification**：`cargo test -p agent-store`、`cargo test -p agent-server`、`cargo check -p agent-server` 通过；前端类型/测试校验待执行。
+**Commit**：未提交。
+**Next direction**：如果 trace 数据继续增长，下一步优先把 summary snapshot 的刷新再收口成更明确的增量更新路径，并评估是否需要为 `CLIENT` item 列表单独补覆盖当前排序形状的复合索引。
+
 ## 2026-03-18 Session 59
 
 **Diagnosis**：虽然 `self` 模式已经补上 `/help`、`/status`、`/compress`、`/handoff`，但 `apps/agent-server/src/self_chat.rs` 也随之重新变成一个大文件：会话标题/提示构造、命令解析、终端 loop、事件渲染与命令执行全挤在一起，后续再加命令会迅速失控。

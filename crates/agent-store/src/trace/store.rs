@@ -12,7 +12,12 @@ use super::{
 
 impl LlmTraceStore for AiaStore {
     fn record(&self, record: &LlmTraceRecord) -> Result<(), AiaStoreError> {
-        self.with_conn(|conn| record_with_conn(conn, record))
+        self.with_conn(|conn| {
+            record_with_conn(conn, record)?;
+            refresh_summary_snapshot_with_conn(conn, Some(record.request_kind.as_str()))?;
+            refresh_summary_snapshot_with_conn(conn, None)?;
+            Ok(())
+        })
     }
 
     fn list(&self, limit: usize) -> Result<Vec<LlmTraceListItem>, AiaStoreError> {
@@ -28,7 +33,7 @@ impl LlmTraceStore for AiaStore {
     }
 
     fn summary(&self) -> Result<LlmTraceSummary, AiaStoreError> {
-        self.with_conn(|conn| summary_with_conn(conn, None))
+        self.with_conn(|conn| load_summary_snapshot_with_conn(conn, None))
     }
 }
 
@@ -37,7 +42,13 @@ impl AiaStore {
         self: &Arc<Self>,
         record: LlmTraceRecord,
     ) -> Result<(), AiaStoreError> {
-        self.with_conn_async(move |conn| record_with_conn(conn, &record)).await
+        self.with_conn_async(move |conn| {
+            record_with_conn(conn, &record)?;
+            refresh_summary_snapshot_with_conn(conn, Some(record.request_kind.as_str()))?;
+            refresh_summary_snapshot_with_conn(conn, None)?;
+            Ok(())
+        })
+        .await
     }
 
     pub async fn list_page_async(
@@ -70,7 +81,7 @@ impl AiaStore {
     }
 
     pub async fn summary_async(self: &Arc<Self>) -> Result<LlmTraceSummary, AiaStoreError> {
-        self.with_conn_async(|conn| summary_with_conn(conn, None)).await
+        self.with_conn_async(|conn| load_summary_snapshot_with_conn(conn, None)).await
     }
 
     pub async fn summary_by_request_kind_async(
@@ -78,7 +89,10 @@ impl AiaStore {
         request_kind: impl Into<String>,
     ) -> Result<LlmTraceSummary, AiaStoreError> {
         let request_kind = request_kind.into();
-        self.with_conn_async(move |conn| summary_with_conn(conn, Some(request_kind.as_str()))).await
+        self.with_conn_async(move |conn| {
+            load_summary_snapshot_with_conn(conn, Some(request_kind.as_str()))
+        })
+        .await
     }
 
     pub async fn overview_by_request_kind_async(
@@ -90,7 +104,7 @@ impl AiaStore {
         let request_kind = request_kind.into();
         self.with_conn_async(move |conn| {
             let page = list_page_with_conn(conn, limit, offset, Some(request_kind.as_str()))?;
-            let summary = summary_with_conn(conn, Some(request_kind.as_str()))?;
+            let summary = load_summary_snapshot_with_conn(conn, Some(request_kind.as_str()))?;
             Ok(LlmTraceOverview { summary, page })
         })
         .await
@@ -164,10 +178,10 @@ fn list_page_with_conn(
     offset: usize,
     request_kind: Option<&str>,
 ) -> Result<LlmTraceListPage, AiaStoreError> {
-    let total_loops = if let Some(request_kind) = request_kind {
+    let total_items = if let Some(request_kind) = request_kind {
         conn.query_row(
             "
-            SELECT COUNT(DISTINCT trace_id)
+            SELECT COUNT(*)
             FROM llm_request_traces
             WHERE span_kind = 'CLIENT' AND request_kind = ?1
             ",
@@ -176,7 +190,7 @@ fn list_page_with_conn(
         )?
     } else {
         conn.query_row(
-            "SELECT COUNT(DISTINCT trace_id) FROM llm_request_traces WHERE span_kind = 'CLIENT'",
+            "SELECT COUNT(*) FROM llm_request_traces WHERE span_kind = 'CLIENT'",
             [],
             |row| row.get::<_, u64>(0),
         )?
@@ -184,43 +198,29 @@ fn list_page_with_conn(
     let mut stmt = if request_kind.is_some() {
         conn.prepare(
             "
-            WITH paged_loops AS (
-                SELECT trace_id, MAX(started_at_ms) AS latest_started_at_ms
-                FROM llm_request_traces
-                WHERE span_kind = 'CLIENT' AND request_kind = ?1
-                GROUP BY trace_id
-                ORDER BY latest_started_at_ms DESC, trace_id DESC
-                LIMIT ?2 OFFSET ?3
-            )
             SELECT t.id, t.trace_id, t.span_id, t.parent_span_id, t.root_span_id,
                    t.operation_name, t.span_kind, t.turn_id, t.run_id, t.request_kind,
                    t.step_index, t.provider, t.protocol, t.model, t.endpoint_path,
                    t.status, t.stop_reason, t.status_code, t.started_at_ms, t.duration_ms,
                    t.total_tokens, t.cached_tokens, t.request_summary, t.error
             FROM llm_request_traces t
-            JOIN paged_loops p ON p.trace_id = t.trace_id
-            ORDER BY p.latest_started_at_ms DESC, t.started_at_ms DESC, t.id DESC
+            WHERE t.span_kind = 'CLIENT' AND t.request_kind = ?1
+            ORDER BY t.started_at_ms DESC, t.trace_id DESC, t.id DESC
+            LIMIT ?2 OFFSET ?3
             ",
         )?
     } else {
         conn.prepare(
             "
-            WITH paged_loops AS (
-                SELECT trace_id, MAX(started_at_ms) AS latest_started_at_ms
-                FROM llm_request_traces
-                WHERE span_kind = 'CLIENT'
-                GROUP BY trace_id
-                ORDER BY latest_started_at_ms DESC, trace_id DESC
-                LIMIT ?1 OFFSET ?2
-            )
             SELECT t.id, t.trace_id, t.span_id, t.parent_span_id, t.root_span_id,
                    t.operation_name, t.span_kind, t.turn_id, t.run_id, t.request_kind,
                    t.step_index, t.provider, t.protocol, t.model, t.endpoint_path,
                    t.status, t.stop_reason, t.status_code, t.started_at_ms, t.duration_ms,
                    t.total_tokens, t.cached_tokens, t.request_summary, t.error
             FROM llm_request_traces t
-            JOIN paged_loops p ON p.trace_id = t.trace_id
-            ORDER BY p.latest_started_at_ms DESC, t.started_at_ms DESC, t.id DESC
+            WHERE t.span_kind = 'CLIENT'
+            ORDER BY t.started_at_ms DESC, t.trace_id DESC, t.id DESC
+            LIMIT ?1 OFFSET ?2
             ",
         )?
     };
@@ -232,7 +232,7 @@ fn list_page_with_conn(
 
     Ok(LlmTraceListPage {
         items: rows.collect::<Result<Vec<_>, _>>().map_err(AiaStoreError::from)?,
-        total_loops,
+        total_items,
         page: offset / limit + 1,
         page_size: limit,
     })
@@ -342,6 +342,104 @@ fn summary_with_conn(
         total_tokens,
         total_cached_tokens,
     })
+}
+
+fn refresh_summary_snapshot_with_conn(
+    conn: &Connection,
+    request_kind: Option<&str>,
+) -> Result<(), AiaStoreError> {
+    let summary = summary_with_conn(conn, request_kind)?;
+    let request_kind_key = request_kind.unwrap_or("*");
+    let updated_at_ms = if let Some(request_kind) = request_kind {
+        conn.query_row(
+            "
+            SELECT COALESCE(MAX(started_at_ms), 0)
+            FROM llm_request_traces
+            WHERE span_kind = 'CLIENT' AND request_kind = ?1
+            ",
+            [request_kind],
+            |row| row.get::<_, u64>(0),
+        )?
+    } else {
+        conn.query_row(
+            "
+            SELECT COALESCE(MAX(started_at_ms), 0)
+            FROM llm_request_traces
+            WHERE span_kind = 'CLIENT'
+            ",
+            [],
+            |row| row.get::<_, u64>(0),
+        )?
+    };
+
+    conn.execute(
+        "
+        INSERT INTO llm_trace_overview_summaries (
+            request_kind, total_requests, failed_requests, avg_duration_ms, p95_duration_ms,
+            total_input_tokens, total_output_tokens, total_tokens, total_cached_tokens, updated_at_ms
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+        ON CONFLICT(request_kind) DO UPDATE SET
+            total_requests = excluded.total_requests,
+            failed_requests = excluded.failed_requests,
+            avg_duration_ms = excluded.avg_duration_ms,
+            p95_duration_ms = excluded.p95_duration_ms,
+            total_input_tokens = excluded.total_input_tokens,
+            total_output_tokens = excluded.total_output_tokens,
+            total_tokens = excluded.total_tokens,
+            total_cached_tokens = excluded.total_cached_tokens,
+            updated_at_ms = excluded.updated_at_ms
+        ",
+        params![
+            request_kind_key,
+            summary.total_requests,
+            summary.failed_requests,
+            summary.avg_duration_ms,
+            summary.p95_duration_ms,
+            summary.total_input_tokens,
+            summary.total_output_tokens,
+            summary.total_tokens,
+            summary.total_cached_tokens,
+            updated_at_ms,
+        ],
+    )?;
+    Ok(())
+}
+
+fn load_summary_snapshot_with_conn(
+    conn: &Connection,
+    request_kind: Option<&str>,
+) -> Result<LlmTraceSummary, AiaStoreError> {
+    let request_kind_key = request_kind.unwrap_or("*");
+    let cached = conn
+        .query_row(
+            "
+            SELECT total_requests, failed_requests, avg_duration_ms, p95_duration_ms,
+                   total_input_tokens, total_output_tokens, total_tokens, total_cached_tokens
+            FROM llm_trace_overview_summaries
+            WHERE request_kind = ?1
+            ",
+            [request_kind_key],
+            |row| {
+                Ok(LlmTraceSummary {
+                    total_requests: row.get(0)?,
+                    failed_requests: row.get(1)?,
+                    avg_duration_ms: row.get(2)?,
+                    p95_duration_ms: row.get(3)?,
+                    total_input_tokens: row.get(4)?,
+                    total_output_tokens: row.get(5)?,
+                    total_tokens: row.get(6)?,
+                    total_cached_tokens: row.get(7)?,
+                })
+            },
+        )
+        .optional()?;
+
+    if let Some(summary) = cached {
+        return Ok(summary);
+    }
+
+    refresh_summary_snapshot_with_conn(conn, request_kind)?;
+    summary_with_conn(conn, request_kind)
 }
 
 fn load_client_durations(

@@ -57,6 +57,19 @@ impl AiaStore {
                 CREATE INDEX IF NOT EXISTS idx_llm_request_traces_client_request_duration_partial
                     ON llm_request_traces(request_kind, duration_ms)
                     WHERE span_kind = 'CLIENT';
+
+                CREATE TABLE IF NOT EXISTS llm_trace_overview_summaries (
+                    request_kind TEXT PRIMARY KEY,
+                    total_requests INTEGER NOT NULL DEFAULT 0,
+                    failed_requests INTEGER NOT NULL DEFAULT 0,
+                    avg_duration_ms REAL,
+                    p95_duration_ms INTEGER,
+                    total_input_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_output_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_cached_tokens INTEGER NOT NULL DEFAULT 0,
+                    updated_at_ms INTEGER NOT NULL DEFAULT 0
+                );
                 ",
             )?;
 

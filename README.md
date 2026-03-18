@@ -49,7 +49,7 @@ this repository currently runs as a library-first rust workspace with a web-firs
 - trace data now follows an otel-shaped local model with stable trace/span ids, local events, and real tool spans
 - trace list loading now reads lightweight request summaries instead of deserializing full upstream request payloads for every row
 - context compression calls now emit their own trace records and can be inspected in a dedicated compression-log view instead of being mixed into the regular trace list
-- trace workbench now loads its filtered summary + page data through a single overview request and relies on SQLite composite indexes for trace list/summary hot paths
+- trace workbench now loads its filtered summary + page data through a single overview request; overview page results are truly item-paginated, while summary data is served from a SQLite overview-summary snapshot instead of being recomputed on every request
 
 ## web workspace
 

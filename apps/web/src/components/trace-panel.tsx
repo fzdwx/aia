@@ -1463,7 +1463,7 @@ export function TracePanel() {
   const traceError = useTraceStore((state) => state.traceError)
   const tracePage = useTraceStore((state) => state.tracePage)
   const tracePageSize = useTraceStore((state) => state.tracePageSize)
-  const totalTraceLoops = useTraceStore((state) => state.totalTraceLoops)
+  const totalTraceItems = useTraceStore((state) => state.totalTraceItems)
   const refreshTraces = useTraceStore((state) => state.refreshTraces)
   const switchTraceView = useTraceStore((state) => state.switchTraceView)
   const selectTrace = useTraceStore((state) => state.selectTrace)
@@ -1500,7 +1500,7 @@ export function TracePanel() {
   ).length
   const traceListPageCount = Math.max(
     1,
-    Math.ceil(totalTraceLoops / tracePageSize)
+    Math.ceil(totalTraceItems / tracePageSize)
   )
 
   const resolvedActiveLoopKey =
@@ -1604,8 +1604,8 @@ export function TracePanel() {
           <div className="grid grid-cols-5 divide-x divide-border/25 overflow-hidden rounded-xl border border-border/35 bg-background/70">
             <SummaryItem
               bare
-              label="loops"
-              value={String(totalTraceLoops)}
+              label="listed items"
+              value={String(totalTraceItems)}
               icon={<Waypoints className="size-3.5" />}
             />
             <SummaryItem
@@ -1702,8 +1702,8 @@ export function TracePanel() {
                     </Button>
                     <span className="text-[11px] text-muted-foreground">
                       {(tracePage - 1) * tracePageSize + 1}-
-                      {Math.min(tracePage * tracePageSize, totalTraceLoops)} of{" "}
-                      {totalTraceLoops}
+                      {Math.min(tracePage * tracePageSize, totalTraceItems)} of{" "}
+                      {totalTraceItems}
                     </span>
                     <Button
                       variant="outline"

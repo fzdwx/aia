@@ -16,7 +16,7 @@ let inflightOverviewPromise: Promise<{
   traces: TraceListItem[]
   tracePage: number
   tracePageSize: number
-  totalTraceLoops: number
+  totalTraceItems: number
 }> | null = null
 
 type TraceStore = {
@@ -24,7 +24,7 @@ type TraceStore = {
   traceView: TraceView
   tracePage: number
   tracePageSize: number
-  totalTraceLoops: number
+  totalTraceItems: number
   selectedTraceId: string | null
   selectedTrace: TraceRecord | null
   traceSummary: TraceSummary | null
@@ -44,7 +44,7 @@ export const useTraceStore = create<TraceStore>((set, get) => ({
   traceView: "conversation",
   tracePage: 1,
   tracePageSize: TRACE_PAGE_SIZE,
-  totalTraceLoops: 0,
+  totalTraceItems: 0,
   selectedTraceId: null,
   selectedTrace: null,
   traceSummary: null,
@@ -74,7 +74,7 @@ export const useTraceStore = create<TraceStore>((set, get) => ({
               traces: overview.page.items,
               tracePage: overview.page.page,
               tracePageSize: overview.page.page_size,
-              totalTraceLoops: overview.page.total_loops,
+              totalTraceItems: overview.page.total_items,
             }))
 
       inflightOverviewKey = overviewKey
@@ -85,7 +85,7 @@ export const useTraceStore = create<TraceStore>((set, get) => ({
         traces,
         tracePage: nextTracePage,
         tracePageSize: nextTracePageSize,
-        totalTraceLoops,
+        totalTraceItems,
       } = await overviewPromise
 
       if (inflightOverviewKey === overviewKey) {
@@ -104,7 +104,7 @@ export const useTraceStore = create<TraceStore>((set, get) => ({
         traceView,
         tracePage: nextTracePage,
         tracePageSize: nextTracePageSize,
-        totalTraceLoops,
+        totalTraceItems,
         traceSummary,
         selectedTraceId: nextSelectedId,
         selectedTrace:

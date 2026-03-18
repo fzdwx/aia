@@ -289,7 +289,7 @@ fn list_page_prefers_request_summary_user_message() {
 }
 
 #[test]
-fn list_page_paginates_by_loop_not_individual_span() {
+fn list_page_paginates_by_returned_items() {
     let store = AiaStore::in_memory().expect("store should initialize");
 
     for (loop_index, started_at_ms) in [(1_u32, 300_u64), (2_u32, 200_u64), (3_u32, 100_u64)] {
@@ -338,23 +338,20 @@ fn list_page_paginates_by_loop_not_individual_span() {
     }
 
     let first_page = store.list_page(2, 0).expect("page query should succeed");
-    assert_eq!(first_page.total_loops, 3);
+    assert_eq!(first_page.total_items, 6);
     assert_eq!(first_page.page, 1);
     assert_eq!(first_page.page_size, 2);
-    assert_eq!(first_page.items.len(), 4);
-    assert!(
-        first_page.items.iter().all(|item| item.trace_id == "loop-1" || item.trace_id == "loop-2")
-    );
-    assert!(first_page.items.iter().any(|item| item.trace_id == "loop-1"));
-    assert!(first_page.items.iter().any(|item| item.trace_id == "loop-2"));
-    assert!(first_page.items.iter().all(|item| item.trace_id != "loop-3"));
+    assert_eq!(first_page.items.len(), 2);
+    assert_eq!(first_page.items[0].trace_id, "loop-1");
+    assert_eq!(first_page.items[1].trace_id, "loop-1");
 
     let second_page = store.list_page(2, 2).expect("page query should succeed");
-    assert_eq!(second_page.total_loops, 3);
+    assert_eq!(second_page.total_items, 6);
     assert_eq!(second_page.page, 2);
     assert_eq!(second_page.page_size, 2);
     assert_eq!(second_page.items.len(), 2);
-    assert!(second_page.items.iter().all(|item| item.trace_id == "loop-3"));
+    assert_eq!(second_page.items[0].trace_id, "loop-2");
+    assert_eq!(second_page.items[1].trace_id, "loop-2");
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -475,7 +472,7 @@ async fn async_trace_filters_can_separate_compression_logs() {
         .list_page_by_request_kind_async(10, 0, "compression")
         .await
         .expect("compression page async");
-    assert_eq!(compression_page.total_loops, 1);
+    assert_eq!(compression_page.total_items, 1);
     assert_eq!(compression_page.items.len(), 1);
     assert_eq!(compression_page.items[0].request_kind, "compression");
 
@@ -483,7 +480,7 @@ async fn async_trace_filters_can_separate_compression_logs() {
         .list_page_by_request_kind_async(10, 0, "completion")
         .await
         .expect("conversation page async");
-    assert_eq!(conversation_page.total_loops, 1);
+    assert_eq!(conversation_page.total_items, 1);
     assert_eq!(conversation_page.items.len(), 1);
     assert_eq!(conversation_page.items[0].request_kind, "completion");
 

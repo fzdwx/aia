@@ -184,7 +184,7 @@ async fn list_traces_reads_trace_page_from_store() {
     assert_eq!(body["items"].as_array().map(Vec::len), Some(2));
     assert_eq!(body["items"][0]["id"], "trace-newer");
     assert_eq!(body["items"][1]["id"], "trace-older");
-    assert_eq!(body["total_loops"], 2);
+    assert_eq!(body["total_items"], 2);
     assert_eq!(body["page"], 1);
     assert_eq!(body["page_size"], 10);
 }
@@ -209,7 +209,7 @@ async fn list_traces_can_filter_compression_logs() {
     assert_eq!(body["items"].as_array().map(Vec::len), Some(1));
     assert_eq!(body["items"][0]["id"], "trace-compression");
     assert_eq!(body["items"][0]["request_kind"], "compression");
-    assert_eq!(body["total_loops"], 1);
+    assert_eq!(body["total_items"], 1);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -230,7 +230,7 @@ async fn get_trace_overview_returns_summary_and_page_together() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["summary"]["total_requests"], 1);
     assert_eq!(body["page"]["items"].as_array().map(Vec::len), Some(1));
-    assert_eq!(body["page"]["total_loops"], 1);
+    assert_eq!(body["page"]["total_items"], 1);
 }
 
 #[tokio::test(flavor = "current_thread")]
