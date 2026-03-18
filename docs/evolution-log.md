@@ -7,7 +7,7 @@
 **Changes**：
 - `apps/agent-server/src/self_chat.rs`：新增 `SelfCommand` 解析与 3 个命令处理 helper；`/status` 读取 `ContextStats`，`/compress` 触发共享自动压缩入口，`/handoff` 走现有 handoff 命令。
 - `README.md`、`docs/architecture.md`、`docs/status.md`：同步记录 `self` 模式下新支持的命令集合与“仍复用 session manager 命令面”的边界。
-**Verification**：待执行 `cargo test -p agent-server`、`cargo check -p agent-server`，并手动验证 `agent-server self` 中 `/status`、`/compress`、`/handoff ...` 可用。
+**Verification**：`cargo test -p agent-server`、`cargo check -p agent-server` 通过；`printf '/status\n/quit\n' | cargo run -p agent-server -- self` 已冒烟确认终端模式中的内建命令可用。
 **Commit**：未提交。
 **Next direction**：如果继续增强 `self` 模式，可把命令解析再拆到独立 `self_chat/commands.rs`，并继续补 `/history` 或 `/provider` 这类只读控制命令。
 
