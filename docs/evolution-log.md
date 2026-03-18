@@ -49,6 +49,18 @@
 **Commit**：未提交。
 **Next direction**：如果后续继续向 `openclaw-lark` 靠拢，下一步优先评估是否切到 CardKit entity + `element_id` 级流式更新，而不是持续依赖 interactive message PATCH；同时继续补 markdown 样式优化与图片资源解析，提升飞书卡片可读性。
 
+## 2026-03-18 Session 66
+
+**Diagnosis**：上一轮飞书流式回复虽然已经把最终文本升级成可更新卡片，但仍主要依赖 interactive message PATCH，离 `openclaw-lark` 的 CardKit entity + `element_id` 真流式模式还差一步；同时当前卡片头部信息偏重，用户明确要求直接用回复本身的格式，不要再显示 header 和用户消息区块。
+**Decision**：继续沿 `openclaw-lark` 的主方向推进，但保持实现尽量轻：引入 `CardKit` card entity 创建、card 引用消息发送、`element_id` 内容流式更新、`streaming_mode` 关闭与最终卡片更新；interactive PATCH 保留作降级兜底。卡片布局收紧成“正文直出 + 可折叠思考 + 工具状态 + footer”，不再额外展示 header 和用户消息。
+**Changes**：
+- `apps/agent-server/src/channel_runtime.rs`：新增 `CardKit` 相关 endpoint helper、card entity 创建、引用 `card_id` 的 interactive 发送、`element_id` 流式内容更新、关闭 streaming mode 与最终卡片更新逻辑；原有 interactive PATCH 仅作为失败兜底。
+- `apps/agent-server/src/channel_runtime.rs` 测试：补齐 `CardKit` shell、引用消息请求、stream payload 纯函数测试，并把最终卡片断言调整为“无 header / 无用户消息区块”的回复式布局。
+- `docs/status.md`：同步记录飞书已经切到 `CardKit` 流式回复，以及新的卡片布局边界。
+**Verification**：`cargo test -p agent-server cardkit`、`cargo test -p agent-server` 通过。工作区级 `cargo check -p agent-server` 仍受既有 workspace 老问题阻塞，未由本轮引入。
+**Commit**：未提交。
+**Next direction**：继续补 markdown 样式优化、图片资源解析和 CardKit 限流/降级策略，让飞书卡片更接近 `openclaw-lark` 的最终体验，同时避免单卡高频更新压到接口限流。
+
 ## 2026-03-18 Session 61
 
 **Diagnosis**：仓库已有统一的 `session_manager.submit_turn(...)` + SSE/runtime 主链，也已有 provider settings 模式，但还缺一条“外部聊天平台消息 → 现有会话主链”的稳定桥接层；如果直接把飞书协议细节塞进 `session_manager` 或只做前端配置页，都无法真正形成可复用的 channel 能力。
