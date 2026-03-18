@@ -17,14 +17,18 @@ use super::{
     turn::CancelTurnRequest,
 };
 use crate::{
+    channel_runtime::FeishuRuntimeSupervisor,
     session_manager::{ProviderInfoSnapshot, SessionManagerHandle},
     state::AppState,
 };
 
 fn test_state() -> Arc<AppState> {
+    let session_manager = SessionManagerHandle::test_handle();
+    let broadcast_tx = tokio::sync::broadcast::channel(8).0;
+    let store = Arc::new(agent_store::AiaStore::in_memory().expect("memory store"));
     Arc::new(AppState {
-        session_manager: SessionManagerHandle::test_handle(),
-        broadcast_tx: tokio::sync::broadcast::channel(8).0,
+        session_manager: session_manager.clone(),
+        broadcast_tx: broadcast_tx.clone(),
         provider_registry_snapshot: Arc::new(RwLock::new(ProviderRegistry::default())),
         provider_info_snapshot: Arc::new(RwLock::new(ProviderInfoSnapshot {
             name: "bootstrap".into(),
@@ -33,7 +37,12 @@ fn test_state() -> Arc<AppState> {
         })),
         channel_registry_path: aia_config::default_channels_path(),
         channel_registry_snapshot: Arc::new(RwLock::new(ChannelRegistry::default())),
-        store: Arc::new(agent_store::AiaStore::in_memory().expect("memory store")),
+        store: store.clone(),
+        feishu_runtime: Arc::new(tokio::sync::Mutex::new(FeishuRuntimeSupervisor::new(
+            store,
+            session_manager,
+            broadcast_tx,
+        ))),
     })
 }
 
