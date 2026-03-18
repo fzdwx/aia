@@ -1,0 +1,5 @@
+error: 容器级仅支持 #[tool_schema(min_properties = N)]；当前支持键：min_properties
+ --> tests/ui/tool_args_schema/invalid_container_key.rs:5:15
+  |
+5 | #[tool_schema(description = "bad")]
+  |               ^^^^^^^^^^^

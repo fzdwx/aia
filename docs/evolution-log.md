@@ -1,5 +1,17 @@
 # 演进日志
 
+## 2026-03-18 Session 55
+
+**Diagnosis**：`ToolArgsSchema` derive 宏最近连续扩了能力和错误文案，但仓库里还没有 compile-fail 级别的回归测试去锁住这些诊断；一旦后续继续扩字段类型或属性键，最容易先悄悄退化的就是“写错时能否给出明确错误提示”。
+**Decision**：不继续扩新 schema 能力，先补一轮 `trybuild` compile-fail 测试，把当前最关键的用户态诊断锁住：容器级非法键、字段级非法键、以及无符号整数字段负数 `minimum`。这样能以很小改动提升 derive 宏的长期可靠性。
+**Changes**：
+- `crates/agent-core/Cargo.toml`：新增 `trybuild` dev-dependency，用于 compile-fail UI 回归测试。
+- `crates/agent-core/tests/tool_args_schema_compile_fail.rs`、`crates/agent-core/tests/ui/tool_args_schema/*.rs`：新增 `ToolArgsSchema` 诊断测试入口与 3 个失败样例，覆盖容器级非法 `tool_schema(...)` 键、字段级非法键、以及无符号负数 `minimum`。
+- `docs/tool-schema-derive.md`、`docs/status.md`：同步记录 derive 宏当前已用 compile-fail 测试锁住关键诊断文案。
+**Verification**：`cargo test -p agent-core`、`cargo test -p builtin-tools`、`cargo test -p agent-runtime`、`cargo test -p openai-adapter`、`cargo check` 通过。
+**Commit**：未提交。
+**Next direction**：如果后续 `ToolArgsSchema` 再扩展到更多容器类型或 serde 语义，继续优先补 compile-fail 诊断测试，而不是只补成功路径测试。
+
 ## 2026-03-18 Session 51
 
 **Diagnosis**：虽然生产工具 schema 已经大多改成手写裸 JSON，但 `agent-core` 仍保留对 `schemars` 的依赖来支撑 `with_parameters_schema::<T>()`，测试链路也仍靠 `JsonSchema derive` 才能覆盖 typed helper；这让工具 schema 能力继续绑在外部反射式库上，不符合“最小共享抽象优先”的当前方向。

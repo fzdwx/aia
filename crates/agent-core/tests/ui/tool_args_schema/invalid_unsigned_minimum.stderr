@@ -1,0 +1,5 @@
+error: 无符号整数字段的 minimum 不能为负数
+ --> tests/ui/tool_args_schema/invalid_unsigned_minimum.rs:7:12
+  |
+7 |     limit: u32,
+  |            ^^^

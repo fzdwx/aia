@@ -121,4 +121,5 @@ struct ExtendedArgsSchema {
 
 - 保持单一 `tool_schema(...)` 语法，不拆成多套接口
 - 在宏里给出更明确的编译错误
+- 用 compile-fail 回归测试锁住关键诊断文案，避免后续扩展时悄悄退化
 - 用本文件作为权威属性清单
