@@ -478,12 +478,15 @@ async fn stream_turn_to_feishu_reply(
         .await
         .map_err(runtime_error_to_string)?;
 
-    let started_at_ms = current_timestamp_ms();
-    let mut card_state = FeishuStreamingCardState::new(prompt.to_string(), started_at_ms);
-    let mut reply_mode =
-        create_feishu_streaming_reply_mode(profile, reply_target, &card_state, request_uuid_seed)
-            .await;
-    let mut last_card_update_at_ms = started_at_ms;
+    let mut controller =
+        FeishuStreamingReplyController::new(prompt.to_string(), current_timestamp_ms());
+    controller.reply_mode = create_feishu_streaming_reply_mode(
+        profile,
+        reply_target,
+        &controller.state,
+        request_uuid_seed,
+    )
+    .await;
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
     loop {
@@ -497,73 +500,33 @@ async fn stream_turn_to_feishu_reply(
             SsePayload::CurrentTurnStarted { session_id: sid, current_turn }
                 if sid == session_id && current_turn.turn_id == expected_turn_id =>
             {
-                update_feishu_card_state_from_snapshot(&mut card_state, &current_turn);
-                reply_mode = maybe_update_reply(
-                    profile,
-                    reply_mode,
-                    &card_state,
-                    &mut last_card_update_at_ms,
-                    false,
-                )
-                .await;
+                controller.update_from_snapshot(&current_turn);
+                controller.flush(profile, false).await;
             }
             SsePayload::Status { session_id: sid, turn_id, status }
                 if sid == session_id && turn_id == expected_turn_id =>
             {
-                card_state.status = status;
-                reply_mode = maybe_update_reply(
-                    profile,
-                    reply_mode,
-                    &card_state,
-                    &mut last_card_update_at_ms,
-                    false,
-                )
-                .await;
+                controller.update_status(status);
+                controller.flush(profile, false).await;
             }
             SsePayload::Stream { session_id: sid, turn_id, event }
                 if sid == session_id && turn_id == expected_turn_id =>
             {
-                apply_stream_event_to_feishu_card_state(&mut card_state, &event);
-                reply_mode = maybe_update_reply(
-                    profile,
-                    reply_mode,
-                    &card_state,
-                    &mut last_card_update_at_ms,
-                    false,
-                )
-                .await;
+                controller.apply_stream(&event);
+                controller.flush(profile, false).await;
             }
             SsePayload::TurnCompleted { session_id: sid, turn_id, turn }
                 if sid == session_id && turn_id == expected_turn_id =>
             {
-                if let Some(message) = extract_final_answer_from_turn(&turn) {
-                    card_state.answer = message;
-                }
-                if let Some(message) = turn.failure_message {
-                    card_state.failed = true;
-                    if card_state.answer.trim().is_empty() {
-                        card_state.answer = message;
-                    }
-                }
-                card_state.finished_at_ms = Some(turn.finished_at_ms);
-                card_state.status = if card_state.failed {
-                    crate::sse::TurnStatus::Cancelled
-                } else {
-                    crate::sse::TurnStatus::Generating
-                };
+                finalize_feishu_card_state(
+                    &mut controller.state,
+                    Some(extract_assistant_segments_from_turn(&turn)),
+                    turn.failure_message.clone(),
+                    turn.finished_at_ms,
+                );
 
-                if maybe_update_reply(
-                    profile,
-                    reply_mode,
-                    &card_state,
-                    &mut last_card_update_at_ms,
-                    true,
-                )
-                .await
-                .is_some()
-                {
-                } else {
-                    let fallback = card_state.final_text();
+                if controller.flush(profile, true).await.is_none() {
+                    let fallback = controller.state.final_text();
                     send_reply_message(profile, reply_target, &fallback, request_uuid_seed).await?;
                 }
                 return Ok(());
@@ -571,33 +534,69 @@ async fn stream_turn_to_feishu_reply(
             SsePayload::Error { session_id: sid, turn_id, message }
                 if sid == session_id && turn_id.as_deref() == Some(expected_turn_id.as_str()) =>
             {
-                card_state.failed = true;
-                card_state.finished_at_ms = Some(current_timestamp_ms());
-                card_state.answer =
-                    if message.contains("already running") || message.contains("正在") {
+                finalize_feishu_card_state(
+                    &mut controller.state,
+                    None,
+                    Some(if message.contains("already running") || message.contains("正在") {
                         "当前会话仍在处理中，请稍后再试。".into()
                     } else {
                         format!("处理消息失败：{message}")
-                    };
+                    }),
+                    current_timestamp_ms(),
+                );
 
-                if maybe_update_reply(
-                    profile,
-                    reply_mode,
-                    &card_state,
-                    &mut last_card_update_at_ms,
-                    true,
-                )
-                .await
-                .is_some()
-                {
-                } else {
-                    let fallback = card_state.final_text();
+                if controller.flush(profile, true).await.is_none() {
+                    let fallback = controller.state.final_text();
                     send_reply_message(profile, reply_target, &fallback, request_uuid_seed).await?;
                 }
                 return Ok(());
             }
             _ => {}
         }
+    }
+}
+
+struct FeishuStreamingReplyController {
+    state: FeishuStreamingCardState,
+    reply_mode: Option<FeishuStreamingReplyMode>,
+    last_card_update_at_ms: u64,
+}
+
+impl FeishuStreamingReplyController {
+    fn new(user_message: String, started_at_ms: u64) -> Self {
+        Self {
+            state: FeishuStreamingCardState::new(user_message, started_at_ms),
+            reply_mode: None,
+            last_card_update_at_ms: started_at_ms,
+        }
+    }
+
+    fn update_from_snapshot(&mut self, snapshot: &CurrentTurnSnapshot) {
+        update_feishu_card_state_from_snapshot(&mut self.state, snapshot);
+    }
+
+    fn update_status(&mut self, status: crate::sse::TurnStatus) {
+        self.state.status = status;
+    }
+
+    fn apply_stream(&mut self, event: &agent_core::StreamEvent) {
+        apply_stream_event_to_feishu_card_state(&mut self.state, event);
+    }
+
+    async fn flush(
+        &mut self,
+        profile: &ChannelProfile,
+        force: bool,
+    ) -> Option<FeishuStreamingReplyMode> {
+        self.reply_mode = maybe_update_reply(
+            profile,
+            self.reply_mode.take(),
+            &self.state,
+            &mut self.last_card_update_at_ms,
+            force,
+        )
+        .await;
+        self.reply_mode.clone()
     }
 }
 
@@ -711,16 +710,7 @@ fn runtime_error_to_string(error: RuntimeWorkerError) -> String {
 }
 
 fn extract_final_answer_from_turn(turn: &agent_runtime::TurnLifecycle) -> Option<String> {
-    let assistant_blocks = turn
-        .blocks
-        .iter()
-        .filter_map(|block| match block {
-            agent_runtime::TurnBlock::Assistant { content } if !content.trim().is_empty() => {
-                Some(content.as_str())
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
+    let assistant_blocks = extract_assistant_segments_from_turn(turn);
 
     if !assistant_blocks.is_empty() {
         return Some(assistant_blocks.join("\n\n"));
@@ -1457,7 +1447,8 @@ struct FeishuStreamingCardState {
     user_message: String,
     status: crate::sse::TurnStatus,
     reasoning: String,
-    answer: String,
+    streaming_text: String,
+    completed_segments: Vec<String>,
     tools: Vec<FeishuStreamingToolState>,
     started_at_ms: u64,
     finished_at_ms: Option<u64>,
@@ -1470,7 +1461,8 @@ impl FeishuStreamingCardState {
             user_message,
             status: crate::sse::TurnStatus::Waiting,
             reasoning: String::new(),
-            answer: String::new(),
+            streaming_text: String::new(),
+            completed_segments: Vec::new(),
             tools: Vec::new(),
             started_at_ms,
             finished_at_ms: None,
@@ -1479,8 +1471,10 @@ impl FeishuStreamingCardState {
     }
 
     fn final_text(&self) -> String {
-        if !self.answer.trim().is_empty() {
-            self.answer.clone()
+        if !self.completed_segments.is_empty() {
+            self.completed_segments.join("\n\n")
+        } else if !self.streaming_text.trim().is_empty() {
+            self.streaming_text.clone()
         } else if self.failed {
             "处理失败，且没有可发送的回复内容。".into()
         } else {
@@ -1489,8 +1483,10 @@ impl FeishuStreamingCardState {
     }
 
     fn summary_text(&self) -> String {
-        if !self.answer.trim().is_empty() {
-            self.answer.chars().take(120).collect::<String>()
+        if !self.completed_segments.is_empty() {
+            self.final_text().chars().take(120).collect::<String>()
+        } else if !self.streaming_text.trim().is_empty() {
+            self.streaming_text.chars().take(120).collect::<String>()
         } else if !self.reasoning.trim().is_empty() {
             format!("{}…", self.reasoning.chars().take(60).collect::<String>())
         } else if self.failed {
@@ -1533,8 +1529,10 @@ fn build_feishu_card_payload(state: &FeishuStreamingCardState) -> serde_json::Va
         }));
     }
 
-    let main_content = if !state.answer.trim().is_empty() {
-        feishu_markdown_text(&state.answer)
+    let main_content = if !state.completed_segments.is_empty() {
+        feishu_markdown_text(&state.final_text())
+    } else if !state.streaming_text.trim().is_empty() {
+        feishu_markdown_text(&state.streaming_text)
     } else if !state.reasoning.trim().is_empty() {
         "_正在生成回复…_".into()
     } else {
@@ -1616,8 +1614,10 @@ fn build_feishu_cardkit_shell() -> serde_json::Value {
 fn build_feishu_cardkit_stream_markdown(state: &FeishuStreamingCardState) -> String {
     let mut sections = Vec::<String>::new();
 
-    if !state.answer.trim().is_empty() {
-        sections.push(feishu_markdown_text(&state.answer));
+    if !state.completed_segments.is_empty() {
+        sections.push(feishu_markdown_text(&state.final_text()));
+    } else if !state.streaming_text.trim().is_empty() {
+        sections.push(feishu_markdown_text(&state.streaming_text));
     } else if !state.reasoning.trim().is_empty() {
         sections.push(format!("💭 {}", feishu_markdown_text(&state.reasoning)));
     } else {
@@ -1661,7 +1661,7 @@ fn apply_stream_event_to_feishu_card_state(
             state.status = crate::sse::TurnStatus::Thinking;
         }
         agent_core::StreamEvent::TextDelta { text } => {
-            state.answer.push_str(text);
+            state.streaming_text.push_str(text);
             state.status = crate::sse::TurnStatus::Generating;
         }
         agent_core::StreamEvent::ToolCallDetected { invocation_id, tool_name, .. }
@@ -1713,6 +1713,42 @@ fn update_feishu_card_state_from_snapshot(
 ) {
     state.user_message = snapshot.user_message.clone();
     state.status = snapshot.status.clone();
+}
+
+fn finalize_feishu_card_state(
+    state: &mut FeishuStreamingCardState,
+    completed_segments: Option<Vec<String>>,
+    failure_message: Option<String>,
+    finished_at_ms: u64,
+) {
+    if let Some(segments) = completed_segments.filter(|segments| !segments.is_empty()) {
+        state.completed_segments = segments;
+        state.streaming_text.clear();
+    }
+    if let Some(message) = failure_message {
+        state.failed = true;
+        if state.completed_segments.is_empty() && state.streaming_text.trim().is_empty() {
+            state.streaming_text = message;
+        }
+    }
+    state.finished_at_ms = Some(finished_at_ms);
+    state.status = if state.failed {
+        crate::sse::TurnStatus::Cancelled
+    } else {
+        crate::sse::TurnStatus::Generating
+    };
+}
+
+fn extract_assistant_segments_from_turn(turn: &agent_runtime::TurnLifecycle) -> Vec<String> {
+    turn.blocks
+        .iter()
+        .filter_map(|block| match block {
+            agent_runtime::TurnBlock::Assistant { content } if !content.trim().is_empty() => {
+                Some(content.clone())
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 fn find_or_insert_tool_state<'a>(
@@ -2670,7 +2706,8 @@ mod tests {
             user_message: "用户问题".into(),
             status: crate::sse::TurnStatus::Generating,
             reasoning: "先分析上下文".into(),
-            answer: "最终回答内容".into(),
+            streaming_text: String::new(),
+            completed_segments: vec!["最终回答内容".into()],
             tools: vec![FeishuStreamingToolState {
                 invocation_id: "tool-1".into(),
                 tool_name: "grep".into(),
@@ -2816,10 +2853,44 @@ mod tests {
         );
 
         assert_eq!(state.reasoning, "分析中");
-        assert_eq!(state.answer, "最终回答");
+        assert_eq!(state.streaming_text, "最终回答");
         assert_eq!(state.tools.len(), 1);
         assert_eq!(state.tools[0].tool_name, "grep");
         assert_eq!(state.tools[0].status, FeishuStreamingToolStatus::Completed);
         assert!(state.tools[0].output.contains("匹配内容"));
+    }
+
+    #[test]
+    fn streaming_display_text_uses_inflight_text_before_final_blocks() {
+        let mut state = FeishuStreamingCardState::new("用户问题".into(), 10);
+
+        apply_stream_event_to_feishu_card_state(
+            &mut state,
+            &agent_core::StreamEvent::TextDelta { text: "第一段流式".into() },
+        );
+        apply_stream_event_to_feishu_card_state(
+            &mut state,
+            &agent_core::StreamEvent::TextDelta { text: "增量续写".into() },
+        );
+
+        assert_eq!(state.streaming_text, "第一段流式增量续写");
+        assert_eq!(build_feishu_cardkit_stream_markdown(&state), "第一段流式增量续写");
+    }
+
+    #[test]
+    fn finalize_state_promotes_completed_segments_over_streaming_text() {
+        let mut state = FeishuStreamingCardState::new("用户问题".into(), 10);
+        state.streaming_text = "旧的流式文本".into();
+
+        finalize_feishu_card_state(
+            &mut state,
+            Some(vec!["第一段最终回复".into(), "第二段最终回复".into()]),
+            None,
+            20,
+        );
+
+        assert_eq!(state.streaming_text, "");
+        assert_eq!(state.completed_segments, vec!["第一段最终回复", "第二段最终回复"]);
+        assert_eq!(state.final_text(), "第一段最终回复\n\n第二段最终回复");
     }
 }
