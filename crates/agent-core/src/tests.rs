@@ -70,6 +70,38 @@ fn 自研_schema_可为带别名的可选字段_struct_生成扁平对象参数(
     assert_eq!(definition.parameters["properties"]["patchText"]["description"], "补丁正文别名");
 }
 
+#[derive(Serialize, Deserialize, ToolArgsSchema)]
+#[serde(deny_unknown_fields)]
+struct ExtendedArgsSchema {
+    enabled: bool,
+    delta: Option<i64>,
+    tags: Option<Vec<String>>,
+    #[tool_schema(minimum = -5, maximum = 5)]
+    balance: i32,
+    #[tool_schema(minimum = 1, maximum = 10)]
+    attempts: u32,
+}
+
+#[test]
+fn 自研_schema_支持更多高频字段类型与数值约束() {
+    let definition =
+        ToolDefinition::new("extended", "扩展字段").with_parameters_schema::<ExtendedArgsSchema>();
+
+    assert_eq!(definition.parameters["properties"]["enabled"]["type"], "boolean");
+    assert_eq!(definition.parameters["properties"]["delta"]["type"], "integer");
+    assert!(definition.parameters["properties"]["delta"].get("minimum").is_none());
+    assert_eq!(definition.parameters["properties"]["tags"]["type"], "array");
+    assert_eq!(definition.parameters["properties"]["tags"]["items"]["type"], "string");
+    assert_eq!(definition.parameters["properties"]["balance"]["minimum"], -5);
+    assert_eq!(definition.parameters["properties"]["balance"]["maximum"], 5);
+    assert_eq!(definition.parameters["properties"]["attempts"]["minimum"], 1);
+    assert_eq!(definition.parameters["properties"]["attempts"]["maximum"], 10);
+    assert_eq!(
+        definition.parameters["required"],
+        serde_json::json!(["enabled", "balance", "attempts"])
+    );
+}
+
 #[test]
 fn 工具定义可直接接收手写参数_schema() {
     let definition =

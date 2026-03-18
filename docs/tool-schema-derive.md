@@ -5,19 +5,32 @@
 ## 支持的类型
 
 - `String`
+- `bool`
 - `usize`
 - `u32`
 - `u64`
+- `isize`
+- `i32`
+- `i64`
+- `Vec<String>`
 - `Option<String>`
+- `Option<bool>`
 - `Option<usize>`
 - `Option<u32>`
 - `Option<u64>`
+- `Option<isize>`
+- `Option<i32>`
+- `Option<i64>`
+- `Option<Vec<String>>`
 
 其中：
 
 - 普通字段会进入 `required`
 - `Option<_>` 字段不会进入 `required`
-- 整数字段会生成 `integer`，并带 `minimum: 0`
+- 无符号整数字段会生成 `integer`，并带 `minimum: 0`
+- 有符号整数字段会生成 `integer`
+- `bool` 字段会生成 `boolean`
+- `Vec<String>` 会生成 `array`，且 `items.type = string`
 
 ## 支持的结构形态
 
@@ -41,12 +54,20 @@
 ### 字段级
 
 ```rust
-#[tool_schema(description = "字段说明")]
+#[tool_schema(description = "字段说明", minimum = 1, maximum = 10)]
 ```
 
 当前只支持：
 
 - `description`
+- `minimum`
+- `maximum`
+
+其中：
+
+- `minimum` / `maximum` 仅支持整数类型字段
+- 无符号整数字段不能设置负数约束
+- 数值约束当前只支持整数字面量
 
 ### `serde` 协作
 
@@ -73,6 +94,20 @@ struct ApplyPatchToolArgs {
     #[serde(rename = "patchText")]
     #[tool_schema(description = "Alias for patch; the full patch text in apply_patch format")]
     patch_text: Option<String>,
+}
+```
+
+```rust
+#[derive(Serialize, Deserialize, ToolArgsSchema)]
+#[serde(deny_unknown_fields)]
+struct ExtendedArgsSchema {
+    enabled: bool,
+    delta: Option<i64>,
+    tags: Option<Vec<String>>,
+    #[tool_schema(minimum = -5, maximum = 5)]
+    balance: i32,
+    #[tool_schema(minimum = 1, maximum = 10)]
+    attempts: u32,
 }
 ```
 

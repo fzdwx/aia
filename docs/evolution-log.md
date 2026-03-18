@@ -39,6 +39,19 @@
 **Commit**：未提交。
 **Next direction**：如果后续 `tool_schema(...)` 的支持键明显增多，再考虑是否需要把语法进一步收窄或引入 compile-fail 测试锁住诊断文案；在此之前，优先维持接口单一稳定。
 
+## 2026-03-18 Session 54
+
+**Diagnosis**：derive 宏已经能覆盖当前仓库里的常规字符串和无符号整数参数，但距离“支持更多功能”仍差一批高频低歧义能力：布尔值、有符号整数、字符串数组，以及字段级整数约束都还需要用户退回手写 schema 或避免使用，收益和实现复杂度明显失衡。
+**Decision**：继续沿着“最小增量扩展”推进，不把宏做成通用 schema 系统；这一轮只补 `bool`、有符号整数、`Vec<String>` / `Option<Vec<String>>`，以及字段级 `minimum` / `maximum`。不做任意 `Vec<T>`、嵌套对象、enum、复杂 serde 语义。
+**Changes**：
+- `crates/agent-core/src/tooling.rs`：`ToolSchemaProperty` 新增 `boolean()`、`array(...)`、`maximum(...)`，并把数值约束方法扩成可接收有符号/无符号 JSON number。
+- `crates/agent-core-macros/src/lib.rs`：宏现在可识别 `bool`、`isize/i32/i64`、`Vec<String>` 与对应 `Option` 形式；字段级 `tool_schema(...)` 新增 `minimum` / `maximum`，并对错误类型和无符号负数约束给出明确编译错误。
+- `crates/agent-core/src/tests.rs`：新增 `ExtendedArgsSchema` 回归测试，锁住布尔值、有符号整数、字符串数组和字段级数值约束的 schema 生成结果。
+- `docs/tool-schema-derive.md`、`docs/architecture.md`、`docs/status.md`：同步更新支持矩阵与约束说明。
+**Verification**：先写 `ExtendedArgsSchema` 测试并确认红灯，再执行 `cargo test -p agent-core 自研_schema_支持更多高频字段类型与数值约束`、`cargo test -p builtin-tools builtin_tool_definitions_match_derive_schema_output` 转绿；随后继续执行 `cargo fmt --all`、`cargo test -p agent-core`、`cargo test -p builtin-tools`、`cargo test -p agent-runtime`、`cargo test -p openai-adapter`、`cargo check` 全量验证。
+**Commit**：未提交。
+**Next direction**：如果后续真实需求继续增长，下一轮优先评估 `Vec<u32>` / `Vec<u64>` 与 compile-fail 诊断测试；在出现嵌套对象或更复杂容器之前，不扩到任意 `Vec<T>`。
+
 ## 2026-03-17 Session 50
 
 **Diagnosis**：压缩日志独立视图虽然已经拆出来了，但 trace 页仍然很慢。直接观察代码和 SQLite 查询计划后发现有两个根因同时存在：前端在 `StrictMode` 下会对同一视图触发重复刷新，而后端 trace 列表/汇总又仍然走全表扫描与临时排序，导致单连接 SQLite 把多个慢查询串行放大。

@@ -82,8 +82,16 @@ impl ToolSchemaProperty {
         Self { value: serde_json::json!({ "type": "string" }) }
     }
 
+    pub fn boolean() -> Self {
+        Self { value: serde_json::json!({ "type": "boolean" }) }
+    }
+
     pub fn integer() -> Self {
         Self { value: serde_json::json!({ "type": "integer" }) }
+    }
+
+    pub fn array(items: ToolSchemaProperty) -> Self {
+        Self { value: serde_json::json!({ "type": "array", "items": items.into_value() }) }
     }
 
     pub fn description(mut self, description: impl Into<String>) -> Self {
@@ -93,9 +101,22 @@ impl ToolSchemaProperty {
         self
     }
 
-    pub fn minimum(mut self, minimum: u64) -> Self {
+    pub fn minimum<T>(mut self, minimum: T) -> Self
+    where
+        T: Into<serde_json::Number>,
+    {
         if let Some(object) = self.value.as_object_mut() {
             object.insert("minimum".into(), Value::Number(minimum.into()));
+        }
+        self
+    }
+
+    pub fn maximum<T>(mut self, maximum: T) -> Self
+    where
+        T: Into<serde_json::Number>,
+    {
+        if let Some(object) = self.value.as_object_mut() {
+            object.insert("maximum".into(), Value::Number(maximum.into()));
         }
         self
     }

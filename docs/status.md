@@ -113,6 +113,7 @@
 - 完成 SSE 落后客户端显式重同步：`apps/agent-server` 的 `/api/events` 在 `broadcast` 消费者落后时会发出 `sync_required` 事件，而不是静默丢弃；`apps/web` 收到后会主动补拉 session 列表与当前 session 的历史、当前 turn、上下文压力，避免事件流与本地 UI 状态无声漂移
 - 完成工具参数 schema 共享 helper 收口：`agent-core::ToolDefinition` 除支持手写 JSON 外，也支持基于自研最小 `ToolArgsSchema` trait 与 derive 宏生成统一参数 schema；当前 `builtin-tools`、runtime tape tools 与测试中的常规参数结构体已切到 `#[derive(ToolArgsSchema)]` 自动生成，`ApplyPatchToolArgs` 也已收口为单 struct + 别名字段模型来复用这条能力；该 helper 继续只覆盖当前真实需要的 object/properties/required/additionalProperties/description/minimum/minProperties 子集，避免再引入外部反射式 schema 依赖
 - 补齐 `ToolArgsSchema` 用户态清单文档：新增 `docs/tool-schema-derive.md`，明确支持的字段类型、结构边界、`tool_schema(...)` 可用键与 `serde` 协作范围，避免把可发现性完全寄托在编辑器对 derive helper attribute 的内部键提示上
+- 扩展 `ToolArgsSchema` derive 高频能力：当前已补 `bool` / `Option<bool>`、有符号整数族、`Vec<String>` / `Option<Vec<String>>`，以及字段级 `minimum` / `maximum` 数值约束，让下一批简单工具参数不必再回退到手写 schema
 - 完成真实工具调用到 typed args 的统一收口：`agent-core::ToolCall` 新增共享 `parse_arguments()`，当前 `builtin-tools` 与 runtime tools 的 `call()` 已改为直接反序列化结构化参数，而不再手工散落 `str_arg/opt_*_arg/arguments.get(...)` 取值
 - 完成真实工具 description 的集中管理：`agent-prompts` 现通过 `prompts/tool/` 目录下的 Markdown 文件统一管理内建工具与 runtime tools 的共享 description，`builtin-tools` / `agent-runtime` 的真实 `ToolDefinition` 已改为复用这些文本，不再各 crate 自带字面量
 - 完成 `agent-store` async façade 收口：session / trace 的 SQLite 访问已通过共享 async store API 暴露给 `apps/agent-server` 与 `ServerModel`，trace/session 路由、session manager 初始化与 turn/tool trace 落盘不再在 async 路径里直接调用同步 store 方法

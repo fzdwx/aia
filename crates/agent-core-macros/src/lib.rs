@@ -2,8 +2,8 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{
-    Attribute, Data, DataStruct, DeriveInput, Fields, GenericArgument, LitInt, LitStr,
-    PathArguments, Type, parse_macro_input,
+    parse_macro_input, Attribute, Data, DataStruct, DeriveInput, Expr, Fields, GenericArgument,
+    LitInt, LitStr, PathArguments, Type,
 };
 
 #[proc_macro_derive(ToolArgsSchema, attributes(serde, tool_schema))]
@@ -61,6 +61,12 @@ struct SchemaField {
     required: bool,
 }
 
+struct FieldSchemaConfig {
+    description: Option<String>,
+    minimum: Option<i64>,
+    maximum: Option<i64>,
+}
+
 fn collect_struct_fields(data: &DataStruct) -> syn::Result<Vec<SchemaField>> {
     let Fields::Named(fields) = &data.fields else {
         return Err(syn::Error::new_spanned(
@@ -79,25 +85,65 @@ fn collect_struct_fields(data: &DataStruct) -> syn::Result<Vec<SchemaField>> {
 
             let schema_name =
                 parse_serde_rename(&field.attrs)?.unwrap_or_else(|| ident.to_string());
-            let description = parse_field_description(&field.attrs)?;
-            let (property_expr, required) = property_expr(&field.ty, description.as_deref())?;
+            let config = parse_field_schema_config(&field.attrs)?;
+            let (property_expr, required) = property_expr(&field.ty, &config)?;
 
             Ok(SchemaField { schema_name, property_expr, required })
         })
         .collect()
 }
 
-fn property_expr(ty: &Type, description: Option<&str>) -> syn::Result<(TokenStream2, bool)> {
+fn property_expr(ty: &Type, config: &FieldSchemaConfig) -> syn::Result<(TokenStream2, bool)> {
     let (inner_ty, required) = unwrap_option(ty).map_or((ty, true), |inner| (inner, false));
-    let mut expr = match primitive_kind(inner_ty)? {
+    let primitive_kind = primitive_kind(inner_ty)?;
+    let mut expr = match primitive_kind {
         PrimitiveKind::String => quote!(::agent_core::ToolSchemaProperty::string()),
-        PrimitiveKind::Integer => {
-            quote!(::agent_core::ToolSchemaProperty::integer().minimum(0))
+        PrimitiveKind::Boolean => quote!(::agent_core::ToolSchemaProperty::boolean()),
+        PrimitiveKind::StringArray => {
+            quote!(::agent_core::ToolSchemaProperty::array(
+                ::agent_core::ToolSchemaProperty::string()
+            ))
         }
+        PrimitiveKind::UnsignedInteger => {
+            quote!(::agent_core::ToolSchemaProperty::integer().minimum(0u64))
+        }
+        PrimitiveKind::SignedInteger => quote!(::agent_core::ToolSchemaProperty::integer()),
     };
 
-    if let Some(description) = description {
+    if let Some(description) = config.description.as_deref() {
         expr = quote!(#expr.description(#description));
+    }
+
+    if let Some(minimum) = config.minimum {
+        if matches!(
+            primitive_kind,
+            PrimitiveKind::String | PrimitiveKind::Boolean | PrimitiveKind::StringArray
+        ) {
+            return Err(syn::Error::new_spanned(
+                ty,
+                "tool_schema(minimum = ...) 仅支持整数类型字段",
+            ));
+        }
+        if matches!(primitive_kind, PrimitiveKind::UnsignedInteger) && minimum < 0 {
+            return Err(syn::Error::new_spanned(ty, "无符号整数字段的 minimum 不能为负数"));
+        }
+        expr = quote!(#expr.minimum(#minimum));
+    }
+
+    if let Some(maximum) = config.maximum {
+        if matches!(
+            primitive_kind,
+            PrimitiveKind::String | PrimitiveKind::Boolean | PrimitiveKind::StringArray
+        ) {
+            return Err(syn::Error::new_spanned(
+                ty,
+                "tool_schema(maximum = ...) 仅支持整数类型字段",
+            ));
+        }
+        if matches!(primitive_kind, PrimitiveKind::UnsignedInteger) && maximum < 0 {
+            return Err(syn::Error::new_spanned(ty, "无符号整数字段的 maximum 不能为负数"));
+        }
+        expr = quote!(#expr.maximum(#maximum));
     }
 
     Ok((expr, required))
@@ -105,14 +151,17 @@ fn property_expr(ty: &Type, description: Option<&str>) -> syn::Result<(TokenStre
 
 enum PrimitiveKind {
     String,
-    Integer,
+    Boolean,
+    StringArray,
+    UnsignedInteger,
+    SignedInteger,
 }
 
 fn primitive_kind(ty: &Type) -> syn::Result<PrimitiveKind> {
     let Type::Path(type_path) = ty else {
         return Err(syn::Error::new_spanned(
             ty,
-            "ToolArgsSchema derive 首轮仅支持 String、usize、u32、u64 与它们的 Option 形式",
+            "ToolArgsSchema derive 当前支持 String、bool、Vec<String>、usize/u32/u64、isize/i32/i64 与它们的 Option 形式",
         ));
     };
 
@@ -122,10 +171,29 @@ fn primitive_kind(ty: &Type) -> syn::Result<PrimitiveKind> {
 
     match segment.ident.to_string().as_str() {
         "String" => Ok(PrimitiveKind::String),
-        "usize" | "u32" | "u64" => Ok(PrimitiveKind::Integer),
+        "bool" => Ok(PrimitiveKind::Boolean),
+        "Vec" => match &segment.arguments {
+            PathArguments::AngleBracketed(arguments) => match arguments.args.first() {
+                Some(GenericArgument::Type(Type::Path(inner_path)))
+                    if inner_path.path.is_ident("String") =>
+                {
+                    Ok(PrimitiveKind::StringArray)
+                }
+                _ => Err(syn::Error::new_spanned(
+                    ty,
+                    "ToolArgsSchema derive 首轮仅支持 Vec<String>，暂不支持其他数组元素类型",
+                )),
+            },
+            _ => Err(syn::Error::new_spanned(
+                ty,
+                "ToolArgsSchema derive 首轮仅支持 Vec<String>，暂不支持其他数组元素类型",
+            )),
+        },
+        "usize" | "u32" | "u64" => Ok(PrimitiveKind::UnsignedInteger),
+        "isize" | "i32" | "i64" => Ok(PrimitiveKind::SignedInteger),
         _ => Err(syn::Error::new_spanned(
             ty,
-            "ToolArgsSchema derive 首轮仅支持 String、usize、u32、u64 与它们的 Option 形式",
+            "ToolArgsSchema derive 当前支持 String、bool、Vec<String>、usize/u32/u64、isize/i32/i64 与它们的 Option 形式",
         )),
     }
 }
@@ -166,23 +234,54 @@ fn parse_container_min_properties(attrs: &[Attribute]) -> syn::Result<Option<u64
     Ok(result)
 }
 
-fn parse_field_description(attrs: &[Attribute]) -> syn::Result<Option<String>> {
-    let mut result = None;
+fn parse_field_schema_config(attrs: &[Attribute]) -> syn::Result<FieldSchemaConfig> {
+    let mut result = FieldSchemaConfig { description: None, minimum: None, maximum: None };
     for attr in attrs.iter().filter(|attr| attr.path().is_ident("tool_schema")) {
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("description") {
                 let value = meta.value()?;
                 let literal: LitStr = value.parse()?;
-                result = Some(literal.value());
+                result.description = Some(literal.value());
+                return Ok(());
+            }
+            if meta.path.is_ident("minimum") {
+                let value = meta.value()?;
+                result.minimum = Some(parse_signed_integer_expr(&value.parse()?)?);
+                return Ok(());
+            }
+            if meta.path.is_ident("maximum") {
+                let value = meta.value()?;
+                result.maximum = Some(parse_signed_integer_expr(&value.parse()?)?);
                 return Ok(());
             }
             Err(meta.error(
-                "字段级仅支持 #[tool_schema(description = \"...\")]；当前支持键：description",
+                "字段级仅支持 #[tool_schema(description = \"...\", minimum = N, maximum = N)]；当前支持键：description、minimum、maximum",
             ))
         })?;
     }
 
     Ok(result)
+}
+
+fn parse_signed_integer_expr(expr: &Expr) -> syn::Result<i64> {
+    match expr {
+        Expr::Lit(expr_lit) => {
+            let syn::Lit::Int(literal) = &expr_lit.lit else {
+                return Err(syn::Error::new_spanned(expr, "数值约束只支持整数字面量"));
+            };
+            literal.base10_parse()
+        }
+        Expr::Unary(expr_unary) if expr_unary.op == syn::UnOp::Neg(Default::default()) => {
+            let Expr::Lit(expr_lit) = &*expr_unary.expr else {
+                return Err(syn::Error::new_spanned(expr, "数值约束只支持整数字面量"));
+            };
+            let syn::Lit::Int(literal) = &expr_lit.lit else {
+                return Err(syn::Error::new_spanned(expr, "数值约束只支持整数字面量"));
+            };
+            Ok(-literal.base10_parse::<i64>()?)
+        }
+        _ => Err(syn::Error::new_spanned(expr, "数值约束只支持整数字面量")),
+    }
 }
 
 fn parse_serde_rename(attrs: &[Attribute]) -> syn::Result<Option<String>> {
