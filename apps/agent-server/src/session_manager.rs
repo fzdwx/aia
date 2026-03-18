@@ -279,6 +279,11 @@ async fn handle_delete_session(
         .delete_session_async(session_id.to_string())
         .await
         .map_err(|e| RuntimeWorkerError::internal(format!("session db delete failed: {e}")))?;
+    config
+        .store
+        .delete_channel_bindings_by_session_id_async(session_id.to_string())
+        .await
+        .map_err(|e| RuntimeWorkerError::internal(format!("channel binding delete failed: {e}")))?;
 
     let _ =
         config.broadcast_tx.send(SsePayload::SessionDeleted { session_id: session_id.to_string() });

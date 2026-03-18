@@ -227,6 +227,21 @@ impl AiaStore {
         .await
     }
 
+    pub async fn delete_channel_bindings_by_session_id_async(
+        self: &Arc<Self>,
+        session_id: impl Into<String>,
+    ) -> Result<usize, AiaStoreError> {
+        let session_id = session_id.into();
+        self.with_conn_async(move |conn| {
+            let changed = conn.execute(
+                "DELETE FROM channel_session_bindings WHERE session_id = ?1",
+                [session_id],
+            )?;
+            Ok(changed)
+        })
+        .await
+    }
+
     pub async fn record_channel_message_receipt_async(
         self: &Arc<Self>,
         receipt: ChannelMessageReceipt,
@@ -317,5 +332,26 @@ mod tests {
         let found = store.get_channel_binding_async(key).await.expect("binding should load async");
 
         assert_eq!(found, Some(binding));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn delete_channel_bindings_by_session_id_removes_binding() {
+        let store = Arc::new(AiaStore::in_memory().expect("store init"));
+        let key = sample_key();
+        let binding = ChannelSessionBinding::new(key.clone(), "session-stale");
+
+        store
+            .upsert_channel_binding_async(binding)
+            .await
+            .expect("binding should save async");
+
+        let deleted = store
+            .delete_channel_bindings_by_session_id_async("session-stale")
+            .await
+            .expect("delete bindings should succeed");
+        let found = store.get_channel_binding_async(key).await.expect("binding should load async");
+
+        assert_eq!(deleted, 1);
+        assert_eq!(found, None);
     }
 }
