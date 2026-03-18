@@ -61,6 +61,31 @@
 **Commit**：未提交。
 **Next direction**：继续补 markdown 样式优化、图片资源解析和 CardKit 限流/降级策略，让飞书卡片更接近 `openclaw-lark` 的最终体验，同时避免单卡高频更新压到接口限流。
 
+## 2026-03-18 Session 67
+
+**Diagnosis**：用户继续反馈“新的 AI message 覆盖上一次 AI message”，但补充说明后发现问题不是跨 turn 复用旧消息，而是同一个 turn 内模型可能产出多段 assistant message；当前飞书完成态只取 `assistant_message` 单字段，天然会把前面的 assistant 块覆盖掉。并行对照 `openclaw-lark` 后也确认：它通过每次入站新建 controller 避免跨 turn 串写，但这与本次同-turn 多段覆盖是两个不同层级的问题。
+**Decision**：对本次用户反馈做最小、直接的修复：飞书最终卡片优先从 `TurnLifecycle.blocks` 中提取全部 `TurnBlock::Assistant` 并按顺序拼接，只有没有 assistant 块时才回退到 `assistant_message`。同时把 `openclaw-lark` 暴露出的另一个潜在风险——aia 当前飞书桥接仍只按 `session_id` 过滤 SSE——记录为后续项，不在这次用户明确反馈之外扩 scope 硬改。
+**Changes**：
+- `apps/agent-server/src/channel_runtime.rs`：新增 `extract_final_answer_from_turn(...)` helper；`TurnCompleted` 处理路径不再只覆盖成单段 `assistant_message`，而是优先拼接多段 assistant blocks。
+- `apps/agent-server/src/channel_runtime.rs` 测试：新增“同一 turn 两段 assistant block 需完整保留”的回归测试。
+- `docs/status.md`：同步记录本次多段 assistant 回复覆盖修复，并注明 `openclaw-lark` 的 per-dispatch controller 隔离与 aia 当前 `session_id` 过滤风险是另一条后续问题。
+**Verification**：`cargo test -p agent-server extract_final_answer_from_turn_keeps_multiple_assistant_blocks`、`cargo test -p agent-server` 通过。
+**Commit**：未提交。
+**Next direction**：下一步应继续解决真正的跨 turn 风险：让飞书流式回复按 `turn_id` 而不是只按 `session_id` 关联 SSE 事件，并把 `submit_turn` 从 fire-and-forget 改成可感知“already running”的真实结果。
+
+## 2026-03-18 Session 68
+
+**Diagnosis**：在修完“同一 turn 多段 assistant message 覆盖”后，仍存在另一层更隐蔽的跨 turn 风险：飞书 `CardKit` 回复链此前只按 `session_id` 监听 `CurrentTurnStarted/Status/Stream/Error/TurnCancelled` 等 SSE，因此同一会话里的下一轮执行理论上仍可能串到上一张正在更新的卡片。对照 `openclaw-lark` 后也确认，它通过 per-dispatch controller 避免跨 turn 串写，而 aia 原先缺少与之等价的 turn 关联键。
+**Decision**：不在这次直接重写成完整 per-dispatch controller，而是做最小但有效的收口：在 server 侧为每次 `submit_turn` 分配一个稳定 turn 关联 ID，并沿 `CurrentTurnSnapshot`、`SsePayload`、self-chat 和飞书 bridge 全链透传；飞书和 self-chat 统一按 `session_id + turn_id` 过滤实时事件。这样既能避免跨 turn 串写，也能保留现有 runtime 边界与长连接桥接结构。
+**Changes**：
+- `apps/agent-server/src/session_manager/{handle.rs,types.rs,rs,current_turn.rs}`：`submit_turn` 由 fire-and-forget 改成返回本次 server 侧 `turn_id`；`CurrentTurnSnapshot` 新增 `turn_id`；`handle_submit_turn(...)` 初始化当前 turn 快照并广播带 turn_id 的 `Status`。
+- `apps/agent-server/src/sse.rs`：`Stream/Status/Error/TurnCancelled/TurnCompleted` 现都携带 turn 关联 ID；相关序列化测试同步更新。
+- `apps/agent-server/src/channel_runtime.rs`、`apps/agent-server/src/self_chat/session.rs`：飞书 bridge 与 self-chat 事件消费现都按 `session_id + turn_id` 双键过滤，不再只凭 `session_id` 接受事件。
+- `apps/agent-server/src/runtime_worker/snapshots.rs`、`apps/agent-server/src/session_manager/tests.rs`、`apps/agent-server/src/routes/turn.rs`：补齐快照恢复、测试断言和 HTTP submit 返回值，以适配新的 turn 关联链。
+**Verification**：`cargo fmt --all`、`cargo test -p agent-server` 通过。
+**Commit**：未提交。
+**Next direction**：如果继续向 `openclaw-lark` 靠拢，下一步可以考虑把飞书 reply pipeline 真正抽成 per-dispatch controller，并在不可用消息、回忆/删除、CardKit orphan cleanup 等边界上进一步补强。
+
 ## 2026-03-18 Session 61
 
 **Diagnosis**：仓库已有统一的 `session_manager.submit_turn(...)` + SSE/runtime 主链，也已有 provider settings 模式，但还缺一条“外部聊天平台消息 → 现有会话主链”的稳定桥接层；如果直接把飞书协议细节塞进 `session_manager` 或只做前端配置页，都无法真正形成可复用的 channel 能力。
