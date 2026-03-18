@@ -6,9 +6,11 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
 };
+use channel_registry::ChannelRegistry;
 use provider_registry::{ModelConfig, ModelLimit, ProviderRegistry};
 
 use super::{
+    channel::{CreateChannelRequest, UpdateChannelRequest},
     common::{json_response, resolve_session_id},
     provider::{ModelConfigDto, ModelLimitDto},
     trace::{TraceListQuery, get_trace, get_trace_overview, get_trace_summary, list_traces},
@@ -29,6 +31,8 @@ fn test_state() -> Arc<AppState> {
             model: "bootstrap".into(),
             connected: true,
         })),
+        channel_registry_path: aia_config::default_channels_path(),
+        channel_registry_snapshot: Arc::new(RwLock::new(ChannelRegistry::default())),
         store: Arc::new(agent_store::AiaStore::in_memory().expect("memory store")),
     })
 }
@@ -43,20 +47,21 @@ fn seed_trace_with_request_kind(
     started_at_ms: u64,
     request_kind: &str,
 ) {
+    let loop_id = id.split("-step-").next().unwrap_or(id);
     state
         .store
         .record(&LlmTraceRecord {
             id: id.into(),
-            trace_id: format!("trace-{id}"),
+            trace_id: format!("trace-loop-{loop_id}"),
             span_id: format!("span-{id}"),
             parent_span_id: None,
-            root_span_id: format!("root-{id}"),
+            root_span_id: format!("root-{loop_id}"),
             operation_name: "responses.create".into(),
             span_kind: LlmTraceSpanKind::Client,
-            turn_id: format!("turn-{id}"),
-            run_id: format!("run-{id}"),
+            turn_id: format!("turn-{loop_id}"),
+            run_id: format!("run-{loop_id}"),
             request_kind: request_kind.into(),
-            step_index: 0,
+            step_index: if id.contains("step-1") { 1 } else { 0 },
             provider: "openai".into(),
             protocol: "responses".into(),
             model: "gpt-5.4".into(),
@@ -168,11 +173,44 @@ fn cancel_turn_request_deserializes_session_id() {
     assert_eq!(parsed.session_id.as_deref(), Some("session-1"));
 }
 
+#[test]
+fn create_channel_request_deserializes_feishu_payload() {
+    let parsed: CreateChannelRequest = serde_json::from_value(serde_json::json!({
+        "id": "default",
+        "name": "默认飞书",
+        "transport": "feishu",
+        "enabled": true,
+        "app_id": "cli_xxx",
+        "app_secret": "secret",
+        "base_url": "https://open.feishu.cn",
+        "require_mention": true,
+        "thread_mode": true
+    }))
+    .expect("create channel request should deserialize");
+
+    assert_eq!(parsed.id, "default");
+    assert_eq!(parsed.transport, "feishu");
+    assert!(parsed.thread_mode);
+}
+
+#[test]
+fn update_channel_request_allows_partial_secret_update() {
+    let parsed: UpdateChannelRequest = serde_json::from_value(serde_json::json!({
+        "enabled": false,
+        "app_secret": ""
+    }))
+    .expect("update channel request should deserialize");
+
+    assert_eq!(parsed.enabled, Some(false));
+    assert_eq!(parsed.app_secret.as_deref(), Some(""));
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn list_traces_reads_trace_page_from_store() {
     let state = test_state();
-    seed_trace(state.as_ref(), "trace-older", 1_000);
-    seed_trace(state.as_ref(), "trace-newer", 2_000);
+    seed_trace(state.as_ref(), "loop-1-step-0", 1_000);
+    seed_trace(state.as_ref(), "loop-1-step-1", 1_010);
+    seed_trace(state.as_ref(), "loop-2-step-0", 2_000);
 
     let (status, Json(body)) = list_traces(
         State(state),
@@ -182,8 +220,10 @@ async fn list_traces_reads_trace_page_from_store() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["items"].as_array().map(Vec::len), Some(2));
-    assert_eq!(body["items"][0]["id"], "trace-newer");
-    assert_eq!(body["items"][1]["id"], "trace-older");
+    assert_eq!(body["items"][0]["id"], "trace-loop-loop-2");
+    assert_eq!(body["items"][0]["llm_span_count"], 1);
+    assert_eq!(body["items"][1]["id"], "trace-loop-loop-1");
+    assert_eq!(body["items"][1]["llm_span_count"], 2);
     assert_eq!(body["total_items"], 2);
     assert_eq!(body["page"], 1);
     assert_eq!(body["page_size"], 10);
@@ -207,7 +247,7 @@ async fn list_traces_can_filter_compression_logs() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["items"].as_array().map(Vec::len), Some(1));
-    assert_eq!(body["items"][0]["id"], "trace-compression");
+    assert_eq!(body["items"][0]["id"], "trace-loop-trace-compression");
     assert_eq!(body["items"][0]["request_kind"], "compression");
     assert_eq!(body["total_items"], 1);
 }
@@ -215,7 +255,8 @@ async fn list_traces_can_filter_compression_logs() {
 #[tokio::test(flavor = "current_thread")]
 async fn get_trace_overview_returns_summary_and_page_together() {
     let state = test_state();
-    seed_trace(state.as_ref(), "trace-chat", 1_000);
+    seed_trace(state.as_ref(), "trace-chat-step-0", 1_000);
+    seed_trace(state.as_ref(), "trace-chat-step-1", 1_020);
 
     let (status, Json(body)) = get_trace_overview(
         State(state),
@@ -231,6 +272,8 @@ async fn get_trace_overview_returns_summary_and_page_together() {
     assert_eq!(body["summary"]["total_requests"], 1);
     assert_eq!(body["page"]["items"].as_array().map(Vec::len), Some(1));
     assert_eq!(body["page"]["total_items"], 1);
+    assert_eq!(body["page"]["items"][0]["llm_span_count"], 2);
+    assert_eq!(body["page"]["items"][0]["traces"].as_array().map(Vec::len), Some(2));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -241,6 +284,19 @@ async fn get_trace_returns_not_found_for_missing_id() {
 
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(body["error"], "trace 不存在：missing-trace");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn get_trace_can_return_loop_detail_by_loop_id() {
+    let state = test_state();
+    seed_trace(state.as_ref(), "trace-chat-step-0", 1_000);
+    seed_trace(state.as_ref(), "trace-chat-step-1", 1_020);
+
+    let (status, Json(body)) = get_trace(State(state), Path("trace-loop-trace-chat".into())).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["loop_item"]["trace_id"], "trace-loop-trace-chat");
+    assert_eq!(body["trace_details"].as_array().map(Vec::len), Some(2));
 }
 
 #[tokio::test(flavor = "current_thread")]

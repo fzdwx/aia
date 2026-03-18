@@ -1,3 +1,5 @@
+mod channel;
+mod channel_event;
 mod common;
 mod provider;
 mod session;
@@ -6,11 +8,13 @@ mod tests;
 mod trace;
 mod turn;
 
+pub(crate) use channel::{create_channel, delete_channel, list_channels, update_channel};
+pub(crate) use channel_event::feishu_event;
+pub(crate) use common::prepare_session_for_turn;
 pub(crate) use provider::{
     create_provider, delete_provider, get_providers, list_providers, switch_provider,
     update_provider,
 };
-pub(crate) use common::prepare_session_for_turn;
 pub(crate) use session::{
     auto_compress_session, create_handoff, create_session, delete_session, get_current_turn,
     get_history, get_session_info, list_sessions,

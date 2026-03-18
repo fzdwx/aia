@@ -3,6 +3,7 @@ use std::{
     time::{Duration, UNIX_EPOCH},
 };
 
+use agent_core_macros::ToolArgsSchema;
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};

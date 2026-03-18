@@ -1,11 +1,12 @@
 mod bootstrap;
+mod channel_runtime;
 mod cli;
 mod model;
 mod routes;
 mod runtime_worker;
-mod session_manager;
-mod server;
 mod self_chat;
+mod server;
+mod session_manager;
 mod sse;
 mod state;
 

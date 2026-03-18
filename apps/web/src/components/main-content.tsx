@@ -1,5 +1,6 @@
 import { ChatMessages } from "@/components/chat-messages"
 import { ChatInput } from "@/components/chat-input"
+import { ChannelsPanel } from "@/components/channels-panel"
 import { SettingsPanel } from "@/components/settings-panel"
 import { TracePanel } from "@/components/trace-panel"
 import { useChatStore } from "@/stores/chat-store"
@@ -12,6 +13,8 @@ export function MainContent() {
       return <SettingsPanel />
     case "trace":
       return <TracePanel />
+    case "channels":
+      return <ChannelsPanel />
     default:
       return (
         <>

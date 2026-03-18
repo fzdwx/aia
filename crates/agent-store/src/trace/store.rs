@@ -5,8 +5,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::{AiaStore, AiaStoreError};
 
 use super::{
-    LlmTraceListItem, LlmTraceListPage, LlmTraceOverview, LlmTraceRecord, LlmTraceStore,
-    LlmTraceSummary,
+    LlmTraceLoopDetail, LlmTraceLoopItem, LlmTraceLoopPage, LlmTraceLoopStatus, LlmTraceOverview,
+    LlmTraceRecord, LlmTraceStatus, LlmTraceStore, LlmTraceSummary,
     mapping::{read_trace_list_item, read_trace_record},
 };
 
@@ -14,18 +14,11 @@ impl LlmTraceStore for AiaStore {
     fn record(&self, record: &LlmTraceRecord) -> Result<(), AiaStoreError> {
         self.with_conn(|conn| {
             record_with_conn(conn, record)?;
+            refresh_loop_snapshot_with_conn(conn, record.trace_id.as_str())?;
             refresh_summary_snapshot_with_conn(conn, Some(record.request_kind.as_str()))?;
             refresh_summary_snapshot_with_conn(conn, None)?;
             Ok(())
         })
-    }
-
-    fn list(&self, limit: usize) -> Result<Vec<LlmTraceListItem>, AiaStoreError> {
-        Ok(self.list_page(limit, 0)?.items)
-    }
-
-    fn list_page(&self, limit: usize, offset: usize) -> Result<LlmTraceListPage, AiaStoreError> {
-        self.with_conn(|conn| list_page_with_conn(conn, limit, offset, None))
     }
 
     fn get(&self, id: &str) -> Result<Option<LlmTraceRecord>, AiaStoreError> {
@@ -44,6 +37,7 @@ impl AiaStore {
     ) -> Result<(), AiaStoreError> {
         self.with_conn_async(move |conn| {
             record_with_conn(conn, &record)?;
+            refresh_loop_snapshot_with_conn(conn, record.trace_id.as_str())?;
             refresh_summary_snapshot_with_conn(conn, Some(record.request_kind.as_str()))?;
             refresh_summary_snapshot_with_conn(conn, None)?;
             Ok(())
@@ -51,23 +45,23 @@ impl AiaStore {
         .await
     }
 
-    pub async fn list_page_async(
+    pub async fn list_loop_page_async(
         self: &Arc<Self>,
         limit: usize,
         offset: usize,
-    ) -> Result<LlmTraceListPage, AiaStoreError> {
-        self.with_conn_async(move |conn| list_page_with_conn(conn, limit, offset, None)).await
+    ) -> Result<LlmTraceLoopPage, AiaStoreError> {
+        self.with_conn_async(move |conn| loop_page_with_conn(conn, limit, offset, None)).await
     }
 
-    pub async fn list_page_by_request_kind_async(
+    pub async fn list_loop_page_by_request_kind_async(
         self: &Arc<Self>,
         limit: usize,
         offset: usize,
         request_kind: impl Into<String>,
-    ) -> Result<LlmTraceListPage, AiaStoreError> {
+    ) -> Result<LlmTraceLoopPage, AiaStoreError> {
         let request_kind = request_kind.into();
         self.with_conn_async(move |conn| {
-            list_page_with_conn(conn, limit, offset, Some(request_kind.as_str()))
+            loop_page_with_conn(conn, limit, offset, Some(request_kind.as_str()))
         })
         .await
     }
@@ -78,6 +72,14 @@ impl AiaStore {
     ) -> Result<Option<LlmTraceRecord>, AiaStoreError> {
         let id = id.into();
         self.with_conn_async(move |conn| get_with_conn(conn, &id)).await
+    }
+
+    pub async fn get_loop_async(
+        self: &Arc<Self>,
+        id: impl Into<String>,
+    ) -> Result<Option<LlmTraceLoopDetail>, AiaStoreError> {
+        let id = id.into();
+        self.with_conn_async(move |conn| get_loop_with_conn(conn, &id)).await
     }
 
     pub async fn summary_async(self: &Arc<Self>) -> Result<LlmTraceSummary, AiaStoreError> {
@@ -103,7 +105,7 @@ impl AiaStore {
     ) -> Result<LlmTraceOverview, AiaStoreError> {
         let request_kind = request_kind.into();
         self.with_conn_async(move |conn| {
-            let page = list_page_with_conn(conn, limit, offset, Some(request_kind.as_str()))?;
+            let page = loop_page_with_conn(conn, limit, offset, Some(request_kind.as_str()))?;
             let summary = load_summary_snapshot_with_conn(conn, Some(request_kind.as_str()))?;
             Ok(LlmTraceOverview { summary, page })
         })
@@ -172,65 +174,58 @@ fn record_with_conn(conn: &Connection, record: &LlmTraceRecord) -> Result<(), Ai
     Ok(())
 }
 
-fn list_page_with_conn(
+fn loop_page_with_conn(
     conn: &Connection,
     limit: usize,
     offset: usize,
     request_kind: Option<&str>,
-) -> Result<LlmTraceListPage, AiaStoreError> {
+) -> Result<LlmTraceLoopPage, AiaStoreError> {
     let total_items = if let Some(request_kind) = request_kind {
         conn.query_row(
-            "
-            SELECT COUNT(*)
-            FROM llm_request_traces
-            WHERE span_kind = 'CLIENT' AND request_kind = ?1
-            ",
+            "SELECT COUNT(*) FROM llm_trace_loops WHERE request_kind = ?1",
             [request_kind],
             |row| row.get::<_, u64>(0),
         )?
     } else {
-        conn.query_row(
-            "SELECT COUNT(*) FROM llm_request_traces WHERE span_kind = 'CLIENT'",
-            [],
-            |row| row.get::<_, u64>(0),
-        )?
+        conn.query_row("SELECT COUNT(*) FROM llm_trace_loops", [], |row| row.get::<_, u64>(0))?
     };
+
     let mut stmt = if request_kind.is_some() {
         conn.prepare(
             "
-            SELECT t.id, t.trace_id, t.span_id, t.parent_span_id, t.root_span_id,
-                   t.operation_name, t.span_kind, t.turn_id, t.run_id, t.request_kind,
-                   t.step_index, t.provider, t.protocol, t.model, t.endpoint_path,
-                   t.status, t.stop_reason, t.status_code, t.started_at_ms, t.duration_ms,
-                   t.total_tokens, t.cached_tokens, t.request_summary, t.error
-            FROM llm_request_traces t
-            WHERE t.span_kind = 'CLIENT' AND t.request_kind = ?1
-            ORDER BY t.started_at_ms DESC, t.trace_id DESC, t.id DESC
+            SELECT id, trace_id, request_kind, turn_id, run_id, root_span_id,
+                   model, protocol, endpoint_path, latest_started_at_ms, started_at_ms,
+                   finished_at_ms, duration_ms, total_tokens, total_cached_tokens,
+                   llm_span_count, tool_span_count, failed_tool_count, final_status,
+                   user_message, latest_error, final_span_id, traces_json
+            FROM llm_trace_loops
+            WHERE request_kind = ?1
+            ORDER BY latest_started_at_ms DESC, trace_id DESC
             LIMIT ?2 OFFSET ?3
             ",
         )?
     } else {
         conn.prepare(
             "
-            SELECT t.id, t.trace_id, t.span_id, t.parent_span_id, t.root_span_id,
-                   t.operation_name, t.span_kind, t.turn_id, t.run_id, t.request_kind,
-                   t.step_index, t.provider, t.protocol, t.model, t.endpoint_path,
-                   t.status, t.stop_reason, t.status_code, t.started_at_ms, t.duration_ms,
-                   t.total_tokens, t.cached_tokens, t.request_summary, t.error
-            FROM llm_request_traces t
-            WHERE t.span_kind = 'CLIENT'
-            ORDER BY t.started_at_ms DESC, t.trace_id DESC, t.id DESC
+            SELECT id, trace_id, request_kind, turn_id, run_id, root_span_id,
+                   model, protocol, endpoint_path, latest_started_at_ms, started_at_ms,
+                   finished_at_ms, duration_ms, total_tokens, total_cached_tokens,
+                   llm_span_count, tool_span_count, failed_tool_count, final_status,
+                   user_message, latest_error, final_span_id, traces_json
+            FROM llm_trace_loops
+            ORDER BY latest_started_at_ms DESC, trace_id DESC
             LIMIT ?1 OFFSET ?2
             ",
         )?
     };
+
     let rows = if let Some(request_kind) = request_kind {
-        stmt.query_map(params![request_kind, limit as i64, offset as i64], read_trace_list_item)?
+        stmt.query_map(params![request_kind, limit as i64, offset as i64], read_trace_loop_item)?
     } else {
-        stmt.query_map(params![limit as i64, offset as i64], read_trace_list_item)?
+        stmt.query_map(params![limit as i64, offset as i64], read_trace_loop_item)?
     };
 
-    Ok(LlmTraceListPage {
+    Ok(LlmTraceLoopPage {
         items: rows.collect::<Result<Vec<_>, _>>().map_err(AiaStoreError::from)?,
         total_items,
         page: offset / limit + 1,
@@ -256,68 +251,138 @@ fn get_with_conn(conn: &Connection, id: &str) -> Result<Option<LlmTraceRecord>, 
     stmt.query_row([id], read_trace_record).optional().map_err(AiaStoreError::from)
 }
 
+fn get_loop_with_conn(
+    conn: &Connection,
+    id: &str,
+) -> Result<Option<LlmTraceLoopDetail>, AiaStoreError> {
+    let loop_item = conn
+        .query_row(
+            "
+            SELECT id, trace_id, request_kind, turn_id, run_id, root_span_id,
+                   model, protocol, endpoint_path, latest_started_at_ms, started_at_ms,
+                   finished_at_ms, duration_ms, total_tokens, total_cached_tokens,
+                   llm_span_count, tool_span_count, failed_tool_count, final_status,
+                   user_message, latest_error, final_span_id, traces_json
+            FROM llm_trace_loops
+            WHERE id = ?1 OR trace_id = ?1
+            LIMIT 1
+            ",
+            [id],
+            read_trace_loop_item,
+        )
+        .optional()?;
+
+    let Some(loop_item) = loop_item else {
+        return Ok(None);
+    };
+
+    let mut stmt = conn.prepare(
+        "
+        SELECT id, trace_id, span_id, parent_span_id, root_span_id,
+               operation_name, span_kind, turn_id, run_id, request_kind,
+               step_index, provider, protocol, model, base_url,
+               endpoint_path, streaming, started_at_ms, finished_at_ms, duration_ms,
+               status_code, status, stop_reason, error, request_summary,
+               provider_request, response_summary, response_body, input_tokens, output_tokens,
+               total_tokens, cached_tokens, otel_attributes, events
+        FROM llm_request_traces
+        WHERE trace_id = ?1
+        ORDER BY started_at_ms ASC, request_kind ASC, id ASC
+        ",
+    )?;
+
+    let trace_details = stmt
+        .query_map([loop_item.trace_id.as_str()], read_trace_record)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(AiaStoreError::from)?;
+
+    Ok(Some(LlmTraceLoopDetail { loop_item, trace_details }))
+}
+
 fn summary_with_conn(
     conn: &Connection,
     request_kind: Option<&str>,
 ) -> Result<LlmTraceSummary, AiaStoreError> {
-    let (
-        total_requests,
-        failed_requests,
-        total_input_tokens,
-        total_output_tokens,
-        total_tokens,
-        total_cached_tokens,
-    ): (u64, u64, u64, u64, u64, u64) = if let Some(request_kind) = request_kind {
-        conn.query_row(
-            "
+    let (total_requests, failed_requests, total_tokens, total_cached_tokens): (u64, u64, u64, u64) =
+        if let Some(request_kind) = request_kind {
+            conn.query_row(
+                "
                 SELECT
                     COUNT(*),
-                    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END),
-                    SUM(COALESCE(input_tokens, 0)),
-                    SUM(COALESCE(output_tokens, 0)),
+                    SUM(CASE WHEN final_status = 'failed' THEN 1 ELSE 0 END),
                     SUM(COALESCE(total_tokens, 0)),
-                    SUM(COALESCE(cached_tokens, 0))
+                    SUM(COALESCE(total_cached_tokens, 0))
+                FROM llm_trace_loops
+                WHERE request_kind = ?1
+                ",
+                [request_kind],
+                |row| {
+                    Ok((
+                        row.get::<_, u64>(0)?,
+                        row.get::<_, Option<u64>>(1)?.unwrap_or(0),
+                        row.get::<_, Option<u64>>(2)?.unwrap_or(0),
+                        row.get::<_, Option<u64>>(3)?.unwrap_or(0),
+                    ))
+                },
+            )?
+        } else {
+            conn.query_row(
+                "
+                SELECT
+                    COUNT(*),
+                    SUM(CASE WHEN final_status = 'failed' THEN 1 ELSE 0 END),
+                    SUM(COALESCE(total_tokens, 0)),
+                    SUM(COALESCE(total_cached_tokens, 0))
+                FROM llm_trace_loops
+                ",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, u64>(0)?,
+                        row.get::<_, Option<u64>>(1)?.unwrap_or(0),
+                        row.get::<_, Option<u64>>(2)?.unwrap_or(0),
+                        row.get::<_, Option<u64>>(3)?.unwrap_or(0),
+                    ))
+                },
+            )?
+        };
+
+    let (total_input_tokens, total_output_tokens): (u64, u64) =
+        if let Some(request_kind) = request_kind {
+            conn.query_row(
+                "
+                SELECT
+                    SUM(COALESCE(input_tokens, 0)),
+                    SUM(COALESCE(output_tokens, 0))
                 FROM llm_request_traces
                 WHERE span_kind = 'CLIENT' AND request_kind = ?1
                 ",
-            [request_kind],
-            |row| {
-                Ok((
-                    row.get::<_, u64>(0)?,
-                    row.get::<_, Option<u64>>(1)?.unwrap_or(0),
-                    row.get::<_, Option<u64>>(2)?.unwrap_or(0),
-                    row.get::<_, Option<u64>>(3)?.unwrap_or(0),
-                    row.get::<_, Option<u64>>(4)?.unwrap_or(0),
-                    row.get::<_, Option<u64>>(5)?.unwrap_or(0),
-                ))
-            },
-        )?
-    } else {
-        conn.query_row(
-            "
+                [request_kind],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<u64>>(0)?.unwrap_or(0),
+                        row.get::<_, Option<u64>>(1)?.unwrap_or(0),
+                    ))
+                },
+            )?
+        } else {
+            conn.query_row(
+                "
                 SELECT
-                    COUNT(*),
-                    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END),
                     SUM(COALESCE(input_tokens, 0)),
-                    SUM(COALESCE(output_tokens, 0)),
-                    SUM(COALESCE(total_tokens, 0)),
-                    SUM(COALESCE(cached_tokens, 0))
+                    SUM(COALESCE(output_tokens, 0))
                 FROM llm_request_traces
                 WHERE span_kind = 'CLIENT'
                 ",
-            [],
-            |row| {
-                Ok((
-                    row.get::<_, u64>(0)?,
-                    row.get::<_, Option<u64>>(1)?.unwrap_or(0),
-                    row.get::<_, Option<u64>>(2)?.unwrap_or(0),
-                    row.get::<_, Option<u64>>(3)?.unwrap_or(0),
-                    row.get::<_, Option<u64>>(4)?.unwrap_or(0),
-                    row.get::<_, Option<u64>>(5)?.unwrap_or(0),
-                ))
-            },
-        )?
-    };
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<u64>>(0)?.unwrap_or(0),
+                        row.get::<_, Option<u64>>(1)?.unwrap_or(0),
+                    ))
+                },
+            )?
+        };
 
     let durations = load_client_durations(conn, request_kind)?;
     let avg_duration_ms = if durations.is_empty() {
@@ -405,6 +470,183 @@ fn refresh_summary_snapshot_with_conn(
     Ok(())
 }
 
+fn refresh_loop_snapshot_with_conn(conn: &Connection, trace_id: &str) -> Result<(), AiaStoreError> {
+    let mut stmt = conn.prepare(
+        "
+        SELECT t.id, t.trace_id, t.span_id, t.parent_span_id, t.root_span_id,
+               t.operation_name, t.span_kind, t.turn_id, t.run_id, t.request_kind,
+               t.step_index, t.provider, t.protocol, t.model, t.endpoint_path,
+               t.status, t.stop_reason, t.status_code, t.started_at_ms, t.duration_ms,
+               t.total_tokens, t.cached_tokens, t.request_summary, t.error
+        FROM llm_request_traces t
+        WHERE t.trace_id = ?1
+        ORDER BY t.started_at_ms ASC, t.request_kind ASC, t.id ASC
+        ",
+    )?;
+
+    let traces = stmt
+        .query_map([trace_id], read_trace_list_item)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(AiaStoreError::from)?;
+
+    if traces.is_empty() {
+        conn.execute("DELETE FROM llm_trace_loops WHERE trace_id = ?1", [trace_id])?;
+        return Ok(());
+    }
+
+    let llm_traces =
+        traces.iter().filter(|trace| trace.request_kind != "tool").cloned().collect::<Vec<_>>();
+    let tool_traces =
+        traces.iter().filter(|trace| trace.request_kind == "tool").cloned().collect::<Vec<_>>();
+    let latest_trace = traces
+        .iter()
+        .max_by(|left, right| {
+            left.started_at_ms.cmp(&right.started_at_ms).then_with(|| left.id.cmp(&right.id))
+        })
+        .cloned()
+        .ok_or_else(|| AiaStoreError::new("trace loop latest item missing"))?;
+    let latest_llm_trace = llm_traces
+        .iter()
+        .max_by(|left, right| {
+            left.started_at_ms.cmp(&right.started_at_ms).then_with(|| left.id.cmp(&right.id))
+        })
+        .cloned();
+    let representative = latest_llm_trace.clone().unwrap_or_else(|| latest_trace.clone());
+
+    let started_at_ms = traces.iter().map(|trace| trace.started_at_ms).min().unwrap_or(0);
+    let latest_started_at_ms = latest_trace.started_at_ms;
+    let finished_at_ms = traces
+        .iter()
+        .filter_map(|trace| {
+            trace.duration_ms.map(|duration| trace.started_at_ms.saturating_add(duration))
+        })
+        .max();
+    let duration_ms = finished_at_ms.map(|finished| finished.saturating_sub(started_at_ms));
+    let total_tokens = llm_traces.iter().map(|trace| trace.total_tokens.unwrap_or(0)).sum::<u64>();
+    let total_cached_tokens =
+        llm_traces.iter().map(|trace| trace.cached_tokens.unwrap_or(0)).sum::<u64>();
+    let llm_span_count = llm_traces.len() as u32;
+    let tool_span_count = tool_traces.len() as u32;
+    let failed_tool_count =
+        tool_traces.iter().filter(|trace| trace.status == LlmTraceStatus::Failed).count() as u32;
+    let has_llm_failure = llm_traces.iter().any(|trace| trace.status == LlmTraceStatus::Failed);
+    let final_llm_trace = llm_traces.last().cloned();
+    let final_status = match final_llm_trace.as_ref() {
+        Some(trace) if trace.status == LlmTraceStatus::Failed => LlmTraceLoopStatus::Failed,
+        _ if has_llm_failure || failed_tool_count > 0 => LlmTraceLoopStatus::Partial,
+        _ => LlmTraceLoopStatus::Completed,
+    };
+    let user_message = latest_llm_trace
+        .as_ref()
+        .and_then(|trace| trace.user_message.clone())
+        .or_else(|| latest_trace.user_message.clone());
+    let latest_error = traces.iter().rev().find_map(|trace| trace.error.clone());
+    let final_span_id = traces.last().map(|trace| trace.id.clone());
+    let traces_json = serde_json::to_string(&traces)?;
+
+    conn.execute(
+        "
+        INSERT INTO llm_trace_loops (
+            id, trace_id, request_kind, turn_id, run_id, root_span_id,
+            model, protocol, endpoint_path, latest_started_at_ms, started_at_ms,
+            finished_at_ms, duration_ms, total_tokens, total_cached_tokens,
+            llm_span_count, tool_span_count, failed_tool_count, final_status,
+            user_message, latest_error, final_span_id, traces_json
+        ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6,
+            ?7, ?8, ?9, ?10, ?11,
+            ?12, ?13, ?14, ?15,
+            ?16, ?17, ?18, ?19,
+            ?20, ?21, ?22, ?23
+        )
+        ON CONFLICT(id) DO UPDATE SET
+            trace_id = excluded.trace_id,
+            request_kind = excluded.request_kind,
+            turn_id = excluded.turn_id,
+            run_id = excluded.run_id,
+            root_span_id = excluded.root_span_id,
+            model = excluded.model,
+            protocol = excluded.protocol,
+            endpoint_path = excluded.endpoint_path,
+            latest_started_at_ms = excluded.latest_started_at_ms,
+            started_at_ms = excluded.started_at_ms,
+            finished_at_ms = excluded.finished_at_ms,
+            duration_ms = excluded.duration_ms,
+            total_tokens = excluded.total_tokens,
+            total_cached_tokens = excluded.total_cached_tokens,
+            llm_span_count = excluded.llm_span_count,
+            tool_span_count = excluded.tool_span_count,
+            failed_tool_count = excluded.failed_tool_count,
+            final_status = excluded.final_status,
+            user_message = excluded.user_message,
+            latest_error = excluded.latest_error,
+            final_span_id = excluded.final_span_id,
+            traces_json = excluded.traces_json
+        ",
+        params![
+            trace_id,
+            trace_id,
+            representative.request_kind,
+            representative.turn_id,
+            representative.run_id,
+            representative.root_span_id,
+            representative.model,
+            representative.protocol,
+            representative.endpoint_path,
+            latest_started_at_ms,
+            started_at_ms,
+            finished_at_ms,
+            duration_ms,
+            total_tokens,
+            total_cached_tokens,
+            llm_span_count,
+            tool_span_count,
+            failed_tool_count,
+            final_status.as_str(),
+            user_message,
+            latest_error,
+            final_span_id,
+            traces_json,
+        ],
+    )?;
+
+    Ok(())
+}
+
+fn read_trace_loop_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<LlmTraceLoopItem> {
+    Ok(LlmTraceLoopItem {
+        id: row.get(0)?,
+        trace_id: row.get(1)?,
+        request_kind: row.get(2)?,
+        turn_id: row.get(3)?,
+        run_id: row.get(4)?,
+        root_span_id: row.get(5)?,
+        model: row.get(6)?,
+        protocol: row.get(7)?,
+        endpoint_path: row.get(8)?,
+        latest_started_at_ms: row.get(9)?,
+        started_at_ms: row.get(10)?,
+        finished_at_ms: row.get(11)?,
+        duration_ms: row.get(12)?,
+        total_tokens: row.get(13)?,
+        total_cached_tokens: row.get(14)?,
+        llm_span_count: row.get(15)?,
+        tool_span_count: row.get(16)?,
+        failed_tool_count: row.get(17)?,
+        final_status: LlmTraceLoopStatus::from_str(row.get::<_, String>(18)?.as_str()),
+        user_message: row.get(19)?,
+        latest_error: row.get(20)?,
+        final_span_id: row.get(21)?,
+        traces: serde_json::from_str(&row.get::<_, String>(22)?).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                22,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?,
+    })
+}
+
 fn load_summary_snapshot_with_conn(
     conn: &Connection,
     request_kind: Option<&str>,
@@ -450,8 +692,8 @@ fn load_client_durations(
         let mut stmt = conn.prepare(
             "
             SELECT duration_ms
-            FROM llm_request_traces
-            WHERE span_kind = 'CLIENT' AND request_kind = ?1 AND duration_ms IS NOT NULL
+            FROM llm_trace_loops
+            WHERE request_kind = ?1 AND duration_ms IS NOT NULL
             ORDER BY duration_ms ASC
             ",
         )?;
@@ -462,8 +704,8 @@ fn load_client_durations(
         let mut stmt = conn.prepare(
             "
             SELECT duration_ms
-            FROM llm_request_traces
-            WHERE span_kind = 'CLIENT' AND duration_ms IS NOT NULL
+            FROM llm_trace_loops
+            WHERE duration_ms IS NOT NULL
             ORDER BY duration_ms ASC
             ",
         )?;

@@ -70,6 +70,34 @@ impl AiaStore {
                     total_cached_tokens INTEGER NOT NULL DEFAULT 0,
                     updated_at_ms INTEGER NOT NULL DEFAULT 0
                 );
+
+                CREATE TABLE IF NOT EXISTS llm_trace_loops (
+                    id TEXT PRIMARY KEY,
+                    trace_id TEXT NOT NULL,
+                    request_kind TEXT NOT NULL,
+                    turn_id TEXT NOT NULL,
+                    run_id TEXT NOT NULL,
+                    root_span_id TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    protocol TEXT NOT NULL,
+                    endpoint_path TEXT NOT NULL,
+                    latest_started_at_ms INTEGER NOT NULL,
+                    started_at_ms INTEGER NOT NULL,
+                    finished_at_ms INTEGER,
+                    duration_ms INTEGER,
+                    total_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_cached_tokens INTEGER NOT NULL DEFAULT 0,
+                    llm_span_count INTEGER NOT NULL DEFAULT 0,
+                    tool_span_count INTEGER NOT NULL DEFAULT 0,
+                    failed_tool_count INTEGER NOT NULL DEFAULT 0,
+                    final_status TEXT NOT NULL,
+                    user_message TEXT,
+                    latest_error TEXT,
+                    final_span_id TEXT,
+                    traces_json TEXT NOT NULL DEFAULT '[]'
+                );
+                CREATE INDEX IF NOT EXISTS idx_llm_trace_loops_request_kind_latest_started
+                    ON llm_trace_loops(request_kind, latest_started_at_ms DESC, trace_id DESC);
                 ",
             )?;
 

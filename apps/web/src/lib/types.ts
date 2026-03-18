@@ -236,6 +236,42 @@ export type ProviderListItem = {
   active: boolean
 }
 
+export type ChannelTransport = "feishu"
+
+export type ChannelListItem = {
+  id: string
+  name: string
+  transport: ChannelTransport
+  enabled: boolean
+  app_id: string
+  app_secret_set: boolean
+  base_url: string
+  require_mention: boolean
+  thread_mode: boolean
+}
+
+export type CreateChannelRequest = {
+  id: string
+  name: string
+  transport: ChannelTransport
+  enabled: boolean
+  app_id: string
+  app_secret: string
+  base_url: string
+  require_mention: boolean
+  thread_mode: boolean
+}
+
+export type UpdateChannelRequest = {
+  name?: string
+  enabled?: boolean
+  app_id?: string
+  app_secret?: string
+  base_url?: string
+  require_mention?: boolean
+  thread_mode?: boolean
+}
+
 export type TraceStatus = "succeeded" | "failed"
 export type TraceSpanKind = "CLIENT" | "INTERNAL"
 export type TraceEvent = {
@@ -271,16 +307,49 @@ export type TraceListItem = {
   error: string | null
 }
 
-export type TraceListPage = {
-  items: TraceListItem[]
+export type TraceLoopStatus = "completed" | "failed" | "partial"
+
+export type TraceLoopItem = {
+  id: string
+  trace_id: string
+  request_kind: string
+  turn_id: string
+  run_id: string
+  root_span_id: string
+  model: string
+  protocol: string
+  endpoint_path: string
+  latest_started_at_ms: number
+  started_at_ms: number
+  finished_at_ms: number | null
+  duration_ms: number | null
+  total_tokens: number
+  total_cached_tokens: number
+  llm_span_count: number
+  tool_span_count: number
+  failed_tool_count: number
+  final_status: TraceLoopStatus
+  user_message: string | null
+  latest_error: string | null
+  final_span_id: string | null
+  traces: TraceListItem[]
+}
+
+export type TraceLoopPage = {
+  items: TraceLoopItem[]
   total_items: number
   page: number
   page_size: number
 }
 
+export type TraceLoopDetail = {
+  loop_item: TraceLoopItem
+  trace_details: TraceRecord[]
+}
+
 export type TraceOverview = {
   summary: TraceSummary
-  page: TraceListPage
+  page: TraceLoopPage
 }
 
 export type TraceRecord = {
@@ -331,4 +400,6 @@ export type TraceSummary = {
   total_cached_tokens: number
 }
 
-export type AppView = "chat" | "settings" | "trace"
+export type TraceDetailResponse = TraceRecord | TraceLoopDetail
+
+export type AppView = "chat" | "settings" | "trace" | "channels"

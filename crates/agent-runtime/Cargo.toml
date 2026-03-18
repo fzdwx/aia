@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 aia-config = { path = "../aia-config" }
 agent-core = { path = "../agent-core" }
+agent-core-macros = { path = "../agent-core-macros" }
 agent-prompts = { path = "../agent-prompts" }
 session-tape = { path = "../session-tape" }
 async-trait = "0.1"

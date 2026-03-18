@@ -27,9 +27,7 @@ export function ChatMessages() {
   const previousTurnCountRef = useRef(0)
   const previousStreamingBlockCountRef = useRef(0)
   const shouldStickToBottomRef = useRef(true)
-  const restoreSessionScrollRef = useRef(false)
   const skipNextAutoScrollRef = useRef(false)
-  const scrollPositionsRef = useRef<Record<string, number>>({})
   const autoLoadingOlderTurnsRef = useRef(false)
   const historyHasMoreRef = useRef(historyHasMore)
   const historyLoadingMoreRef = useRef(historyLoadingMore)
@@ -67,9 +65,6 @@ export function ChatMessages() {
         const nextScrollHeight = nextContainer.scrollHeight
         nextContainer.scrollTop += nextScrollHeight - previousScrollHeight
         setScrollTop(nextContainer.scrollTop)
-        if (activeSessionId) {
-          scrollPositionsRef.current[activeSessionId] = nextContainer.scrollTop
-        }
         autoLoadingOlderTurnsRef.current = false
       })
     } catch {
@@ -92,9 +87,6 @@ export function ChatMessages() {
         container.scrollHeight - container.scrollTop - container.clientHeight
       shouldStickToBottomRef.current = distanceFromBottom < 120
       setScrollTop(container.scrollTop)
-      if (activeSessionId) {
-        scrollPositionsRef.current[activeSessionId] = container.scrollTop
-      }
     }
 
     const resizeObserver = new ResizeObserver(() => {
@@ -150,29 +142,21 @@ export function ChatMessages() {
     handleLoadOlderTurns,
   ])
 
-  useEffect(() => {
-    const previousSessionId = previousSessionIdRef.current
-    if (previousSessionId && previousSessionId !== activeSessionId) {
-      restoreSessionScrollRef.current = true
-      shouldStickToBottomRef.current = true
-      skipNextAutoScrollRef.current = false
-    }
-  }, [activeSessionId])
-
   useLayoutEffect(() => {
     const container = containerRef.current
     if (!container) return
 
-    if (restoreSessionScrollRef.current) {
+    const currentStreamingBlockCount = streamingTurn?.blocks.length ?? 0
+    const sessionChanged = previousSessionIdRef.current !== activeSessionId
+
+    if (sessionChanged) {
+      shouldStickToBottomRef.current = true
+      skipNextAutoScrollRef.current = false
       container.scrollTop = container.scrollHeight
       setScrollTop(container.scrollTop)
-      if (activeSessionId) {
-        scrollPositionsRef.current[activeSessionId] = container.scrollTop
-      }
-      restoreSessionScrollRef.current = false
       previousSessionIdRef.current = activeSessionId
       previousTurnCountRef.current = turns.length
-      previousStreamingBlockCountRef.current = streamingTurn?.blocks.length ?? 0
+      previousStreamingBlockCountRef.current = currentStreamingBlockCount
       return
     }
 
@@ -180,12 +164,10 @@ export function ChatMessages() {
       skipNextAutoScrollRef.current = false
       previousSessionIdRef.current = activeSessionId
       previousTurnCountRef.current = turns.length
-      previousStreamingBlockCountRef.current = streamingTurn?.blocks.length ?? 0
+      previousStreamingBlockCountRef.current = currentStreamingBlockCount
       return
     }
 
-    const currentStreamingBlockCount = streamingTurn?.blocks.length ?? 0
-    const sessionChanged = previousSessionIdRef.current !== activeSessionId
     const hydratedManyTurns = turns.length > previousTurnCountRef.current + 1
     const hydratedStreamingSnapshot =
       currentStreamingBlockCount > previousStreamingBlockCountRef.current + 1

@@ -930,6 +930,78 @@ describe("chat store submitTurn", () => {
     globalThis.fetch = originalFetchImpl
   })
 
+  test("session_deleted for active session swaps visible messages to next session snapshot", () => {
+    useChatStore.setState({
+      activeSessionId: "session-1",
+      sessions: [
+        {
+          id: "session-1",
+          title: "当前会话",
+          created_at: "2026-03-17T00:00:00Z",
+          updated_at: "2026-03-17T00:00:00Z",
+          model: "gpt-4.1-mini",
+        },
+        {
+          id: "session-2",
+          title: "下一个会话",
+          created_at: "2026-03-17T00:01:00Z",
+          updated_at: "2026-03-17T00:01:00Z",
+          model: "gpt-4.1-mini",
+        },
+      ],
+      turns: [
+        {
+          turn_id: "turn-session-1",
+          started_at_ms: 1,
+          finished_at_ms: 2,
+          source_entry_ids: [1],
+          user_message: "当前会话问题",
+          blocks: [{ kind: "assistant", content: "当前会话答案" }],
+          assistant_message: "当前会话答案",
+          thinking: null,
+          tool_invocations: [],
+          usage: null,
+          failure_message: null,
+          outcome: "succeeded",
+        },
+      ],
+      streamingTurn: null,
+      _sessionSnapshots: {
+        "session-2": {
+          latestTurn: {
+            turn_id: "turn-session-2",
+            started_at_ms: 10,
+            finished_at_ms: 20,
+            source_entry_ids: [2],
+            user_message: "下一个会话问题",
+            blocks: [{ kind: "assistant", content: "下一个会话答案" }],
+            assistant_message: "下一个会话答案",
+            thinking: null,
+            tool_invocations: [],
+            usage: null,
+            failure_message: null,
+            outcome: "succeeded",
+          },
+          streamingTurn: null,
+          chatState: "idle",
+          contextPressure: 0.2,
+          lastCompression: null,
+        },
+      },
+    })
+
+    useChatStore.getState().handleSseEvent({
+      type: "session_deleted",
+      data: { session_id: "session-1" },
+    })
+
+    const state = useChatStore.getState()
+    expect(state.activeSessionId).toBe("session-2")
+    expect(state.turns).toHaveLength(1)
+    expect(state.turns[0]?.turn_id).toBe("turn-session-2")
+    expect(state.chatState).toBe("idle")
+  })
+
   test("loadOlderTurns prepends history without dropping existing turns", async () => {
     const originalFetchImpl = globalThis.fetch
 

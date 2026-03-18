@@ -1,4 +1,6 @@
 import type {
+  ChannelListItem,
+  CreateChannelRequest,
   CurrentTurnSnapshot,
   HistoryPage,
   ModelConfig,
@@ -6,10 +8,10 @@ import type {
   ProviderListItem,
   SessionListItem,
   SseEvent,
-  TraceListPage,
+  TraceDetailResponse,
   TraceOverview,
-  TraceRecord,
   TraceSummary,
+  UpdateChannelRequest,
 } from "./types"
 
 export type ContextStats = {
@@ -124,26 +126,16 @@ export async function listProviders(): Promise<ProviderListItem[]> {
   return (await res.json()) as Promise<ProviderListItem[]>
 }
 
-export async function fetchTraces(params?: {
-  page?: number
-  page_size?: number
-  request_kind?: string
-}): Promise<TraceListPage> {
-  const search = new URLSearchParams()
-  if (params?.page != null) search.set("page", String(params.page))
-  if (params?.page_size != null)
-    search.set("page_size", String(params.page_size))
-  if (params?.request_kind) search.set("request_kind", params.request_kind)
-  const query = search.size > 0 ? `?${search.toString()}` : ""
-  const res = await fetch(`/api/traces${query}`)
-  if (!res.ok) throw new Error(`GET /api/traces failed: ${res.status}`)
-  return (await res.json()) as Promise<TraceListPage>
+export async function listChannels(): Promise<ChannelListItem[]> {
+  const res = await fetch("/api/channels")
+  if (!res.ok) throw new Error(`GET /api/channels failed: ${res.status}`)
+  return (await res.json()) as Promise<ChannelListItem[]>
 }
 
-export async function fetchTrace(id: string): Promise<TraceRecord> {
+export async function fetchTrace(id: string): Promise<TraceDetailResponse> {
   const res = await fetch(`/api/traces/${encodeURIComponent(id)}`)
   if (!res.ok) throw new Error(`GET /api/traces/${id} failed: ${res.status}`)
-  return (await res.json()) as Promise<TraceRecord>
+  return (await res.json()) as Promise<TraceDetailResponse>
 }
 
 export async function fetchTraceSummary(params?: {
@@ -189,6 +181,15 @@ export async function createProvider(body: {
   if (!res.ok) throw new Error(`POST /api/providers failed: ${res.status}`)
 }
 
+export async function createChannel(body: CreateChannelRequest): Promise<void> {
+  const res = await fetch("/api/channels", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(`POST /api/channels failed: ${res.status}`)
+}
+
 export async function updateProvider(
   name: string,
   body: {
@@ -208,12 +209,32 @@ export async function updateProvider(
     throw new Error(`PUT /api/providers/${name} failed: ${res.status}`)
 }
 
+export async function updateChannel(
+  id: string,
+  body: UpdateChannelRequest
+): Promise<void> {
+  const res = await fetch(`/api/channels/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(`PUT /api/channels/${id} failed: ${res.status}`)
+}
+
 export async function deleteProvider(name: string): Promise<void> {
   const res = await fetch(`/api/providers/${encodeURIComponent(name)}`, {
     method: "DELETE",
   })
   if (!res.ok)
     throw new Error(`DELETE /api/providers/${name} failed: ${res.status}`)
+}
+
+export async function deleteChannel(id: string): Promise<void> {
+  const res = await fetch(`/api/channels/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  })
+  if (!res.ok)
+    throw new Error(`DELETE /api/channels/${id} failed: ${res.status}`)
 }
 
 export async function switchProvider(

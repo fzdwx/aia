@@ -11,11 +11,13 @@ agent-prompts = { path = "../../crates/agent-prompts" }
 agent-runtime = { path = "../../crates/agent-runtime" }
 builtin-tools = { path = "../../crates/builtin-tools" }
 agent-store = { path = "../../crates/agent-store" }
+channel-registry = { path = "../../crates/channel-registry" }
 openai-adapter = { path = "../../crates/openai-adapter" }
 provider-registry = { path = "../../crates/provider-registry" }
 session-tape = { path = "../../crates/session-tape" }
 async-trait = "0.1"
 axum = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 tower-http = { version = "0.6", features = ["cors"] }

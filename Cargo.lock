@@ -38,6 +38,7 @@ name = "agent-runtime"
 version = "0.1.0"
 dependencies = [
  "agent-core",
+ "agent-core-macros",
  "agent-prompts",
  "aia-config",
  "async-trait",
@@ -60,8 +61,10 @@ dependencies = [
  "async-trait",
  "axum",
  "builtin-tools",
+ "channel-registry",
  "openai-adapter",
  "provider-registry",
+ "reqwest",
  "serde",
  "serde_json",
  "session-tape",
@@ -429,6 +432,7 @@ name = "builtin-tools"
 version = "0.1.0"
 dependencies = [
  "agent-core",
+ "agent-core-macros",
  "agent-prompts",
  "async-trait",
  "brush-builtins",
@@ -508,6 +512,15 @@ name = "cfg_aliases"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
+
+[[package]]
+name = "channel-registry"
+version = "0.1.0"
+dependencies = [
+ "aia-config",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "chrono"
@@ -1659,6 +1672,7 @@ name = "openai-adapter"
 version = "0.1.0"
 dependencies = [
  "agent-core",
+ "agent-core-macros",
  "async-trait",
  "futures-util",
  "reqwest",

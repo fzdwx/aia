@@ -25,9 +25,9 @@ pub(crate) async fn list_traces(
 
     let result = match query.request_kind.as_deref() {
         Some(request_kind) => {
-            state.store.list_page_by_request_kind_async(page_size, offset, request_kind).await
+            state.store.list_loop_page_by_request_kind_async(page_size, offset, request_kind).await
         }
-        None => state.store.list_page_async(page_size, offset).await,
+        None => state.store.list_loop_page_async(page_size, offset).await,
     };
 
     match result {
@@ -41,9 +41,15 @@ pub(crate) async fn get_trace(
     Path(id): Path<String>,
 ) -> JsonResponse {
     let missing_id = id.clone();
-    match state.store.get_async(id).await {
-        Ok(Some(trace)) => json_response(StatusCode::OK, trace),
-        Ok(None) => error_response(StatusCode::NOT_FOUND, format!("trace 不存在：{missing_id}")),
+    match state.store.get_loop_async(id.clone()).await {
+        Ok(Some(loop_detail)) => json_response(StatusCode::OK, loop_detail),
+        Ok(None) => match state.store.get_async(id).await {
+            Ok(Some(trace)) => json_response(StatusCode::OK, trace),
+            Ok(None) => {
+                error_response(StatusCode::NOT_FOUND, format!("trace 不存在：{missing_id}"))
+            }
+            Err(error) => trace_store_error_response(error),
+        },
         Err(error) => trace_store_error_response(error),
     }
 }

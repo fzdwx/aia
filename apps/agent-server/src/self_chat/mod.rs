@@ -10,7 +10,9 @@ use crate::{bootstrap::ServerInitError, state::AppState};
 
 use self::commands::{SelfCommand, parse_self_command, print_help};
 use self::prompt::{build_self_session_title, load_self_prompt};
-use self::session::{print_session_status, run_handoff, run_manual_compress, submit_prompt_and_wait};
+use self::session::{
+    print_session_status, run_handoff, run_manual_compress, submit_prompt_and_wait,
+};
 
 pub async fn run_self_chat(state: Arc<AppState>) -> Result<(), ServerInitError> {
     let self_prompt = load_self_prompt().await?;

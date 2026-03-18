@@ -8,8 +8,9 @@ use std::{
 use agent_core::{
     AbortSignal, CompletionRequest, CompletionSegment, CompletionStopReason, ConversationItem,
     LanguageModel, Message, ModelDisposition, ModelIdentity, PromptCacheConfig,
-    PromptCacheRetention, Role, StreamEvent, ToolArgsSchema, ToolCall, ToolDefinition, ToolResult,
+    PromptCacheRetention, Role, StreamEvent, ToolCall, ToolDefinition, ToolResult,
 };
+use agent_core_macros::ToolArgsSchema as DeriveToolArgsSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -40,7 +41,7 @@ fn sample_request() -> CompletionRequest {
     }
 }
 
-#[derive(Serialize, Deserialize, ToolArgsSchema)]
+#[derive(Serialize, Deserialize, DeriveToolArgsSchema)]
 #[serde(deny_unknown_fields)]
 struct SearchToolArgs {
     #[tool_schema(description = "要搜索的关键字")]

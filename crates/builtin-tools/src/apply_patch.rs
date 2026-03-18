@@ -1,7 +1,7 @@
 use agent_core::{
-    CoreError, Tool, ToolArgsSchema, ToolCall, ToolDefinition, ToolExecutionContext,
-    ToolOutputDelta, ToolResult,
+    CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
+use agent_core_macros::ToolArgsSchema as DeriveToolArgsSchema;
 use agent_prompts::tool_descriptions::apply_patch_tool_description;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -17,7 +17,7 @@ const NO_NEWLINE_MARKER: &str = r"\ No newline at end of file";
 
 pub struct ApplyPatchTool;
 
-#[derive(Serialize, Deserialize, ToolArgsSchema)]
+#[derive(Serialize, Deserialize, DeriveToolArgsSchema)]
 #[serde(deny_unknown_fields)]
 #[tool_schema(min_properties = 1)]
 pub(crate) struct ApplyPatchToolArgs {

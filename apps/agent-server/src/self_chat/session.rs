@@ -105,7 +105,9 @@ async fn drain_session_events(
                 SsePayload::Status { session_id: current, status } if current == session_id => {
                     render_status(status, streamed_text)?;
                 }
-                SsePayload::TurnCompleted { session_id: current, turn } if current == session_id => {
+                SsePayload::TurnCompleted { session_id: current, turn }
+                    if current == session_id =>
+                {
                     if !streamed_text
                         && let Some(message) = turn.assistant_message.as_deref()
                         && !message.is_empty()
@@ -185,23 +187,14 @@ fn render_stream_event(
             }
             println!("[tool:start] {tool_name} #{invocation_id} {arguments}");
         }
-        StreamEvent::ToolOutputDelta {
-            invocation_id,
-            stream,
-            text,
-        } => {
+        StreamEvent::ToolOutputDelta { invocation_id, stream, text } => {
             if *streamed_text {
                 println!();
                 *streamed_text = false;
             }
             println!("[tool:{stream:?}] #{invocation_id} {text}");
         }
-        StreamEvent::ToolCallCompleted {
-            invocation_id,
-            tool_name,
-            failed,
-            ..
-        } => {
+        StreamEvent::ToolCallCompleted { invocation_id, tool_name, failed, .. } => {
             if *streamed_text {
                 println!();
                 *streamed_text = false;

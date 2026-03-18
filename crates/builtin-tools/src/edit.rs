@@ -1,7 +1,7 @@
 use agent_core::{
-    CoreError, Tool, ToolArgsSchema, ToolCall, ToolDefinition, ToolExecutionContext,
-    ToolOutputDelta, ToolResult,
+    CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
+use agent_core_macros::ToolArgsSchema as DeriveToolArgsSchema;
 use agent_prompts::tool_descriptions::edit_tool_description;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,7 @@ fn build_edit_diff(old_string: &str, new_string: &str) -> String {
     removed.chain(added).collect::<Vec<_>>().join("\n")
 }
 
-#[derive(Serialize, Deserialize, ToolArgsSchema)]
+#[derive(Serialize, Deserialize, DeriveToolArgsSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct EditToolArgs {
     #[tool_schema(description = "Path to the file to edit")]

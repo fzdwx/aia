@@ -56,6 +56,7 @@ this repository currently runs as a library-first rust workspace with a web-firs
 `apps/web` is no longer a placeholder. it now contains the main workbench UI for:
 
 - provider management
+- channel management (currently Feishu only)
 - session list and history hydration
 - streaming assistant / thinking / tool output rendering
 - current turn recovery and cancellation

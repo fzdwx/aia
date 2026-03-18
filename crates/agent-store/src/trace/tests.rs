@@ -54,15 +54,6 @@ fn store_records_round_trip_and_summary() {
     let loaded = store.get("trace-1").expect("query should succeed").expect("trace exists");
     assert_eq!(loaded, record);
 
-    let list = store.list(10).expect("list should succeed");
-    assert_eq!(list.len(), 1);
-    assert_eq!(list[0].id, "trace-1");
-    assert_eq!(list[0].status, LlmTraceStatus::Succeeded);
-    assert_eq!(list[0].stop_reason.as_deref(), Some("stop"));
-    assert_eq!(list[0].total_tokens, Some(18));
-    assert_eq!(list[0].cached_tokens, Some(4));
-    assert_eq!(list[0].user_message, None);
-
     let summary = store.summary().expect("summary should succeed");
     assert_eq!(summary.total_requests, 1);
     assert_eq!(summary.failed_requests, 0);
@@ -128,230 +119,63 @@ fn trace_operations_recover_after_poisoned_mutex() {
     assert_eq!(summary.total_requests, 1);
 }
 
-#[test]
-fn list_extracts_user_message_from_chat_completions_request() {
-    let store = AiaStore::in_memory().expect("store should initialize");
-    store
-        .record(&LlmTraceRecord {
-            id: "trace-chat".into(),
-            trace_id: "trace-chat-group".into(),
-            span_id: "trace-chat".into(),
-            parent_span_id: Some("trace-chat-root".into()),
-            root_span_id: "trace-chat-root".into(),
-            operation_name: "chat".into(),
-            span_kind: LlmTraceSpanKind::Client,
-            turn_id: "turn-chat".into(),
-            run_id: "turn-chat".into(),
-            request_kind: "completion".into(),
-            step_index: 0,
-            provider: "openai".into(),
-            protocol: "openai-chat-completions".into(),
-            model: "gpt-5.4".into(),
-            base_url: "https://api.example.com".into(),
-            endpoint_path: "/chat/completions".into(),
-            streaming: false,
-            started_at_ms: 100,
-            finished_at_ms: Some(180),
-            duration_ms: Some(80),
-            status_code: Some(200),
-            status: LlmTraceStatus::Succeeded,
-            stop_reason: Some("stop".into()),
-            error: None,
-            request_summary: json!({
-                "user_message": "summarize this repo",
-            }),
-            provider_request: json!({
-                "messages": [
-                    {"role": "system", "content": "keep it short"},
-                    {"role": "user", "content": "summarize this repo"}
-                ]
-            }),
-            response_summary: json!({}),
-            response_body: None,
-            input_tokens: None,
-            output_tokens: None,
-            total_tokens: None,
-            cached_tokens: None,
-            otel_attributes: json!({"gen_ai.operation.name": "chat"}),
-            events: vec![],
-        })
-        .expect("record should persist");
+#[tokio::test(flavor = "current_thread")]
+async fn overview_returns_loop_page_instead_of_single_spans() {
+    let store = Arc::new(AiaStore::in_memory().expect("store should initialize"));
 
-    let list = store.list(10).expect("list should succeed");
-    assert_eq!(list[0].user_message.as_deref(), Some("summarize this repo"));
-}
-
-#[test]
-fn list_extracts_user_message_from_responses_request() {
-    let store = AiaStore::in_memory().expect("store should initialize");
-    store
-        .record(&LlmTraceRecord {
-            id: "trace-responses".into(),
-            trace_id: "trace-responses-group".into(),
-            span_id: "trace-responses".into(),
-            parent_span_id: Some("trace-responses-root".into()),
-            root_span_id: "trace-responses-root".into(),
-            operation_name: "chat".into(),
-            span_kind: LlmTraceSpanKind::Client,
-            turn_id: "turn-responses".into(),
-            run_id: "turn-responses".into(),
-            request_kind: "completion".into(),
-            step_index: 0,
-            provider: "openai".into(),
-            protocol: "openai-responses".into(),
-            model: "gpt-5.4".into(),
-            base_url: "https://api.example.com".into(),
-            endpoint_path: "/responses".into(),
-            streaming: false,
-            started_at_ms: 100,
-            finished_at_ms: Some(180),
-            duration_ms: Some(80),
-            status_code: Some(200),
-            status: LlmTraceStatus::Succeeded,
-            stop_reason: Some("stop".into()),
-            error: None,
-            request_summary: json!({
-                "user_message": "explain the failing test",
-            }),
-            provider_request: json!({
-                "input": [
-                    {"role": "system", "content": "keep it short"},
-                    {"role": "user", "content": "explain the failing test"}
-                ]
-            }),
-            response_summary: json!({}),
-            response_body: None,
-            input_tokens: None,
-            output_tokens: None,
-            total_tokens: None,
-            cached_tokens: None,
-            otel_attributes: json!({"gen_ai.operation.name": "chat"}),
-            events: vec![],
-        })
-        .expect("record should persist");
-
-    let list = store.list(10).expect("list should succeed");
-    assert_eq!(list[0].user_message.as_deref(), Some("explain the failing test"));
-}
-
-#[test]
-fn list_page_prefers_request_summary_user_message() {
-    let store = AiaStore::in_memory().expect("store should initialize");
-    store
-        .record(&LlmTraceRecord {
-            id: "trace-summary-user-message".into(),
-            trace_id: "trace-summary-group".into(),
-            span_id: "trace-summary-user-message".into(),
-            parent_span_id: Some("trace-summary-root".into()),
-            root_span_id: "trace-summary-root".into(),
-            operation_name: "chat".into(),
-            span_kind: LlmTraceSpanKind::Client,
-            turn_id: "turn-summary".into(),
-            run_id: "turn-summary".into(),
-            request_kind: "completion".into(),
-            step_index: 0,
-            provider: "openai".into(),
-            protocol: "openai-responses".into(),
-            model: "gpt-5.4".into(),
-            base_url: "https://api.example.com".into(),
-            endpoint_path: "/responses".into(),
-            streaming: false,
-            started_at_ms: 100,
-            finished_at_ms: Some(180),
-            duration_ms: Some(80),
-            status_code: Some(200),
-            status: LlmTraceStatus::Succeeded,
-            stop_reason: Some("stop".into()),
-            error: None,
-            request_summary: json!({
-                "conversation_items": 8,
-                "user_message": "summary user message",
-            }),
-            provider_request: json!({
-                "input": [
-                    {"role": "system", "content": "keep it short"}
-                ]
-            }),
-            response_summary: json!({}),
-            response_body: None,
-            input_tokens: None,
-            output_tokens: None,
-            total_tokens: None,
-            cached_tokens: None,
-            otel_attributes: json!({"gen_ai.operation.name": "chat"}),
-            events: vec![],
-        })
-        .expect("record should persist");
-
-    let page = store.list_page(10, 0).expect("page query should succeed");
-    assert_eq!(page.items.len(), 1);
-    assert_eq!(page.items[0].user_message.as_deref(), Some("summary user message"));
-}
-
-#[test]
-fn list_page_paginates_by_returned_items() {
-    let store = AiaStore::in_memory().expect("store should initialize");
-
-    for (loop_index, started_at_ms) in [(1_u32, 300_u64), (2_u32, 200_u64), (3_u32, 100_u64)] {
-        for step_index in 0..2_u32 {
-            store
-                .record(&LlmTraceRecord {
-                    id: format!("trace-{loop_index}-{step_index}"),
-                    trace_id: format!("loop-{loop_index}"),
-                    span_id: format!("span-{loop_index}-{step_index}"),
-                    parent_span_id: Some(format!("root-{loop_index}")),
-                    root_span_id: format!("root-{loop_index}"),
-                    operation_name: "chat".into(),
-                    span_kind: LlmTraceSpanKind::Client,
-                    turn_id: format!("turn-{loop_index}"),
-                    run_id: format!("run-{loop_index}"),
-                    request_kind: "completion".into(),
-                    step_index,
-                    provider: "openai".into(),
-                    protocol: "openai-responses".into(),
-                    model: "gpt-5".into(),
-                    base_url: "https://api.example.com".into(),
-                    endpoint_path: "/responses".into(),
-                    streaming: false,
-                    started_at_ms: started_at_ms + u64::from(step_index),
-                    finished_at_ms: Some(started_at_ms + u64::from(step_index) + 10),
-                    duration_ms: Some(10),
-                    status_code: Some(200),
-                    status: LlmTraceStatus::Succeeded,
-                    stop_reason: Some("stop".into()),
-                    error: None,
-                    request_summary: json!({}),
-                    provider_request: json!({
-                        "input": [{"role": "user", "content": format!("message {loop_index}")}]
-                    }),
-                    response_summary: json!({}),
-                    response_body: None,
-                    input_tokens: None,
-                    output_tokens: None,
-                    total_tokens: None,
-                    cached_tokens: None,
-                    otel_attributes: json!({}),
-                    events: vec![],
-                })
-                .expect("record should persist");
-        }
+    for step_index in 0..2_u32 {
+        store
+            .record_async(LlmTraceRecord {
+                id: format!("trace-step-{step_index}"),
+                trace_id: "loop-1".into(),
+                span_id: format!("span-step-{step_index}"),
+                parent_span_id: Some("root-1".into()),
+                root_span_id: "root-1".into(),
+                operation_name: "chat".into(),
+                span_kind: LlmTraceSpanKind::Client,
+                turn_id: "turn-1".into(),
+                run_id: "turn-1".into(),
+                request_kind: "completion".into(),
+                step_index,
+                provider: "openai".into(),
+                protocol: "openai-responses".into(),
+                model: "gpt-5.4".into(),
+                base_url: "https://api.example.com".into(),
+                endpoint_path: "/responses".into(),
+                streaming: false,
+                started_at_ms: 100 + u64::from(step_index) * 10,
+                finished_at_ms: Some(105 + u64::from(step_index) * 10),
+                duration_ms: Some(5),
+                status_code: Some(200),
+                status: LlmTraceStatus::Succeeded,
+                stop_reason: Some("stop".into()),
+                error: None,
+                request_summary: json!({"user_message": "hello loop"}),
+                provider_request: json!({}),
+                response_summary: json!({}),
+                response_body: None,
+                input_tokens: Some(10),
+                output_tokens: Some(5),
+                total_tokens: Some(15),
+                cached_tokens: Some(1),
+                otel_attributes: json!({}),
+                events: vec![],
+            })
+            .await
+            .expect("record async");
     }
 
-    let first_page = store.list_page(2, 0).expect("page query should succeed");
-    assert_eq!(first_page.total_items, 6);
-    assert_eq!(first_page.page, 1);
-    assert_eq!(first_page.page_size, 2);
-    assert_eq!(first_page.items.len(), 2);
-    assert_eq!(first_page.items[0].trace_id, "loop-1");
-    assert_eq!(first_page.items[1].trace_id, "loop-1");
+    let overview =
+        store.overview_by_request_kind_async(10, 0, "completion").await.expect("overview async");
 
-    let second_page = store.list_page(2, 2).expect("page query should succeed");
-    assert_eq!(second_page.total_items, 6);
-    assert_eq!(second_page.page, 2);
-    assert_eq!(second_page.page_size, 2);
-    assert_eq!(second_page.items.len(), 2);
-    assert_eq!(second_page.items[0].trace_id, "loop-2");
-    assert_eq!(second_page.items[1].trace_id, "loop-2");
+    assert_eq!(overview.summary.total_requests, 1);
+    assert_eq!(overview.summary.total_tokens, 30);
+    assert_eq!(overview.page.total_items, 1);
+    assert_eq!(overview.page.items.len(), 1);
+    assert_eq!(overview.page.items[0].trace_id, "loop-1");
+    assert_eq!(overview.page.items[0].llm_span_count, 2);
+    assert_eq!(overview.page.items[0].traces.len(), 2);
+    assert_eq!(overview.page.items[0].total_tokens, 30);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -396,7 +220,7 @@ async fn async_trace_methods_work() {
 
     store.record_async(record.clone()).await.expect("record async");
 
-    let page = store.list_page_async(10, 0).await.expect("list page async");
+    let page = store.list_loop_page_async(10, 0).await.expect("list loop page async");
     assert_eq!(page.items.len(), 1);
 
     let loaded = store.get_async("trace-async").await.expect("get async").expect("trace exists");
@@ -469,7 +293,7 @@ async fn async_trace_filters_can_separate_compression_logs() {
     }
 
     let compression_page = store
-        .list_page_by_request_kind_async(10, 0, "compression")
+        .list_loop_page_by_request_kind_async(10, 0, "compression")
         .await
         .expect("compression page async");
     assert_eq!(compression_page.total_items, 1);
@@ -477,7 +301,7 @@ async fn async_trace_filters_can_separate_compression_logs() {
     assert_eq!(compression_page.items[0].request_kind, "compression");
 
     let conversation_page = store
-        .list_page_by_request_kind_async(10, 0, "completion")
+        .list_loop_page_by_request_kind_async(10, 0, "completion")
         .await
         .expect("conversation page async");
     assert_eq!(conversation_page.total_items, 1);

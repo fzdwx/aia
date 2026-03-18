@@ -1,10 +1,10 @@
 use std::sync::{Arc, Mutex};
 
 use agent_core::{
-    CoreError, LanguageModel, RuntimeToolContext, RuntimeToolContextStats, Tool, ToolArgsSchema,
-    ToolCall, ToolDefinition, ToolExecutionContext, ToolExecutor, ToolOutputDelta, ToolRegistry,
-    ToolResult,
+    CoreError, LanguageModel, RuntimeToolContext, RuntimeToolContextStats, Tool, ToolCall,
+    ToolDefinition, ToolExecutionContext, ToolExecutor, ToolOutputDelta, ToolRegistry, ToolResult,
 };
+use agent_core_macros::ToolArgsSchema as DeriveToolArgsSchema;
 use agent_prompts::tool_descriptions::{tape_handoff_tool_description, tape_info_tool_description};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -80,7 +80,7 @@ impl RuntimeToolContext for RuntimeToolContextBridge {
 
 struct TapeInfoTool;
 
-#[derive(Serialize, Deserialize, ToolArgsSchema)]
+#[derive(Serialize, Deserialize, DeriveToolArgsSchema)]
 #[serde(deny_unknown_fields)]
 struct TapeInfoToolArgs {}
 
@@ -124,7 +124,7 @@ impl Tool for TapeInfoTool {
 
 struct TapeHandoffTool;
 
-#[derive(Serialize, Deserialize, ToolArgsSchema)]
+#[derive(Serialize, Deserialize, DeriveToolArgsSchema)]
 #[serde(deny_unknown_fields)]
 struct TapeHandoffToolArgs {
     #[tool_schema(description = "A concise summary of the conversation so far to carry forward.")]

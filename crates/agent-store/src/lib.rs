@@ -1,3 +1,4 @@
+mod channel;
 mod session;
 mod trace;
 
@@ -6,10 +7,14 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use rusqlite::Connection;
 
+pub use channel::{
+    ChannelMessageReceipt, ChannelSessionBinding, ExternalConversationKey, FeishuMessageTarget,
+};
 pub use session::{SessionRecord, generate_session_id, iso8601_now};
 pub use trace::{
-    LlmTraceEvent, LlmTraceListItem, LlmTraceListPage, LlmTraceOverview, LlmTraceRecord,
-    LlmTraceSpanKind, LlmTraceStatus, LlmTraceStore, LlmTraceSummary,
+    LlmTraceEvent, LlmTraceListItem, LlmTraceLoopDetail, LlmTraceLoopItem, LlmTraceLoopPage,
+    LlmTraceLoopStatus, LlmTraceOverview, LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus,
+    LlmTraceStore, LlmTraceSummary,
 };
 
 #[derive(Debug)]
@@ -62,6 +67,7 @@ impl AiaStore {
         }
         let conn = Connection::open(path).map_err(AiaStoreError::from)?;
         let store = Self { conn: Mutex::new(conn) };
+        store.init_channel_schema()?;
         store.init_trace_schema()?;
         store.init_session_schema()?;
         Ok(store)
@@ -70,6 +76,7 @@ impl AiaStore {
     pub fn in_memory() -> Result<Self, AiaStoreError> {
         let conn = Connection::open_in_memory().map_err(AiaStoreError::from)?;
         let store = Self { conn: Mutex::new(conn) };
+        store.init_channel_schema()?;
         store.init_trace_schema()?;
         store.init_session_schema()?;
         Ok(store)

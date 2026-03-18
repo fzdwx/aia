@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 pub const AIA_DIR_NAME: &str = ".aia";
+pub const CHANNELS_FILE_NAME: &str = "channels.json";
 pub const PROVIDERS_FILE_NAME: &str = "providers.json";
 pub const SESSION_TAPE_FILE_NAME: &str = "session.jsonl";
 pub const STORE_FILE_NAME: &str = "store.sqlite3";
@@ -12,6 +13,10 @@ pub fn aia_dir_path() -> PathBuf {
 
 pub fn default_registry_path() -> PathBuf {
     aia_dir_path().join(PROVIDERS_FILE_NAME)
+}
+
+pub fn default_channels_path() -> PathBuf {
+    aia_dir_path().join(CHANNELS_FILE_NAME)
 }
 
 pub fn default_session_tape_path() -> PathBuf {
@@ -32,4 +37,8 @@ pub fn sessions_dir_from_registry_path(registry_path: &Path) -> PathBuf {
 
 pub fn store_path_from_registry_path(registry_path: &Path) -> PathBuf {
     registry_path.parent().unwrap_or_else(|| Path::new(".")).join(STORE_FILE_NAME)
+}
+
+pub fn channels_path_from_registry_path(registry_path: &Path) -> PathBuf {
+    registry_path.parent().unwrap_or_else(|| Path::new(".")).join(CHANNELS_FILE_NAME)
 }

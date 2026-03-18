@@ -137,28 +137,81 @@ pub struct LlmTraceSummary {
     pub total_cached_tokens: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LlmTraceLoopStatus {
+    Completed,
+    Failed,
+    Partial,
+}
+
+impl LlmTraceLoopStatus {
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Partial => "partial",
+        }
+    }
+
+    pub(crate) fn from_str(value: &str) -> Self {
+        match value {
+            "failed" => Self::Failed,
+            "partial" => Self::Partial,
+            _ => Self::Completed,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct LlmTraceListPage {
-    pub items: Vec<LlmTraceListItem>,
+pub struct LlmTraceLoopItem {
+    pub id: String,
+    pub trace_id: String,
+    pub request_kind: String,
+    pub turn_id: String,
+    pub run_id: String,
+    pub root_span_id: String,
+    pub model: String,
+    pub protocol: String,
+    pub endpoint_path: String,
+    pub latest_started_at_ms: u64,
+    pub started_at_ms: u64,
+    pub finished_at_ms: Option<u64>,
+    pub duration_ms: Option<u64>,
+    pub total_tokens: u64,
+    pub total_cached_tokens: u64,
+    pub llm_span_count: u32,
+    pub tool_span_count: u32,
+    pub failed_tool_count: u32,
+    pub final_status: LlmTraceLoopStatus,
+    pub user_message: Option<String>,
+    pub latest_error: Option<String>,
+    pub final_span_id: Option<String>,
+    pub traces: Vec<LlmTraceListItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LlmTraceLoopPage {
+    pub items: Vec<LlmTraceLoopItem>,
     pub total_items: u64,
     pub page: usize,
     pub page_size: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LlmTraceLoopDetail {
+    pub loop_item: LlmTraceLoopItem,
+    pub trace_details: Vec<LlmTraceRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LlmTraceOverview {
     pub summary: LlmTraceSummary,
-    pub page: LlmTraceListPage,
+    pub page: LlmTraceLoopPage,
 }
 
 pub trait LlmTraceStore: Send + Sync {
     fn record(&self, record: &LlmTraceRecord) -> Result<(), crate::AiaStoreError>;
-    fn list(&self, limit: usize) -> Result<Vec<LlmTraceListItem>, crate::AiaStoreError>;
-    fn list_page(
-        &self,
-        limit: usize,
-        offset: usize,
-    ) -> Result<LlmTraceListPage, crate::AiaStoreError>;
     fn get(&self, id: &str) -> Result<Option<LlmTraceRecord>, crate::AiaStoreError>;
     fn summary(&self) -> Result<LlmTraceSummary, crate::AiaStoreError>;
 }

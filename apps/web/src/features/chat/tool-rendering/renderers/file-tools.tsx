@@ -6,7 +6,6 @@ import {
   createMetaBadge,
   getNumberValue,
   getStringValue,
-  truncateInline,
 } from "../helpers"
 import { ExpandableOutput, ToolDetailSection } from "../ui"
 
@@ -80,10 +79,6 @@ export function createEditRenderer(): ToolRenderer {
   return {
     matches: (toolName) => toolName === "edit",
     renderTitle(data) {
-      if (!data.succeeded) {
-        return truncateInline(data.outputContent, 88)
-      }
-
       const args = normalizeToolArguments(data.arguments)
       const path = getToolDisplayPath(data.toolName, data.details, args)
       return compactPath(path, 64)

@@ -41,8 +41,9 @@
 ### 已完成
 
 - Rust 工作区骨架已建立
-- 共享核心库边界已拆分为 `aia-config`、`agent-core`、`session-tape`、`agent-runtime`、`provider-registry`、`openai-adapter`、`agent-store`
+- 共享核心库边界已拆分为 `aia-config`、`agent-core`、`session-tape`、`agent-runtime`、`channel-registry`、`provider-registry`、`openai-adapter`、`agent-store`
 - `aia-config` 已承担跨 crate 复用的应用级路径、默认值、稳定标识与构造 helper
+- `channel-registry` 已承担外部 channel 静态配置与本地持久化
 - `provider-registry` 已承担本地 provider 管理与持久化
 - 首个真实模型适配库 `openai-adapter` 已建立，并已同时覆盖 Responses 与 OpenAI 兼容 Chat Completions 两条协议链路
 - `openai-adapter` 当前已改为原生 async `reqwest`：单次请求与流式 SSE 不再依赖 blocking client
@@ -58,10 +59,12 @@
 - 旧格式 JSONL 可兼容载入并自动转换为新扁平格式
 - `.aia/session.jsonl` 当前统一以扁平 `TapeEntry` JSONL 形式 append-only 落盘
 - provider 本地资料当前落盘在 `.aia/providers.json`
+- channel 本地资料当前落盘在 `.aia/channels.json`
 - 本地 SQLite 状态当前落盘在 `.aia/store.sqlite3`
 - provider 当前已具备协议级区分能力，可在同一地址 / 模型下区分 Responses 与 Chat Completions
 - `apps/web` 已建立为实际主工作台，而不是仅布局骨架
 - Web 客户端当前已接入 provider 管理、session 列表 / 历史 / 当前轮次恢复、流式消息展示、trace 诊断视图
+- Web 客户端当前也已接入飞书 channel 管理：列表、创建、编辑、删除与启停配置
 - 内建基础编码工具名已收口为 `shell`、`read`、`write`、`edit`、`glob`、`grep`，其中 `shell` 当前以内嵌 `brush` 库执行
 - `builtin-tools` 的 `shell` 已把输出聚合、abort 轮询与输出捕获改为 async 事件泵，长命令等待不再依赖同步 `recv_timeout` 循环，也不再依赖 `spawn_blocking` pipe reader 桥接
 - `builtin-tools` 的 `read` / `write` / `edit` 已切到 `tokio::fs`，`glob` / `grep` 也已改为共享的 async `.gitignore` 感知仓库遍历 + async 文件读取，不再依赖 `spawn_blocking` / `ignore::WalkBuilder`
@@ -72,6 +75,8 @@
 - Web 流式 turn 已与共享运行时失败语义对齐：当前轮失败会通过 SSE 发出错误事件，但不会直接结束整个交互会话
 - cached prompt usage 已贯通到 `completion.usage`、trace 存储、trace 汇总与 Web 聊天/诊断展示
 - `apps/agent-server` 当前由后台 runtime worker 独占运行时，provider / history / current-turn 读取走共享快照
+- `apps/agent-server` 当前已补齐 channel 控制面；飞书 channel 的目标接入模式明确为长连接，当前仓库里仍保留 webhook 过渡入口以维持主链可验证，但后续应收敛到单一长连接接入形态
+- `agent-store` 当前已承担外部 conversation → `session_id` 映射与 channel message receipt 幂等去重
 - `apps/agent-server` 的 turn 执行已去掉 `tokio::spawn_blocking`，session manager 与 turn worker 当前都由原生 Tokio async task 承载，不再依赖独立 current-thread Tokio worker thread
 - `apps/agent-server` 的 trace 查询路由已去掉 per-request `spawn_blocking` 包装，当前直接复用共享 SQLite store 读取路径
 - provider 变更已采用事务式提交：候选 registry 校验、registry 落盘、session tape 落盘全部成功后才更新内存 runtime / tape
@@ -92,6 +97,7 @@
 ### 下一阶段优先事项
 
 - 继续补强 stop/cancel 在不同 provider 与复杂 shell pipeline 下的实际覆盖率
+- 继续补强飞书 channel 的生产级接入细节，优先把当前过渡 webhook 入口收敛为正式长连接模式，并补齐更细的群聊权限策略
 - 继续把 runtime 驱动辅助从 `apps/agent-server` 上移到共享层
 - 在工具协议边界进一步收稳后，推进统一工具规范向外部协议映射与 MCP 接入
 - 在现有 Web / server 主路径稳定的前提下，继续补强 trace 数据模型与桌面壳复用基础

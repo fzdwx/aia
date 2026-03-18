@@ -2,9 +2,9 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_core::{
-    CoreError, Tool, ToolArgsSchema, ToolCall, ToolDefinition, ToolExecutionContext,
-    ToolOutputDelta, ToolResult,
+    CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
+use agent_core_macros::ToolArgsSchema as DeriveToolArgsSchema;
 use agent_prompts::tool_descriptions::glob_tool_description;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -27,7 +27,7 @@ enum GlobSearchOutcome {
     Cancelled,
 }
 
-#[derive(Serialize, Deserialize, ToolArgsSchema)]
+#[derive(Serialize, Deserialize, DeriveToolArgsSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct GlobToolArgs {
     #[tool_schema(description = "Glob pattern (e.g. **/*.rs)")]

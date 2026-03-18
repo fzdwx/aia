@@ -5,6 +5,7 @@
 ## 目标
 
 - 承接 provider 选择、创建、更新、删除与切换
+- 承接 channel（当前仅飞书）创建、更新、删除与启停配置
 - 承接 session 列表、历史水合、当前运行中轮次恢复
 - 承接输入发送、流式 thinking / tool output / assistant text 展示
 - 承接 trace loop / span 诊断视图
@@ -16,7 +17,7 @@
 - 已有 React + TypeScript + Tailwind 基础工程，并切换到 Vite+ 工作流
 - 当前使用 `pnpm` 作为锁文件来源，`packageManager` 已声明为 `pnpm`
 - 已接入 `shadcn` / 基础 UI 组件体系
-- 当前工作台已覆盖：左侧边栏、中央消息区、底部输入区、provider 管理、session 视图、trace 诊断视图
+- 当前工作台已覆盖：左侧边栏、中央消息区、底部输入区、provider 管理、channel 配置、session 视图、trace 诊断视图
 - 已支持流式状态累积、乐观消息渲染、会话历史分页与当前 turn 恢复
 - 已支持 stop/cancel 相关前端交互与 cancelled 状态展示
 - 已支持主题切换与本地主题状态同步

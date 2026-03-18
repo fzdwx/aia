@@ -1,5 +1,18 @@
 # 演进日志
 
+## 2026-03-18 Session 61
+
+**Diagnosis**：仓库已有统一的 `session_manager.submit_turn(...)` + SSE/runtime 主链，也已有 provider settings 模式，但还缺一条“外部聊天平台消息 → 现有会话主链”的稳定桥接层；如果直接把飞书协议细节塞进 `session_manager` 或只做前端配置页，都无法真正形成可复用的 channel 能力。
+**Decision**：按 library-first 原则先补共享配置与动态索引，再在 `apps/agent-server` 上做一层很薄的飞书 ingress bridge：新增 `channel-registry` 负责 `.aia/channels.json` 静态配置，`agent-store` 新增 channel 会话映射/幂等表，`agent-server` 先补 `/api/channels` 控制面与一个临时 `/api/channels/feishu/events` 过渡入口，把飞书文本消息复用到现有 `session_manager.submit_turn(...)` 路径，并在 Web 端补齐对应的 `Channels` 配置页。后续已明确要求应收敛到长连接模式，而不是长期保留 webhook。
+**Changes**：
+- `crates/channel-registry/src/{lib.rs,error.rs,model.rs,registry.rs,tests.rs}`、`Cargo.toml`、`crates/aia-config/src/{paths.rs,lib.rs}`：新增 channel 静态配置共享库与 `.aia/channels.json` 路径约定，当前首期只支持飞书 channel。
+- `crates/agent-store/src/{lib.rs,channel.rs}`：新增 `channel_session_bindings` 与 `channel_message_receipts`，承接外部会话键 → `session_id` 映射和按 `message_id` 幂等去重。
+- `apps/agent-server/src/{channel_runtime.rs,state.rs,bootstrap.rs,server.rs,routes.rs}`、`apps/agent-server/src/routes/{channel.rs,channel_event.rs,tests.rs}`、`apps/agent-server/Cargo.toml`：新增 `/api/channels` CRUD 与一个临时 `/api/channels/feishu/events` 过渡入口；飞书 bridge 负责消息解析、群聊 thread/p2p 会话键计算、SQLite 去重、session 自动创建、复用 `session_manager.submit_turn(...)` 并调用飞书 reply API 回发文本回复。
+- `apps/web/src/{lib/types.ts,lib/api.ts,stores/chat-store.ts,components/main-content.tsx,components/sidebar.tsx,components/channels-panel.tsx}`、`README.md`、`apps/web/README.md`、`docs/{architecture.md,requirements.md,status.md}`：补齐 `Channels` 视图、前端 CRUD 链路与文档边界说明。
+**Verification**：`cargo fmt --all`、`cargo check -p agent-server`、`cargo test -p channel-registry`、`cargo test -p agent-store`、`cargo test -p agent-server`、`cd apps/web && ./node_modules/.bin/tsc --noEmit`、`cd apps/web && ./node_modules/.bin/vp test src/stores/chat-store.test.ts`、`cd apps/web && ./node_modules/.bin/vp build` 通过；文件级 TypeScript LSP 诊断对本轮新增的 `channels-panel.tsx`、`api.ts`、`chat-store.ts` 为 0 错误。Rust 文件级 LSP 因环境里缺少 `rust-analyzer` 无法执行。
+**Commit**：未提交。
+**Next direction**：优先把当前过渡 webhook 入口替换为正式飞书长连接模式，并同步补齐更细的群聊权限策略（mention gate、可用范围、群白名单），避免同时长期维护两套协议入口。
+
 ## 2026-03-18 Session 60
 
 **Diagnosis**：`/api/traces/overview` 虽然表面接受 `page` / `page_size`，但实际分页单位是 `trace_id` loop，再把整组 span 全展开返回；这会让响应里的 `items` 数量明显超过 `page_size`，属于伪分页。同时 overview summary 仍每次现算，随着 trace 增长会持续放大单连接 SQLite 负担。

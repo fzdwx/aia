@@ -54,9 +54,7 @@ pub(crate) fn parse_self_command(input: &str) -> SelfCommand {
 }
 
 pub(crate) fn print_help() {
-    println!(
-        "[self] commands: /help, /exit, /quit, /status, /compress, /handoff <name> <summary>"
-    );
+    println!("[self] commands: /help, /exit, /quit, /status, /compress, /handoff <name> <summary>");
 }
 
 #[cfg(test)]

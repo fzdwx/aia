@@ -8,8 +8,9 @@ pub use identifiers::{
     build_root_span_id, build_tool_span_id, build_trace_id,
 };
 pub use paths::{
-    AIA_DIR_NAME, PROVIDERS_FILE_NAME, SESSION_TAPE_FILE_NAME, SESSIONS_DIR_NAME, STORE_FILE_NAME,
-    aia_dir_path, default_registry_path, default_session_tape_path, default_sessions_dir,
+    AIA_DIR_NAME, CHANNELS_FILE_NAME, PROVIDERS_FILE_NAME, SESSION_TAPE_FILE_NAME,
+    SESSIONS_DIR_NAME, STORE_FILE_NAME, aia_dir_path, channels_path_from_registry_path,
+    default_channels_path, default_registry_path, default_session_tape_path, default_sessions_dir,
     default_store_path, sessions_dir_from_registry_path, store_path_from_registry_path,
 };
 pub use server::{
@@ -22,19 +23,22 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{
-        AIA_DIR_NAME, APP_NAME, DEFAULT_SERVER_BASE_URL, DEFAULT_SERVER_BIND_ADDR,
-        DEFAULT_SERVER_EVENT_BUFFER, DEFAULT_SERVER_REQUEST_TIMEOUT_MS, DEFAULT_SESSION_TITLE,
-        PROMPT_CACHE_KEY_PREFIX, PROVIDERS_FILE_NAME, SESSION_TAPE_FILE_NAME, SESSIONS_DIR_NAME,
-        SPAN_ID_PREFIX, STORE_FILE_NAME, TRACE_ATTR_FIRST_REASONING_DELTA_MS,
-        TRACE_ATTR_FIRST_TEXT_DELTA_MS, TRACE_ID_PREFIX, aia_dir_path, build_prompt_cache_key,
-        build_request_span_id, build_root_span_id, build_tool_span_id, build_trace_id,
-        build_user_agent, default_registry_path, default_session_tape_path, default_sessions_dir,
-        default_store_path, sessions_dir_from_registry_path, store_path_from_registry_path,
+        AIA_DIR_NAME, APP_NAME, CHANNELS_FILE_NAME, DEFAULT_SERVER_BASE_URL,
+        DEFAULT_SERVER_BIND_ADDR, DEFAULT_SERVER_EVENT_BUFFER, DEFAULT_SERVER_REQUEST_TIMEOUT_MS,
+        DEFAULT_SESSION_TITLE, PROMPT_CACHE_KEY_PREFIX, PROVIDERS_FILE_NAME,
+        SESSION_TAPE_FILE_NAME, SESSIONS_DIR_NAME, SPAN_ID_PREFIX, STORE_FILE_NAME,
+        TRACE_ATTR_FIRST_REASONING_DELTA_MS, TRACE_ATTR_FIRST_TEXT_DELTA_MS, TRACE_ID_PREFIX,
+        aia_dir_path, build_prompt_cache_key, build_request_span_id, build_root_span_id,
+        build_tool_span_id, build_trace_id, build_user_agent, channels_path_from_registry_path,
+        default_channels_path, default_registry_path, default_session_tape_path,
+        default_sessions_dir, default_store_path, sessions_dir_from_registry_path,
+        store_path_from_registry_path,
     };
 
     #[test]
     fn default_paths_are_under_hidden_workspace_dir() {
         assert_eq!(aia_dir_path(), PathBuf::from(AIA_DIR_NAME));
+        assert_eq!(default_channels_path(), PathBuf::from(".aia/channels.json"));
         assert_eq!(default_registry_path(), PathBuf::from(".aia/providers.json"));
         assert_eq!(default_session_tape_path(), PathBuf::from(".aia/session.jsonl"));
         assert_eq!(default_store_path(), PathBuf::from(".aia/store.sqlite3"));
@@ -45,6 +49,7 @@ mod tests {
         assert_eq!(DEFAULT_SERVER_BASE_URL, "http://localhost:3434");
         assert_eq!(DEFAULT_SERVER_EVENT_BUFFER, 512);
         assert_eq!(DEFAULT_SERVER_REQUEST_TIMEOUT_MS, 300_000);
+        assert_eq!(CHANNELS_FILE_NAME, "channels.json");
         assert_eq!(PROVIDERS_FILE_NAME, "providers.json");
         assert_eq!(SESSION_TAPE_FILE_NAME, "session.jsonl");
         assert_eq!(STORE_FILE_NAME, "store.sqlite3");
@@ -66,6 +71,10 @@ mod tests {
         assert_eq!(
             store_path_from_registry_path(registry_path),
             PathBuf::from("/tmp/aia/.aia/store.sqlite3")
+        );
+        assert_eq!(
+            channels_path_from_registry_path(registry_path),
+            PathBuf::from("/tmp/aia/.aia/channels.json")
         );
     }
 

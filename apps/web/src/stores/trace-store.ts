@@ -1,6 +1,12 @@
 import { create } from "zustand"
 import { fetchTrace, fetchTraceOverview } from "@/lib/api"
-import type { TraceListItem, TraceRecord, TraceSummary } from "@/lib/types"
+import type {
+  TraceDetailResponse,
+  TraceLoopDetail,
+  TraceLoopItem,
+  TraceRecord,
+  TraceSummary,
+} from "@/lib/types"
 
 const TRACE_PAGE_SIZE = 12
 
@@ -13,20 +19,22 @@ function requestKindForView(view: TraceView) {
 let inflightOverviewKey: string | null = null
 let inflightOverviewPromise: Promise<{
   traceSummary: TraceSummary
-  traces: TraceListItem[]
+  traces: TraceLoopItem[]
   tracePage: number
   tracePageSize: number
   totalTraceItems: number
-}> | null = null
+}>
+ | null = null
 
 type TraceStore = {
-  traces: TraceListItem[]
+  traces: TraceLoopItem[]
   traceView: TraceView
   tracePage: number
   tracePageSize: number
   totalTraceItems: number
   selectedTraceId: string | null
   selectedTrace: TraceRecord | null
+  selectedLoop: TraceLoopDetail | null
   traceSummary: TraceSummary | null
   traceLoading: boolean
   traceError: string | null
@@ -47,6 +55,7 @@ export const useTraceStore = create<TraceStore>((set, get) => ({
   totalTraceItems: 0,
   selectedTraceId: null,
   selectedTrace: null,
+  selectedLoop: null,
   traceSummary: null,
   traceLoading: false,
   traceError: null,
@@ -111,12 +120,19 @@ export const useTraceStore = create<TraceStore>((set, get) => ({
           nextSelectedId != null && get().selectedTrace?.id === nextSelectedId
             ? get().selectedTrace
             : null,
+        selectedLoop:
+          nextSelectedId != null &&
+          get().selectedLoop?.trace_details.some(
+            (trace) => trace.id === nextSelectedId
+          )
+            ? get().selectedLoop
+            : null,
       })
 
       if (nextSelectedId != null) {
         await get().selectTrace(nextSelectedId)
       } else {
-        set({ selectedTrace: null, traceLoading: false })
+        set({ selectedTrace: null, selectedLoop: null, traceLoading: false })
       }
     } catch (err: unknown) {
       inflightOverviewKey = null
@@ -144,12 +160,20 @@ export const useTraceStore = create<TraceStore>((set, get) => ({
     set({ selectedTraceId: traceId, traceLoading: true, traceError: null })
 
     try {
-      const selectedTrace = await fetchTrace(traceId)
+      const detail = await fetchTrace(traceId)
       if (get().selectedTraceId !== traceId) {
         return
       }
 
-      set({ selectedTrace, traceLoading: false })
+      if (isTraceLoopDetail(detail)) {
+        const selectedTrace =
+          detail.trace_details.find((trace) => trace.id === traceId) ??
+          detail.trace_details[detail.trace_details.length - 1] ??
+          null
+        set({ selectedTrace, selectedLoop: detail, traceLoading: false })
+      } else {
+        set({ selectedTrace: detail, selectedLoop: null, traceLoading: false })
+      }
     } catch (err: unknown) {
       if (get().selectedTraceId !== traceId) {
         return
@@ -157,6 +181,7 @@ export const useTraceStore = create<TraceStore>((set, get) => ({
 
       set({
         selectedTrace: null,
+        selectedLoop: null,
         traceLoading: false,
         traceError:
           err instanceof Error ? err.message : "Failed to load trace detail",
@@ -165,6 +190,10 @@ export const useTraceStore = create<TraceStore>((set, get) => ({
   },
 
   clearSelection: () => {
-    set({ selectedTraceId: null, selectedTrace: null, traceError: null })
+    set({ selectedTraceId: null, selectedTrace: null, selectedLoop: null, traceError: null })
   },
 }))
+
+function isTraceLoopDetail(value: TraceDetailResponse): value is TraceLoopDetail {
+  return "loop_item" in value && "trace_details" in value
+}

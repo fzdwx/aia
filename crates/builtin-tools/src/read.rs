@@ -1,16 +1,16 @@
 use std::io::ErrorKind;
 
 use agent_core::{
-    CoreError, Tool, ToolArgsSchema, ToolCall, ToolDefinition, ToolExecutionContext,
-    ToolOutputDelta, ToolResult,
+    CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
+use agent_core_macros::ToolArgsSchema as DeriveToolArgsSchema;
 use agent_prompts::tool_descriptions::read_tool_description;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 pub struct ReadTool;
 
-#[derive(Serialize, Deserialize, ToolArgsSchema)]
+#[derive(Serialize, Deserialize, DeriveToolArgsSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ReadToolArgs {
     #[tool_schema(description = "Path to the file to read")]

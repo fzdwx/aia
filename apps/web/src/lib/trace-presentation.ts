@@ -1,4 +1,4 @@
-import type { TraceListItem, TurnLifecycle } from "@/lib/types"
+import type { TraceListItem, TraceLoopItem, TurnLifecycle } from "@/lib/types"
 
 export type LoopStatus = "completed" | "failed" | "partial"
 
@@ -155,24 +155,14 @@ function countChildTools(llmTrace: TraceListItem, toolTraces: TraceListItem[]) {
 }
 
 export function buildTraceLoopGroups(
-  traces: TraceListItem[],
+  loops: TraceLoopItem[],
   turns: TurnLifecycle[]
 ): TraceLoopGroup[] {
-  const groups = new Map<string, TraceListItem[]>()
   const turnsById = new Map(turns.map((turn) => [turn.turn_id, turn]))
 
-  for (const trace of traces) {
-    const existing = groups.get(trace.trace_id)
-    if (existing) {
-      existing.push(trace)
-    } else {
-      groups.set(trace.trace_id, [trace])
-    }
-  }
-
-  return Array.from(groups.entries())
-    .map(([key, items]) => {
-      const ordered = sortByStartedAt(items)
+  return loops
+    .map((loop) => {
+      const ordered = sortByStartedAt(loop.traces)
       const llmTraces = ordered.filter((trace) => !isToolTrace(trace))
       const toolTraces = ordered.filter((trace) => isToolTrace(trace))
       const latestTrace = [...ordered].sort(
@@ -181,32 +171,17 @@ export function buildTraceLoopGroups(
       const latestLlmTrace = [...llmTraces].sort(
         (left, right) => right.started_at_ms - left.started_at_ms
       )[0]
-      const turn =
-        turnsById.get((latestLlmTrace ?? latestTrace).turn_id) ?? null
-      const totalDurationMs = ordered.reduce(
-        (sum, trace) => sum + (trace.duration_ms ?? 0),
-        0
-      )
-      const totalTokens = llmTraces.reduce(
-        (sum, trace) => sum + (trace.total_tokens ?? 0),
-        0
-      )
-      const finalStatus = loopStatus(llmTraces, toolTraces)
-      const startedAtMs = Math.min(
-        ...ordered.map((trace) => trace.started_at_ms)
-      )
-      const finishedCandidates = ordered
-        .map(findFinishedAtMs)
-        .filter((value): value is number => value != null)
-      const turnFinishedAtMs = turn?.finished_at_ms ?? null
-      const finishedAtMs =
-        turnFinishedAtMs ??
-        (finishedCandidates.length > 0 ? Math.max(...finishedCandidates) : null)
+      const turn = turnsById.get(loop.turn_id) ?? null
+      const totalDurationMs = loop.duration_ms ?? 0
+      const totalTokens = loop.total_tokens
+      const finalStatus = loop.final_status
+      const startedAtMs = loop.started_at_ms
+      const finishedAtMs = loop.finished_at_ms
 
       const timeline: LoopTimelineNode[] = [
         {
           kind: "agent_root",
-          id: ordered[0]?.root_span_id ?? `${key}:root`,
+          id: loop.root_span_id || `${loop.trace_id}:root`,
           name: "invoke_agent aia.agent",
           operationName: "invoke_agent",
           spanKind: "INTERNAL",
@@ -258,28 +233,23 @@ export function buildTraceLoopGroups(
       }
 
       return {
-        key,
-        requestKind: (latestLlmTrace ?? latestTrace).request_kind,
-        turnId: (latestLlmTrace ?? latestTrace).turn_id,
-        runId: (latestLlmTrace ?? latestTrace).run_id,
-        userMessage:
-          turn?.user_message ??
-          latestLlmTrace?.user_message ??
-          latestTrace.user_message ??
-          null,
+        key: loop.trace_id,
+        requestKind: loop.request_kind,
+        turnId: loop.turn_id,
+        runId: loop.run_id,
+        userMessage: turn?.user_message ?? loop.user_message,
         assistantMessage: turn?.assistant_message ?? null,
-        model: (latestLlmTrace ?? latestTrace).model,
-        protocol: (latestLlmTrace ?? latestTrace).protocol,
-        endpointPath: (latestLlmTrace ?? latestTrace).endpoint_path,
-        latestStartedAtMs: latestTrace.started_at_ms,
+        model: loop.model,
+        protocol: loop.protocol,
+        endpointPath: loop.endpoint_path,
+        latestStartedAtMs: loop.latest_started_at_ms,
         startedAtMs,
         finishedAtMs,
         totalDurationMs,
         totalTokens,
-        stepCount: llmTraces.length,
-        toolCount: toolTraces.length,
-        failedToolCount: toolTraces.filter((trace) => trace.status === "failed")
-          .length,
+        stepCount: loop.llm_span_count,
+        toolCount: loop.tool_span_count,
+        failedToolCount: loop.failed_tool_count,
         finalStatus,
         traces: ordered,
         turn,
@@ -288,11 +258,9 @@ export function buildTraceLoopGroups(
           .filter((value): value is string => Boolean(value))
           .join(" -> "),
         latestError:
-          [...ordered].reverse().find((trace) => trace.error)?.error ??
-          turn?.failure_message ??
-          null,
+          loop.latest_error ?? turn?.failure_message ?? null,
         timeline,
-        finalSpanId: ordered[ordered.length - 1]?.id ?? null,
+        finalSpanId: loop.final_span_id,
       }
     })
     .sort((left, right) => right.latestStartedAtMs - left.latestStartedAtMs)

@@ -1,9 +1,11 @@
 use std::sync::{Arc, RwLock};
 
 use agent_store::{AiaStore, SessionRecord, generate_session_id};
+use channel_registry::ChannelRegistry;
 use provider_registry::ProviderRegistry;
 
 use crate::{
+    channel_runtime::sync_feishu_runtime,
     model::{ProviderLaunchChoice, build_model_from_selection},
     session_manager::{ProviderInfoSnapshot, SessionManagerConfig, spawn_session_manager},
     state::AppState,
@@ -35,6 +37,7 @@ impl std::error::Error for ServerInitError {}
 
 pub async fn bootstrap_state() -> Result<Arc<AppState>, ServerInitError> {
     let registry_path = provider_registry::default_registry_path();
+    let channel_registry_path = channel_registry::default_registry_path();
     let aia_store_path = aia_config::store_path_from_registry_path(&registry_path);
     let sessions_dir = aia_config::sessions_dir_from_registry_path(&registry_path);
     let workspace_root = std::env::current_dir()
@@ -42,6 +45,8 @@ pub async fn bootstrap_state() -> Result<Arc<AppState>, ServerInitError> {
 
     let registry = ProviderRegistry::load_or_default(&registry_path)
         .map_err(|error| ServerInitError::new("provider 注册表加载", error.to_string()))?;
+    let channel_registry = ChannelRegistry::load_or_default(&channel_registry_path)
+        .map_err(|error| ServerInitError::new("channel 注册表加载", error.to_string()))?;
 
     let store = Arc::new(
         AiaStore::new(&aia_store_path)
@@ -86,6 +91,7 @@ pub async fn bootstrap_state() -> Result<Arc<AppState>, ServerInitError> {
     let provider_registry_snapshot = Arc::new(RwLock::new(registry.clone()));
     let provider_info_snapshot =
         Arc::new(RwLock::new(ProviderInfoSnapshot::from_identity(&identity)));
+    let channel_registry_snapshot = Arc::new(RwLock::new(channel_registry));
 
     let session_manager = spawn_session_manager(SessionManagerConfig {
         sessions_dir,
@@ -99,11 +105,19 @@ pub async fn bootstrap_state() -> Result<Arc<AppState>, ServerInitError> {
         user_agent: build_server_user_agent(),
     });
 
-    Ok(Arc::new(AppState {
+    let state = Arc::new(AppState {
         session_manager,
         broadcast_tx,
         provider_registry_snapshot,
         provider_info_snapshot,
+        channel_registry_path,
+        channel_registry_snapshot,
         store,
-    }))
+    });
+
+    sync_feishu_runtime(state.as_ref())
+        .await
+        .map_err(|error| ServerInitError::new("飞书通道启动", error))?;
+
+    Ok(state)
 }

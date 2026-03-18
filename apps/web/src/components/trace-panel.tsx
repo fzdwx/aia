@@ -1458,6 +1458,7 @@ export function TracePanel() {
   const traceView = useTraceStore((state) => state.traceView)
   const selectedTraceId = useTraceStore((state) => state.selectedTraceId)
   const selectedTrace = useTraceStore((state) => state.selectedTrace)
+  const selectedLoop = useTraceStore((state) => state.selectedLoop)
   const traceSummary = useTraceStore((state) => state.traceSummary)
   const traceLoading = useTraceStore((state) => state.traceLoading)
   const traceError = useTraceStore((state) => state.traceError)
@@ -1477,10 +1478,7 @@ export function TracePanel() {
     refreshTraces().catch(() => {})
   }, [refreshTraces])
 
-  const loopGroups = useMemo(
-    () => buildTraceLoopGroups(traces, turns),
-    [traces, turns]
-  )
+  const loopGroups = useMemo(() => buildTraceLoopGroups(traces, turns), [traces, turns])
   const partitionedGroups = useMemo(
     () => partitionTraceLoopGroups(loopGroups),
     [loopGroups]
@@ -1490,7 +1488,11 @@ export function TracePanel() {
       ? partitionedGroups.compression
       : partitionedGroups.conversation
 
-  const llmSpanCount = traceSummary?.total_requests ?? traces.length
+  const listedLoopCount = totalTraceItems
+  const llmSpanCount = loopGroups.reduce(
+    (sum, group) => sum + group.stepCount,
+    0
+  )
   const toolSpanCount = loopGroups.reduce(
     (sum, group) => sum + group.toolCount,
     0
@@ -1541,9 +1543,10 @@ export function TracePanel() {
   const inspectedTrace =
     activeNode?.kind === "agent_root"
       ? null
-      : selectedTrace?.id === activeNode?.trace.id
-        ? selectedTrace
-        : null
+      : (selectedLoop?.trace_details.find(
+            (trace) => trace.id === activeNode?.trace.id
+          ) ??
+          (selectedTrace?.id === activeNode?.trace.id ? selectedTrace : null))
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -1605,7 +1608,7 @@ export function TracePanel() {
             <SummaryItem
               bare
               label="listed items"
-              value={String(totalTraceItems)}
+              value={String(listedLoopCount)}
               icon={<Waypoints className="size-3.5" />}
             />
             <SummaryItem

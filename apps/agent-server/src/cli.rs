@@ -33,8 +33,8 @@ mod tests {
 
     #[test]
     fn parse_cli_accepts_self_subcommand() {
-        let command =
-            parse_cli_command(["agent-server".to_string(), "self".to_string()]).expect("cli should parse");
+        let command = parse_cli_command(["agent-server".to_string(), "self".to_string()])
+            .expect("cli should parse");
         assert!(matches!(command, CliCommand::SelfChat));
     }
 }

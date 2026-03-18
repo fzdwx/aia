@@ -1,4 +1,4 @@
-import { PanelRightDashed, Plus, Settings, X } from "lucide-react"
+import { PanelRightDashed, Plus, Settings, Waypoints, X } from "lucide-react"
 import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat-store"
@@ -121,6 +121,16 @@ export function Sidebar() {
         >
           <PanelRightDashed className="size-[14px] opacity-40" />
           <span>Trace</span>
+        </button>
+        <button
+          onClick={() => setView(view === "channels" ? "chat" : "channels")}
+          className={cn(
+            "mb-1 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] text-muted-foreground transition-colors duration-150 hover:bg-accent/50 hover:text-foreground/80",
+            view === "channels" && "bg-accent/50 text-foreground/80"
+          )}
+        >
+          <Waypoints className="size-[14px] opacity-40" />
+          <span>Channels</span>
         </button>
         <button
           onClick={() => setView(view === "settings" ? "chat" : "settings")}

@@ -23,6 +23,7 @@ README 里真正难的是这些能力：
 - `agent-core`：领域模型与协议边界
 - `session-tape`：扁平条目磁带（`{id, kind, payload, meta, date}`）、轻量锚点、handoff 事件、查询切片、fork / merge 与重建状态
 - `agent-runtime`：运行时编排与最小 turn 执行
+- `channel-registry`：外部 channel 配置、启停状态与本地持久化
 - `provider-registry`：provider 资料、活动项与本地持久化
 - `openai-adapter`：首个真实模型适配层，负责把统一请求映射到 Responses 风格接口，并已切到原生 async `reqwest` 主链
 - `agent-store`：本地 SQLite session / trace 存储与查询
@@ -41,7 +42,7 @@ README 里真正难的是这些能力：
 
 负责应用级共享默认值与稳定约定：
 
-- `.aia/` 目录及其下 `providers.json`、`session.jsonl`、`store.sqlite3`、`sessions/` 等默认路径
+- `.aia/` 目录及其下 `providers.json`、`channels.json`、`session.jsonl`、`store.sqlite3`、`sessions/` 等默认路径
 - server 默认 bind 地址、默认 base url、事件缓冲大小、请求超时等应用壳通用默认值
 - 默认 session 标题、trace / span / prompt-cache 稳定前缀与统一 user agent 组装辅助
 - 当前内部已拆为 `paths`、`server`、`identifiers` 三类模块，`lib.rs` 保持薄 façade
@@ -132,6 +133,16 @@ README 里真正难的是这些能力：
 - 兼容历史遗留 `.aia/sessions/providers.json` 回退读取
 - 保持 provider 持久化逻辑不泄漏进应用壳层
 
+### `channel-registry`
+
+负责外部 channel 配置管理：
+
+- 保存 channel 档案与启停状态
+- 当前首期只支持飞书 channel，但 transport 结构保持可扩展
+- 本地落盘在 `.aia/channels.json`
+- 只承载静态 channel 配置，不承担动态会话映射、运行时桥接或平台协议处理
+- 保持外部 channel 配置逻辑不泄漏进 `apps/web` 或 `apps/agent-server` 临时状态
+
 ### `openai-adapter`
 
 负责首个真实模型提供商适配：
@@ -163,7 +174,8 @@ README 里真正难的是这些能力：
 - `AiaStore` 现同时提供共享 async façade：server 与 model 层通过 async store API 访问 session / trace 数据，内部再由共享 `spawn_blocking` 边界桥接 `rusqlite`，避免 async 路由和 turn 路径直接阻塞 Tokio worker
 - session 侧也已开始承接 server 共享样板：`SessionRecord::new(...)` 统一了新 session 的时间戳/字段构造，`AiaStore::first_session_id()` 让 app 壳在解析默认 session 时不必为了取第一条记录而整表加载
 - trace 列表页现在优先读取 `request_summary.user_message` 这类轻量摘要字段，不再为列表每一行都反序列化整份 `provider_request`，把大 payload 留给详情接口按需读取
-- trace 诊断读路径又进一步拆成“单次 overview 读取 + 明确过滤”的控制面：`apps/agent-server` 提供按 `request_kind` 过滤的 `/api/traces/overview`；`agent-store` 现在对 overview 的 `page.items` 采用真正按返回项数量的分页，而不再先按 `trace_id` 分页后整组展开。同时，overview 的 summary 会同步写入本地 SQLite `llm_trace_overview_summaries` 快照表，避免每次 overview/summary 请求都重新扫描聚合全表
+- trace 诊断读路径又进一步拆成“单次 overview 读取 + 明确过滤”的控制面：`apps/agent-server` 提供按 `request_kind` 过滤的 `/api/traces/overview`；`agent-store` 现在在 span 入库时同步维护 `llm_trace_loops` 聚合表，直接把同一 agent loop 的 LLM span / tool span 收敛为稳定 loop 记录，因此 overview 的 `page.items` 天然按 agent loop 分页，不再在查询期把单个模型调用临时拼装成 loop。同时，overview 的 summary 会同步写入本地 SQLite `llm_trace_overview_summaries` 快照表，避免每次 overview/summary 请求都重新扫描聚合全表
+- 当前也承担 channel 侧的动态索引数据：`channel_session_bindings` 负责外部会话键到 `session_id` 的稳定映射，`channel_message_receipts` 负责按外部 `message_id` 幂等去重；这两类动态数据明确留在 SQLite，而不是散落到 jsonl tape 或 app 壳内存 map
 - 为 server 与 trace 诊断页提供本地存储支撑，而不把 SQLite 细节扩散到更多边界
 
 ### `apps/web`
@@ -204,6 +216,8 @@ README 里真正难的是这些能力：
 - 全局 `broadcast::channel` 向所有 SSE 客户端推送事件
 - SSE 在线分发层显式暴露“需要重同步”语义：当 `broadcast` 接收端因慢客户端而 `Lagged` 时，`/api/events` 不再静默吞掉错误，而是发出 `sync_required` 事件；Web 侧据此补拉 session 列表，并重拉当前 session 的历史、当前 turn 与上下文压力，把实时分发层与持久化恢复边界连接起来
 - 暴露 provider、session、turn、cancel、handoff、trace 等 HTTP API
+- 现已额外暴露 `channels` 控制面：`/api/channels` 负责飞书 channel 的列表、创建、更新、删除；飞书的目标接入形态明确为长连接模式，当前仓库内仍暂保留 `/api/channels/feishu/events` 作为过渡期事件入口，直到长连接 bridge 完整替换为止
+- channel 桥接遵循“薄 ingress bridge”原则：无论最终是长连接还是过渡期 webhook，平台事件解析、幂等去重、external conversation → `session_id` 映射、`session_manager.submit_turn(...)` 复用与飞书回复都停留在 app 壳桥接层，不把平台协议细节塞进 `session_manager`
 - `POST /api/turn` 仍保持 fire-and-forget，但真正的 turn 执行、事件回收与 session 条目追加都在 worker 内串行完成
 - turn 执行与 session manager 已切到原生 Tokio async task：`apps/agent-server` 不再依赖 `tokio::spawn_blocking`、`std::thread::Builder`、`LocalSet` 或 `spawn_local` 承载 turn 主链；worker 直接 await `AgentRuntime::handle_turn_streaming(...)`，压缩路径也直接 await `AgentRuntime::auto_compress_now()`，运行中 `session/info` 通过 slot 内的 `ContextStats` 快照读取 live stats，turn 结束后仍沿用显式 runtime ownership 归还路径
 - 运行中的条目会实时 append 到 `.aia/session.jsonl`
