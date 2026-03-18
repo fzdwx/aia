@@ -1,5 +1,16 @@
 # 演进日志
 
+## 2026-03-18 Session 59
+
+**Diagnosis**：虽然 `self` 模式已经补上 `/help`、`/status`、`/compress`、`/handoff`，但 `apps/agent-server/src/self_chat.rs` 也随之重新变成一个大文件：会话标题/提示构造、命令解析、终端 loop、事件渲染与命令执行全挤在一起，后续再加命令会迅速失控。
+**Decision**：在不改变功能的前提下继续做一次内部拆分：把 `self_chat` 收口成目录模块，分成 `commands.rs`、`prompt.rs`、`session.rs` 和薄 `mod.rs`。这样继续保持 server 壳层清晰，也让后续增加命令时有稳定落点。
+**Changes**：
+- `apps/agent-server/src/self_chat/{mod.rs,commands.rs,prompt.rs,session.rs}`：分别承接终端 loop 编排、命令解析/帮助输出、`docs/self.md` prompt 与 session title 构造、以及 session-manager/broadcast 交互与事件渲染。
+- `docs/evolution-log.md`：记录这轮 `self_chat` 模块化收口。
+**Verification**：`cargo test -p agent-server` 通过；初次 `cargo check -p agent-server` 仍被工作区内旧的 `agent_core`/`openai-adapter` 构建缓存尾灯阻塞，随后执行 `cargo clean -p agent-core -p openai-adapter` 后再次运行 `cargo check -p agent-server` 转绿。
+**Commit**：未提交。
+**Next direction**：如果继续增强 `self` 模式，下一步优先把 `session.rs` 里的事件渲染再拆成独立 `render.rs`，并补 `/history` 或 `/provider` 这类只读命令。
+
 ## 2026-03-18 Session 58
 
 **Diagnosis**：`agent-server self` 虽然已经能直接开始终端对话，但进入会话后除了继续发 prompt 和退出之外几乎没有控制面；像查看上下文压力、手动压缩、创建 handoff 这类自我进化场景下的高频动作，仍要切回 Web 或手工拼 HTTP。
