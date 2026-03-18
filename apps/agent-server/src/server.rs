@@ -13,7 +13,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/providers", get(routes::get_providers))
         .route("/api/providers/list", get(routes::list_providers))
         .route("/api/channels", get(routes::list_channels))
-        .route("/api/channels/feishu/events", post(routes::feishu_event))
         .route("/api/traces/overview", get(routes::get_trace_overview))
         .route("/api/traces", get(routes::list_traces))
         .route("/api/traces/summary", get(routes::get_trace_summary))

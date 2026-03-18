@@ -1,5 +1,4 @@
 mod channel;
-mod channel_event;
 mod common;
 mod provider;
 mod session;
@@ -9,7 +8,6 @@ mod trace;
 mod turn;
 
 pub(crate) use channel::{create_channel, delete_channel, list_channels, update_channel};
-pub(crate) use channel_event::feishu_event;
 pub(crate) use common::prepare_session_for_turn;
 pub(crate) use provider::{
     create_provider, delete_provider, get_providers, list_providers, switch_provider,
