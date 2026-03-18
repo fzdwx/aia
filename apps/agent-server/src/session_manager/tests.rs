@@ -115,6 +115,7 @@ fn collect_runtime_events_reports_missing_subscriber() {
 #[test]
 fn update_current_turn_status_recovers_from_poisoned_snapshot_lock() {
     let snapshot = Arc::new(RwLock::new(Some(CurrentTurnSnapshot {
+        turn_id: "turn-1".into(),
         started_at_ms: 1,
         user_message: "hello".into(),
         status: TurnStatus::Waiting,
@@ -132,6 +133,7 @@ fn update_current_turn_status_recovers_from_poisoned_snapshot_lock() {
 #[test]
 fn handle_cancel_turn_marks_running_snapshot_as_cancelled() {
     let current_turn = Arc::new(RwLock::new(Some(CurrentTurnSnapshot {
+        turn_id: "turn-1".into(),
         started_at_ms: 1,
         user_message: "hello".into(),
         status: TurnStatus::Working,
@@ -223,8 +225,9 @@ fn spawned_turn_worker_completes_bootstrap_turn() {
             .create_session(Some("Async worker".into()))
             .await
             .expect("session should be created");
-        handle
+        let accepted_turn_id = handle
             .submit_turn(session.id.clone(), "hello from async worker".into())
+            .await
             .expect("turn should be accepted");
 
         let mut completed_turn = None;
@@ -239,6 +242,7 @@ fn spawned_turn_worker_completes_bootstrap_turn() {
         }
         let turn = completed_turn.expect("turn should complete");
 
+        assert!(accepted_turn_id.starts_with("srv-turn-"));
         assert_eq!(turn.user_message, "hello from async worker");
         assert_eq!(turn.outcome, agent_runtime::TurnOutcome::Succeeded);
         assert!(

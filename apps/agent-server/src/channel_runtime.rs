@@ -472,8 +472,10 @@ async fn stream_turn_to_feishu_reply(
     prepare_session_for_turn(&deps.session_manager, session_id).await?;
 
     let mut rx = deps.broadcast_tx.subscribe();
-    deps.session_manager
+    let expected_turn_id = deps
+        .session_manager
         .submit_turn(session_id.to_string(), prompt.to_string())
+        .await
         .map_err(runtime_error_to_string)?;
 
     let started_at_ms = current_timestamp_ms();
@@ -493,7 +495,7 @@ async fn stream_turn_to_feishu_reply(
 
         match received {
             SsePayload::CurrentTurnStarted { session_id: sid, current_turn }
-                if sid == session_id =>
+                if sid == session_id && current_turn.turn_id == expected_turn_id =>
             {
                 update_feishu_card_state_from_snapshot(&mut card_state, &current_turn);
                 reply_mode = maybe_update_reply(
@@ -505,7 +507,9 @@ async fn stream_turn_to_feishu_reply(
                 )
                 .await;
             }
-            SsePayload::Status { session_id: sid, status } if sid == session_id => {
+            SsePayload::Status { session_id: sid, turn_id, status }
+                if sid == session_id && turn_id == expected_turn_id =>
+            {
                 card_state.status = status;
                 reply_mode = maybe_update_reply(
                     profile,
@@ -516,7 +520,9 @@ async fn stream_turn_to_feishu_reply(
                 )
                 .await;
             }
-            SsePayload::Stream { session_id: sid, event } if sid == session_id => {
+            SsePayload::Stream { session_id: sid, turn_id, event }
+                if sid == session_id && turn_id == expected_turn_id =>
+            {
                 apply_stream_event_to_feishu_card_state(&mut card_state, &event);
                 reply_mode = maybe_update_reply(
                     profile,
@@ -527,8 +533,10 @@ async fn stream_turn_to_feishu_reply(
                 )
                 .await;
             }
-            SsePayload::TurnCompleted { session_id: sid, turn } if sid == session_id => {
-                if let Some(message) = turn.assistant_message {
+            SsePayload::TurnCompleted { session_id: sid, turn_id, turn }
+                if sid == session_id && turn_id == expected_turn_id =>
+            {
+                if let Some(message) = extract_final_answer_from_turn(&turn) {
                     card_state.answer = message;
                 }
                 if let Some(message) = turn.failure_message {
@@ -560,7 +568,9 @@ async fn stream_turn_to_feishu_reply(
                 }
                 return Ok(());
             }
-            SsePayload::Error { session_id: sid, message } if sid == session_id => {
+            SsePayload::Error { session_id: sid, turn_id, message }
+                if sid == session_id && turn_id.as_deref() == Some(expected_turn_id.as_str()) =>
+            {
                 card_state.failed = true;
                 card_state.finished_at_ms = Some(current_timestamp_ms());
                 card_state.answer =
@@ -698,6 +708,25 @@ async fn resolve_session_id(
 
 fn runtime_error_to_string(error: RuntimeWorkerError) -> String {
     error.message
+}
+
+fn extract_final_answer_from_turn(turn: &agent_runtime::TurnLifecycle) -> Option<String> {
+    let assistant_blocks = turn
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            agent_runtime::TurnBlock::Assistant { content } if !content.trim().is_empty() => {
+                Some(content.as_str())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    if !assistant_blocks.is_empty() {
+        return Some(assistant_blocks.join("\n\n"));
+    }
+
+    turn.assistant_message.clone().filter(|message| !message.trim().is_empty())
 }
 
 fn build_turn_prompt(prompt: &str, event: &EventBody) -> String {
@@ -2722,6 +2751,29 @@ mod tests {
 
         assert_eq!(payload["content"], "完整累计文本");
         assert_eq!(payload["sequence"], 3);
+    }
+
+    #[test]
+    fn extract_final_answer_from_turn_keeps_multiple_assistant_blocks() {
+        let turn = agent_runtime::TurnLifecycle {
+            turn_id: "turn-1".into(),
+            started_at_ms: 1,
+            finished_at_ms: 2,
+            source_entry_ids: vec![],
+            user_message: "用户问题".into(),
+            blocks: vec![
+                agent_runtime::TurnBlock::Assistant { content: "第一段回复".into() },
+                agent_runtime::TurnBlock::Assistant { content: "第二段回复".into() },
+            ],
+            assistant_message: Some("第二段回复".into()),
+            thinking: None,
+            tool_invocations: vec![],
+            usage: None,
+            failure_message: None,
+            outcome: agent_runtime::TurnOutcome::Succeeded,
+        };
+
+        assert_eq!(extract_final_answer_from_turn(&turn), Some("第一段回复\n\n第二段回复".into()));
     }
 
     #[test]

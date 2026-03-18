@@ -28,15 +28,6 @@ impl SessionManagerHandle {
         reply_rx.await.map_err(|_| RuntimeWorkerError::unavailable())?
     }
 
-    fn try_request<R>(
-        &self,
-        build: impl FnOnce(oneshot::Sender<Result<R, RuntimeWorkerError>>) -> SessionCommand,
-    ) -> Result<(), RuntimeWorkerError> {
-        let (reply_tx, _reply_rx) = oneshot::channel();
-        self.tx.try_send(build(reply_tx)).map_err(|_| RuntimeWorkerError::unavailable())?;
-        Ok(())
-    }
-
     pub async fn create_session(
         &self,
         title: Option<String>,
@@ -48,12 +39,12 @@ impl SessionManagerHandle {
         self.request(|reply| SessionCommand::DeleteSession { session_id, reply }).await
     }
 
-    pub fn submit_turn(
+    pub async fn submit_turn(
         &self,
         session_id: String,
         prompt: String,
-    ) -> Result<(), RuntimeWorkerError> {
-        self.try_request(|reply| SessionCommand::SubmitTurn { session_id, prompt, reply })
+    ) -> Result<String, RuntimeWorkerError> {
+        self.request(|reply| SessionCommand::SubmitTurn { session_id, prompt, reply }).await
     }
 
     pub async fn cancel_turn(&self, session_id: String) -> Result<bool, RuntimeWorkerError> {

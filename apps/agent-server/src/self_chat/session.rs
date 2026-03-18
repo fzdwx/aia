@@ -82,32 +82,40 @@ pub(crate) async fn submit_prompt_and_wait(
         .await
         .map_err(|error| ServerInitError::new("turn 预压缩", error.message))?;
 
-    state
+    let turn_id = state
         .session_manager
         .submit_turn(session_id.to_string(), prompt)
+        .await
         .map_err(|error| ServerInitError::new("turn 提交", error.message))?;
 
-    drain_session_events(events, session_id).await
+    drain_session_events(events, session_id, &turn_id).await
 }
 
 async fn drain_session_events(
     events: &mut broadcast::Receiver<SsePayload>,
     session_id: &str,
+    turn_id: &str,
 ) -> Result<(), ServerInitError> {
     let mut streamed_text = false;
 
     loop {
         match events.recv().await {
             Ok(payload) => match payload {
-                SsePayload::Stream { session_id: current, event } if current == session_id => {
+                SsePayload::Stream { session_id: current, turn_id: current_turn_id, event }
+                    if current == session_id && current_turn_id == turn_id =>
+                {
                     render_stream_event(&event, &mut streamed_text)?;
                 }
-                SsePayload::Status { session_id: current, status } if current == session_id => {
+                SsePayload::Status { session_id: current, turn_id: current_turn_id, status }
+                    if current == session_id && current_turn_id == turn_id =>
+                {
                     render_status(status, streamed_text)?;
                 }
-                SsePayload::TurnCompleted { session_id: current, turn }
-                    if current == session_id =>
-                {
+                SsePayload::TurnCompleted {
+                    session_id: current,
+                    turn_id: current_turn_id,
+                    turn,
+                } if current == session_id && current_turn_id == turn_id => {
                     if !streamed_text
                         && let Some(message) = turn.assistant_message.as_deref()
                         && !message.is_empty()
@@ -118,13 +126,17 @@ async fn drain_session_events(
                     }
                     return Ok(());
                 }
-                SsePayload::Error { session_id: current, message } if current == session_id => {
+                SsePayload::Error { session_id: current, turn_id: current_turn_id, message }
+                    if current == session_id && current_turn_id.as_deref() == Some(turn_id) =>
+                {
                     if streamed_text {
                         println!();
                     }
                     return Err(ServerInitError::new("turn 执行", message));
                 }
-                SsePayload::TurnCancelled { session_id: current } if current == session_id => {
+                SsePayload::TurnCancelled { session_id: current, turn_id: current_turn_id }
+                    if current == session_id && current_turn_id == turn_id =>
+                {
                     if streamed_text {
                         println!();
                     }

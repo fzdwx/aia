@@ -24,7 +24,7 @@ use crate::{
     sse::{SsePayload, TurnStatus},
 };
 use current_turn::{
-    CurrentStatusInner, now_timestamp_ms, refresh_context_stats_snapshot,
+    CurrentStatusInner, next_server_turn_id, now_timestamp_ms, refresh_context_stats_snapshot,
     update_current_turn_from_stream, update_current_turn_status,
 };
 pub use handle::SessionManagerHandle;
@@ -292,7 +292,7 @@ async fn handle_submit_turn(
     return_tx: &mpsc::Sender<RuntimeReturn>,
     session_id: &str,
     prompt: String,
-) -> Result<(), RuntimeWorkerError> {
+) -> Result<String, RuntimeWorkerError> {
     let slot = slots
         .get_mut(session_id)
         .ok_or_else(|| RuntimeWorkerError::not_found(format!("session not found: {session_id}")))?;
@@ -312,7 +312,9 @@ async fn handle_submit_turn(
     let _ = config.store.update_session_async(session_id.to_string(), None, None).await;
 
     // Initialize current turn snapshot
+    let turn_id = next_server_turn_id();
     let current_turn = CurrentTurnSnapshot {
+        turn_id: turn_id.clone(),
         started_at_ms: now_timestamp_ms(),
         user_message: prompt.clone(),
         status: TurnStatus::Waiting,
@@ -328,11 +330,15 @@ async fn handle_submit_turn(
     let sid = session_id.to_string();
     let return_tx = return_tx.clone();
     let turn_control = turn_control.clone();
+    let stream_turn_id = turn_id.clone();
 
     let _ =
         broadcast_tx.send(SsePayload::CurrentTurnStarted { session_id: sid.clone(), current_turn });
-    let _ = broadcast_tx
-        .send(SsePayload::Status { session_id: sid.clone(), status: TurnStatus::Waiting });
+    let _ = broadcast_tx.send(SsePayload::Status {
+        session_id: sid.clone(),
+        turn_id: turn_id.clone(),
+        status: TurnStatus::Waiting,
+    });
 
     tokio::spawn(async move {
         let runtime_return = run_turn_worker(
@@ -346,13 +352,14 @@ async fn handle_submit_turn(
             context_stats_snapshot,
             trace_store,
             sid,
+            stream_turn_id,
         )
         .await;
 
         let _ = return_tx.send(runtime_return).await;
     });
 
-    Ok(())
+    Ok(turn_id)
 }
 
 async fn run_turn_worker(
@@ -366,6 +373,7 @@ async fn run_turn_worker(
     context_stats_snapshot: Arc<RwLock<ContextStats>>,
     trace_store: Arc<AiaStore>,
     session_id: SessionId,
+    turn_id: String,
 ) -> RuntimeReturn {
     let mut current_status = CurrentStatusInner::Waiting;
     let status_broadcast = broadcast_tx.clone();
@@ -388,13 +396,17 @@ async fn run_turn_worker(
                 update_current_turn_status(&stream_snapshot, new_status.to_turn_status());
                 let _ = status_broadcast.send(SsePayload::Status {
                     session_id: stream_session_id.clone(),
+                    turn_id: turn_id.clone(),
                     status: new_status.to_turn_status(),
                 });
             }
 
             update_current_turn_from_stream(&stream_snapshot, &event);
-            let _ = status_broadcast
-                .send(SsePayload::Stream { session_id: stream_session_id.clone(), event });
+            let _ = status_broadcast.send(SsePayload::Stream {
+                session_id: stream_session_id.clone(),
+                turn_id: turn_id.clone(),
+                event,
+            });
         })
         .await;
     *write_lock(&context_stats_snapshot) = runtime.context_stats();
@@ -407,8 +419,11 @@ async fn run_turn_worker(
                 if let Some(turn) = turn {
                     persist_tool_trace_spans(&turn, trace_store.clone()).await;
                     write_lock(&history_snapshot).push(turn.clone());
-                    let _ = broadcast_tx
-                        .send(SsePayload::TurnCompleted { session_id: session_id.clone(), turn });
+                    let _ = broadcast_tx.send(SsePayload::TurnCompleted {
+                        session_id: session_id.clone(),
+                        turn_id: turn_id.clone(),
+                        turn,
+                    });
                 }
                 *write_lock(&current_turn_snapshot) = None;
             }
@@ -416,6 +431,7 @@ async fn run_turn_worker(
                 *write_lock(&current_turn_snapshot) = None;
                 let _ = broadcast_tx.send(SsePayload::Error {
                     session_id: session_id.clone(),
+                    turn_id: Some(turn_id.clone()),
                     message: error.message.clone(),
                 });
             }
@@ -431,6 +447,7 @@ async fn run_turn_worker(
                         write_lock(&history_snapshot).push(turn.clone());
                         let _ = broadcast_tx.send(SsePayload::TurnCompleted {
                             session_id: session_id.clone(),
+                            turn_id: turn_id.clone(),
                             turn,
                         });
                     }
@@ -438,6 +455,7 @@ async fn run_turn_worker(
                 Err(collection_error) => {
                     let _ = broadcast_tx.send(SsePayload::Error {
                         session_id: session_id.clone(),
+                        turn_id: Some(turn_id.clone()),
                         message: collection_error.message.clone(),
                     });
                 }
@@ -446,14 +464,18 @@ async fn run_turn_worker(
                 update_current_turn_status(&current_turn_snapshot, TurnStatus::Cancelled);
                 let _ = broadcast_tx.send(SsePayload::Status {
                     session_id: session_id.clone(),
+                    turn_id: turn_id.clone(),
                     status: TurnStatus::Cancelled,
                 });
-                let _ =
-                    broadcast_tx.send(SsePayload::TurnCancelled { session_id: session_id.clone() });
+                let _ = broadcast_tx.send(SsePayload::TurnCancelled {
+                    session_id: session_id.clone(),
+                    turn_id: turn_id.clone(),
+                });
             }
             *write_lock(&current_turn_snapshot) = None;
             let _ = broadcast_tx.send(SsePayload::Error {
                 session_id: session_id.clone(),
+                turn_id: Some(turn_id.clone()),
                 message: error.to_string(),
             });
         }

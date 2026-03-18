@@ -253,6 +253,7 @@ impl TurnHistoryBuilder {
         let status = turn_lifecycle_status(&lifecycle);
 
         Some(CurrentTurnSnapshot {
+            turn_id: lifecycle.turn_id,
             started_at_ms: lifecycle.started_at_ms,
             user_message: lifecycle.user_message,
             status,

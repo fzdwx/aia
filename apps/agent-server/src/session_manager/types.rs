@@ -53,7 +53,7 @@ pub(crate) enum SessionCommand {
     SubmitTurn {
         session_id: SessionId,
         prompt: String,
-        reply: oneshot::Sender<Result<(), RuntimeWorkerError>>,
+        reply: oneshot::Sender<Result<String, RuntimeWorkerError>>,
     },
     CancelTurn {
         session_id: SessionId,

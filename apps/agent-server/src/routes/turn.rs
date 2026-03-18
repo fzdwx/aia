@@ -14,10 +14,7 @@ use tokio_stream::{
     wrappers::{BroadcastStream, errors::BroadcastStreamRecvError},
 };
 
-use crate::{
-    sse::{SsePayload, TurnStatus},
-    state::SharedState,
-};
+use crate::{sse::SsePayload, state::SharedState};
 
 use super::common::{prepare_session_for_turn, require_session_id, runtime_worker_error_response};
 
@@ -64,12 +61,10 @@ pub(crate) async fn submit_turn(
         return runtime_worker_error_response(error);
     }
 
-    let _ = state
-        .broadcast_tx
-        .send(SsePayload::Status { session_id: session_id.clone(), status: TurnStatus::Waiting });
-
-    match state.session_manager.submit_turn(session_id, body.prompt) {
-        Ok(()) => (StatusCode::ACCEPTED, Json(serde_json::json!({ "ok": true }))),
+    match state.session_manager.submit_turn(session_id, body.prompt).await {
+        Ok(turn_id) => {
+            (StatusCode::ACCEPTED, Json(serde_json::json!({ "ok": true, "turn_id": turn_id })))
+        }
         Err(error) => runtime_worker_error_response(error),
     }
 }

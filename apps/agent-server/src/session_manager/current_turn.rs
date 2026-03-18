@@ -1,4 +1,7 @@
-use std::sync::{Arc, RwLock};
+use std::sync::{
+    Arc, RwLock,
+    atomic::{AtomicU64, Ordering},
+};
 
 use agent_core::{StreamEvent, ToolRegistry};
 use agent_runtime::{AgentRuntime, ContextStats};
@@ -39,6 +42,12 @@ pub(crate) fn now_timestamp_ms() -> u64 {
         Ok(duration) => duration.as_millis().min(u64::MAX as u128) as u64,
         Err(_) => 0,
     }
+}
+
+static NEXT_SERVER_TURN_ID: AtomicU64 = AtomicU64::new(1);
+
+pub(crate) fn next_server_turn_id() -> String {
+    format!("srv-turn-{}", NEXT_SERVER_TURN_ID.fetch_add(1, Ordering::Relaxed))
 }
 
 pub(crate) fn update_current_turn_status(

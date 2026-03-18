@@ -30,6 +30,7 @@ pub enum CurrentTurnBlock {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct CurrentTurnSnapshot {
+    pub turn_id: String,
     pub started_at_ms: u64,
     pub user_message: String,
     pub status: TurnStatus,
