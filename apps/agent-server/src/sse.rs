@@ -13,6 +13,7 @@ pub enum TurnStatus {
     Thinking,
     Working,
     Generating,
+    Finishing,
     Cancelled,
 }
 

@@ -23,6 +23,7 @@ pub(crate) enum CurrentStatusInner {
     Thinking,
     Working,
     Generating,
+    Finishing,
 }
 
 impl CurrentStatusInner {
@@ -32,6 +33,7 @@ impl CurrentStatusInner {
             Self::Thinking => TurnStatus::Thinking,
             Self::Working => TurnStatus::Working,
             Self::Generating => TurnStatus::Generating,
+            Self::Finishing => TurnStatus::Finishing,
         }
     }
 }

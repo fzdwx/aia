@@ -164,6 +164,7 @@ fn render_status(status: TurnStatus, streamed_text: bool) -> Result<(), ServerIn
         TurnStatus::Thinking => println!("[status] thinking"),
         TurnStatus::Working => println!("[status] working"),
         TurnStatus::Generating => {}
+        TurnStatus::Finishing => println!("[status] finishing"),
         TurnStatus::Cancelled => println!("[status] cancelled"),
     }
     std::io::stdout()

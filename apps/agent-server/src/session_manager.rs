@@ -41,12 +41,13 @@ pub use crate::runtime_worker::{
 
 pub fn spawn_session_manager(config: SessionManagerConfig) -> SessionManagerHandle {
     let (tx, rx) = mpsc::channel(256);
-    tokio::spawn(session_manager_loop(rx, config));
+    tokio::spawn(session_manager_loop(rx, tx.clone(), config));
     SessionManagerHandle::new(tx)
 }
 
 async fn session_manager_loop(
     mut rx: mpsc::Receiver<SessionCommand>,
+    command_tx: mpsc::Sender<SessionCommand>,
     mut config: SessionManagerConfig,
 ) {
     let mut slots: HashMap<SessionId, SessionSlot> = HashMap::new();
@@ -124,10 +125,24 @@ async fn session_manager_loop(
                 // Put runtime back into the slot after turn completion
                 if let Some(slot) = slots.get_mut(&ret.session_id) {
                     *write_lock(&slot.context_stats) = ret.runtime.context_stats();
+                    let should_auto_compress = slot
+                        .context_stats
+                        .read()
+                        .ok()
+                        .and_then(|stats| stats.pressure_ratio)
+                        .is_some_and(|ratio| ratio >= agent_prompts::AUTO_COMPRESSION_THRESHOLD);
                     slot.runtime = Some(ret.runtime);
                     slot.subscriber = ret.subscriber;
                     slot.running_turn = None;
                     slot.status = SlotStatus::Idle;
+
+                    if should_auto_compress {
+                        let (reply, _reply_rx) = tokio::sync::oneshot::channel();
+                        let _ = command_tx.try_send(SessionCommand::AutoCompressSession {
+                            session_id: ret.session_id.clone(),
+                            reply,
+                        });
+                    }
                 }
             }
             else => break,
@@ -393,6 +408,7 @@ async fn run_turn_worker(
                 StreamEvent::ToolCallDetected { .. } => current_status.clone(),
                 StreamEvent::ToolCallStarted { .. } => CurrentStatusInner::Working,
                 StreamEvent::ToolOutputDelta { .. } => CurrentStatusInner::Working,
+                StreamEvent::Done => CurrentStatusInner::Finishing,
                 _ => current_status.clone(),
             };
 
@@ -422,12 +438,15 @@ async fn run_turn_worker(
                 let turn =
                     broadcast_runtime_events_with_session(events, &broadcast_tx, &session_id);
                 if let Some(turn) = turn {
-                    persist_tool_trace_spans(&turn, trace_store.clone()).await;
+                    let turn_for_traces = turn.clone();
                     write_lock(&history_snapshot).push(turn.clone());
                     let _ = broadcast_tx.send(SsePayload::TurnCompleted {
                         session_id: session_id.clone(),
                         turn_id: turn_id.clone(),
                         turn,
+                    });
+                    tokio::spawn(async move {
+                        persist_tool_trace_spans(&turn_for_traces, trace_store).await;
                     });
                 }
                 *write_lock(&current_turn_snapshot) = None;
@@ -448,12 +467,15 @@ async fn run_turn_worker(
                     let turn =
                         broadcast_runtime_events_with_session(events, &broadcast_tx, &session_id);
                     if let Some(turn) = turn {
-                        persist_tool_trace_spans(&turn, trace_store.clone()).await;
+                        let turn_for_traces = turn.clone();
                         write_lock(&history_snapshot).push(turn.clone());
                         let _ = broadcast_tx.send(SsePayload::TurnCompleted {
                             session_id: session_id.clone(),
                             turn_id: turn_id.clone(),
                             turn,
+                        });
+                        tokio::spawn(async move {
+                            persist_tool_trace_spans(&turn_for_traces, trace_store).await;
                         });
                     }
                 }
