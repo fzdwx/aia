@@ -9,6 +9,7 @@
 - 最新后端架构收口：`apps/agent-server/src/routes/channel.rs` 已按职责拆成目录模块，`mod.rs` 仅保留 façade，`dto`、配置脱敏/合并、持久化回滚事务与 handler 已分别下沉到子模块，避免单个路由文件继续混合 HTTP 边界、配置语义与运行态回滚细节。
 - 最新宿主桥接收口：`apps/agent-server/src/channel_host` 也已从单文件拆成目录模块；当前由 façade `mod.rs` 暴露稳定装配接口，宿主 trait 实现、SSE→channel 事件映射与运行态装配分别下沉，继续把 `agent-server` 保持在“桥接壳层”而非巨石入口。
 - 最新 channel-feishu 收口：`crates/channel-feishu/src/lib.rs` 已收回为薄 façade，公开接口继续保持 `build_feishu_runtime_adapter` 与 `FeishuMessageTarget`，具体实现整体下沉到 `runtime.rs`，不再把 2800+ 行实现细节长期堆在 crate 根文件。
+- 最新 channel-feishu 内部细拆：`crates/channel-feishu/src/runtime.rs` 又继续按职责拆出 `config.rs`、`protocol.rs`、`card.rs` 与 `tests.rs`；配置 schema/解析、协议 DTO/帧编解码、卡片状态机/请求构造与测试已分层，主流程文件开始回到“长连接与回复编排主线”角色。
 - 最新 channel 抽象进展：`channel-bridge` 现在不只承接 session 绑定恢复、turn 前预压缩与消息回执幂等 helper，还新增了通用 `ChannelRuntimeAdapter` / `ChannelRuntimeSupervisor` 与去平台化的 `ChannelRuntimeHost` / `ChannelRuntimeEvent` 边界；与此同时新增 `channel-feishu` crate，飞书 WebSocket、CardKit、回复控制与协议实现已从 `apps/agent-server` 迁出，`agent-server` 现在只保留宿主注册、状态装配与 SSE→通用 channel 运行时事件映射。
 - 最新飞书修复进展：私聊回复路径已从“总是 reply 当前消息”收紧为“私聊按 `chat_id` 直发、群聊按需 reply/thread”；SSE 现已补齐 `current_turn_started` 事件，前端对外部 channel 触发的当前执行态支持即时显示与流式恢复，不再依赖手动刷新；飞书消息进入处理中后会先加 `Typing` 表情，结束后再移除；同时飞书回包已进一步切到 `CardKit`：先创建 card entity，再用 `element_id` 按流事件更新正文，最后关闭 streaming mode 并收口为最终卡片。
 - 最新飞书消息覆盖修复：同一个 turn 内若模型产出多段 assistant message，飞书最终卡片不再只取最后一段 `assistant_message`，而是优先按 `TurnBlock::Assistant` 顺序拼接所有回复块，避免后一段覆盖前一段。

@@ -34,6 +34,18 @@
 **Commit**：未提交。
 **Next direction**：后续应继续把 `crates/channel-feishu/src/runtime.rs` 内部再切成 adapter/config/protocol/reply/tests 等更细模块，而不是止步于“把大文件从 `lib.rs` 挪到 `runtime.rs`”。
 
+## 2026-03-19 Session 76
+
+**Diagnosis**：虽然 `channel-feishu` 的 crate 根文件已经瘦成 façade，但 `runtime.rs` 仍然同时承载配置 schema、协议 DTO、帧编解码、卡片状态机、出站请求构造和测试，依旧是另一个大而杂的实现热点。
+**Decision**：继续按“主流程 + 领域子模块”的方式下沉最自洽的两块：把配置模型/解析收口到 `runtime/config.rs`，把事件/响应 DTO、连接策略和帧编解码收口到 `runtime/protocol.rs`，再把卡片状态机与消息请求构造收口到 `runtime/card.rs`；测试继续放在 sibling `runtime/tests.rs`。
+**Changes**：
+- `crates/channel-feishu/src/runtime/{config.rs,protocol.rs,card.rs,tests.rs}`：承接配置、协议、卡片状态机与测试。
+- `crates/channel-feishu/src/runtime.rs`：现在主要保留 adapter 装配、长连接主循环和回复编排主线。
+- `docs/status.md`：同步记录 `channel-feishu` 的内部模块化进展。
+**Verification**：`cargo fmt --all`、`cargo test -p channel-feishu`、`cargo test -p agent-server`、`cargo check --workspace` 通过。
+**Commit**：未提交。
+**Next direction**：如果继续沿这条线收口，下一步应考虑把 `runtime.rs` 中剩余的 adapter 装配和 reply/job orchestration 再拆成更专注的子模块，或转向 `apps/agent-server/src/session_manager.rs` 这类更高杠杆热点。
+
 ## 2026-03-19 Session 72
 
 **Diagnosis**：channel 抽象与 SQLite 持久化主体已经落地，但仓库里还残留两类收尾问题：一是 `apps/agent-server` 的 `/api/channels` 仍按“先改内存快照、再写 store”执行，若 SQLite 写入失败会把 `channel_profile_registry_snapshot` 留在脏状态；二是 `aia-config` 和文档叙事里还带着历史 `.aia/channels.json` / `channel-registry` 词汇，和当前代码现实不一致。
