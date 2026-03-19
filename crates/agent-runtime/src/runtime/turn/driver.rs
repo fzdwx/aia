@@ -195,7 +195,6 @@ where
                         user_message.content,
                         completion.usage.clone(),
                     ))?;
-                    self.maybe_auto_compress_current_context(&turn_id, &mut llm_step_index).await;
 
                     return Ok(TurnOutput {
                         assistant_text,

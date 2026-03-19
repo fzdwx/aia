@@ -2029,7 +2029,7 @@ fn 压缩事件会被发布到事件流() {
 }
 
 #[test]
-fn 成功轮完成后若真实_usage_超阈值会立刻自动压缩() {
+fn 成功轮完成后不会在关键路径立刻自动压缩() {
     let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced)
         .with_limit(Some(agent_core::ModelLimit { context: Some(100), output: Some(32) }));
     let mut tape = SessionTape::new();
@@ -2044,12 +2044,12 @@ fn 成功轮完成后若真实_usage_超阈值会立刻自动压缩() {
     let _ = run_turn(&mut runtime, "统计并在结束后触发压缩").expect("应成功完成");
     let events = runtime.collect_events(subscriber).expect("读取事件成功");
 
-    assert!(runtime.tape().anchors().iter().any(|a| a.name == "context_compression"));
-    assert!(events.iter().any(|event| matches!(event, RuntimeEvent::ContextCompressed { .. })));
+    assert!(runtime.tape().anchors().iter().all(|a| a.name != "context_compression"));
+    assert!(!events.iter().any(|event| matches!(event, RuntimeEvent::ContextCompressed { .. })));
     let stats = runtime.context_stats();
-    assert_eq!(stats.anchor_count, 1);
-    assert_eq!(stats.last_input_tokens, None);
-    assert_eq!(stats.pressure_ratio, None);
+    assert_eq!(stats.anchor_count, 0);
+    assert_eq!(stats.last_input_tokens, Some(21));
+    assert_eq!(stats.pressure_ratio, Some(0.21));
 }
 
 // --- Tape tools tests ---
