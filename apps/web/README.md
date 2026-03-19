@@ -31,37 +31,46 @@
 
 ## 常用命令
 
-先进入目录：
-
-```bash
-cd apps/web
-```
-
-如果全局 `vp` 不在当前环境的 `PATH` 中，可使用项目本地 binary：`./node_modules/.bin/vp`。
+前端相关命令统一优先通过仓库根目录 `just` 运行。
 
 ### 安装与开发
 
 ```bash
-./node_modules/.bin/vp install
-./node_modules/.bin/vp dev
-./node_modules/.bin/vp build
-./node_modules/.bin/vp preview
+just web-install
+just web-dev
+just web-build
+just web-preview
+just dev
+just dev-web
 ```
 
 ### 校验
 
 ```bash
+just web-lint
+just web-format
+just web-typecheck
+just web-test
+just web-test-watch
+just web-check
+just typecheck
+```
+
+如需直接在 `apps/web` 目录内排查问题，再回退到本地命令：
+
+```bash
+cd apps/web
+./node_modules/.bin/vp dev
+./node_modules/.bin/vp build
 ./node_modules/.bin/vp test
-pnpm run test
 ./node_modules/.bin/tsc --noEmit
-pnpm run typecheck
 ```
 
 其中：
 
+- `just web-dev` / `just web-build` / `just web-test` 等命令会通过仓库根目录 `justfile` 调用 `apps/web/package.json` 的当前脚本语义
 - `./node_modules/.bin/vp test` 是直接调用当前项目本地的 Vite+ 测试入口
-- `pnpm run test` 会执行当前 `package.json` 中的 `test` 脚本；当前已统一为 `vp test --run`
-- `./node_modules/.bin/tsc --noEmit` 与 `pnpm run typecheck` 当前都对应 TypeScript 类型检查
+- `./node_modules/.bin/tsc --noEmit` 当前对应 TypeScript 类型检查
 
 ### 当前 `package.json` 脚本语义
 
@@ -72,4 +81,4 @@ pnpm run typecheck
 
 在运行命令前，以 `apps/web/package.json` 的当前定义为准，不要假设所有脚本都等价于 `vp` 子命令。
 
-如需运行前后端联调，优先使用仓库根目录下已有的联动命令，而不是在 Web 子目录各自发明流程。
+如需运行前后端联调，优先使用仓库根目录下已有的 `just dev`，而不是在 Web 子目录各自发明流程。

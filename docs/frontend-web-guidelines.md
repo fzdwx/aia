@@ -108,10 +108,22 @@ Web 主界面按以下信息层次组织：
 
 ## 9. 开发工作流
 
-- `just dev`：同时启动后端（cargo run -p agent-server）和前端（bun dev）
+- 前端相关命令统一优先通过仓库根目录 `just` 运行，而不是在 `apps/web` 目录里各自发明入口
+- `just web-install`：安装前端依赖；优先复用本地 Vite+，首次引导时回退到 `pnpm install`
+- `just web-dev`：启动前端开发服务器
+- `just web-build`：构建前端生产包
+- `just web-preview`：预览前端生产包
+- `just web-lint`：运行前端 lint
+- `just web-format`：运行前端格式化
+- `just web-typecheck`：运行 TypeScript 类型检查
+- `just web-test`：运行前端测试
+- `just web-test-watch`：以 watch 模式运行前端测试
+- `just web-check`：运行前端全量检查
+- `just dev`：同时启动后端与前端；当前以后端 `cargo run -p agent-server` + 前端 `just web-dev` 执行
 - `just dev-server`：仅启动后端
-- `just dev-web`：仅启动前端
-- `just typecheck`：TypeScript 类型检查
+- `just dev-web`：仅启动前端；当前等价于 `just web-dev`
+- `just typecheck`：TypeScript 类型检查；当前等价于 `just web-typecheck`
+- 若前端本地脚本语义后续变化，以仓库根目录 `justfile` 与 `apps/web/package.json` 的当前定义为准，不要继续沿用旧文档中的固定命令描述
 - Vite 开发服务器自动代理 `/api` 请求到 `http://localhost:3434`
 
 ## 10. 代码质量要求
