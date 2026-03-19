@@ -9,8 +9,8 @@
     "lint": "vp lint .",
     "format": "vp fmt \"**/*.{ts,tsx}\"",
     "typecheck": "tsc --noEmit",
-    "test": "bun test",
-    "test:watch": "bun test --watch",
+    "test": "vp test --run",
+    "test:watch": "vp test --watch",
     "preview": "vp preview"
   },
   "dependencies": {

@@ -1,7 +1,11 @@
-import { Children, isValidElement } from "react"
+import { Children, isValidElement, type ReactNode } from "react"
 import { describe, expect, test } from "vite-plus/test"
 
 import { toolRendererRegistry } from "./index"
+
+type ElementWithChildren = {
+  children?: ReactNode
+}
 
 describe("tool renderer registry", () => {
   test("renders read tool title as file path only", () => {
@@ -37,7 +41,7 @@ describe("tool renderer registry", () => {
 
     expect(meta).not.toBe(null)
     expect(isValidElement(meta)).toBe(true)
-    if (!isValidElement(meta)) {
+    if (!isValidElement<ElementWithChildren>(meta)) {
       throw new Error("expected read meta to be a React element")
     }
 
@@ -45,7 +49,7 @@ describe("tool renderer registry", () => {
     expect(badges).toHaveLength(1)
     const badge = badges[0]
     expect(isValidElement(badge)).toBe(true)
-    if (!isValidElement(badge)) {
+    if (!isValidElement<ElementWithChildren>(badge)) {
       throw new Error("expected read meta badge to be a React element")
     }
 
@@ -130,7 +134,7 @@ describe("tool renderer registry", () => {
     )
   })
 
-  test("renders edit tool failure title from error message", () => {
+  test("renders edit tool failure title from file path", () => {
     const title = toolRendererRegistry.renderTitle({
       toolName: "functions.edit",
       arguments: {
@@ -142,7 +146,7 @@ describe("tool renderer registry", () => {
       succeeded: false,
     })
 
-    expect(title).toBe("old_string not found in file")
+    expect(title).toBe("apps/web/src/lib/tool-display.ts")
   })
 
   test("renders shell tool title from command", () => {

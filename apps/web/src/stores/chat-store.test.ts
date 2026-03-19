@@ -5,6 +5,15 @@ import { __setIdleSchedulerForTests, useChatStore } from "./chat-store"
 import type { SseEvent } from "@/lib/types"
 
 type FetchMock = typeof fetch
+type ResponseResolver = (value: Response) => void
+
+function requireResolver(
+  resolver: ResponseResolver | null,
+  message: string
+): ResponseResolver {
+  assert.ok(resolver, message)
+  return resolver
+}
 
 const initialState = {
   activeSessionId: "session-1",
@@ -73,7 +82,7 @@ describe("chat store submitTurn", () => {
 
     const waitingEvent: SseEvent = {
       type: "status",
-      data: { session_id: "session-1", status: "waiting" },
+      data: { session_id: "session-1", turn_id: "turn-1", status: "waiting" },
     }
 
     useChatStore.getState().handleSseEvent(waitingEvent)
@@ -172,7 +181,7 @@ describe("chat store submitTurn", () => {
 
     useChatStore.getState().handleSseEvent({
       type: "status",
-      data: { session_id: "session-1", status: "waiting" },
+      data: { session_id: "session-1", turn_id: "turn-1", status: "waiting" },
     })
 
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -217,6 +226,7 @@ describe("chat store submitTurn", () => {
       type: "stream",
       data: {
         session_id: "session-1",
+        turn_id: "turn-1",
         kind: "text_delta",
         text: "后续增量",
       },
@@ -288,6 +298,7 @@ describe("chat store submitTurn", () => {
       type: "stream",
       data: {
         session_id: "session-1",
+        turn_id: "turn-1",
         kind: "tool_call_started",
         invocation_id: "functions.read:27",
         tool_name: "functions.read",
@@ -524,7 +535,7 @@ describe("chat store submitTurn", () => {
     useChatStore.getState().handleSseEvent({
       type: "sync_required",
       data: { reason: "lagged", skipped_messages: 3 },
-    } as unknown as SseEvent)
+    })
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -701,7 +712,10 @@ describe("chat store submitTurn", () => {
       "turn-1-latest"
     )
 
-    resolveInitialHistory?.(
+    requireResolver(
+      resolveInitialHistory,
+      "expected initial history resolver"
+    )(
       new Response(
         JSON.stringify({
           turns: [
@@ -736,7 +750,10 @@ describe("chat store submitTurn", () => {
     expect(firstHydrated.turns.length).toBe(1)
     expect(firstHydrated.turns[0]?.turn_id).toBe("turn-2-latest")
 
-    resolveFullHistory?.(
+    requireResolver(
+      resolveFullHistory,
+      "expected full history resolver"
+    )(
       new Response(
         JSON.stringify({
           turns: [
@@ -898,7 +915,10 @@ describe("chat store submitTurn", () => {
     expect(duringHydration.turns[0]?.turn_id).toBe("turn-2-cached")
     expect(duringHydration.turns.length).toBe(1)
 
-    resolveHistory?.(
+    requireResolver(
+      resolveHistory,
+      "expected history resolver"
+    )(
       new Response(
         JSON.stringify({
           turns: [
@@ -926,7 +946,10 @@ describe("chat store submitTurn", () => {
         }
       )
     )
-    resolveCurrentTurn?.(
+    requireResolver(
+      resolveCurrentTurn,
+      "expected current turn resolver"
+    )(
       new Response("null", {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -1006,7 +1029,10 @@ describe("chat store submitTurn", () => {
 
     const switchPromise = useChatStore.getState().switchSession("session-2")
 
-    resolveInitialHistory?.(
+    requireResolver(
+      resolveInitialHistory,
+      "expected initial history resolver"
+    )(
       new Response(
         JSON.stringify({
           turns: [
@@ -1038,7 +1064,10 @@ describe("chat store submitTurn", () => {
     await switchPromise
     await useChatStore.getState().switchSession("session-3")
 
-    resolveBackgroundHistory?.(
+    requireResolver(
+      resolveBackgroundHistory,
+      "expected background history resolver"
+    )(
       new Response(
         JSON.stringify({
           turns: [

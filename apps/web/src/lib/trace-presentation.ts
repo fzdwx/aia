@@ -122,16 +122,6 @@ function spanStatus(trace: TraceListItem): "ok" | "error" {
   return trace.status === "failed" ? "error" : "ok"
 }
 
-function loopStatus(llmTraces: TraceListItem[], toolTraces: TraceListItem[]) {
-  const finalLlmTrace = llmTraces[llmTraces.length - 1] ?? null
-  const hasTraceFailure = llmTraces.some((trace) => trace.status === "failed")
-  const hasToolFailure = toolTraces.some((trace) => trace.status === "failed")
-
-  if (finalLlmTrace?.status === "failed") return "failed" as const
-  if (hasTraceFailure || hasToolFailure) return "partial" as const
-  return "completed" as const
-}
-
 function findFinishedAtMs(trace: TraceListItem): number | null {
   if (trace.duration_ms == null) return null
   return trace.started_at_ms + trace.duration_ms
@@ -257,8 +247,7 @@ export function buildTraceLoopGroups(
           .map(summarizeStopReason)
           .filter((value): value is string => Boolean(value))
           .join(" -> "),
-        latestError:
-          loop.latest_error ?? turn?.failure_message ?? null,
+        latestError: loop.latest_error ?? turn?.failure_message ?? null,
         timeline,
         finalSpanId: loop.final_span_id,
       }

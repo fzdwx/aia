@@ -60,13 +60,13 @@ pnpm run typecheck
 其中：
 
 - `./node_modules/.bin/vp test` 是直接调用当前项目本地的 Vite+ 测试入口
-- `pnpm run test` 会执行当前 `package.json` 中的 `test` 脚本；按当前仓库配置，它实际运行的是 `bun test`
+- `pnpm run test` 会执行当前 `package.json` 中的 `test` 脚本；当前已统一为 `vp test --run`
 - `./node_modules/.bin/tsc --noEmit` 与 `pnpm run typecheck` 当前都对应 TypeScript 类型检查
 
 ### 当前 `package.json` 脚本语义
 
-- `test`：当前实际执行 `bun test`
-- `test:watch`：当前实际执行 `bun test --watch`
+- `test`：当前实际执行 `vp test --run`
+- `test:watch`：当前实际执行 `vp test --watch`
 - `typecheck`：当前实际执行 `tsc --noEmit`
 - `lint` / `format` / `dev`：当前脚本内部仍走 `vp`
 

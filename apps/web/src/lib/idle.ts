@@ -18,8 +18,8 @@ type BrowserIdleTarget = {
 function hasIdleCallbackSupport(
   target: BrowserIdleTarget
 ): target is BrowserIdleTarget & {
-  requestIdleCallback: NonNullable<BrowserWindowWithIdle["requestIdleCallback"]>
-  cancelIdleCallback: NonNullable<BrowserWindowWithIdle["cancelIdleCallback"]>
+  requestIdleCallback: NonNullable<BrowserIdleTarget["requestIdleCallback"]>
+  cancelIdleCallback: NonNullable<BrowserIdleTarget["cancelIdleCallback"]>
 } {
   return (
     typeof (target as BrowserIdleTarget).requestIdleCallback === "function" &&

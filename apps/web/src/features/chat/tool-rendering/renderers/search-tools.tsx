@@ -1,3 +1,5 @@
+import type { ReactNode } from "react"
+
 import { normalizeToolArguments } from "@/lib/tool-display"
 
 import type { ToolRenderer } from "../types"
@@ -12,7 +14,7 @@ import { ExpandableOutput, ToolDetailSection } from "../ui"
 
 function renderSearchMeta(data: {
   details?: Record<string, unknown>
-}): ReturnType<ToolRenderer["renderMeta"]> {
+}): ReactNode | null {
   const matches = getNumberValue(data.details, "matches")
   const returned = getNumberValue(data.details, "returned")
   const truncated = getBooleanValue(data.details, "truncated")
