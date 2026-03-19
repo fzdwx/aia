@@ -13,6 +13,7 @@
 - 最新 session_manager 收口：`apps/agent-server/src/session_manager.rs` 在先前拆出 `query_ops` 之后，又继续把 provider 注册表同步与 turn worker/SSE 投影主线下沉到 `session_manager/{provider_sync,turn_execution}.rs`；同时根模块也已从“散落函数集合”收口为 `SessionManagerLoop`、`SessionSlotFactory` 等职责对象，provider/query/turn/tool-trace 分别由显式服务对象承接，避免同一文件继续混合运行时归还、SSE 广播与 provider 重绑细节。
 - 最新 self-chat 收口：`agent-server self` 不再在运行时读取 `docs/self.md`，而是改为编译期内嵌 prompt；同时 `self` 子命令现在支持附加启动任务参数，让首轮对话可直接带着用户指定目标启动。
 - 最新 Web Markdown 收口：`apps/web` 的共享 Markdown 渲染入口已从 `streamdown` 切到 `markstream-react`，继续保留流式渲染调用面，同时把样式适配收口到现有 `MarkdownContent` 门面，减少聊天区与推理区后续继续绑定旧 renderer 私有 DOM 结构。
+- 最新 Web Markdown 微调：`MarkdownContent` 现已透传当前明暗主题到 `markstream-react`，代码块/表格样式也进一步压回 aia 现有聊天视觉层级，避免 renderer 切换后出现亮暗色不一致或默认卡片边框过重。
 - 最新 model 收口：`apps/agent-server/src/model.rs` 已从“根模块同时承载 provider 选择、model 构建、trace 执行与 trace 落盘”继续收口为薄门面；当前 `model/factory.rs` 承接 provider→model 构建，`model/runner.rs` 承接带 trace 的完成链路，`model/trace.rs` 通过显式 `ModelTraceRecorder` 对象承接 trace 种子、事件收集与异步持久化，根模块只保留稳定类型、`LanguageModel` 适配与 façade 入口。
 - 最新 bootstrap 收口：`apps/agent-server/src/bootstrap.rs` 已从单个启动大函数收口为薄 façade，真实启动主线下沉到 `bootstrap/startup.rs` 的 `ServerBootstrap` 对象；路径/工作区发现、持久化依赖加载、默认 session 补种、snapshot 构建、`AppState` 装配与 channel runtime 激活都已归入显式启动上下文与阶段方法，避免根模块继续同时混合环境发现、持久化变更与长生命周期 actor 启动。
 - 最新 agent-server 路由收口：`apps/agent-server/src/routes` 现已统一按资源目录模块组织。`provider`、`session`、`trace`、`turn` 都已收口为 `mod.rs + dto.rs + handlers.rs`；其中 provider handler 直接依赖 `AppState` 中的 provider 快照与 `session_manager`，不再额外包一层 `ProviderRouteService`。与此同时，`routes.rs` 现统一 merge 各资源子 router，`server.rs` 只保留 listener 启动与顶层 router 调用，避免继续在启动文件里堆整张 `/api/*` 路由表。
@@ -183,6 +184,7 @@
 - 完成 Web 聊天区一次 session 切换滚动抖动收口：`ChatMessages` 在切换 session 时改为用 `useLayoutEffect` 同步恢复到底部，避免首帧先渲染旧滚动位置再跳动到最新消息
 - 完成 `read` 工具元信息文案纠偏：聊天内工具时间线里，`read` 的 meta 改为显示真实 1-based 行号范围（如 `L121-160`），不再把 `offset` 和 `lines_read` 误显示成含糊区间
 - 完成 Web Markdown renderer 替换：共享 `MarkdownContent` 现改用 `markstream-react`，聊天正文与推理内容不再依赖 `streamdown`；样式入口已同步改为 `markstream-react/index.css` 并补了基础渲染回归测试
+- 完成 Web Markdown 主题与样式收口：共享 Markdown renderer 现在会感知当前 `resolvedTheme` 并把 `isDark` 透传给 `markstream-react`；同时代码块/表格默认边框、阴影与 hover 操作区已重新压到当前聊天 UI 语义，并补了暗色主题回归测试
 
 ## 正在进行
 

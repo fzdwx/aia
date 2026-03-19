@@ -272,10 +272,13 @@ pre {
   border: 0.5px solid oklch(from var(--border) l c h / 50%);
   border-radius: 6px;
   background: transparent;
+  box-shadow: none;
 }
 
 .markdown-content .table-node {
   margin: 0;
+  width: 100%;
+  background: transparent;
 }
 
 .markdown-content .table-node th {
@@ -293,18 +296,32 @@ pre {
   border-bottom: 1px solid oklch(from var(--border) l c h / 30%);
 }
 
+.markdown-content .table-node th,
+.markdown-content .table-node td {
+  background: transparent;
+}
+
 .markdown-content .table-node tbody tr:last-child td {
   border-bottom: none;
 }
 
+.markdown-content .code-block-container,
+.markdown-content .code-block,
+.markdown-content .code-block-node,
+.markdown-content .code-block-body,
+.markdown-content .code-block-content {
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: inherit;
+}
+
+.markdown-content .code-block-container,
 .markdown-content .code-block,
 .markdown-content .code-block-node {
   margin: 0.25rem 0 0.75rem;
-  border: none;
-  border-radius: 0;
-  background: transparent;
   padding: 0;
-  color: inherit;
   overflow: visible;
 }
 
@@ -312,8 +329,8 @@ pre {
   min-height: 1.5rem;
   padding: 0 0 0.375rem 0.125rem;
   color: var(--muted-foreground);
-  background: transparent;
-  border-bottom: none;
+  background: transparent !important;
+  border-bottom: none !important;
 }
 
 .markdown-content .code-block-language {
@@ -322,6 +339,13 @@ pre {
 
 .markdown-content .code-block-actions {
   gap: 0.125rem;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.markdown-content .code-block-container:hover .code-block-actions,
+.markdown-content .code-block-container:focus-within .code-block-actions {
+  opacity: 1;
 }
 
 .markdown-content .code-block-btn {
@@ -338,9 +362,6 @@ pre {
 
 .markdown-content .code-block-body {
   min-height: 0;
-  border: none;
-  border-radius: 0;
-  background: transparent;
   padding: 0;
 }
 
@@ -353,4 +374,9 @@ pre {
   color: inherit;
   font-size: 13px;
   line-height: 1.7;
+}
+
+.markdown-content .code-block-body pre code,
+.markdown-content .code-fallback-plain code {
+  color: inherit;
 }

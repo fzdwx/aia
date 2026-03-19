@@ -1,6 +1,7 @@
 import { memo } from "react"
 import NodeRenderer from "markstream-react"
 
+import { useTheme } from "@/components/theme-provider"
 import { cn } from "@/lib/utils"
 
 export const MarkdownRenderer = memo(
@@ -12,21 +13,26 @@ export const MarkdownRenderer = memo(
     content: string
     className?: string
     streaming?: boolean
-  }) => (
-    <div className={cn("markdown-content", className)}>
-      <NodeRenderer
-        content={content}
-        final={!streaming}
-        mermaidProps={{
-          showCollapseButton: false,
-          showCopyButton: true,
-          showExportButton: false,
-          showFullscreenButton: false,
-          showHeader: false,
-          showModeToggle: false,
-          showZoomControls: false,
-        }}
-      />
-    </div>
-  )
+  }) => {
+    const { resolvedTheme } = useTheme()
+
+    return (
+      <div className={cn("markdown-content", className)}>
+        <NodeRenderer
+          content={content}
+          final={!streaming}
+          isDark={resolvedTheme === "dark"}
+          mermaidProps={{
+            showCollapseButton: false,
+            showCopyButton: true,
+            showExportButton: false,
+            showFullscreenButton: false,
+            showHeader: false,
+            showModeToggle: false,
+            showZoomControls: false,
+          }}
+        />
+      </div>
+    )
+  }
 )

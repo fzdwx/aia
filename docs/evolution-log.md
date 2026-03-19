@@ -1,5 +1,17 @@
 # 演进日志
 
+## 2026-03-19 Session 80
+
+**Diagnosis**：虽然上一轮已把共享 Markdown renderer 切到 `markstream-react`，但接入仍有两个直接影响聊天观感的缺口：一是没有把当前明暗主题透传给 renderer，代码块等富节点仍可能沿用默认浅色语义；二是表格与代码块的默认边框/阴影比 aia 现有聊天视觉更重，切换后有明显“第三方组件感”。
+**Decision**：不改 `MarkdownContent` 对外调用面，也不引入新主题机制，而是在现有前端主题上下文里显式暴露 `resolvedTheme`，让共享 Markdown renderer 直接透传 `isDark` 给 `markstream-react`；与此同时继续把代码块/表格的默认视觉压回 aia 当前聊天样式，并补一条暗色主题回归测试。
+**Changes**：
+- `apps/web/src/components/theme-provider.tsx`：主题上下文新增 `resolvedTheme`，并让 SSR / 静态渲染下的默认主题读取避开 `localStorage` 不可用路径。
+- `apps/web/src/components/markdown-content-rich.tsx`：`markstream-react` 现在会接收当前 `isDark`，保持富 Markdown 节点与全局主题一致。
+- `apps/web/src/{index.css,components/markdown-content.test.tsx}`：细化代码块/表格样式覆盖，补齐暗色主题渲染回归测试。
+**Verification**：`just web-typecheck`、`just web-test`、`just web-build` 通过。
+**Commit**：未提交。
+**Next direction**：若继续打磨聊天 Markdown 体验，下一步应优先评估 `markstream-react` 在高频 token streaming 下的增量解析与 offscreen heavy-node 行为，而不是继续纯视觉微调。
+
 ## 2026-03-19 Session 79
 
 **Diagnosis**：用户明确要求把 Web 侧 Markdown 组件切到 `markstream-react`；当前 `apps/web` 的共享 `MarkdownContent` 仍基于 `streamdown`，而聊天正文与推理区都通过这个门面复用，属于一次替换即可覆盖主路径的高杠杆改动。
