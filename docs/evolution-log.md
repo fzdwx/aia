@@ -9,7 +9,7 @@
 - `apps/web/src/components/markdown-content-rich.tsx`：`markstream-react` 现在会接收当前 `isDark`，保持富 Markdown 节点与全局主题一致。
 - `apps/web/src/{index.css,components/markdown-content.test.tsx}`：细化代码块/表格样式覆盖，补齐暗色主题渲染回归测试。
 **Verification**：`just web-typecheck`、`just web-test`、`just web-build` 通过。
-**Commit**：未提交。
+**Commit**：`039a863 feat(web): tune markdown renderer theming`。
 **Next direction**：若继续打磨聊天 Markdown 体验，下一步应优先评估 `markstream-react` 在高频 token streaming 下的增量解析与 offscreen heavy-node 行为，而不是继续纯视觉微调。
 
 ## 2026-03-19 Session 79
