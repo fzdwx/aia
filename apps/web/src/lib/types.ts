@@ -123,8 +123,14 @@ export type ContextCompressionNotice = {
 
 // SSE event types from the global /api/events stream — all carry session_id
 export type SseEvent =
-  | { type: "stream"; data: StreamEvent & { session_id: string; turn_id: string } }
-  | { type: "status"; data: { session_id: string; turn_id: string; status: TurnStatus } }
+  | {
+      type: "stream"
+      data: StreamEvent & { session_id: string; turn_id: string }
+    }
+  | {
+      type: "status"
+      data: { session_id: string; turn_id: string; status: TurnStatus }
+    }
   | {
       type: "current_turn_started"
       data: CurrentTurnSnapshot & { session_id: string }
@@ -151,12 +157,12 @@ export type SseEvent =
 
 // Mirrors Rust TurnStatus
 export type TurnStatus =
-| "waiting"
-| "thinking"
-| "working"
-| "generating"
-| "finishing"
-| "cancelled"
+  | "waiting"
+  | "thinking"
+  | "working"
+  | "generating"
+  | "finishing"
+  | "cancelled"
 
 export type CurrentToolOutput = {
   invocation_id: string
@@ -244,18 +250,22 @@ export type ProviderListItem = {
   active: boolean
 }
 
-export type ChannelTransport = "feishu"
+export type ChannelTransport = string
+
+export type SupportedChannelDefinition = {
+  transport: ChannelTransport
+  label: string
+  description: string | null
+  config_schema: Record<string, unknown>
+}
 
 export type ChannelListItem = {
   id: string
   name: string
   transport: ChannelTransport
   enabled: boolean
-  app_id: string
-  app_secret_set: boolean
-  base_url: string
-  require_mention: boolean
-  thread_mode: boolean
+  config: Record<string, unknown>
+  secret_fields_set: string[]
 }
 
 export type CreateChannelRequest = {
@@ -263,21 +273,13 @@ export type CreateChannelRequest = {
   name: string
   transport: ChannelTransport
   enabled: boolean
-  app_id: string
-  app_secret: string
-  base_url: string
-  require_mention: boolean
-  thread_mode: boolean
+  config: Record<string, unknown>
 }
 
 export type UpdateChannelRequest = {
   name?: string
   enabled?: boolean
-  app_id?: string
-  app_secret?: string
-  base_url?: string
-  require_mention?: boolean
-  thread_mode?: boolean
+  config?: Record<string, unknown>
 }
 
 export type TraceStatus = "succeeded" | "failed"

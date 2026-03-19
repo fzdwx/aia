@@ -3,6 +3,8 @@ use std::{collections::HashMap, sync::Arc};
 use agent_core::StreamEvent;
 use agent_runtime::TurnLifecycle;
 use channel_registry::{ChannelProfile, ChannelTransport};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::task::JoinHandle;
 
@@ -35,6 +37,14 @@ pub enum ChannelRuntimeEvent {
     Error { session_id: String, turn_id: Option<String>, message: String },
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SupportedChannelDefinition {
+    pub transport: ChannelTransport,
+    pub label: String,
+    pub description: Option<String>,
+    pub config_schema: Value,
+}
+
 #[async_trait::async_trait]
 pub trait ChannelRuntimeHost: ChannelSessionService + ChannelBindingStore + Send + Sync {
     async fn submit_turn(&self, session_id: String, prompt: String) -> Result<String, String>;
@@ -45,9 +55,40 @@ pub trait ChannelRuntimeHost: ChannelSessionService + ChannelBindingStore + Send
 pub trait ChannelRuntimeAdapter: Send + Sync {
     fn transport(&self) -> ChannelTransport;
 
-    fn fingerprint(&self, profile: &ChannelProfile) -> String;
+    fn definition(&self) -> SupportedChannelDefinition;
 
-    fn spawn(&self, profile: ChannelProfile) -> JoinHandle<()>;
+    fn validate_config(&self, config: &Value) -> Result<(), ChannelBridgeError>;
+
+    fn fingerprint(&self, profile: &ChannelProfile) -> Result<String, ChannelBridgeError>;
+
+    fn spawn(&self, profile: ChannelProfile) -> Result<JoinHandle<()>, ChannelBridgeError>;
+}
+
+#[derive(Clone, Default)]
+pub struct ChannelRuntimeAdapterRegistry {
+    adapters: Vec<Arc<dyn ChannelRuntimeAdapter>>,
+}
+
+impl ChannelRuntimeAdapterRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn register(&mut self, adapter: Arc<dyn ChannelRuntimeAdapter>) {
+        self.adapters.retain(|existing| existing.transport() != adapter.transport());
+        self.adapters.push(adapter);
+    }
+
+    pub fn definitions(&self) -> Vec<SupportedChannelDefinition> {
+        self.adapters.iter().map(|adapter| adapter.definition()).collect()
+    }
+
+    pub fn adapter_for(
+        &self,
+        transport: &ChannelTransport,
+    ) -> Option<Arc<dyn ChannelRuntimeAdapter>> {
+        self.adapters.iter().find(|adapter| adapter.transport() == *transport).cloned()
+    }
 }
 
 struct RunningChannelWorker {
@@ -68,12 +109,12 @@ struct DesiredWorker {
 }
 
 pub struct ChannelRuntimeSupervisor {
-    adapters: Vec<Arc<dyn ChannelRuntimeAdapter>>,
+    adapters: ChannelRuntimeAdapterRegistry,
     workers: HashMap<String, RunningChannelWorker>,
 }
 
 impl ChannelRuntimeSupervisor {
-    pub fn new(adapters: Vec<Arc<dyn ChannelRuntimeAdapter>>) -> Self {
+    pub fn new(adapters: ChannelRuntimeAdapterRegistry) -> Self {
         Self { adapters, workers: HashMap::new() }
     }
 
@@ -111,7 +152,7 @@ impl ChannelRuntimeSupervisor {
                 profile_id,
                 RunningChannelWorker {
                     fingerprint: worker.fingerprint,
-                    handle: worker.adapter.spawn(worker.profile),
+                    handle: worker.adapter.spawn(worker.profile)?,
                 },
             );
         }
@@ -131,14 +172,15 @@ impl ChannelRuntimeSupervisor {
                     profile.transport
                 )));
             };
-            let fingerprint = adapter.fingerprint(&profile);
+            adapter.validate_config(&profile.config)?;
+            let fingerprint = adapter.fingerprint(&profile)?;
             desired.insert(profile.id.clone(), DesiredWorker { adapter, profile, fingerprint });
         }
         Ok(desired)
     }
 
     fn adapter_for(&self, transport: &ChannelTransport) -> Option<Arc<dyn ChannelRuntimeAdapter>> {
-        self.adapters.iter().find(|adapter| adapter.transport() == *transport).cloned()
+        self.adapters.adapter_for(transport)
     }
 }
 
@@ -200,26 +242,56 @@ mod tests {
             self.transport.clone()
         }
 
-        fn fingerprint(&self, profile: &ChannelProfile) -> String {
-            format!("{}:{}:{}", profile.id, profile.enabled, profile.config.base_url)
+        fn definition(&self) -> SupportedChannelDefinition {
+            SupportedChannelDefinition {
+                transport: self.transport(),
+                label: "Fake".into(),
+                description: None,
+                config_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                    "additionalProperties": false,
+                }),
+            }
         }
 
-        fn spawn(&self, profile: ChannelProfile) -> JoinHandle<()> {
+        fn validate_config(&self, _config: &Value) -> Result<(), ChannelBridgeError> {
+            Ok(())
+        }
+
+        fn fingerprint(&self, profile: &ChannelProfile) -> Result<String, ChannelBridgeError> {
+            let base_url = profile.config.get("base_url").and_then(Value::as_str).unwrap_or("");
+            Ok(format!("{}:{}:{}", profile.id, profile.enabled, base_url))
+        }
+
+        fn spawn(&self, profile: ChannelProfile) -> Result<JoinHandle<()>, ChannelBridgeError> {
             self.spawned
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .push(profile.id.clone());
-            tokio::spawn(async {})
+            Ok(tokio::spawn(async {}))
         }
     }
 
     fn sample_profile(id: &str) -> ChannelProfile {
-        ChannelProfile::new_feishu(id, "默认飞书", "app", "secret")
+        ChannelProfile::new(
+            id,
+            "默认飞书",
+            ChannelTransport::Feishu,
+            serde_json::json!({
+                "app_id": "app",
+                "app_secret": "secret",
+                "base_url": "https://open.feishu.cn",
+                "require_mention": true,
+                "thread_mode": true
+            }),
+        )
     }
 
     #[test]
     fn sync_errors_when_transport_has_no_adapter() {
-        let mut supervisor = ChannelRuntimeSupervisor::new(vec![]);
+        let mut supervisor = ChannelRuntimeSupervisor::new(ChannelRuntimeAdapterRegistry::new());
 
         let error = supervisor
             .sync(vec![sample_profile("default")])
@@ -253,7 +325,9 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn sync_spawns_enabled_profile_once_when_fingerprint_matches() {
         let adapter = Arc::new(FakeAdapter::new(ChannelTransport::Feishu));
-        let mut supervisor = ChannelRuntimeSupervisor::new(vec![adapter.clone()]);
+        let mut registry = ChannelRuntimeAdapterRegistry::new();
+        registry.register(adapter.clone());
+        let mut supervisor = ChannelRuntimeSupervisor::new(registry);
         let profile = sample_profile("default");
 
         supervisor.sync(vec![profile.clone()]).expect("first sync should succeed");
@@ -263,5 +337,17 @@ mod tests {
         let spawned =
             adapter.spawned.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
         assert_eq!(spawned, vec!["default"]);
+    }
+
+    #[test]
+    fn registry_returns_supported_definitions() {
+        let adapter = Arc::new(FakeAdapter::new(ChannelTransport::Feishu));
+        let mut registry = ChannelRuntimeAdapterRegistry::new();
+        registry.register(adapter);
+
+        let definitions = registry.definitions();
+
+        assert_eq!(definitions.len(), 1);
+        assert_eq!(definitions[0].transport, ChannelTransport::Feishu);
     }
 }

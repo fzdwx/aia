@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 agent-core = { path = "../agent-core" }
+agent-core-macros = { path = "../agent-core-macros" }
 agent-runtime = { path = "../agent-runtime" }
 agent-store = { path = "../agent-store" }
 channel-bridge = { path = "../channel-bridge" }

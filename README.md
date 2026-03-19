@@ -55,7 +55,7 @@ this repository currently runs as a library-first rust workspace with a web-firs
 - context compression calls now emit their own trace records and can be inspected in a dedicated compression-log view instead of being mixed into the regular trace list
 - trace workbench now loads its filtered summary + page data through a single overview request; overview page results are truly item-paginated, while summary data is served from a SQLite overview-summary snapshot instead of being recomputed on every request
 - feishu channels now run through a long-lived websocket bridge in `apps/agent-server`; inbound events are acknowledged quickly and the actual agent turn + reply path continues asynchronously through the existing session manager/runtime chain
-- channel ingress now shares session-binding, stale-binding recovery, turn preparation, message-receipt idempotency, and generic adapter supervision through `crates/channel-bridge`; the Feishu websocket/protocol/reply implementation now lives in `crates/channel-feishu`
+- channel ingress now shares session-binding, stale-binding recovery, turn preparation, message-receipt idempotency, generic adapter supervision, and adapter-exposed config schema through `crates/channel-bridge`; the Feishu websocket/protocol/reply implementation now lives in `crates/channel-feishu`, while `crates/channel-registry` only persists transport-neutral profiles plus raw config payloads
 
 ## web workspace
 

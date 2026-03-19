@@ -8,6 +8,7 @@ import type {
   ProviderListItem,
   SessionListItem,
   SseEvent,
+  SupportedChannelDefinition,
   TraceDetailResponse,
   TraceOverview,
   TraceSummary,
@@ -130,6 +131,15 @@ export async function listChannels(): Promise<ChannelListItem[]> {
   const res = await fetch("/api/channels")
   if (!res.ok) throw new Error(`GET /api/channels failed: ${res.status}`)
   return (await res.json()) as Promise<ChannelListItem[]>
+}
+
+export async function listSupportedChannels(): Promise<
+  SupportedChannelDefinition[]
+> {
+  const res = await fetch("/api/channels/catalog")
+  if (!res.ok)
+    throw new Error(`GET /api/channels/catalog failed: ${res.status}`)
+  return (await res.json()) as Promise<SupportedChannelDefinition[]>
 }
 
 export async function fetchTrace(id: string): Promise<TraceDetailResponse> {

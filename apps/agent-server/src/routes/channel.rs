@@ -3,24 +3,26 @@ use axum::{
     extract::{Path, State},
     response::IntoResponse,
 };
-use channel_registry::{ChannelProfile, ChannelTransport, FeishuChannelConfig};
+use channel_bridge::SupportedChannelDefinition;
+use channel_registry::{ChannelProfile, ChannelTransport};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
-use crate::{channel_host::sync_channel_runtime, state::SharedState};
+use crate::{
+    channel_host::{supported_channel_definitions, sync_channel_runtime},
+    state::SharedState,
+};
 
 use super::common::{JsonResponse, error_response, ok_response};
 
-#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Clone, Debug, PartialEq)]
 pub(crate) struct ChannelListItem {
     pub id: String,
     pub name: String,
     pub transport: String,
     pub enabled: bool,
-    pub app_id: String,
-    pub app_secret_set: bool,
-    pub base_url: String,
-    pub require_mention: bool,
-    pub thread_mode: bool,
+    pub config: Value,
+    pub secret_fields_set: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -29,37 +31,19 @@ pub(crate) struct CreateChannelRequest {
     pub name: String,
     pub transport: String,
     pub enabled: bool,
-    pub app_id: String,
-    pub app_secret: String,
-    pub base_url: String,
-    pub require_mention: bool,
-    pub thread_mode: bool,
+    pub config: Value,
 }
 
 #[derive(Deserialize)]
 pub(crate) struct UpdateChannelRequest {
     pub name: Option<String>,
     pub enabled: Option<bool>,
-    pub app_id: Option<String>,
-    pub app_secret: Option<String>,
-    pub base_url: Option<String>,
-    pub require_mention: Option<bool>,
-    pub thread_mode: Option<bool>,
+    pub config: Option<Value>,
 }
 
-fn channel_list_item(profile: &ChannelProfile) -> ChannelListItem {
-    ChannelListItem {
-        id: profile.id.clone(),
-        name: profile.name.clone(),
-        transport: match profile.transport {
-            ChannelTransport::Feishu => "feishu".into(),
-        },
-        enabled: profile.enabled,
-        app_id: profile.config.app_id.clone(),
-        app_secret_set: !profile.config.app_secret.is_empty(),
-        base_url: profile.config.base_url.clone(),
-        require_mention: profile.config.require_mention,
-        thread_mode: profile.config.thread_mode,
+fn transport_label(transport: &ChannelTransport) -> &'static str {
+    match transport {
+        ChannelTransport::Feishu => "feishu",
     }
 }
 
@@ -73,9 +57,113 @@ fn parse_transport(value: &str) -> Result<ChannelTransport, JsonResponse> {
     }
 }
 
+fn sanitize_config_for_display(
+    config: &Value,
+    definition: &SupportedChannelDefinition,
+) -> (Value, Vec<String>) {
+    let mut sanitized = config.clone();
+    let Some(object) = sanitized.as_object_mut() else {
+        return (sanitized, Vec::new());
+    };
+
+    let mut secret_fields_set = Vec::new();
+    for key in secret_field_keys(definition) {
+        let is_set =
+            object.get(&key).and_then(Value::as_str).is_some_and(|value| !value.trim().is_empty());
+        if is_set {
+            secret_fields_set.push(key.clone());
+        }
+        object.insert(key, Value::String(String::new()));
+    }
+
+    (sanitized, secret_fields_set)
+}
+
+fn merge_channel_config(
+    existing: &Value,
+    patch: Option<Value>,
+    definition: &SupportedChannelDefinition,
+) -> Result<Value, String> {
+    let mut merged = existing.clone();
+    let Some(patch) = patch else {
+        return Ok(merged);
+    };
+
+    let Some(merged_object) = merged.as_object_mut() else {
+        return Err("channel config 必须是对象".into());
+    };
+    let Some(patch_object) = patch.as_object() else {
+        return Err("channel config patch 必须是对象".into());
+    };
+    let secret_keys = secret_field_keys(definition);
+
+    for (key, value) in patch_object {
+        let secret_field = secret_keys.iter().any(|item| item == key);
+        if secret_field && value.as_str().is_some_and(|secret| secret.trim().is_empty()) {
+            continue;
+        }
+        merged_object.insert(key.clone(), value.clone());
+    }
+
+    Ok(merged)
+}
+
+fn secret_field_keys(definition: &SupportedChannelDefinition) -> Vec<String> {
+    definition
+        .config_schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .map(|properties| {
+            properties
+                .iter()
+                .filter_map(|(key, schema)| {
+                    schema
+                        .get("x-secret")
+                        .and_then(Value::as_bool)
+                        .is_some_and(|secret| secret)
+                        .then_some(key.clone())
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn channel_list_item(
+    profile: &ChannelProfile,
+    definition: &SupportedChannelDefinition,
+) -> ChannelListItem {
+    let (config, secret_fields_set) = sanitize_config_for_display(&profile.config, definition);
+    ChannelListItem {
+        id: profile.id.clone(),
+        name: profile.name.clone(),
+        transport: transport_label(&profile.transport).into(),
+        enabled: profile.enabled,
+        config,
+        secret_fields_set,
+    }
+}
+
+pub(crate) async fn list_supported_channels(
+    State(state): State<SharedState>,
+) -> Json<Vec<SupportedChannelDefinition>> {
+    Json(supported_channel_definitions(state.channel_adapter_registry.as_ref()))
+}
+
 pub(crate) async fn list_channels(State(state): State<SharedState>) -> Json<Vec<ChannelListItem>> {
+    let definitions = supported_channel_definitions(state.channel_adapter_registry.as_ref());
     let registry = crate::session_manager::read_lock(&state.channel_registry_snapshot);
-    Json(registry.channels().iter().map(channel_list_item).collect())
+    Json(
+        registry
+            .channels()
+            .iter()
+            .filter_map(|profile| {
+                definitions
+                    .iter()
+                    .find(|definition| definition.transport == profile.transport)
+                    .map(|definition| channel_list_item(profile, definition))
+            })
+            .collect(),
+    )
 }
 
 pub(crate) async fn create_channel(
@@ -86,18 +174,22 @@ pub(crate) async fn create_channel(
         Ok(transport) => transport,
         Err(response) => return response,
     };
+    let Some(adapter) = state.channel_adapter_registry.adapter_for(&transport) else {
+        return error_response(
+            axum::http::StatusCode::BAD_REQUEST,
+            format!("当前服务未注册 transport={} 的 channel adapter", body.transport),
+        );
+    };
+    if let Err(error) = adapter.validate_config(&body.config) {
+        return error_response(axum::http::StatusCode::BAD_REQUEST, error.to_string());
+    }
+
     let profile = ChannelProfile {
         id: body.id,
         name: body.name,
         transport,
         enabled: body.enabled,
-        config: FeishuChannelConfig {
-            app_id: body.app_id,
-            app_secret: body.app_secret,
-            base_url: body.base_url,
-            require_mention: body.require_mention,
-            thread_mode: body.thread_mode,
-        },
+        config: body.config,
     };
 
     let save_result = {
@@ -120,6 +212,7 @@ pub(crate) async fn update_channel(
     Path(channel_id): Path<String>,
     Json(body): Json<UpdateChannelRequest>,
 ) -> impl IntoResponse {
+    let definitions = supported_channel_definitions(state.channel_adapter_registry.as_ref());
     let save_result = {
         let mut registry = crate::session_manager::write_lock(&state.channel_registry_snapshot);
         let Some(existing) = registry.get(&channel_id).cloned() else {
@@ -128,21 +221,40 @@ pub(crate) async fn update_channel(
                 format!("channel 不存在：{channel_id}"),
             );
         };
+        let Some(definition) = definitions.iter().find(|item| item.transport == existing.transport)
+        else {
+            return error_response(
+                axum::http::StatusCode::BAD_REQUEST,
+                format!(
+                    "当前服务未注册 transport={} 的 channel adapter",
+                    transport_label(&existing.transport)
+                ),
+            );
+        };
+        let Some(adapter) = state.channel_adapter_registry.adapter_for(&existing.transport) else {
+            return error_response(
+                axum::http::StatusCode::BAD_REQUEST,
+                format!(
+                    "当前服务未注册 transport={} 的 channel adapter",
+                    transport_label(&existing.transport)
+                ),
+            );
+        };
+        let merged_config = match merge_channel_config(&existing.config, body.config, definition) {
+            Ok(config) => config,
+            Err(error) => {
+                return error_response(axum::http::StatusCode::BAD_REQUEST, error);
+            }
+        };
+        if let Err(error) = adapter.validate_config(&merged_config) {
+            return error_response(axum::http::StatusCode::BAD_REQUEST, error.to_string());
+        }
         let profile = ChannelProfile {
             id: existing.id,
             name: body.name.unwrap_or(existing.name),
             transport: existing.transport,
             enabled: body.enabled.unwrap_or(existing.enabled),
-            config: FeishuChannelConfig {
-                app_id: body.app_id.unwrap_or(existing.config.app_id),
-                app_secret: body
-                    .app_secret
-                    .filter(|secret| !secret.trim().is_empty())
-                    .unwrap_or(existing.config.app_secret),
-                base_url: body.base_url.unwrap_or(existing.config.base_url),
-                require_mention: body.require_mention.unwrap_or(existing.config.require_mention),
-                thread_mode: body.thread_mode.unwrap_or(existing.config.thread_mode),
-            },
+            config: merged_config,
         };
         registry.upsert(profile);
         registry.save(&state.channel_registry_path)
@@ -182,7 +294,11 @@ pub(crate) async fn delete_channel(
 
 #[cfg(test)]
 mod tests {
-    use super::parse_transport;
+    use channel_bridge::SupportedChannelDefinition;
+    use channel_registry::ChannelTransport;
+    use serde_json::json;
+
+    use super::{merge_channel_config, parse_transport};
 
     #[test]
     fn parse_transport_accepts_feishu() {
@@ -192,5 +308,35 @@ mod tests {
     #[test]
     fn parse_transport_rejects_unknown_transport() {
         assert!(parse_transport("slack").is_err());
+    }
+
+    #[test]
+    fn merge_channel_config_keeps_secret_when_patch_is_blank() {
+        let definition = SupportedChannelDefinition {
+            transport: ChannelTransport::Feishu,
+            label: "Feishu".into(),
+            description: None,
+            config_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "app_secret": {
+                        "type": "string",
+                        "x-secret": true
+                    }
+                },
+                "required": ["app_secret"],
+                "additionalProperties": false
+            }),
+        };
+
+        let merged = merge_channel_config(
+            &json!({ "app_secret": "secret", "base_url": "https://open.feishu.cn" }),
+            Some(json!({ "app_secret": "", "base_url": "https://proxy" })),
+            &definition,
+        )
+        .expect("config should merge");
+
+        assert_eq!(merged["app_secret"], "secret");
+        assert_eq!(merged["base_url"], "https://proxy");
     }
 }

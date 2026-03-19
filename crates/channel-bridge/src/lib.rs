@@ -4,8 +4,9 @@ mod session;
 
 pub use error::ChannelBridgeError;
 pub use runtime::{
-    ChannelCurrentTurnSnapshot, ChannelRuntimeAdapter, ChannelRuntimeEvent, ChannelRuntimeHost,
-    ChannelRuntimeSupervisor, ChannelTurnStatus,
+    ChannelCurrentTurnSnapshot, ChannelRuntimeAdapter, ChannelRuntimeAdapterRegistry,
+    ChannelRuntimeEvent, ChannelRuntimeHost, ChannelRuntimeSupervisor, ChannelTurnStatus,
+    SupportedChannelDefinition,
 };
 pub use session::{
     ChannelBindingStore, ChannelSessionInfo, ChannelSessionService, prepare_session_for_turn,

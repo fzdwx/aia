@@ -1,0 +1,5 @@
+error: meta(value = ...) 当前只支持字符串、布尔与整数字面量
+ --> tests/ui/tool_args_schema/invalid_meta_value.rs:8:49
+  |
+8 |     #[tool_schema(meta(key = "x-label", value = LABEL))]
+  |                                                 ^^^^^

@@ -56,6 +56,8 @@
 - 完成 Web 端 provider 创建、更新、删除、切换与当前 provider / provider 列表刷新链路
 - 完成 Web 端 Channels 配置链路：`AppView`/Sidebar/MainContent 已接入 `channels` 视图，前端 store 与 `/api/channels` 的 list/create/update/delete 已连通，当前先只支持飞书 channel
 - 完成 `channel-registry`：飞书 channel 静态配置当前已统一落盘到 `.aia/channels.json`
+- 完成 channel 配置模型再收口：`ChannelProfile` 现只保留通用 profile 元数据 + raw `config` payload，具体配置结构与校验改由 adapter 自己定义；旧版 Feishu 裸配置 JSON 继续可读
+- 完成 channel catalog 首轮打通：`channel-bridge` 现在额外提供 `ChannelRuntimeAdapterRegistry` 与 `SupportedChannelDefinition.config_schema`；`agent-server` 已暴露支持的 channel catalog，Web 端 Channels 面板可按 server 下发的 schema 动态渲染，而不是继续写死 Feishu 表单
 - 完成 `channel-bridge` 首轮 trait 化落地：共享 `ChannelSessionService` / `ChannelBindingStore` 契约、session 绑定恢复、turn 预压缩、消息回执幂等 helper，以及 adapter 化 `ChannelRuntimeSupervisor` 已从 `apps/agent-server` 抽离，供多渠道入口复用
 - 完成 `channel-feishu` 首轮迁移：飞书协议、长连接、回复控制、卡片流式状态与相关单测已迁入独立 crate，`agent-server` 只保留宿主桥接
 - 完成 `agent-store` 的 channel 动态索引：外部会话键 → `session_id` 映射与 `message_id` 幂等去重已进入 SQLite

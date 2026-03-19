@@ -62,12 +62,16 @@
 - `description`
 - `minimum`
 - `maximum`
+- `meta(key = "...", value = ...)`
 
 其中：
 
 - `minimum` / `maximum` 仅支持整数类型字段
 - 无符号整数字段不能设置负数约束
 - 数值约束当前只支持整数字面量
+- `meta(...)` 里的 `value` 当前支持字符串、布尔与整数字面量
+- `meta(...)` 用于补充属性级扩展元信息，例如 `x-label`、`x-secret`、`format`、`default`
+- `meta(key = ...)` 不能覆盖 `description`、`minimum`、`maximum` 这些已有内建键
 
 ### `serde` 协作
 
@@ -108,6 +112,25 @@ struct ExtendedArgsSchema {
     balance: i32,
     #[tool_schema(minimum = 1, maximum = 10)]
     attempts: u32,
+}
+```
+
+```rust
+#[derive(Serialize, Deserialize, ToolArgsSchema)]
+#[serde(deny_unknown_fields)]
+struct ChannelConfigArgs {
+    #[tool_schema(
+        description = "App Secret",
+        meta(key = "x-label", value = "App Secret"),
+        meta(key = "x-secret", value = true)
+    )]
+    app_secret: String,
+    #[tool_schema(
+        description = "Base URL",
+        meta(key = "format", value = "uri"),
+        meta(key = "default", value = "https://open.feishu.cn")
+    )]
+    base_url: String,
 }
 ```
 

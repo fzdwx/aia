@@ -21,6 +21,23 @@ pub trait ToolArgsSchema {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ToolSchemaMetadataValue {
+    String(String),
+    Boolean(bool),
+    Integer(i64),
+}
+
+impl ToolSchemaMetadataValue {
+    fn into_value(self) -> Value {
+        match self {
+            Self::String(value) => Value::String(value),
+            Self::Boolean(value) => Value::Bool(value),
+            Self::Integer(value) => Value::Number(value.into()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolSchema {
     value: Value,
 }
@@ -117,6 +134,17 @@ impl ToolSchemaProperty {
     {
         if let Some(object) = self.value.as_object_mut() {
             object.insert("maximum".into(), Value::Number(maximum.into()));
+        }
+        self
+    }
+
+    pub fn meta(
+        mut self,
+        key: impl Into<String>,
+        value: ToolSchemaMetadataValue,
+    ) -> Self {
+        if let Some(object) = self.value.as_object_mut() {
+            object.insert(key.into(), value.into_value());
         }
         self
     }

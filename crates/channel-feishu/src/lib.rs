@@ -4,16 +4,19 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use agent_core::ToolArgsSchema;
+use agent_core_macros::ToolArgsSchema as DeriveToolArgsSchema;
 use agent_store::ExternalConversationKey;
 use channel_bridge::{
-    ChannelBindingStore, ChannelCurrentTurnSnapshot, ChannelRuntimeAdapter, ChannelRuntimeEvent,
-    ChannelRuntimeHost, ChannelSessionService, ChannelTurnStatus, prepare_session_for_turn,
-    record_channel_message_receipt, resolve_or_create_session,
+    ChannelBindingStore, ChannelBridgeError, ChannelCurrentTurnSnapshot, ChannelRuntimeAdapter,
+    ChannelRuntimeEvent, ChannelRuntimeHost, ChannelSessionService, ChannelTurnStatus,
+    SupportedChannelDefinition, prepare_session_for_turn, record_channel_message_receipt,
+    resolve_or_create_session,
 };
 use channel_registry::{ChannelProfile, ChannelTransport};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{Value, json};
 use tokio::{task::JoinHandle, time::MissedTickBehavior};
 use tokio_tungstenite::{connect_async, tungstenite::Message as WebSocketMessage};
 
@@ -23,6 +26,43 @@ pub struct FeishuMessageTarget {
     pub receive_id_type: String,
     pub reply_to_message_id: Option<String>,
     pub reply_in_thread: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, DeriveToolArgsSchema)]
+#[serde(deny_unknown_fields)]
+struct FeishuChannelConfig {
+    #[tool_schema(
+        description = "App ID",
+        meta(key = "x-label", value = "App ID")
+    )]
+    app_id: String,
+    #[tool_schema(
+        description = "编辑时留空表示保持现有 secret",
+        meta(key = "x-label", value = "App Secret"),
+        meta(key = "x-secret", value = true)
+    )]
+    app_secret: String,
+    #[tool_schema(
+        description = "Base URL",
+        meta(key = "x-label", value = "Base URL"),
+        meta(key = "format", value = "uri"),
+        meta(key = "default", value = "https://open.feishu.cn")
+    )]
+    base_url: String,
+    #[serde(default)]
+    #[tool_schema(
+        description = "Require mention",
+        meta(key = "x-label", value = "Require mention"),
+        meta(key = "default", value = true)
+    )]
+    require_mention: bool,
+    #[serde(default)]
+    #[tool_schema(
+        description = "Thread mode",
+        meta(key = "x-label", value = "Thread mode"),
+        meta(key = "default", value = true)
+    )]
+    thread_mode: bool,
 }
 
 const FEISHU_EVENT_KIND: &str = "im.message.receive_v1";
@@ -72,24 +112,39 @@ impl ChannelRuntimeAdapter for FeishuChannelAdapter {
         ChannelTransport::Feishu
     }
 
-    fn fingerprint(&self, profile: &ChannelProfile) -> String {
-        format!(
+    fn definition(&self) -> SupportedChannelDefinition {
+        SupportedChannelDefinition {
+            transport: ChannelTransport::Feishu,
+            label: "Feishu".into(),
+            description: Some("飞书长连接 channel".into()),
+            config_schema: FeishuChannelConfig::schema().into_value(),
+        }
+    }
+
+    fn validate_config(&self, config: &Value) -> Result<(), ChannelBridgeError> {
+        parse_feishu_config(config).map(|_| ())
+    }
+
+    fn fingerprint(&self, profile: &ChannelProfile) -> Result<String, ChannelBridgeError> {
+        let config = feishu_config(profile);
+        Ok(format!(
             "{}|{}|{}|{}|{}|{}|{}",
             profile.id,
             profile.enabled,
-            profile.config.app_id,
-            profile.config.app_secret,
-            profile.config.base_url,
-            profile.config.require_mention,
-            profile.config.thread_mode,
-        )
+            config.app_id,
+            config.app_secret,
+            config.base_url,
+            config.require_mention,
+            config.thread_mode,
+        ))
     }
 
-    fn spawn(&self, profile: ChannelProfile) -> JoinHandle<()> {
+    fn spawn(&self, profile: ChannelProfile) -> Result<JoinHandle<()>, ChannelBridgeError> {
+        self.validate_config(&profile.config)?;
         let deps = self.deps.clone();
-        tokio::spawn(async move {
+        Ok(tokio::spawn(async move {
             run_feishu_long_connection(profile, deps).await;
-        })
+        }))
     }
 }
 
@@ -274,21 +329,22 @@ async fn handle_feishu_event_payload(
 async fn fetch_websocket_endpoint(
     profile: &ChannelProfile,
 ) -> Result<FeishuWebsocketEndpoint, String> {
+    let config = feishu_config(profile);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(|error| error.to_string())?;
     let url = format!(
         "{}/{}",
-        profile.config.base_url.trim_end_matches('/'),
+        config.base_url.trim_end_matches('/'),
         FEISHU_WS_ENDPOINT_URI.trim_start_matches('/'),
     );
     let response = client
         .post(url)
         .header("locale", "zh")
         .json(&json!({
-            "AppID": profile.config.app_id,
-            "AppSecret": profile.config.app_secret,
+            "AppID": config.app_id,
+            "AppSecret": config.app_secret,
         }))
         .send()
         .await
@@ -320,13 +376,14 @@ async fn handle_event(
     deps: &ChannelRuntimeDeps,
     event: EventBody,
 ) -> Result<(), String> {
+    let config = feishu_config(profile);
     if event.sender.sender_type != "user" {
         return Ok(());
     }
     if event.message.message_type != "text" {
         return Ok(());
     }
-    if profile.config.require_mention
+    if config.require_mention
         && event.message.chat_type == "group"
         && event.message.mentions.is_empty()
     {
@@ -645,10 +702,21 @@ fn build_turn_prompt(prompt: &str, event: &EventBody) -> String {
     }
 }
 
+fn parse_feishu_config(config: &Value) -> Result<FeishuChannelConfig, ChannelBridgeError> {
+    serde_json::from_value(config.clone())
+        .map_err(|error| ChannelBridgeError::new(format!("invalid feishu config: {error}")))
+}
+
+fn feishu_config(profile: &ChannelProfile) -> FeishuChannelConfig {
+    parse_feishu_config(&profile.config)
+        .unwrap_or_else(|error| unreachable!("feishu adapter received invalid config: {error}"))
+}
+
 fn build_session_title(profile: &ChannelProfile, event: &EventBody) -> String {
+    let config = feishu_config(profile);
     match event.message.chat_type.as_str() {
         "p2p" => format!("Feishu DM · {} · {}", profile.name, event.sender.sender_id.open_id),
-        _ if profile.config.thread_mode
+        _ if config.thread_mode
             && !event.message.thread_id.as_deref().unwrap_or_default().is_empty() =>
         {
             format!(
@@ -791,7 +859,8 @@ async fn create_cardkit_entity(
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(|error| error.to_string())?;
-    let base_url = profile.config.base_url.trim_end_matches('/');
+    let config = feishu_config(profile);
+    let base_url = config.base_url.trim_end_matches('/').to_string();
     let response = client
         .post(format!("{base_url}{FEISHU_CARDKIT_CARDS_URI}"))
         .header("Authorization", format!("Bearer {tenant_access_token}"))
@@ -835,7 +904,8 @@ async fn stream_cardkit_content(
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(|error| error.to_string())?;
-    let base_url = profile.config.base_url.trim_end_matches('/');
+    let config = feishu_config(profile);
+    let base_url = config.base_url.trim_end_matches('/').to_string();
     let response = client
         .put(format!(
             "{base_url}/{}",
@@ -877,7 +947,8 @@ async fn set_cardkit_streaming_mode(
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(|error| error.to_string())?;
-    let base_url = profile.config.base_url.trim_end_matches('/');
+    let config = feishu_config(profile);
+    let base_url = config.base_url.trim_end_matches('/').to_string();
     let response = client
         .patch(format!(
             "{base_url}/{}",
@@ -920,7 +991,8 @@ async fn update_cardkit_card(
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(|error| error.to_string())?;
-    let base_url = profile.config.base_url.trim_end_matches('/');
+    let config = feishu_config(profile);
+    let base_url = config.base_url.trim_end_matches('/').to_string();
     let response = client
         .put(format!(
             "{base_url}/{}",
@@ -964,7 +1036,8 @@ async fn update_card_message(
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(|error| error.to_string())?;
-    let base_url = profile.config.base_url.trim_end_matches('/');
+    let config = feishu_config(profile);
+    let base_url = config.base_url.trim_end_matches('/').to_string();
     let response = client
         .patch(format!("{base_url}{FEISHU_MESSAGES_URI}/{message_id}"))
         .header("Authorization", format!("Bearer {tenant_access_token}"))
@@ -1160,7 +1233,8 @@ async fn remove_message_reaction(
 }
 
 fn feishu_message_reactions_url(profile: &ChannelProfile, message_id: &str) -> String {
-    let base_url = profile.config.base_url.trim_end_matches('/');
+    let config = feishu_config(profile);
+    let base_url = config.base_url.trim_end_matches('/').to_string();
     format!(
         "{base_url}/{}",
         FEISHU_MESSAGE_REACTIONS_URI.replace("{message_id}", message_id).trim_start_matches('/')
@@ -1176,7 +1250,8 @@ async fn resolve_p2p_chat_id(profile: &ChannelProfile, open_id: &str) -> Result<
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(|error| error.to_string())?;
-    let base_url = profile.config.base_url.trim_end_matches('/');
+    let config = feishu_config(profile);
+    let base_url = config.base_url.trim_end_matches('/').to_string();
     let response = client
         .post(format!(
             "{base_url}/{}?user_id_type=open_id",
@@ -1214,17 +1289,18 @@ async fn resolve_p2p_chat_id(profile: &ChannelProfile, open_id: &str) -> Result<
 }
 
 async fn fetch_tenant_access_token(profile: &ChannelProfile) -> Result<String, String> {
+    let config = feishu_config(profile);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(|error| error.to_string())?;
-    let base_url = profile.config.base_url.trim_end_matches('/');
+    let base_url = config.base_url.trim_end_matches('/');
     let response = client
         .post(format!("{base_url}/open-apis/auth/v3/tenant_access_token/internal"))
         .header("Content-Type", "application/json; charset=utf-8")
         .json(&json!({
-            "app_id": profile.config.app_id,
-            "app_secret": profile.config.app_secret,
+            "app_id": config.app_id,
+            "app_secret": config.app_secret,
         }))
         .send()
         .await
@@ -1255,6 +1331,7 @@ fn resolve_conversation_key(
     profile: &ChannelProfile,
     event: &EventBody,
 ) -> Result<ExternalConversationKey, String> {
+    let config = feishu_config(profile);
     if event.message.chat_type == "p2p" {
         if event.sender.sender_id.open_id.is_empty() {
             return Err("p2p 消息缺少 sender.open_id".into());
@@ -1267,7 +1344,7 @@ fn resolve_conversation_key(
         });
     }
 
-    if profile.config.thread_mode
+    if config.thread_mode
         && let Some(thread_id) = &event.message.thread_id
         && !thread_id.is_empty()
     {
@@ -1320,7 +1397,7 @@ async fn resolve_reply_target(
         receive_id,
         receive_id_type: "chat_id".into(),
         reply_to_message_id: (!is_p2p).then_some(event.message.message_id.clone()),
-        reply_in_thread: !is_p2p && profile.config.thread_mode,
+        reply_in_thread: !is_p2p && feishu_config(profile).thread_mode,
     })
 }
 
@@ -1714,7 +1791,8 @@ fn prepare_send_message_request(
     text: &str,
     request_uuid_seed: &str,
 ) -> PreparedFeishuSendRequest {
-    let base_url = profile.config.base_url.trim_end_matches('/');
+    let config = feishu_config(profile);
+    let base_url = config.base_url.trim_end_matches('/').to_string();
     let content = json!({ "text": text }).to_string();
     let uuid = format!("aia-{request_uuid_seed}");
     if let Some(reply_to_message_id) = &target.reply_to_message_id {
@@ -1749,7 +1827,8 @@ fn prepare_send_card_request(
     card: &serde_json::Value,
     request_uuid_seed: &str,
 ) -> PreparedFeishuSendRequest {
-    let base_url = profile.config.base_url.trim_end_matches('/');
+    let config = feishu_config(profile);
+    let base_url = config.base_url.trim_end_matches('/').to_string();
     let content = serde_json::to_string(card).unwrap_or_else(|_| "{}".into());
     let uuid = format!("aia-card-{request_uuid_seed}");
     if let Some(reply_to_message_id) = &target.reply_to_message_id {
@@ -1781,7 +1860,8 @@ fn prepare_send_cardkit_request(
     card_id: &str,
     request_uuid_seed: &str,
 ) -> PreparedFeishuSendRequest {
-    let base_url = profile.config.base_url.trim_end_matches('/');
+    let config = feishu_config(profile);
+    let base_url = config.base_url.trim_end_matches('/').to_string();
     let content = serde_json::to_string(&json!({
         "type": "card",
         "data": { "card_id": card_id }
@@ -2319,12 +2399,25 @@ fn skip_unknown_field(input: &[u8], cursor: &mut usize, wire_type: u64) -> Resul
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use channel_registry::ChannelProfile;
 
     use super::*;
 
     fn sample_profile() -> ChannelProfile {
-        ChannelProfile::new_feishu("default", "默认飞书", "cli_app", "secret")
+        ChannelProfile::new(
+            "default",
+            "默认飞书",
+            ChannelTransport::Feishu,
+            json!({
+                "app_id": "cli_app",
+                "app_secret": "secret",
+                "base_url": "https://open.feishu.cn",
+                "require_mention": true,
+                "thread_mode": true
+            }),
+        )
     }
 
     fn group_event() -> EventBody {
@@ -2477,7 +2570,7 @@ mod tests {
     #[test]
     fn prepare_send_message_request_uses_create_for_direct_messages() {
         let mut profile = sample_profile();
-        profile.config.base_url = "https://open.feishu.cn".into();
+        profile.config["base_url"] = json!("https://open.feishu.cn");
         let target = FeishuMessageTarget {
             receive_id: "oc_p2p_chat_1".into(),
             receive_id_type: "chat_id".into(),
@@ -2520,7 +2613,7 @@ mod tests {
     #[test]
     fn feishu_message_reactions_url_builds_expected_path() {
         let mut profile = sample_profile();
-        profile.config.base_url = "https://open.feishu.cn".into();
+        profile.config["base_url"] = json!("https://open.feishu.cn");
 
         assert_eq!(
             feishu_message_reactions_url(&profile, "om_message_1"),
@@ -2585,7 +2678,7 @@ mod tests {
     #[test]
     fn prepare_send_cardkit_request_uses_card_reference_payload() {
         let mut profile = sample_profile();
-        profile.config.base_url = "https://open.feishu.cn".into();
+        profile.config["base_url"] = json!("https://open.feishu.cn");
         let target = FeishuMessageTarget {
             receive_id: "oc_p2p_chat_1".into(),
             receive_id_type: "chat_id".into(),

@@ -17,7 +17,7 @@ use super::{
     turn::CancelTurnRequest,
 };
 use crate::{
-    channel_host::build_channel_runtime,
+    channel_host::{build_channel_adapter_registry, build_channel_runtime},
     session_manager::{ProviderInfoSnapshot, SessionManagerHandle},
     state::AppState,
 };
@@ -26,6 +26,11 @@ fn test_state() -> Arc<AppState> {
     let session_manager = SessionManagerHandle::test_handle();
     let broadcast_tx = tokio::sync::broadcast::channel(8).0;
     let store = Arc::new(agent_store::AiaStore::in_memory().expect("memory store"));
+    let channel_adapter_registry = Arc::new(build_channel_adapter_registry(
+        store.clone(),
+        session_manager.clone(),
+        broadcast_tx.clone(),
+    ));
     Arc::new(AppState {
         session_manager: session_manager.clone(),
         broadcast_tx: broadcast_tx.clone(),
@@ -38,10 +43,9 @@ fn test_state() -> Arc<AppState> {
         channel_registry_path: aia_config::default_channels_path(),
         channel_registry_snapshot: Arc::new(RwLock::new(ChannelRegistry::default())),
         store: store.clone(),
+        channel_adapter_registry: channel_adapter_registry.clone(),
         channel_runtime: Arc::new(tokio::sync::Mutex::new(build_channel_runtime(
-            store,
-            session_manager,
-            broadcast_tx,
+            channel_adapter_registry.as_ref().clone(),
         ))),
     })
 }
@@ -189,29 +193,36 @@ fn create_channel_request_deserializes_feishu_payload() {
         "name": "默认飞书",
         "transport": "feishu",
         "enabled": true,
-        "app_id": "cli_xxx",
-        "app_secret": "secret",
-        "base_url": "https://open.feishu.cn",
-        "require_mention": true,
-        "thread_mode": true
+        "config": {
+            "app_id": "cli_xxx",
+            "app_secret": "secret",
+            "base_url": "https://open.feishu.cn",
+            "require_mention": true,
+            "thread_mode": true
+        }
     }))
     .expect("create channel request should deserialize");
 
     assert_eq!(parsed.id, "default");
     assert_eq!(parsed.transport, "feishu");
-    assert!(parsed.thread_mode);
+    assert_eq!(parsed.config["thread_mode"], true);
 }
 
 #[test]
 fn update_channel_request_allows_partial_secret_update() {
     let parsed: UpdateChannelRequest = serde_json::from_value(serde_json::json!({
         "enabled": false,
-        "app_secret": ""
+        "config": {
+            "app_secret": ""
+        }
     }))
     .expect("update channel request should deserialize");
 
     assert_eq!(parsed.enabled, Some(false));
-    assert_eq!(parsed.app_secret.as_deref(), Some(""));
+    assert_eq!(
+        parsed.config.as_ref().and_then(|value| value.get("app_secret")),
+        Some(&serde_json::json!(""))
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]

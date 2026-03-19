@@ -62,11 +62,13 @@
 - `.aia/session.jsonl` 当前统一以扁平 `TapeEntry` JSONL 形式 append-only 落盘
 - provider 本地资料当前落盘在 `.aia/providers.json`
 - channel 本地资料当前落盘在 `.aia/channels.json`
+- channel 配置模型必须保持“通用 profile 元数据 + raw config payload”的结构；具体配置结构、校验与字段 schema 由各 channel adapter 定义，而不是由 `channel-registry` 持有
 - 本地 SQLite 状态当前落盘在 `.aia/store.sqlite3`
 - provider 当前已具备协议级区分能力，可在同一地址 / 模型下区分 Responses 与 Chat Completions
 - `apps/web` 已建立为实际主工作台，而不是仅布局骨架
 - Web 客户端当前已接入 provider 管理、session 列表 / 历史 / 当前轮次恢复、流式消息展示、trace 诊断视图
 - Web 客户端当前也已接入飞书 channel 管理：列表、创建、编辑、删除与启停配置
+- Web 客户端的 channel 表单定义应以 server 暴露的 supported-channel catalog 为准，而不是继续写死某个平台字段
 - 内建基础编码工具名已收口为 `shell`、`read`、`write`、`edit`、`glob`、`grep`，其中 `shell` 当前以内嵌 `brush` 库执行
 - `builtin-tools` 的 `shell` 已把输出聚合、abort 轮询与输出捕获改为 async 事件泵，长命令等待不再依赖同步 `recv_timeout` 循环，也不再依赖 `spawn_blocking` pipe reader 桥接
 - `builtin-tools` 的 `read` / `write` / `edit` 已切到 `tokio::fs`，`glob` / `grep` 也已改为共享的 async `.gitignore` 感知仓库遍历 + async 文件读取，不再依赖 `spawn_blocking` / `ignore::WalkBuilder`

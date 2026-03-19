@@ -5,7 +5,7 @@ use channel_registry::ChannelRegistry;
 use provider_registry::ProviderRegistry;
 
 use crate::{
-    channel_host::{build_channel_runtime, sync_channel_runtime},
+    channel_host::{build_channel_adapter_registry, build_channel_runtime, sync_channel_runtime},
     model::{ProviderLaunchChoice, build_model_from_selection},
     session_manager::{ProviderInfoSnapshot, SessionManagerConfig, spawn_session_manager},
     state::AppState,
@@ -104,10 +104,13 @@ pub async fn bootstrap_state() -> Result<Arc<AppState>, ServerInitError> {
         workspace_root,
         user_agent: build_server_user_agent(),
     });
-    let channel_runtime = Arc::new(tokio::sync::Mutex::new(build_channel_runtime(
+    let channel_adapter_registry = Arc::new(build_channel_adapter_registry(
         store.clone(),
         session_manager.clone(),
         broadcast_tx.clone(),
+    ));
+    let channel_runtime = Arc::new(tokio::sync::Mutex::new(build_channel_runtime(
+        channel_adapter_registry.as_ref().clone(),
     )));
 
     let state = Arc::new(AppState {
@@ -118,6 +121,7 @@ pub async fn bootstrap_state() -> Result<Arc<AppState>, ServerInitError> {
         channel_registry_path,
         channel_registry_snapshot,
         store,
+        channel_adapter_registry,
         channel_runtime,
     });
 

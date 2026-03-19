@@ -1,4 +1,4 @@
-use agent_core::ToolArgsSchema;
+use agent_core_macros::ToolArgsSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, ToolArgsSchema)]

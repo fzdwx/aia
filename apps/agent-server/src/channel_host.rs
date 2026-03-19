@@ -3,9 +3,10 @@ use std::sync::Arc;
 use agent_store::{AiaStore, ChannelSessionBinding, ExternalConversationKey};
 use async_trait::async_trait;
 use channel_bridge::{
-    ChannelBindingStore, ChannelBridgeError, ChannelCurrentTurnSnapshot, ChannelRuntimeEvent,
-    ChannelRuntimeHost, ChannelRuntimeSupervisor, ChannelSessionInfo, ChannelSessionService,
-    ChannelTurnStatus,
+    ChannelBindingStore, ChannelBridgeError, ChannelCurrentTurnSnapshot,
+    ChannelRuntimeAdapterRegistry, ChannelRuntimeEvent, ChannelRuntimeHost,
+    ChannelRuntimeSupervisor, ChannelSessionInfo, ChannelSessionService, ChannelTurnStatus,
+    SupportedChannelDefinition,
 };
 use channel_feishu::build_feishu_runtime_adapter;
 
@@ -23,13 +24,25 @@ struct AgentServerChannelHost {
     broadcast_tx: tokio::sync::broadcast::Sender<SsePayload>,
 }
 
-pub fn build_channel_runtime(
+pub fn build_channel_adapter_registry(
     store: Arc<AiaStore>,
     session_manager: SessionManagerHandle,
     broadcast_tx: tokio::sync::broadcast::Sender<SsePayload>,
-) -> ChannelRuntimeSupervisor {
+) -> ChannelRuntimeAdapterRegistry {
     let host = Arc::new(AgentServerChannelHost { store, session_manager, broadcast_tx });
-    ChannelRuntimeSupervisor::new(vec![build_feishu_runtime_adapter(host)])
+    let mut registry = ChannelRuntimeAdapterRegistry::new();
+    registry.register(build_feishu_runtime_adapter(host));
+    registry
+}
+
+pub fn build_channel_runtime(registry: ChannelRuntimeAdapterRegistry) -> ChannelRuntimeSupervisor {
+    ChannelRuntimeSupervisor::new(registry)
+}
+
+pub fn supported_channel_definitions(
+    registry: &ChannelRuntimeAdapterRegistry,
+) -> Vec<SupportedChannelDefinition> {
+    registry.definitions()
 }
 
 pub async fn sync_channel_runtime(state: &AppState) -> Result<(), String> {
@@ -234,9 +247,9 @@ mod tests {
         let store = Arc::new(AiaStore::in_memory().expect("memory store"));
         let session_manager = SessionManagerHandle::test_handle();
         let broadcast_tx = tokio::sync::broadcast::channel(8).0;
+        let registry = build_channel_adapter_registry(store, session_manager, broadcast_tx);
 
-        let _runtime: ChannelRuntimeSupervisor =
-            build_channel_runtime(store, session_manager, broadcast_tx);
+        let _runtime: ChannelRuntimeSupervisor = build_channel_runtime(registry);
     }
 
     #[test]

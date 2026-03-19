@@ -4,7 +4,7 @@ use std::{
 };
 
 use agent_store::AiaStore;
-use channel_bridge::ChannelRuntimeSupervisor;
+use channel_bridge::{ChannelRuntimeAdapterRegistry, ChannelRuntimeSupervisor};
 use channel_registry::ChannelRegistry;
 use provider_registry::ProviderRegistry;
 use tokio::sync::broadcast;
@@ -24,5 +24,6 @@ pub struct AppState {
     pub channel_registry_path: PathBuf,
     pub channel_registry_snapshot: Arc<RwLock<ChannelRegistry>>,
     pub store: Arc<AiaStore>,
+    pub channel_adapter_registry: Arc<ChannelRuntimeAdapterRegistry>,
     pub channel_runtime: Arc<tokio::sync::Mutex<ChannelRuntimeSupervisor>>,
 }

@@ -2,8 +2,8 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{
-    Attribute, Data, DataStruct, DeriveInput, Expr, Fields, GenericArgument, LitInt, LitStr,
-    PathArguments, Type, parse_macro_input,
+    parse_macro_input, Attribute, Data, DataStruct, DeriveInput, Expr, Fields, GenericArgument,
+    LitInt, LitStr, PathArguments, Type,
 };
 
 #[proc_macro_derive(ToolArgsSchema, attributes(serde, tool_schema))]
@@ -65,6 +65,18 @@ struct FieldSchemaConfig {
     description: Option<String>,
     minimum: Option<i64>,
     maximum: Option<i64>,
+    metadata: Vec<FieldSchemaMeta>,
+}
+
+struct FieldSchemaMeta {
+    key: String,
+    value: FieldSchemaMetaValue,
+}
+
+enum FieldSchemaMetaValue {
+    String(String),
+    Boolean(bool),
+    Integer(i64),
 }
 
 fn collect_struct_fields(data: &DataStruct) -> syn::Result<Vec<SchemaField>> {
@@ -144,6 +156,22 @@ fn property_expr(ty: &Type, config: &FieldSchemaConfig) -> syn::Result<(TokenStr
             return Err(syn::Error::new_spanned(ty, "无符号整数字段的 maximum 不能为负数"));
         }
         expr = quote!(#expr.maximum(#maximum));
+    }
+
+    for meta in &config.metadata {
+        let key = &meta.key;
+        let meta_expr = match &meta.value {
+            FieldSchemaMetaValue::String(value) => {
+                quote!(::agent_core::ToolSchemaMetadataValue::String(#value.into()))
+            }
+            FieldSchemaMetaValue::Boolean(value) => {
+                quote!(::agent_core::ToolSchemaMetadataValue::Boolean(#value))
+            }
+            FieldSchemaMetaValue::Integer(value) => {
+                quote!(::agent_core::ToolSchemaMetadataValue::Integer(#value))
+            }
+        };
+        expr = quote!(#expr.meta(#key, #meta_expr));
     }
 
     Ok((expr, required))
@@ -235,7 +263,8 @@ fn parse_container_min_properties(attrs: &[Attribute]) -> syn::Result<Option<u64
 }
 
 fn parse_field_schema_config(attrs: &[Attribute]) -> syn::Result<FieldSchemaConfig> {
-    let mut result = FieldSchemaConfig { description: None, minimum: None, maximum: None };
+    let mut result =
+        FieldSchemaConfig { description: None, minimum: None, maximum: None, metadata: Vec::new() };
     for attr in attrs.iter().filter(|attr| attr.path().is_ident("tool_schema")) {
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("description") {
@@ -254,13 +283,82 @@ fn parse_field_schema_config(attrs: &[Attribute]) -> syn::Result<FieldSchemaConf
                 result.maximum = Some(parse_signed_integer_expr(&value.parse()?)?);
                 return Ok(());
             }
+            if meta.path.is_ident("meta") {
+                result.metadata.push(parse_field_schema_meta(&meta)?);
+                return Ok(());
+            }
             Err(meta.error(
-                "字段级仅支持 #[tool_schema(description = \"...\", minimum = N, maximum = N)]；当前支持键：description、minimum、maximum",
+                "字段级仅支持 #[tool_schema(description = \"...\", minimum = N, maximum = N, meta(key = \"...\", value = ...))]；当前支持键：description、minimum、maximum、meta",
             ))
         })?;
     }
 
     Ok(result)
+}
+
+fn parse_field_schema_meta(meta: &syn::meta::ParseNestedMeta<'_>) -> syn::Result<FieldSchemaMeta> {
+    let mut key = None;
+    let mut value = None;
+
+    meta.parse_nested_meta(|nested| {
+        if nested.path.is_ident("key") {
+            let literal: LitStr = nested.value()?.parse()?;
+            key = Some(literal.value());
+            return Ok(());
+        }
+        if nested.path.is_ident("value") {
+            let expr: Expr = nested.value()?.parse()?;
+            value = Some(parse_field_schema_meta_value(&expr)?);
+            return Ok(());
+        }
+        Err(nested.error("meta(...) 仅支持 key = \"...\" 与 value = ... 两个键"))
+    })?;
+
+    let Some(key) = key else {
+        return Err(meta.error("meta(...) 缺少 key = \"...\""));
+    };
+    let Some(value) = value else {
+        return Err(meta.error("meta(...) 缺少 value = ..."));
+    };
+
+    if matches!(key.as_str(), "description" | "minimum" | "maximum") {
+        return Err(meta.error("meta(key = ...) 不能覆盖 description、minimum、maximum 等内建键"));
+    }
+
+    Ok(FieldSchemaMeta { key, value })
+}
+
+fn parse_field_schema_meta_value(expr: &Expr) -> syn::Result<FieldSchemaMetaValue> {
+    match expr {
+        Expr::Lit(expr_lit) => match &expr_lit.lit {
+            syn::Lit::Str(literal) => Ok(FieldSchemaMetaValue::String(literal.value())),
+            syn::Lit::Bool(literal) => Ok(FieldSchemaMetaValue::Boolean(literal.value())),
+            syn::Lit::Int(literal) => Ok(FieldSchemaMetaValue::Integer(literal.base10_parse()?)),
+            _ => Err(syn::Error::new_spanned(
+                expr,
+                "meta(value = ...) 当前只支持字符串、布尔与整数字面量",
+            )),
+        },
+        Expr::Unary(expr_unary) if expr_unary.op == syn::UnOp::Neg(Default::default()) => {
+            let Expr::Lit(expr_lit) = &*expr_unary.expr else {
+                return Err(syn::Error::new_spanned(
+                    expr,
+                    "meta(value = ...) 当前只支持字符串、布尔与整数字面量",
+                ));
+            };
+            let syn::Lit::Int(literal) = &expr_lit.lit else {
+                return Err(syn::Error::new_spanned(
+                    expr,
+                    "meta(value = ...) 当前只支持字符串、布尔与整数字面量",
+                ));
+            };
+            Ok(FieldSchemaMetaValue::Integer(-literal.base10_parse::<i64>()?))
+        }
+        _ => Err(syn::Error::new_spanned(
+            expr,
+            "meta(value = ...) 当前只支持字符串、布尔与整数字面量",
+        )),
+    }
 }
 
 fn parse_signed_integer_expr(expr: &Expr) -> syn::Result<i64> {

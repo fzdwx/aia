@@ -1,4 +1,4 @@
-error: 字段级仅支持 #[tool_schema(description = "...", minimum = N, maximum = N)]；当前支持键：description、minimum、maximum
+error: 字段级仅支持 #[tool_schema(description = "...", minimum = N, maximum = N, meta(key = "...", value = ...))]；当前支持键：description、minimum、maximum、meta
  --> tests/ui/tool_args_schema/invalid_field_key.rs:6:19
   |
 6 |     #[tool_schema(title = "bad")]

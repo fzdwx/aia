@@ -1,6 +1,12 @@
-import { useEffect, useState, type FormEvent } from "react"
+import { useEffect, useMemo, useState, type FormEvent } from "react"
 import { ArrowLeft, Pencil, Plus, Trash2 } from "lucide-react"
 
+import { listSupportedChannels } from "@/lib/api"
+import type {
+  ChannelListItem,
+  ChannelTransport,
+  SupportedChannelDefinition,
+} from "@/lib/types"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -11,30 +17,127 @@ import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat-store"
 
+type ChannelSchemaProperty = Record<string, unknown>
+
 type ChannelFormState = {
   id: string
   name: string
+  transport: ChannelTransport
   enabled: boolean
-  app_id: string
-  app_secret: string
-  base_url: string
-  require_mention: boolean
-  thread_mode: boolean
+  config: Record<string, unknown>
 }
 
-const FEISHU_BASE_URL = "https://open.feishu.cn"
+function cloneValue(value: unknown): unknown {
+  if (typeof structuredClone === "function") return structuredClone(value)
+  return JSON.parse(JSON.stringify(value)) as unknown
+}
 
-function emptyChannelForm(): ChannelFormState {
+function schemaProperties(
+  definition: SupportedChannelDefinition | null
+): Array<[string, ChannelSchemaProperty]> {
+  const properties = definition?.config_schema.properties
+  if (!properties || typeof properties !== "object") return []
+  return Object.entries(properties).map(([key, value]) => [
+    key,
+    typeof value === "object" && value ? (value as ChannelSchemaProperty) : {},
+  ])
+}
+
+function requiredFieldKeys(
+  definition: SupportedChannelDefinition | null
+): Set<string> {
+  const required = definition?.config_schema.required
+  if (!Array.isArray(required)) return new Set()
+  return new Set(
+    required.filter((value): value is string => typeof value === "string")
+  )
+}
+
+function fieldKind(
+  schema: ChannelSchemaProperty
+): "text" | "secret" | "boolean" | "url" {
+  if (schema["x-secret"] === true) return "secret"
+  if (schema.type === "boolean") return "boolean"
+  if (schema.format === "uri") return "url"
+  return "text"
+}
+
+function fieldLabel(key: string, schema: ChannelSchemaProperty): string {
+  const label = schema["x-label"]
+  if (typeof label === "string" && label.trim().length > 0) return label
+  return key.replaceAll("_", " ")
+}
+
+function definitionDefaults(
+  definition: SupportedChannelDefinition | null
+): Record<string, unknown> {
+  return Object.fromEntries(
+    schemaProperties(definition).map(([key, schema]) => [
+      key,
+      cloneValue(
+        schema.default ?? (fieldKind(schema) === "boolean" ? false : "")
+      ),
+    ])
+  )
+}
+
+function normalizeConfigForForm(
+  definition: SupportedChannelDefinition | null,
+  config: Record<string, unknown>
+): Record<string, unknown> {
+  const merged = definitionDefaults(definition)
+  for (const [key, schema] of schemaProperties(definition)) {
+    if (fieldKind(schema) === "boolean") {
+      merged[key] = config[key] === true
+      continue
+    }
+    merged[key] = typeof config[key] === "string" ? config[key] : ""
+  }
+  return merged
+}
+
+function emptyChannelForm(
+  definition: SupportedChannelDefinition | null
+): ChannelFormState {
   return {
     id: "",
     name: "",
+    transport: definition?.transport ?? "",
     enabled: true,
-    app_id: "",
-    app_secret: "",
-    base_url: FEISHU_BASE_URL,
-    require_mention: true,
-    thread_mode: true,
+    config: definitionDefaults(definition),
   }
+}
+
+function isMissingRequiredValue(
+  key: string,
+  schema: ChannelSchemaProperty,
+  value: unknown,
+  editing: boolean,
+  requiredKeys: Set<string>
+): boolean {
+  if (!requiredKeys.has(key)) return false
+  if (editing && fieldKind(schema) === "secret") return false
+  if (fieldKind(schema) === "boolean") return false
+  return typeof value !== "string" || value.trim().length === 0
+}
+
+function fieldPreview(
+  key: string,
+  schema: ChannelSchemaProperty,
+  channel: ChannelListItem
+): string | null {
+  const label = fieldLabel(key, schema)
+  if (fieldKind(schema) === "secret") {
+    return channel.secret_fields_set.includes(key) ? `${label}: set` : null
+  }
+  const value = channel.config[key]
+  if (fieldKind(schema) === "boolean") {
+    return `${label}: ${value === true ? "on" : "off"}`
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    return `${label}: ${value}`
+  }
+  return null
 }
 
 export function ChannelsPanel() {
@@ -45,14 +148,41 @@ export function ChannelsPanel() {
   const storeUpdateChannel = useChatStore((s) => s.updateChannel)
   const storeDeleteChannel = useChatStore((s) => s.deleteChannel)
 
-  const [form, setForm] = useState<ChannelFormState>(emptyChannelForm)
+  const [catalog, setCatalog] = useState<SupportedChannelDefinition[]>([])
+  const [loadingCatalog, setLoadingCatalog] = useState(true)
+  const [form, setForm] = useState<ChannelFormState>(emptyChannelForm(null))
   const [submitting, setSubmitting] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
   const [formOpen, setFormOpen] = useState(channelList.length === 0)
 
+  const selectedDefinition = useMemo(
+    () => catalog.find((item) => item.transport === form.transport) ?? null,
+    [catalog, form.transport]
+  )
+  const selectedProperties = useMemo(
+    () => schemaProperties(selectedDefinition),
+    [selectedDefinition]
+  )
+  const selectedRequired = useMemo(
+    () => requiredFieldKeys(selectedDefinition),
+    [selectedDefinition]
+  )
+
   useEffect(() => {
-    refreshChannels().catch(() => {})
-  }, [refreshChannels])
+    void refreshChannels().catch(() => {})
+    void (async () => {
+      try {
+        const definitions = await listSupportedChannels()
+        setCatalog(definitions)
+        setForm((prev) => {
+          if (prev.transport || editing) return prev
+          return emptyChannelForm(definitions[0] ?? null)
+        })
+      } finally {
+        setLoadingCatalog(false)
+      }
+    })()
+  }, [editing, refreshChannels])
 
   useEffect(() => {
     if (channelList.length === 0 && !editing) {
@@ -64,24 +194,36 @@ export function ChannelsPanel() {
     setForm((prev) => ({ ...prev, ...patch }))
   }
 
-  function resetForm() {
-    setForm(emptyChannelForm())
+  function updateConfigField(key: string, value: unknown) {
+    setForm((prev) => ({
+      ...prev,
+      config: {
+        ...prev.config,
+        [key]: value,
+      },
+    }))
+  }
+
+  function resetForm(nextTransport?: string) {
+    const definition =
+      catalog.find((item) => item.transport === nextTransport) ??
+      catalog[0] ??
+      null
+    setForm(emptyChannelForm(definition))
     setEditing(null)
   }
 
   function startEdit(channelId: string) {
     const channel = channelList.find((item) => item.id === channelId)
     if (!channel) return
-
+    const definition =
+      catalog.find((item) => item.transport === channel.transport) ?? null
     setForm({
       id: channel.id,
       name: channel.name,
+      transport: channel.transport,
       enabled: channel.enabled,
-      app_id: channel.app_id,
-      app_secret: "",
-      base_url: channel.base_url,
-      require_mention: channel.require_mention,
-      thread_mode: channel.thread_mode,
+      config: normalizeConfigForForm(definition, channel.config),
     })
     setEditing(channelId)
     setFormOpen(true)
@@ -89,6 +231,7 @@ export function ChannelsPanel() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (!selectedDefinition) return
     setSubmitting(true)
 
     try {
@@ -96,27 +239,18 @@ export function ChannelsPanel() {
         await storeUpdateChannel(editing, {
           name: form.name.trim(),
           enabled: form.enabled,
-          app_id: form.app_id.trim(),
-          app_secret: form.app_secret,
-          base_url: form.base_url.trim(),
-          require_mention: form.require_mention,
-          thread_mode: form.thread_mode,
+          config: form.config,
         })
       } else {
         await storeCreateChannel({
           id: form.id.trim(),
           name: form.name.trim(),
-          transport: "feishu",
+          transport: form.transport,
           enabled: form.enabled,
-          app_id: form.app_id.trim(),
-          app_secret: form.app_secret,
-          base_url: form.base_url.trim(),
-          require_mention: form.require_mention,
-          thread_mode: form.thread_mode,
+          config: form.config,
         })
       }
-
-      resetForm()
+      resetForm(form.transport)
       setFormOpen(false)
     } finally {
       setSubmitting(false)
@@ -125,17 +259,23 @@ export function ChannelsPanel() {
 
   async function handleDelete(channelId: string) {
     await storeDeleteChannel(channelId)
-    if (editing === channelId) {
-      resetForm()
-    }
+    if (editing === channelId) resetForm()
   }
 
   const canSubmit =
     form.id.trim() &&
     form.name.trim() &&
-    form.app_id.trim() &&
-    form.base_url.trim() &&
-    (editing ? true : form.app_secret.trim())
+    form.transport &&
+    selectedDefinition &&
+    selectedProperties.every(([key, schema]) => {
+      return !isMissingRequiredValue(
+        key,
+        schema,
+        form.config[key],
+        Boolean(editing),
+        selectedRequired
+      )
+    })
 
   return (
     <ScrollArea className="min-h-0 flex-1">
@@ -160,73 +300,70 @@ export function ChannelsPanel() {
             </p>
           ) : (
             <div className="space-y-2">
-              {channelList.map((channel) => (
-                <Card
-                  key={channel.id}
-                  className={cn(
-                    "flex items-center justify-between px-4 py-3",
-                    channel.enabled && "border-foreground/20"
-                  )}
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-[13px] font-medium">
-                        {channel.name}
-                      </span>
-                      <Badge variant="secondary" className="text-[10px]">
-                        {channel.transport}
-                      </Badge>
-                      <Badge variant="outline" className="text-[10px]">
-                        {channel.enabled ? "enabled" : "disabled"}
-                      </Badge>
-                      {channel.app_secret_set ? (
-                        <Badge variant="outline" className="text-[10px]">
-                          secret set
+              {channelList.map((channel) => {
+                const definition =
+                  catalog.find(
+                    (item) => item.transport === channel.transport
+                  ) ?? null
+                const previews = definition
+                  ? schemaProperties(definition)
+                      .map(([key, schema]) =>
+                        fieldPreview(key, schema, channel)
+                      )
+                      .filter((value): value is string => Boolean(value))
+                  : []
+                return (
+                  <Card
+                    key={channel.id}
+                    className={cn(
+                      "flex items-center justify-between px-4 py-3",
+                      channel.enabled && "border-foreground/20"
+                    )}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[13px] font-medium">
+                          {channel.name}
+                        </span>
+                        <Badge variant="secondary" className="text-[10px]">
+                          {definition?.label ?? channel.transport}
                         </Badge>
-                      ) : null}
+                        <Badge variant="outline" className="text-[10px]">
+                          {channel.enabled ? "enabled" : "disabled"}
+                        </Badge>
+                      </div>
+                      <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                        {channel.id}
+                      </p>
+                      <div className="mt-1 flex flex-wrap gap-1.5">
+                        {previews.map((preview) => (
+                          <Badge
+                            key={`${channel.id}-${preview}`}
+                            variant="outline"
+                            className="text-[10px] font-normal"
+                          >
+                            {preview}
+                          </Badge>
+                        ))}
+                      </div>
                     </div>
-                    <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                      {channel.id} · {channel.base_url}
-                    </p>
-                    <div className="mt-1 flex flex-wrap gap-1.5">
-                      <Badge
-                        variant="outline"
-                        className="text-[10px] font-normal"
+                    <div className="ml-3 flex shrink-0 gap-1">
+                      <button
+                        onClick={() => startEdit(channel.id)}
+                        className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
                       >
-                        {channel.app_id}
-                      </Badge>
-                      <Badge
-                        variant="outline"
-                        className="text-[10px] font-normal"
+                        <Pencil className="size-3.5" />
+                      </button>
+                      <button
+                        onClick={() => void handleDelete(channel.id)}
+                        className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
                       >
-                        {channel.require_mention
-                          ? "mention required"
-                          : "mention optional"}
-                      </Badge>
-                      <Badge
-                        variant="outline"
-                        className="text-[10px] font-normal"
-                      >
-                        {channel.thread_mode ? "thread mode" : "direct reply"}
-                      </Badge>
+                        <Trash2 className="size-3.5" />
+                      </button>
                     </div>
-                  </div>
-                  <div className="ml-3 flex shrink-0 gap-1">
-                    <button
-                      onClick={() => startEdit(channel.id)}
-                      className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-                    >
-                      <Pencil className="size-3.5" />
-                    </button>
-                    <button
-                      onClick={() => void handleDelete(channel.id)}
-                      className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                    >
-                      <Trash2 className="size-3.5" />
-                    </button>
-                  </div>
-                </Card>
-              ))}
+                  </Card>
+                )
+              })}
             </div>
           )}
         </section>
@@ -301,86 +438,118 @@ export function ChannelsPanel() {
                   <label className="mb-1 block text-[12px] text-muted-foreground">
                     Transport
                   </label>
-                  <div className="flex h-8 items-center rounded-lg border border-input bg-transparent px-2.5 text-[13px] text-foreground">
-                    Feishu
-                  </div>
+                  <select
+                    value={form.transport}
+                    disabled={!!editing || loadingCatalog}
+                    onChange={(event) => {
+                      const next =
+                        catalog.find(
+                          (item) => item.transport === event.target.value
+                        ) ?? null
+                      setForm((prev) => ({
+                        ...prev,
+                        transport: event.target.value,
+                        config: definitionDefaults(next),
+                      }))
+                    }}
+                    className="flex h-8 w-full items-center rounded-lg border border-input bg-transparent px-2.5 text-[13px] text-foreground"
+                  >
+                    {catalog.map((definition) => (
+                      <option
+                        key={definition.transport}
+                        value={definition.transport}
+                      >
+                        {definition.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div>
-                    <label className="mb-1 block text-[12px] text-muted-foreground">
-                      App ID
-                    </label>
-                    <Input
-                      value={form.app_id}
-                      onChange={(event) =>
-                        updateForm({ app_id: event.target.value })
-                      }
-                      placeholder="cli_xxx"
-                      className="h-8 text-[13px]"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-[12px] text-muted-foreground">
-                      App Secret
-                      {editing ? " (leave blank to keep existing)" : ""}
-                    </label>
-                    <Input
-                      type="password"
-                      value={form.app_secret}
-                      onChange={(event) =>
-                        updateForm({ app_secret: event.target.value })
-                      }
-                      placeholder="secret"
-                      className="h-8 text-[13px]"
-                    />
-                  </div>
-                </div>
+                {selectedDefinition ? (
+                  <div className="space-y-3">
+                    {selectedDefinition.description ? (
+                      <p className="text-[12px] text-muted-foreground">
+                        {selectedDefinition.description}
+                      </p>
+                    ) : null}
 
-                <div>
-                  <label className="mb-1 block text-[12px] text-muted-foreground">
-                    Base URL
-                  </label>
-                  <Input
-                    value={form.base_url}
-                    onChange={(event) =>
-                      updateForm({ base_url: event.target.value })
+                    {selectedProperties.map(([key, schema]) => {
+                      const kind = fieldKind(schema)
+                      const label = fieldLabel(key, schema)
+                      const description =
+                        typeof schema.description === "string"
+                          ? schema.description
+                          : null
+                      const value = form.config[key]
+
+                      if (kind === "boolean") {
+                        return (
+                          <label
+                            key={key}
+                            className="flex items-center justify-between gap-3 rounded-lg border border-border/30 bg-muted/20 px-3 py-2 text-[12px] text-foreground"
+                          >
+                            <span>{label}</span>
+                            <Switch
+                              checked={value === true}
+                              onCheckedChange={(checked: boolean) =>
+                                updateConfigField(key, checked)
+                              }
+                            />
+                          </label>
+                        )
+                      }
+
+                      return (
+                        <div key={key}>
+                          <label className="mb-1 block text-[12px] text-muted-foreground">
+                            {label}
+                            {editing && kind === "secret"
+                              ? " (leave blank to keep existing)"
+                              : ""}
+                          </label>
+                          <Input
+                            type={
+                              kind === "secret"
+                                ? "password"
+                                : kind === "url"
+                                  ? "url"
+                                  : "text"
+                            }
+                            value={typeof value === "string" ? value : ""}
+                            onChange={(event) =>
+                              updateConfigField(key, event.target.value)
+                            }
+                            placeholder={
+                              typeof schema.default === "string"
+                                ? schema.default
+                                : undefined
+                            }
+                            className="h-8 text-[13px]"
+                          />
+                          {description ? (
+                            <p className="mt-1 text-[11px] text-muted-foreground/70">
+                              {description}
+                            </p>
+                          ) : null}
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-[12px] text-muted-foreground">
+                    No supported channel definitions available.
+                  </p>
+                )}
+
+                <label className="flex items-center justify-between gap-3 rounded-lg border border-border/30 bg-muted/20 px-3 py-2 text-[12px] text-foreground">
+                  <span>Enabled</span>
+                  <Switch
+                    checked={form.enabled}
+                    onCheckedChange={(checked: boolean) =>
+                      updateForm({ enabled: checked })
                     }
-                    className="h-8 text-[13px]"
                   />
-                </div>
-
-                <Separator className="opacity-30" />
-
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <label className="flex items-center justify-between gap-3 rounded-lg border border-border/30 bg-muted/20 px-3 py-2 text-[12px] text-foreground">
-                    <span>Enabled</span>
-                    <Switch
-                      checked={form.enabled}
-                      onCheckedChange={(checked: boolean) =>
-                        updateForm({ enabled: checked })
-                      }
-                    />
-                  </label>
-                  <label className="flex items-center justify-between gap-3 rounded-lg border border-border/30 bg-muted/20 px-3 py-2 text-[12px] text-foreground">
-                    <span>Require mention</span>
-                    <Switch
-                      checked={form.require_mention}
-                      onCheckedChange={(checked: boolean) =>
-                        updateForm({ require_mention: checked })
-                      }
-                    />
-                  </label>
-                  <label className="flex items-center justify-between gap-3 rounded-lg border border-border/30 bg-muted/20 px-3 py-2 text-[12px] text-foreground">
-                    <span>Thread mode</span>
-                    <Switch
-                      checked={form.thread_mode}
-                      onCheckedChange={(checked: boolean) =>
-                        updateForm({ thread_mode: checked })
-                      }
-                    />
-                  </label>
-                </div>
+                </label>
 
                 <Button
                   type="submit"

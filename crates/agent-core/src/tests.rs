@@ -83,6 +83,28 @@ struct ExtendedArgsSchema {
     attempts: u32,
 }
 
+#[derive(Serialize, Deserialize, ToolArgsSchema)]
+#[serde(deny_unknown_fields)]
+struct DecoratedArgsSchema {
+    #[tool_schema(
+        description = "应用标识",
+        meta(key = "x-label", value = "App ID")
+    )]
+    app_id: String,
+    #[tool_schema(
+        description = "应用密钥",
+        meta(key = "x-label", value = "App Secret"),
+        meta(key = "x-secret", value = true)
+    )]
+    app_secret: String,
+    #[tool_schema(
+        description = "基础地址",
+        meta(key = "format", value = "uri"),
+        meta(key = "default", value = "https://open.feishu.cn")
+    )]
+    base_url: Option<String>,
+}
+
 #[test]
 fn 自研_schema_支持更多高频字段类型与数值约束() {
     let definition =
@@ -100,6 +122,24 @@ fn 自研_schema_支持更多高频字段类型与数值约束() {
     assert_eq!(
         definition.parameters["required"],
         serde_json::json!(["enabled", "balance", "attempts"])
+    );
+}
+
+#[test]
+fn 自研_schema_可附加属性级扩展元信息() {
+    let definition =
+        ToolDefinition::new("channel", "通道配置").with_parameters_schema::<DecoratedArgsSchema>();
+
+    assert_eq!(definition.parameters["properties"]["app_id"]["x-label"], "App ID");
+    assert_eq!(
+        definition.parameters["properties"]["app_secret"]["x-label"],
+        "App Secret"
+    );
+    assert_eq!(definition.parameters["properties"]["app_secret"]["x-secret"], true);
+    assert_eq!(definition.parameters["properties"]["base_url"]["format"], "uri");
+    assert_eq!(
+        definition.parameters["properties"]["base_url"]["default"],
+        "https://open.feishu.cn"
     );
 }
 

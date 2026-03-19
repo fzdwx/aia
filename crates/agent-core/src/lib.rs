@@ -24,6 +24,7 @@ pub use streaming::{
     ToolOutputDelta, ToolOutputStream,
 };
 pub use tooling::{
-    ToolArgsSchema, ToolCall, ToolDefinition, ToolResult, ToolSchema, ToolSchemaProperty,
+    ToolArgsSchema, ToolCall, ToolDefinition, ToolResult, ToolSchema, ToolSchemaMetadataValue,
+    ToolSchemaProperty,
 };
 pub use traits::{LanguageModel, Tool, ToolExecutor};

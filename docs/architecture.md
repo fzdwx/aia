@@ -140,18 +140,22 @@ README 里真正难的是这些能力：
 负责外部 channel 配置管理：
 
 - 保存 channel 档案与启停状态
-- 当前首期只支持飞书 channel，但 transport 结构保持可扩展
+- 当前首期只支持飞书 channel，但 transport 结构与 adapter 暴露的配置 schema 保持可扩展
 - 本地落盘在 `.aia/channels.json`
 - 只承载静态 channel 配置，不承担动态会话映射、运行时桥接或平台协议处理
 - 保持外部 channel 配置逻辑不泄漏进 `apps/web` 或 `apps/agent-server` 临时状态
+- `ChannelProfile` 只承载通用元数据与原始 `config` payload，不再拥有某个平台的配置类型定义
+- `.aia/channels.json` 读取侧继续兼容旧版 Feishu 裸配置 JSON；当前写回保持 transport + raw config 结构
 
 ### `channel-bridge`
 
 负责外部 channel 入口共享的桥接抽象：
 
 - 暴露 transport-neutral 的 `ChannelSessionService` / `ChannelBindingStore` 契约
+- 暴露 `ChannelRuntimeAdapterRegistry`，由宿主显式注册当前服务支持的 channel adapter
 - 暴露 `ChannelRuntimeAdapter` trait 与通用 `ChannelRuntimeSupervisor`，让 app 壳只实现各平台 adapter，而不是把 transport 分发硬编码在 supervisor 内
 - 暴露 transport-neutral 的 `ChannelRuntimeHost`、`ChannelRuntimeEvent`、`ChannelTurnStatus` 等宿主事件/回调边界，让具体 channel crate 不再定义带平台前缀的宿主契约
+- 暴露 `SupportedChannelDefinition`，其中 `config_schema` 复用工具参数那套 JSON Schema 风格对象，供 server catalog 与前端动态表单直连
 - 统一承接 external conversation → `session_id` 绑定恢复、turn 前预压缩与消息幂等回执 helper
 - 为多个 channel transport 复用同一套 session 准备语义，而不是在各个 app 壳 adapter 内重复复制这类 glue code
 - 不承载平台协议 payload、WebSocket 生命周期、回复渲染或 provider/runtime 业务主链
@@ -164,6 +168,7 @@ README 里真正难的是这些能力：
 - 持有飞书 WebSocket 长连接生命周期、二进制帧编解码、endpoint 拉取与重连策略
 - 持有飞书事件 payload、回复目标解析、卡片流式控制与回复发送链路
 - 实现 `channel-bridge` 暴露的通用 `ChannelRuntimeAdapter`，作为第一个真实 transport adapter
+- 持有飞书配置结构与校验逻辑，并通过 adapter 暴露对应 `config_schema`
 - 通过 `channel-bridge` 提供的通用宿主接口向上请求 session 绑定、turn 提交与运行时事件订阅，不直接依赖 `apps/agent-server` 本地类型
 - 不承载 channel 静态配置持久化，也不接管 app 壳的 HTTP/SSE 路由与全局状态装配
 
@@ -241,7 +246,7 @@ README 里真正难的是这些能力：
 - SSE 在线分发层显式暴露“需要重同步”语义：当 `broadcast` 接收端因慢客户端而 `Lagged` 时，`/api/events` 不再静默吞掉错误，而是发出 `sync_required` 事件；Web 侧据此补拉 session 列表，并重拉当前 session 的历史、当前 turn 与上下文压力，把实时分发层与持久化恢复边界连接起来
 - 暴露 provider、session、turn、cancel、handoff、trace 等 HTTP API
 - 现已额外暴露 `channels` 控制面：`/api/channels` 负责飞书 channel 的列表、创建、更新、删除；飞书事件入口已收口为 app 壳内部持有的长连接 worker，不再继续暴露 webhook 过渡路由
-- channel 桥接遵循“薄 ingress bridge”原则：`apps/agent-server` 只保留宿主注册、配置读取、状态持有与运行时事件映射；`channel-bridge` 提供通用 `ChannelRuntimeAdapter` trait + `ChannelRuntimeSupervisor`；`channel-feishu` 承接飞书平台协议、长连接与回复控制，实现真正的 transport adapter；external conversation → `session_id` 绑定恢复、turn 前预压缩与消息回执幂等继续走共享 helper，避免未来新增 transport 时继续改 supervisor 本体或在 app 壳里复制粘贴 glue code
+- channel 桥接遵循“薄 ingress bridge”原则：`apps/agent-server` 只保留宿主注册、配置读取、状态持有、catalog 暴露与运行时事件映射；`channel-bridge` 提供通用 `ChannelRuntimeAdapterRegistry` / `ChannelRuntimeAdapter` / `ChannelRuntimeSupervisor` 与 schema 风格的 `config_schema`；`channel-feishu` 承接飞书平台协议、长连接、配置校验与回复控制，实现真正的 transport adapter；external conversation → `session_id` 绑定恢复、turn 前预压缩与消息回执幂等继续走共享 helper，避免未来新增 transport 时继续改 supervisor 本体或在 app 壳里复制粘贴 glue code
 - `POST /api/turn` 仍保持 fire-and-forget，但真正的 turn 执行、事件回收与 session 条目追加都在 worker 内串行完成
 - turn 执行与 session manager 已切到原生 Tokio async task：`apps/agent-server` 不再依赖 `tokio::spawn_blocking`、`std::thread::Builder`、`LocalSet` 或 `spawn_local` 承载 turn 主链；worker 直接 await `AgentRuntime::handle_turn_streaming(...)`，压缩路径也直接 await `AgentRuntime::auto_compress_now()`，运行中 `session/info` 通过 slot 内的 `ContextStats` 快照读取 live stats，turn 结束后仍沿用显式 runtime ownership 归还路径
 - 运行中的条目会实时 append 到 `.aia/session.jsonl`

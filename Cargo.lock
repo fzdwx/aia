@@ -536,6 +536,8 @@ dependencies = [
  "agent-store",
  "async-trait",
  "channel-registry",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 
@@ -544,6 +546,7 @@ name = "channel-feishu"
 version = "0.1.0"
 dependencies = [
  "agent-core",
+ "agent-core-macros",
  "agent-runtime",
  "agent-store",
  "async-trait",
