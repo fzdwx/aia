@@ -86,6 +86,35 @@ describe("chat store submitTurn", () => {
     })
   })
 
+  test("finishing status updates streaming turn immediately after stream done", () => {
+    useChatStore.setState({
+      activeSessionId: "session-1",
+      chatState: "active",
+      streamingTurn: {
+        userMessage: "hello world",
+        status: "generating",
+        blocks: [{ type: "text", content: "partial answer" }],
+      },
+    })
+
+    useChatStore.getState().handleSseEvent({
+      type: "status",
+      data: {
+        session_id: "session-1",
+        turn_id: "turn-1",
+        status: "finishing",
+      },
+    })
+
+    const state = useChatStore.getState()
+    expect(state.chatState).toBe("active")
+    assert.deepEqual(state.streamingTurn, {
+      userMessage: "hello world",
+      status: "finishing",
+      blocks: [{ type: "text", content: "partial answer" }],
+    })
+  })
+
   test("current_turn_started renders external inbound message immediately", () => {
     useChatStore.setState({
       activeSessionId: "session-1",

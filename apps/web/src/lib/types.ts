@@ -123,36 +123,40 @@ export type ContextCompressionNotice = {
 
 // SSE event types from the global /api/events stream — all carry session_id
 export type SseEvent =
-  | { type: "stream"; data: StreamEvent & { session_id: string } }
-  | { type: "status"; data: { session_id: string; status: TurnStatus } }
+  | { type: "stream"; data: StreamEvent & { session_id: string; turn_id: string } }
+  | { type: "status"; data: { session_id: string; turn_id: string; status: TurnStatus } }
   | {
       type: "current_turn_started"
       data: CurrentTurnSnapshot & { session_id: string }
     }
   | {
       type: "turn_completed"
-      data: TurnLifecycle & { session_id: string }
+      data: TurnLifecycle & { session_id: string; turn_id: string }
     }
   | { type: "context_compressed"; data: ContextCompressionNotice }
   | {
       type: "sync_required"
       data: { reason: "lagged" | string; skipped_messages: number }
     }
-  | { type: "error"; data: { session_id: string; message: string } }
+  | {
+      type: "error"
+      data: { session_id: string; turn_id?: string | null; message: string }
+    }
   | {
       type: "session_created"
       data: { session_id: string; title: string }
     }
   | { type: "session_deleted"; data: { session_id: string } }
-  | { type: "turn_cancelled"; data: { session_id: string } }
+  | { type: "turn_cancelled"; data: { session_id: string; turn_id: string } }
 
 // Mirrors Rust TurnStatus
 export type TurnStatus =
-  | "waiting"
-  | "thinking"
-  | "working"
-  | "generating"
-  | "cancelled"
+| "waiting"
+| "thinking"
+| "working"
+| "generating"
+| "finishing"
+| "cancelled"
 
 export type CurrentToolOutput = {
   invocation_id: string
