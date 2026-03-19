@@ -23,8 +23,7 @@ let inflightOverviewPromise: Promise<{
   tracePage: number
   tracePageSize: number
   totalTraceItems: number
-}>
- | null = null
+}> | null = null
 
 type TraceStore = {
   traces: TraceLoopItem[]
@@ -32,6 +31,8 @@ type TraceStore = {
   tracePage: number
   tracePageSize: number
   totalTraceItems: number
+  activeLoopKey: string | null
+  selectedNodeId: string | null
   selectedTraceId: string | null
   selectedTrace: TraceRecord | null
   selectedLoop: TraceLoopDetail | null
@@ -44,6 +45,8 @@ type TraceStore = {
   }) => Promise<void>
   switchTraceView: (view: TraceView) => Promise<void>
   selectTrace: (traceId: string) => Promise<void>
+  selectLoop: (loopKey: string | null, nodeId?: string | null) => void
+  selectNode: (nodeId: string | null) => void
   clearSelection: () => void
 }
 
@@ -53,6 +56,8 @@ export const useTraceStore = create<TraceStore>((set, get) => ({
   tracePage: 1,
   tracePageSize: TRACE_PAGE_SIZE,
   totalTraceItems: 0,
+  activeLoopKey: null,
+  selectedNodeId: null,
   selectedTraceId: null,
   selectedTrace: null,
   selectedLoop: null,
@@ -149,6 +154,8 @@ export const useTraceStore = create<TraceStore>((set, get) => ({
     set({
       traceView: view,
       tracePage: 1,
+      activeLoopKey: null,
+      selectedNodeId: null,
       selectedTraceId: null,
       selectedTrace: null,
       traceError: null,
@@ -189,11 +196,31 @@ export const useTraceStore = create<TraceStore>((set, get) => ({
     }
   },
 
+  selectLoop: (loopKey, nodeId = null) => {
+    set({
+      activeLoopKey: loopKey,
+      selectedNodeId: nodeId,
+    })
+  },
+
+  selectNode: (nodeId) => {
+    set({ selectedNodeId: nodeId })
+  },
+
   clearSelection: () => {
-    set({ selectedTraceId: null, selectedTrace: null, selectedLoop: null, traceError: null })
+    set({
+      activeLoopKey: null,
+      selectedNodeId: null,
+      selectedTraceId: null,
+      selectedTrace: null,
+      selectedLoop: null,
+      traceError: null,
+    })
   },
 }))
 
-function isTraceLoopDetail(value: TraceDetailResponse): value is TraceLoopDetail {
+function isTraceLoopDetail(
+  value: TraceDetailResponse
+): value is TraceLoopDetail {
   return "loop_item" in value && "trace_details" in value
 }

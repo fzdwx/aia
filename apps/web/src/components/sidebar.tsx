@@ -1,6 +1,7 @@
 import { useEffect } from "react"
 import { PanelRightDashed, Plus, Settings, Waypoints, X } from "lucide-react"
 import { Separator } from "@/components/ui/separator"
+import { TraceSidebar } from "@/components/trace-sidebar"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat-store"
 import { useChannelsStore } from "@/stores/channels-store"
@@ -37,11 +38,15 @@ export function Sidebar() {
 
       <Separator className="opacity-30" />
 
-      {view === "channels" ? (
+      {view === "trace" ? (
+        <TraceSidebar />
+      ) : view === "channels" ? (
         <>
           <div className="px-2 pt-2">
             <div className="rounded-lg border border-border/30 bg-muted/20 px-3 py-2.5">
-              <p className="text-[13px] font-medium text-foreground/80">Channels</p>
+              <p className="text-[13px] font-medium text-foreground/80">
+                Channels
+              </p>
             </div>
           </div>
 

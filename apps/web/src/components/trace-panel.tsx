@@ -3,8 +3,6 @@ import {
   AlertTriangle,
   ArrowLeft,
   Bot,
-  ChevronLeft,
-  ChevronRight,
   Clock3,
   ExternalLink,
   Loader2,
@@ -31,7 +29,7 @@ import {
 import { getToolDisplayName } from "@/lib/tool-display"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat-store"
-import { useTraceStore, type TraceView } from "@/stores/trace-store"
+import { useTraceStore } from "@/stores/trace-store"
 
 type JsonRecord = Record<string, unknown>
 type InspectorTab = "content" | "overview" | "events"
@@ -44,16 +42,6 @@ function formatDateTime(value: number) {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
-  })
-}
-
-function formatCompactDateTime(value: number) {
-  return new Date(value).toLocaleString("zh-CN", {
-    hour12: false,
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
   })
 }
 
@@ -138,25 +126,11 @@ function loopBadgeVariant(status: TraceLoopGroup["finalStatus"]) {
   }
 }
 
-function loopKindLabel(group: TraceLoopGroup) {
-  return group.requestKind === "compression" ? "compression" : "conversation"
-}
-
 function loopHeadline(group: TraceLoopGroup) {
   if (group.requestKind === "compression") {
     return "Context compression log"
   }
   return truncate(group.userMessage ?? "User message unavailable.", 180)
-}
-
-function traceViewLabel(view: TraceView) {
-  return view === "compression" ? "compression logs" : "conversation trace"
-}
-
-function traceViewDescription(view: TraceView) {
-  return view === "compression"
-    ? "view context compression calls and generated summaries separately"
-    : "waterfall view for agent loops and spans"
 }
 
 function findActiveNode(
@@ -837,123 +811,48 @@ function EventTimeline({
 function TraceActiveStrip({ group }: { group: TraceLoopGroup }) {
   return (
     <div className="overflow-hidden rounded-2xl border border-t-2 border-border/40 border-t-foreground/8 bg-card">
-      <div className="grid gap-3 px-3 py-3 md:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-lg font-semibold tracking-tight text-foreground">
-              trace
-            </span>
-            <Badge variant="outline" className="text-[10px]">
-              {loopKindLabel(group)}
-            </Badge>
-            <Badge
-              variant={loopBadgeVariant(group.finalStatus)}
-              className="text-[10px]"
-            >
-              {group.finalStatus}
-            </Badge>
-            <span className="rounded-md border border-border/35 bg-background/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
-              {compactId(group.key, 12, 8)}
-            </span>
+      <div className="px-3 py-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="max-w-[760px] truncate text-[18px] font-semibold tracking-tight text-foreground">
+                {loopHeadline(group)}
+              </span>
+              <Badge
+                variant={loopBadgeVariant(group.finalStatus)}
+                className="text-[10px]"
+              >
+                {group.finalStatus}
+              </Badge>
+              <span className="rounded-md border border-border/35 bg-background/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
+                {compactId(group.key, 12, 8)}
+              </span>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+              <span>turn {group.turnId}</span>
+              <span className="text-border">/</span>
+              <span>run {compactId(group.runId, 8, 6)}</span>
+              <span className="text-border">/</span>
+              <span>{formatDateTime(group.startedAtMs)}</span>
+              <span className="text-border">/</span>
+              <span>{formatDuration(loopWindowMs(group))}</span>
+              <span className="text-border">/</span>
+              <span>{group.stepCount} llm</span>
+              <span className="text-border">/</span>
+              <span>{group.toolCount} tool</span>
+              {group.failedToolCount > 0 ? (
+                <>
+                  <span className="text-border">/</span>
+                  <span className="text-amber-700 dark:text-amber-300">
+                    {group.failedToolCount} issue
+                  </span>
+                </>
+              ) : null}
+            </div>
           </div>
-          <p className="mt-2 max-w-[760px] text-[13px] leading-6 text-foreground/85">
-            {loopHeadline(group)}
-          </p>
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-            <span>turn {group.turnId}</span>
-            <span className="text-border">/</span>
-            <span>run {compactId(group.runId, 8, 6)}</span>
-            <span className="text-border">/</span>
-            <span>{formatDateTime(group.startedAtMs)}</span>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-2 xl:grid-cols-4">
-          <SummaryItem
-            label="window"
-            value={formatDuration(loopWindowMs(group))}
-            icon={<Clock3 className="size-3.5" />}
-          />
-          <SummaryItem
-            label="llm"
-            value={String(group.stepCount)}
-            icon={<Bot className="size-3.5" />}
-          />
-          <SummaryItem
-            label="tools"
-            value={String(group.toolCount)}
-            icon={<Wrench className="size-3.5" />}
-          />
-          <SummaryItem
-            label="flags"
-            value={
-              group.failedToolCount > 0 ? String(group.failedToolCount) : "0"
-            }
-            tone={group.failedToolCount > 0 ? "warning" : "default"}
-            icon={<AlertTriangle className="size-3.5" />}
-          />
         </div>
       </div>
     </div>
-  )
-}
-
-function RecentLoopRow({
-  group,
-  active,
-  onSelect,
-}: {
-  group: TraceLoopGroup
-  active: boolean
-  onSelect: () => void
-}) {
-  return (
-    <button
-      onClick={onSelect}
-      className={cn(
-        "w-full rounded-lg border px-2 py-1.5 text-left transition-all active:scale-[0.98]",
-        active
-          ? "border-foreground/20 bg-accent/35"
-          : "border-border/30 bg-background/70 hover:bg-accent/20"
-      )}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex min-w-0 items-center gap-1.5">
-            <span className="truncate font-mono text-[10px] text-foreground/80">
-              {compactId(group.key, 8, 5)}
-            </span>
-            <Badge variant="outline" className="h-4 px-1.5 text-[9px]">
-              {loopKindLabel(group)}
-            </Badge>
-            <Badge
-              variant={loopBadgeVariant(group.finalStatus)}
-              className="h-4 px-1.5 text-[9px]"
-            >
-              {group.finalStatus}
-            </Badge>
-          </div>
-          <p className="mt-1 line-clamp-2 text-[12px] leading-4.5 text-foreground/88">
-            {truncate(loopHeadline(group), 72)}
-          </p>
-        </div>
-        <span className="shrink-0 text-[10px] text-muted-foreground">
-          {formatCompactDateTime(group.latestStartedAtMs)}
-        </span>
-      </div>
-
-      <div className="mt-1.5 flex items-center gap-2 text-[10px] text-muted-foreground/75">
-        <span>{group.stepCount} llm</span>
-        <span>{group.toolCount} tool</span>
-        <span>{formatDuration(loopWindowMs(group))}</span>
-      </div>
-
-      {group.latestError ? (
-        <p className="mt-1 line-clamp-1 text-[10px] leading-4 text-destructive">
-          {group.latestError}
-        </p>
-      ) : null}
-    </button>
   )
 }
 
@@ -1456,6 +1355,8 @@ export function TracePanel() {
   const turns = useChatStore((state) => state.turns)
   const traces = useTraceStore((state) => state.traces)
   const traceView = useTraceStore((state) => state.traceView)
+  const activeLoopKey = useTraceStore((state) => state.activeLoopKey)
+  const selectedNodeId = useTraceStore((state) => state.selectedNodeId)
   const selectedTraceId = useTraceStore((state) => state.selectedTraceId)
   const selectedTrace = useTraceStore((state) => state.selectedTrace)
   const selectedLoop = useTraceStore((state) => state.selectedLoop)
@@ -1463,22 +1364,18 @@ export function TracePanel() {
   const traceLoading = useTraceStore((state) => state.traceLoading)
   const traceError = useTraceStore((state) => state.traceError)
   const tracePage = useTraceStore((state) => state.tracePage)
-  const tracePageSize = useTraceStore((state) => state.tracePageSize)
   const totalTraceItems = useTraceStore((state) => state.totalTraceItems)
   const refreshTraces = useTraceStore((state) => state.refreshTraces)
-  const switchTraceView = useTraceStore((state) => state.switchTraceView)
   const selectTrace = useTraceStore((state) => state.selectTrace)
+  const selectNode = useTraceStore((state) => state.selectNode)
 
-  const [activeLoopKey, setActiveLoopKey] = useState<string | null>(null)
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [payloadOpen, setPayloadOpen] = useState(false)
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("content")
 
-  useEffect(() => {
-    refreshTraces().catch(() => {})
-  }, [refreshTraces])
-
-  const loopGroups = useMemo(() => buildTraceLoopGroups(traces, turns), [traces, turns])
+  const loopGroups = useMemo(
+    () => buildTraceLoopGroups(traces, turns),
+    [traces, turns]
+  )
   const partitionedGroups = useMemo(
     () => partitionTraceLoopGroups(loopGroups),
     [loopGroups]
@@ -1500,10 +1397,6 @@ export function TracePanel() {
   const partialOrFailedLoops = loopGroups.filter(
     (group) => group.finalStatus !== "completed"
   ).length
-  const traceListPageCount = Math.max(
-    1,
-    Math.ceil(totalTraceItems / tracePageSize)
-  )
 
   const resolvedActiveLoopKey =
     activeLoopKey &&
@@ -1544,9 +1437,9 @@ export function TracePanel() {
     activeNode?.kind === "agent_root"
       ? null
       : (selectedLoop?.trace_details.find(
-            (trace) => trace.id === activeNode?.trace.id
-          ) ??
-          (selectedTrace?.id === activeNode?.trace.id ? selectedTrace : null))
+          (trace) => trace.id === activeNode?.trace.id
+        ) ??
+        (selectedTrace?.id === activeNode?.trace.id ? selectedTrace : null))
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -1559,38 +1452,11 @@ export function TracePanel() {
             <ArrowLeft className="size-3.5" />
           </button>
           <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-base font-semibold tracking-tight">trace</h1>
-              <Badge variant="outline" className="text-[10px]">
-                local
-              </Badge>
-              <Badge variant="outline" className="text-[10px]">
-                {traceViewLabel(traceView)}
-              </Badge>
-            </div>
-            <p className="mt-0.5 text-[12px] text-muted-foreground">
-              {traceViewDescription(traceView)}
-            </p>
+            <h1 className="text-base font-semibold tracking-tight">trace</h1>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="rounded-lg border border-border/35 bg-muted/20 p-1">
-            <div className="flex items-center gap-1">
-              <TabButton
-                active={traceView === "conversation"}
-                onClick={() => switchTraceView("conversation").catch(() => {})}
-              >
-                trace
-              </TabButton>
-              <TabButton
-                active={traceView === "compression"}
-                onClick={() => switchTraceView("compression").catch(() => {})}
-              >
-                compression
-              </TabButton>
-            </div>
-          </div>
           <Button
             variant="outline"
             size="sm"
@@ -1602,9 +1468,9 @@ export function TracePanel() {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
-        <div className="mx-auto flex max-w-[1440px] flex-col gap-3">
-          <div className="grid grid-cols-5 divide-x divide-border/25 overflow-hidden rounded-xl border border-border/35 bg-background/70">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-5 py-4">
+        <div className="mx-auto flex min-h-0 w-full max-w-[1440px] flex-1 flex-col gap-3">
+          <div className="grid shrink-0 grid-cols-5 divide-x divide-border/25 overflow-hidden rounded-xl border border-border/35 bg-background/70">
             <SummaryItem
               bare
               label="listed items"
@@ -1639,13 +1505,13 @@ export function TracePanel() {
           </div>
 
           {traceError ? (
-            <div className="rounded-lg border border-destructive/25 bg-destructive/[0.05] px-3 py-2.5 text-[12px] text-destructive">
+            <div className="shrink-0 rounded-lg border border-destructive/25 bg-destructive/[0.05] px-3 py-2.5 text-[12px] text-destructive">
               {traceError}
             </div>
           ) : null}
 
           {visibleLoopGroups.length === 0 && !traceLoading ? (
-            <div className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="flex min-h-0 flex-1 flex-col items-center justify-center py-16 text-center">
               <Waypoints className="size-10 text-muted-foreground/30" />
               <p className="mt-4 text-sm font-medium text-foreground/70">
                 {traceView === "compression"
@@ -1660,69 +1526,16 @@ export function TracePanel() {
             </div>
           ) : null}
 
-          {activeGroup ? <TraceActiveStrip group={activeGroup} /> : null}
+          {activeGroup ? (
+            <div className="shrink-0">
+              <TraceActiveStrip group={activeGroup} />
+            </div>
+          ) : null}
 
           {visibleLoopGroups.length > 0 ? (
-            <div className="grid min-h-[700px] overflow-hidden rounded-xl border border-border/30 xl:grid-cols-[280px_minmax(0,1.15fr)_360px]">
-              <div className="min-h-0 overflow-hidden">
-                <div className="border-b border-border/25 px-3 py-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
-                      Trace list
-                    </p>
-                    <span className="text-[11px] text-muted-foreground">
-                      {visibleLoopGroups.length === 0
-                        ? "0"
-                        : `${tracePage}/${traceListPageCount}`}
-                    </span>
-                  </div>
-                </div>
-                <div className="min-h-0 space-y-1 overflow-auto p-1.5">
-                  {visibleLoopGroups.map((group) => (
-                    <RecentLoopRow
-                      key={group.key}
-                      group={group}
-                      active={group.key === activeGroup?.key}
-                      onSelect={() => {
-                        setActiveLoopKey(group.key)
-                        setSelectedNodeId(
-                          group.finalSpanId ?? `${group.key}:root`
-                        )
-                      }}
-                    />
-                  ))}
-                </div>
-                {traceListPageCount > 1 ? (
-                  <div className="flex items-center justify-between border-t border-border/25 px-2.5 py-1.5">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => refreshTraces({ page: tracePage - 1 })}
-                      disabled={tracePage <= 1 || traceLoading}
-                    >
-                      <ChevronLeft className="size-3.5" />
-                      Prev
-                    </Button>
-                    <span className="text-[11px] text-muted-foreground">
-                      {(tracePage - 1) * tracePageSize + 1}-
-                      {Math.min(tracePage * tracePageSize, totalTraceItems)} of{" "}
-                      {totalTraceItems}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => refreshTraces({ page: tracePage + 1 })}
-                      disabled={tracePage >= traceListPageCount || traceLoading}
-                    >
-                      Next
-                      <ChevronRight className="size-3.5" />
-                    </Button>
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="min-h-0 overflow-hidden border-l border-border/25">
-                <div className="border-b border-border/25 px-3 py-2.5">
+            <div className="grid min-h-0 flex-1 overflow-hidden rounded-xl border border-border/30 xl:grid-cols-[minmax(0,1.18fr)_360px]">
+              <div className="flex min-h-0 flex-col overflow-hidden">
+                <div className="shrink-0 border-b border-border/25 px-3 py-2.5">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
                       Waterfall
@@ -1735,7 +1548,7 @@ export function TracePanel() {
                   </div>
                 </div>
 
-                <div className="min-h-0 overflow-auto p-3">
+                <div className="min-h-0 flex-1 overflow-y-auto p-3">
                   {activeGroup ? (
                     <div className="space-y-2">
                       <WaterfallScale group={activeGroup} />
@@ -1751,7 +1564,7 @@ export function TracePanel() {
                               selectedTraceId === node.trace.id &&
                               traceLoading
                             }
-                            onSelect={() => setSelectedNodeId(node.id)}
+                            onSelect={() => selectNode(node.id)}
                           />
                         ))}
                       </div>
@@ -1760,8 +1573,8 @@ export function TracePanel() {
                 </div>
               </div>
 
-              <div className="min-h-0 overflow-hidden border-l border-border/25">
-                <div className="border-b border-border/25 px-3 py-2.5">
+              <div className="flex min-h-0 flex-col overflow-hidden border-l border-border/25">
+                <div className="shrink-0 border-b border-border/25 px-3 py-2.5">
                   <div className="flex items-center justify-between gap-2">
                     <div>
                       <p className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
@@ -1798,7 +1611,7 @@ export function TracePanel() {
                   </div>
                 </div>
 
-                <div className="min-h-0 overflow-auto p-3">
+                <div className="min-h-0 flex-1 overflow-y-auto p-3">
                   {activeGroup && activeNode ? (
                     activeNode.kind === "agent_root" ? (
                       <LoopInspector group={activeGroup} tab={inspectorTab} />
