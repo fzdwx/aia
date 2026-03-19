@@ -12,7 +12,7 @@
 - 提供桌面应用支持
 - 支持 Windows、Linux、macOS
 - 当前以 `apps/web` + `apps/agent-server` 作为主交互承接形态
-- `apps/agent-server` 除 Web 后端模式外，也应支持少量直接 CLI 驱动入口；至少要能在不打开 Web 的情况下读入 `docs/self.md` 并开始同一 runtime 主链上的自我进化对话
+- `apps/agent-server` 除 Web 后端模式外，也应支持少量直接 CLI 驱动入口；至少要能在不打开 Web 的情况下以内嵌 `docs/self.md` 约束启动同一 runtime 主链上的自我进化对话，并允许启动时附加用户想要优先处理的任务
 
 ### 2. 运行特性
 

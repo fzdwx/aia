@@ -78,7 +78,8 @@ the web app currently uses Vite+ tooling and a `pnpm` lockfile. see `apps/web/AG
 the `agent-server` binary now has two entry modes:
 
 - `cargo run -p agent-server` starts the default HTTP + SSE server on `3434`
-- `cargo run -p agent-server -- self` reads `docs/self.md`, creates a dedicated local session, and starts a terminal chat loop against the same runtime/session-manager path used by the server
+- `cargo run -p agent-server -- self` starts a dedicated terminal self-chat session using compile-time embedded `docs/self.md` guidance on the same runtime/session-manager path used by the server
+- `cargo run -p agent-server -- self <task...>` does the same, but also injects the provided startup task so the first turn begins with a user-specified direction
 - in `self` mode, `/help`, `/status`, `/compress`, and `/handoff <name> <summary>` now reuse the existing session-manager command surface instead of shelling out or bypassing runtime state; malformed built-in commands are rejected locally instead of being forwarded as model prompts
 
 that means:
