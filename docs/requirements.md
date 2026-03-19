@@ -41,9 +41,10 @@
 ### 已完成
 
 - Rust 工作区骨架已建立
-- 共享核心库边界已拆分为 `aia-config`、`agent-core`、`session-tape`、`agent-runtime`、`channel-registry`、`provider-registry`、`openai-adapter`、`agent-store`
+- 共享核心库边界已拆分为 `aia-config`、`agent-core`、`session-tape`、`agent-runtime`、`channel-registry`、`channel-bridge`、`provider-registry`、`openai-adapter`、`agent-store`
 - `aia-config` 已承担跨 crate 复用的应用级路径、默认值、稳定标识与构造 helper
 - `channel-registry` 已承担外部 channel 静态配置与本地持久化
+- `channel-bridge` 已承担外部 channel 共享的 session 绑定恢复、turn 预压缩与消息回执幂等 helper
 - `provider-registry` 已承担本地 provider 管理与持久化
 - 首个真实模型适配库 `openai-adapter` 已建立，并已同时覆盖 Responses 与 OpenAI 兼容 Chat Completions 两条协议链路
 - `openai-adapter` 当前已改为原生 async `reqwest`：单次请求与流式 SSE 不再依赖 blocking client

@@ -1,0 +1,16 @@
+[package]
+name = "channel-bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+agent-prompts = { path = "../agent-prompts" }
+agent-store = { path = "../agent-store" }
+async-trait = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
+
+[lib]
+path = "src/lib.rs"

@@ -5,7 +5,7 @@ use channel_registry::ChannelRegistry;
 use provider_registry::ProviderRegistry;
 
 use crate::{
-    channel_runtime::{FeishuRuntimeSupervisor, sync_feishu_runtime},
+    channel_runtime::{ChannelRuntimeSupervisor, sync_channel_runtime},
     model::{ProviderLaunchChoice, build_model_from_selection},
     session_manager::{ProviderInfoSnapshot, SessionManagerConfig, spawn_session_manager},
     state::AppState,
@@ -104,7 +104,7 @@ pub async fn bootstrap_state() -> Result<Arc<AppState>, ServerInitError> {
         workspace_root,
         user_agent: build_server_user_agent(),
     });
-    let feishu_runtime = Arc::new(tokio::sync::Mutex::new(FeishuRuntimeSupervisor::new(
+    let channel_runtime = Arc::new(tokio::sync::Mutex::new(ChannelRuntimeSupervisor::new(
         store.clone(),
         session_manager.clone(),
         broadcast_tx.clone(),
@@ -118,10 +118,10 @@ pub async fn bootstrap_state() -> Result<Arc<AppState>, ServerInitError> {
         channel_registry_path,
         channel_registry_snapshot,
         store,
-        feishu_runtime,
+        channel_runtime,
     });
 
-    sync_feishu_runtime(state.as_ref())
+    sync_channel_runtime(state.as_ref())
         .await
         .map_err(|error| ServerInitError::new("飞书通道启动", error))?;
 

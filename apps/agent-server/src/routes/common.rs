@@ -1,6 +1,6 @@
-use agent_prompts::AUTO_COMPRESSION_THRESHOLD;
 use agent_store::LlmTraceStoreError;
 use axum::{Json, http::StatusCode};
+use channel_bridge::prepare_session_for_turn as prepare_channel_session_for_turn;
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -57,11 +57,9 @@ pub(crate) async fn prepare_session_for_turn(
     state: &AppState,
     session_id: &str,
 ) -> Result<(), RuntimeWorkerError> {
-    let stats = state.session_manager.get_session_info(session_id.to_string()).await?;
-    if stats.pressure_ratio.is_some_and(|ratio| ratio >= AUTO_COMPRESSION_THRESHOLD) {
-        state.session_manager.auto_compress_session(session_id.to_string()).await?;
-    }
-    Ok(())
+    prepare_channel_session_for_turn(&state.session_manager, session_id)
+        .await
+        .map_err(|error| RuntimeWorkerError::internal(error.to_string()))
 }
 
 pub(crate) async fn resolve_session_id(

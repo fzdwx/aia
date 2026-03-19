@@ -27,10 +27,12 @@ this repository currently runs as a library-first rust workspace with a web-firs
 - `crates/agent-core`: core domain types for models, tools, and portable tool specs
 - `crates/session-tape`: append-only tape with flat entries (`{id, kind, payload, meta, date}`), anchors, handoff events, query slicing, fork/merge, and jsonl replay snapshots
 - `crates/agent-runtime`: runtime orchestration for models, tools, sessions, compression, cancellation, and event flow
+- `crates/channel-registry`: static channel profiles, transport selection, enablement, and local persistence
+- `crates/channel-bridge`: shared channel session-binding and turn-preparation abstractions for multi-channel ingress
 - `crates/provider-registry`: local provider profiles, active selection, and persistence
 - `crates/openai-adapter`: real model adapter layer covering both Responses-style and OpenAI-compatible Chat Completions HTTP interfaces
 - `crates/agent-store`: local SQLite-backed session + trace persistence
-- `apps/agent-server`: axum HTTP+SSE server bridging the shared runtime to clients
+- `apps/agent-server`: axum HTTP+SSE server bridging the shared runtime to clients and hosting transport-specific channel adapters
 - `apps/web`: the primary web interface shell built with React + Vite+
 
 `apps/web` is the primary client direction. `apps/agent-server` remains a thin application shell focused on HTTP + SSE bridging instead of re-owning agent logic.
@@ -52,6 +54,7 @@ this repository currently runs as a library-first rust workspace with a web-firs
 - context compression calls now emit their own trace records and can be inspected in a dedicated compression-log view instead of being mixed into the regular trace list
 - trace workbench now loads its filtered summary + page data through a single overview request; overview page results are truly item-paginated, while summary data is served from a SQLite overview-summary snapshot instead of being recomputed on every request
 - feishu channels now run through a long-lived websocket bridge in `apps/agent-server`; inbound events are acknowledged quickly and the actual agent turn + reply path continues asynchronously through the existing session manager/runtime chain
+- channel ingress now shares session-binding, stale-binding recovery, turn preparation, and message-receipt idempotency helpers through `crates/channel-bridge`, so future transports do not need to duplicate that glue
 
 ## web workspace
 

@@ -6,7 +6,7 @@ use axum::{
 use channel_registry::{ChannelProfile, ChannelTransport, FeishuChannelConfig};
 use serde::{Deserialize, Serialize};
 
-use crate::{channel_runtime::sync_feishu_runtime, state::SharedState};
+use crate::{channel_runtime::sync_channel_runtime, state::SharedState};
 
 use super::common::{JsonResponse, error_response, ok_response};
 
@@ -109,7 +109,7 @@ pub(crate) async fn create_channel(
     if let Err(error) = save_result {
         return error_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
     }
-    if let Err(error) = sync_feishu_runtime(state.as_ref()).await {
+    if let Err(error) = sync_channel_runtime(state.as_ref()).await {
         return error_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, error);
     }
     ok_response()
@@ -151,7 +151,7 @@ pub(crate) async fn update_channel(
     if let Err(error) = save_result {
         return error_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
     }
-    if let Err(error) = sync_feishu_runtime(state.as_ref()).await {
+    if let Err(error) = sync_channel_runtime(state.as_ref()).await {
         return error_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, error);
     }
     ok_response()
@@ -174,7 +174,7 @@ pub(crate) async fn delete_channel(
     if let Err(error) = save_result {
         return error_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
     }
-    if let Err(error) = sync_feishu_runtime(state.as_ref()).await {
+    if let Err(error) = sync_channel_runtime(state.as_ref()).await {
         return error_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, error);
     }
     ok_response()

@@ -9,7 +9,7 @@ use provider_registry::ProviderRegistry;
 use tokio::sync::broadcast;
 
 use crate::{
-    channel_runtime::FeishuRuntimeSupervisor,
+    channel_runtime::ChannelRuntimeSupervisor,
     session_manager::{ProviderInfoSnapshot, SessionManagerHandle},
     sse::SsePayload,
 };
@@ -24,5 +24,5 @@ pub struct AppState {
     pub channel_registry_path: PathBuf,
     pub channel_registry_snapshot: Arc<RwLock<ChannelRegistry>>,
     pub store: Arc<AiaStore>,
-    pub feishu_runtime: Arc<tokio::sync::Mutex<FeishuRuntimeSupervisor>>,
+    pub channel_runtime: Arc<tokio::sync::Mutex<ChannelRuntimeSupervisor>>,
 }

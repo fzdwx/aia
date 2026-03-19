@@ -1,5 +1,7 @@
 use agent_runtime::{ContextStats, TurnLifecycle};
 use agent_store::SessionRecord;
+use async_trait::async_trait;
+use channel_bridge::{ChannelBridgeError, ChannelSessionInfo, ChannelSessionService};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::runtime_worker::{
@@ -119,5 +121,36 @@ impl SessionManagerHandle {
     pub(crate) fn test_handle() -> Self {
         let (tx, _rx) = mpsc::channel(1);
         Self { tx }
+    }
+}
+
+#[async_trait]
+impl ChannelSessionService for SessionManagerHandle {
+    async fn session_exists(&self, session_id: &str) -> Result<bool, ChannelBridgeError> {
+        Ok(self.get_session_info(session_id.to_string()).await.is_ok())
+    }
+
+    async fn create_session(&self, title: String) -> Result<String, ChannelBridgeError> {
+        SessionManagerHandle::create_session(self, Some(title))
+            .await
+            .map(|session| session.id)
+            .map_err(|error| ChannelBridgeError::new(error.message))
+    }
+
+    async fn session_info(
+        &self,
+        session_id: &str,
+    ) -> Result<ChannelSessionInfo, ChannelBridgeError> {
+        let stats = self
+            .get_session_info(session_id.to_string())
+            .await
+            .map_err(|error| ChannelBridgeError::new(error.message))?;
+        Ok(ChannelSessionInfo { pressure_ratio: stats.pressure_ratio })
+    }
+
+    async fn auto_compress_session(&self, session_id: &str) -> Result<bool, ChannelBridgeError> {
+        SessionManagerHandle::auto_compress_session(self, session_id.to_string())
+            .await
+            .map_err(|error| ChannelBridgeError::new(error.message))
     }
 }

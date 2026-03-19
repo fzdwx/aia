@@ -1,11 +1,11 @@
 use std::{io::Write, sync::Arc};
 
 use agent_core::StreamEvent;
+use channel_bridge::prepare_session_for_turn;
 use tokio::sync::broadcast;
 
 use crate::{
     bootstrap::ServerInitError,
-    routes::prepare_session_for_turn,
     sse::{SsePayload, TurnStatus},
     state::AppState,
 };
@@ -78,9 +78,9 @@ pub(crate) async fn submit_prompt_and_wait(
     session_id: &str,
     prompt: String,
 ) -> Result<(), ServerInitError> {
-    prepare_session_for_turn(state.as_ref(), session_id)
+    prepare_session_for_turn(&state.session_manager, session_id)
         .await
-        .map_err(|error| ServerInitError::new("turn 预压缩", error.message))?;
+        .map_err(|error| ServerInitError::new("turn 预压缩", error.to_string()))?;
 
     let turn_id = state
         .session_manager
