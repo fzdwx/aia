@@ -1,5 +1,17 @@
 # 演进日志
 
+## 2026-03-19 Session 79
+
+**Diagnosis**：用户明确要求把 Web 侧 Markdown 组件切到 `markstream-react`；当前 `apps/web` 的共享 `MarkdownContent` 仍基于 `streamdown`，而聊天正文与推理区都通过这个门面复用，属于一次替换即可覆盖主路径的高杠杆改动。
+**Decision**：保持 `MarkdownContent` 的现有调用面不变，只在 `apps/web` 内把富 Markdown 实现从 `streamdown` 替换为 `markstream-react`，并同步把样式入口从 `streamdown` 私有选择器改为 `markstream-react` 的类名体系；额外补一条最小渲染回归测试，锁住基础标题/加粗/行内代码渲染。
+**Changes**：
+- `apps/web/src/components/{markdown-content-rich.tsx,markdown-content.test.tsx}`：共享 Markdown renderer 改用 `markstream-react`，并新增基础渲染回归测试。
+- `apps/web/src/index.css`：移除 `streamdown` 的样式源与私有 DOM 选择器适配，改为导入 `markstream-react/index.css` 并覆盖当前聊天区需要的标题、引用、表格、代码块等视觉语义。
+- `apps/web/package.json`、`apps/web/pnpm-lock.yaml`、`apps/web/README.md`、`docs/status.md`、`docs/evolution-log.md`：新增 `markstream-react` 依赖并同步记录 renderer 切换进展。
+**Verification**：`just web-typecheck`、`just web-test`、`just web-build` 通过。
+**Commit**：未提交。
+**Next direction**：若 `markstream-react` 在高频 streaming 下表现稳定，下一步应继续评估是否把聊天区增量 Markdown 解析进一步前移到 store/流消费层，避免每个 chunk 都在组件内重新解析完整字符串。
+
 ## 2026-03-19 Session 78
 
 **Diagnosis**：`agent-server self` 仍在运行时读取 `docs/self.md`，让 CLI 启动依赖工作区文件存在；同时也没有办法在启动时直接附带“这次先做什么”，使自驱模式进入首轮前还要再补一条任务描述。
