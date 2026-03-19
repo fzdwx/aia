@@ -6,7 +6,7 @@ use axum::{
 use channel_registry::{ChannelProfile, ChannelTransport, FeishuChannelConfig};
 use serde::{Deserialize, Serialize};
 
-use crate::{channel_runtime::sync_channel_runtime, state::SharedState};
+use crate::{channel_host::sync_channel_runtime, state::SharedState};
 
 use super::common::{JsonResponse, error_response, ok_response};
 

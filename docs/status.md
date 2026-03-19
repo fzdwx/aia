@@ -5,7 +5,7 @@
 - 阶段：核心工作区搭建之后的当前细分步骤：Web 界面 ↔ 运行时桥接收口
 - 最新前端进展：`apps/web` 已补齐与 `Settings` 平行的 `Channels` 配置页，当前支持飞书 channel 的列表、创建、编辑、删除与启停；入口已接入侧边栏 `Trace/Channels/Settings` 同组导航，前端 store 与 `/api/channels` CRUD 调用链也已打通。
 - 最新后端进展：新增 `channel-registry` 共享库与 `agent-store` 的 channel 映射/幂等表；`apps/agent-server` 已补齐 `/api/channels` 控制面，并把飞书 channel 从过渡 webhook 入口收口为正式长连接 worker。当前长连接会按 profile 启停与重连，收到事件后先快速确认，再异步走既有 `session_manager.submit_turn(...)` 主链与飞书回复链路。
-- 最新 channel 抽象进展：已新增 `channel-bridge` 共享 crate，先把多渠道都会复用的 session 绑定恢复、turn 前预压缩与消息回执幂等 helper 从 `apps/agent-server` 抽到共享层；`agent-server` 的 channel runtime / self chat / HTTP turn 准备路径现已共用这条 bridge helper 边界，为后续继续接入更多 transport 做铺垫，同时仍把飞书 WebSocket、CardKit 与回复模式细节留在 app 壳。
+- 最新 channel 抽象进展：`channel-bridge` 现在不只承接 session 绑定恢复、turn 前预压缩与消息回执幂等 helper，还新增了通用 `ChannelRuntimeAdapter` / `ChannelRuntimeSupervisor` 与去平台化的 `ChannelRuntimeHost` / `ChannelRuntimeEvent` 边界；与此同时新增 `channel-feishu` crate，飞书 WebSocket、CardKit、回复控制与协议实现已从 `apps/agent-server` 迁出，`agent-server` 现在只保留宿主注册、状态装配与 SSE→通用 channel 运行时事件映射。
 - 最新飞书修复进展：私聊回复路径已从“总是 reply 当前消息”收紧为“私聊按 `chat_id` 直发、群聊按需 reply/thread”；SSE 现已补齐 `current_turn_started` 事件，前端对外部 channel 触发的当前执行态支持即时显示与流式恢复，不再依赖手动刷新；飞书消息进入处理中后会先加 `Typing` 表情，结束后再移除；同时飞书回包已进一步切到 `CardKit`：先创建 card entity，再用 `element_id` 按流事件更新正文，最后关闭 streaming mode 并收口为最终卡片。
 - 最新飞书消息覆盖修复：同一个 turn 内若模型产出多段 assistant message，飞书最终卡片不再只取最后一段 `assistant_message`，而是优先按 `TurnBlock::Assistant` 顺序拼接所有回复块，避免后一段覆盖前一段。
 - 最新飞书流式关联修复：飞书 `CardKit` 回复链已从“按 `session_id` 监听 SSE”升级为“按 server 侧 `turn_id` 监听 SSE”；`CurrentTurnStarted/Status/Stream/Error/TurnCancelled/TurnCompleted` 现都携带同一轮的 turn 关联 ID，跨 turn 不再共享同一张流式卡片。
@@ -56,7 +56,8 @@
 - 完成 Web 端 provider 创建、更新、删除、切换与当前 provider / provider 列表刷新链路
 - 完成 Web 端 Channels 配置链路：`AppView`/Sidebar/MainContent 已接入 `channels` 视图，前端 store 与 `/api/channels` 的 list/create/update/delete 已连通，当前先只支持飞书 channel
 - 完成 `channel-registry`：飞书 channel 静态配置当前已统一落盘到 `.aia/channels.json`
-- 完成 `channel-bridge` 首轮落地：共享 `ChannelSessionService` / `ChannelBindingStore` 契约与 session 绑定恢复、turn 预压缩、消息回执幂等 helper 已从 `apps/agent-server` 抽离，供多渠道入口复用
+- 完成 `channel-bridge` 首轮 trait 化落地：共享 `ChannelSessionService` / `ChannelBindingStore` 契约、session 绑定恢复、turn 预压缩、消息回执幂等 helper，以及 adapter 化 `ChannelRuntimeSupervisor` 已从 `apps/agent-server` 抽离，供多渠道入口复用
+- 完成 `channel-feishu` 首轮迁移：飞书协议、长连接、回复控制、卡片流式状态与相关单测已迁入独立 crate，`agent-server` 只保留宿主桥接
 - 完成 `agent-store` 的 channel 动态索引：外部会话键 → `session_id` 映射与 `message_id` 幂等去重已进入 SQLite
 - 完成飞书 channel 正式长连接桥接：`apps/agent-server` 当前会按 channel 配置维护飞书长连接 worker，复用既有消息解析、会话映射、SQLite 幂等去重、`session_manager.submit_turn(...)` 与回复发送链路；原 webhook 过渡入口已移除
 - 完成飞书入口确认路径收口：长连接事件收到后会先回确认帧，再异步执行自动压缩、turn 提交、等待 SSE 完成与飞书回复，避免把平台 3 秒确认窗口直接绑死在模型/工具执行时长上
@@ -168,7 +169,7 @@
 ## 正在进行
 
 - 收口 runtime worker 留在 `apps/agent-server`、哪些能力适合上移到 `agent-runtime` 的边界
-- 继续拆分 `apps/agent-server` 中剩余的 `channel_runtime` 超大文件，优先沿 `channel-bridge` 新边界把 transport-neutral glue 与飞书专属协议/回复控制分开
+- 继续评估 `channel-feishu` 与 `channel-bridge` 之间是否还有可再压缩的宿主接口；若未来出现第二个 transport，再只抽已证明重复的部分，避免过早泛化
 - 观察内嵌 `brush` 作为 shell 运行时的实际稳定性、命令兼容性与中断语义
 - 继续把 trace 数据模型从“本地 span store + event timeline”推进到更完整的 resources / richer events 模型，但暂不抢在工具协议映射与 MCP 之前做 exporter / collector 集成
 - 继续观察 provider settings 与 channels settings 这两条配置面板在同一信息架构下的扩展性，避免后续新增更多配置面时把状态流和表单模式做散
@@ -184,7 +185,7 @@
 
 Web 侧 `Channels` 配置已补齐，但当前优先级不变：下一步仍优先推进统一工具协议映射与 MCP 接入，而不是继续扩张更多客户端表层能力。
 
-1. 在全异步主链完成后，继续推进实现简化与按领域拆分：优先沿 `channel-bridge` 新边界继续拆解 `apps/agent-server::channel_runtime`，再压缩 `session_manager` 的 runtime ownership / return-path 复杂度，并继续评估 `openai-adapter` 剩余协议特有 delta / tool-call 累积 helper 与 store 访问层中适合继续下沉或拆分的辅助逻辑
+1. 在全异步主链完成后，继续推进实现简化与按领域拆分：优先沿 `channel-bridge` / `channel-feishu` 新边界继续收口 `apps/agent-server::channel_host` 的宿主接口，再压缩 `session_manager` 的 runtime ownership / return-path 复杂度，并继续评估 `openai-adapter` 剩余协议特有 delta / tool-call 累积 helper 与 store 访问层中适合继续下沉或拆分的辅助逻辑
 2. 在 async 主链与共享工具边界进一步稳定后，优先推进统一工具协议映射与 MCP 接入，而不是继续堆厚客户端界面
 3. runtime 驱动辅助从 `apps/agent-server` 继续抽到共享层
 4. 在工具协议边界进一步收稳后，把本地 trace 从当前 span record + event timeline 继续推进到更完整的 resources / richer events 形态

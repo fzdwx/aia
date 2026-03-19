@@ -62,6 +62,7 @@ dependencies = [
  "axum",
  "builtin-tools",
  "channel-bridge",
+ "channel-feishu",
  "channel-registry",
  "futures-util",
  "openai-adapter",
@@ -529,10 +530,31 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 name = "channel-bridge"
 version = "0.1.0"
 dependencies = [
+ "agent-core",
  "agent-prompts",
+ "agent-runtime",
  "agent-store",
  "async-trait",
+ "channel-registry",
  "tokio",
+]
+
+[[package]]
+name = "channel-feishu"
+version = "0.1.0"
+dependencies = [
+ "agent-core",
+ "agent-runtime",
+ "agent-store",
+ "async-trait",
+ "channel-bridge",
+ "channel-registry",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
 ]
 
 [[package]]

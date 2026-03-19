@@ -17,7 +17,7 @@ use super::{
     turn::CancelTurnRequest,
 };
 use crate::{
-    channel_runtime::ChannelRuntimeSupervisor,
+    channel_host::build_channel_runtime,
     session_manager::{ProviderInfoSnapshot, SessionManagerHandle},
     state::AppState,
 };
@@ -38,7 +38,7 @@ fn test_state() -> Arc<AppState> {
         channel_registry_path: aia_config::default_channels_path(),
         channel_registry_snapshot: Arc::new(RwLock::new(ChannelRegistry::default())),
         store: store.clone(),
-        channel_runtime: Arc::new(tokio::sync::Mutex::new(ChannelRuntimeSupervisor::new(
+        channel_runtime: Arc::new(tokio::sync::Mutex::new(build_channel_runtime(
             store,
             session_manager,
             broadcast_tx,

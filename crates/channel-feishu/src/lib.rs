@@ -4,9 +4,11 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use agent_store::{ExternalConversationKey, FeishuMessageTarget};
+use agent_store::ExternalConversationKey;
 use channel_bridge::{
-    prepare_session_for_turn, record_channel_message_receipt, resolve_or_create_session,
+    ChannelBindingStore, ChannelCurrentTurnSnapshot, ChannelRuntimeAdapter, ChannelRuntimeEvent,
+    ChannelRuntimeHost, ChannelSessionService, ChannelTurnStatus, prepare_session_for_turn,
+    record_channel_message_receipt, resolve_or_create_session,
 };
 use channel_registry::{ChannelProfile, ChannelTransport};
 use futures_util::{SinkExt, StreamExt};
@@ -15,12 +17,13 @@ use serde_json::json;
 use tokio::{task::JoinHandle, time::MissedTickBehavior};
 use tokio_tungstenite::{connect_async, tungstenite::Message as WebSocketMessage};
 
-use crate::{
-    runtime_worker::CurrentTurnSnapshot,
-    session_manager::{RuntimeWorkerError, SessionManagerHandle, read_lock},
-    sse::SsePayload,
-    state::AppState,
-};
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FeishuMessageTarget {
+    pub receive_id: String,
+    pub receive_id_type: String,
+    pub reply_to_message_id: Option<String>,
+    pub reply_in_thread: bool,
+}
 
 const FEISHU_EVENT_KIND: &str = "im.message.receive_v1";
 const FEISHU_WS_ENDPOINT_URI: &str = "/callback/ws/endpoint";
@@ -50,104 +53,50 @@ const FEISHU_FRAME_TYPE_DATA: i32 = 1;
 
 #[derive(Clone)]
 struct ChannelRuntimeDeps {
-    store: Arc<agent_store::AiaStore>,
-    session_manager: SessionManagerHandle,
-    broadcast_tx: tokio::sync::broadcast::Sender<SsePayload>,
+    host: Arc<dyn ChannelRuntimeHost>,
 }
 
-struct RunningChannelWorker {
-    fingerprint: String,
-    handle: JoinHandle<()>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct RuntimeWorkerState {
-    fingerprint: String,
-    finished: bool,
-}
-
-pub struct ChannelRuntimeSupervisor {
+#[derive(Clone)]
+struct FeishuChannelAdapter {
     deps: ChannelRuntimeDeps,
-    workers: HashMap<String, RunningChannelWorker>,
 }
 
-impl ChannelRuntimeSupervisor {
-    pub fn new(
-        store: Arc<agent_store::AiaStore>,
-        session_manager: SessionManagerHandle,
-        broadcast_tx: tokio::sync::broadcast::Sender<SsePayload>,
-    ) -> Self {
-        Self {
-            deps: ChannelRuntimeDeps { store, session_manager, broadcast_tx },
-            workers: HashMap::new(),
-        }
-    }
-
-    fn spawn_channel_worker(&self, profile: ChannelProfile) -> RunningChannelWorker {
-        spawn_channel_worker(profile, self.deps.clone())
-    }
-
-    async fn sync(&mut self, profiles: Vec<ChannelProfile>) {
-        let existing = self
-            .workers
-            .iter()
-            .map(|(profile_id, worker)| {
-                (
-                    profile_id.clone(),
-                    RuntimeWorkerState {
-                        fingerprint: worker.fingerprint.clone(),
-                        finished: worker.handle.is_finished(),
-                    },
-                )
-            })
-            .collect::<HashMap<_, _>>();
-        let (stop_ids, start_profiles) = reconcile_runtime_workers(&existing, &profiles);
-
-        for profile_id in stop_ids {
-            if let Some(worker) = self.workers.remove(&profile_id) {
-                worker.handle.abort();
-            }
-        }
-
-        for profile in start_profiles {
-            let profile_id = profile.id.clone();
-            if let Some(worker) = self.workers.remove(&profile_id) {
-                worker.handle.abort();
-            }
-            self.workers.insert(profile_id, self.spawn_channel_worker(profile));
-        }
+impl FeishuChannelAdapter {
+    fn new(host: Arc<dyn ChannelRuntimeHost>) -> Self {
+        Self { deps: ChannelRuntimeDeps { host } }
     }
 }
 
-impl Drop for ChannelRuntimeSupervisor {
-    fn drop(&mut self) {
-        for worker in self.workers.drain().map(|(_, worker)| worker) {
-            worker.handle.abort();
-        }
+impl ChannelRuntimeAdapter for FeishuChannelAdapter {
+    fn transport(&self) -> ChannelTransport {
+        ChannelTransport::Feishu
     }
-}
 
-pub async fn sync_channel_runtime(state: &AppState) -> Result<(), String> {
-    let registry = read_lock(&state.channel_registry_snapshot).clone();
-    let desired_profiles = registry
-        .channels()
-        .iter()
-        .filter(|profile| profile.transport == ChannelTransport::Feishu && profile.enabled)
-        .cloned()
-        .collect::<Vec<_>>();
-    let mut runtime = state.channel_runtime.lock().await;
-    runtime.sync(desired_profiles).await;
-    Ok(())
-}
+    fn fingerprint(&self, profile: &ChannelProfile) -> String {
+        format!(
+            "{}|{}|{}|{}|{}|{}|{}",
+            profile.id,
+            profile.enabled,
+            profile.config.app_id,
+            profile.config.app_secret,
+            profile.config.base_url,
+            profile.config.require_mention,
+            profile.config.thread_mode,
+        )
+    }
 
-fn spawn_channel_worker(profile: ChannelProfile, deps: ChannelRuntimeDeps) -> RunningChannelWorker {
-    let fingerprint = profile_fingerprint(&profile);
-    let handle = match profile.transport {
-        ChannelTransport::Feishu => tokio::spawn(async move {
+    fn spawn(&self, profile: ChannelProfile) -> JoinHandle<()> {
+        let deps = self.deps.clone();
+        tokio::spawn(async move {
             run_feishu_long_connection(profile, deps).await;
-        }),
-    };
-    RunningChannelWorker { fingerprint, handle }
+        })
+    }
+}
+
+pub fn build_feishu_runtime_adapter(
+    host: Arc<dyn ChannelRuntimeHost>,
+) -> Arc<dyn ChannelRuntimeAdapter> {
+    Arc::new(FeishuChannelAdapter::new(host))
 }
 
 async fn run_feishu_long_connection(profile: ChannelProfile, deps: ChannelRuntimeDeps) {
@@ -391,9 +340,11 @@ async fn handle_event(
     }
 
     let conversation_key = resolve_conversation_key(profile, &event)?;
+    let bindings: &dyn ChannelBindingStore = deps.host.as_ref();
+    let sessions: &dyn ChannelSessionService = deps.host.as_ref();
     let session_id = resolve_or_create_session(
-        &deps.store,
-        &deps.session_manager,
+        bindings,
+        sessions,
         conversation_key,
         build_session_title(profile, &event),
     )
@@ -401,7 +352,7 @@ async fn handle_event(
     .map_err(|error| error.to_string())?;
     let request_uuid_seed = event.message.message_id.clone();
     let first_seen = record_channel_message_receipt(
-        &deps.store,
+        bindings,
         "feishu",
         &profile.id,
         &event.message.message_id,
@@ -481,16 +432,12 @@ async fn stream_turn_to_feishu_reply(
     reply_target: &FeishuMessageTarget,
     request_uuid_seed: &str,
 ) -> Result<(), String> {
-    prepare_session_for_turn(&deps.session_manager, session_id)
-        .await
-        .map_err(|error| error.to_string())?;
+    let sessions: &dyn ChannelSessionService = deps.host.as_ref();
+    prepare_session_for_turn(sessions, session_id).await.map_err(|error| error.to_string())?;
 
-    let mut rx = deps.broadcast_tx.subscribe();
-    let expected_turn_id = deps
-        .session_manager
-        .submit_turn(session_id.to_string(), prompt.to_string())
-        .await
-        .map_err(runtime_error_to_string)?;
+    let mut rx = deps.host.subscribe_runtime_events();
+    let expected_turn_id =
+        deps.host.submit_turn(session_id.to_string(), prompt.to_string()).await?;
 
     let mut controller =
         FeishuStreamingReplyController::new(prompt.to_string(), current_timestamp_ms());
@@ -507,29 +454,29 @@ async fn stream_turn_to_feishu_reply(
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         let received = tokio::time::timeout(remaining, rx.recv())
             .await
-            .map_err(|_| "等待飞书流式回复超时".to_string())
-            .and_then(|result| result.map_err(|error| error.to_string()))?;
+            .map_err(|_| "等待飞书流式回复超时".to_string())?
+            .ok_or_else(|| "飞书运行时事件流已结束".to_string())?;
 
         match received {
-            SsePayload::CurrentTurnStarted { session_id: sid, current_turn }
+            ChannelRuntimeEvent::CurrentTurnStarted { session_id: sid, current_turn }
                 if sid == session_id && current_turn.turn_id == expected_turn_id =>
             {
                 controller.update_from_snapshot(&current_turn);
                 controller.flush(profile, false).await;
             }
-            SsePayload::Status { session_id: sid, turn_id, status }
+            ChannelRuntimeEvent::Status { session_id: sid, turn_id, status }
                 if sid == session_id && turn_id == expected_turn_id =>
             {
                 controller.update_status(status);
                 controller.flush(profile, false).await;
             }
-            SsePayload::Stream { session_id: sid, turn_id, event }
+            ChannelRuntimeEvent::Stream { session_id: sid, turn_id, event }
                 if sid == session_id && turn_id == expected_turn_id =>
             {
                 controller.apply_stream(&event);
                 controller.flush(profile, false).await;
             }
-            SsePayload::TurnCompleted { session_id: sid, turn_id, turn }
+            ChannelRuntimeEvent::TurnCompleted { session_id: sid, turn_id, turn }
                 if sid == session_id && turn_id == expected_turn_id =>
             {
                 finalize_feishu_card_state(
@@ -545,7 +492,7 @@ async fn stream_turn_to_feishu_reply(
                 }
                 return Ok(());
             }
-            SsePayload::Error { session_id: sid, turn_id, message }
+            ChannelRuntimeEvent::Error { session_id: sid, turn_id, message }
                 if sid == session_id && turn_id.as_deref() == Some(expected_turn_id.as_str()) =>
             {
                 finalize_feishu_card_state(
@@ -585,11 +532,11 @@ impl FeishuStreamingReplyController {
         }
     }
 
-    fn update_from_snapshot(&mut self, snapshot: &CurrentTurnSnapshot) {
+    fn update_from_snapshot(&mut self, snapshot: &ChannelCurrentTurnSnapshot) {
         update_feishu_card_state_from_snapshot(&mut self.state, snapshot);
     }
 
-    fn update_status(&mut self, status: crate::sse::TurnStatus) {
+    fn update_status(&mut self, status: ChannelTurnStatus) {
         self.state.status = status;
     }
 
@@ -674,10 +621,6 @@ async fn create_interactive_patch_mode(
         );
         None
     })
-}
-
-fn runtime_error_to_string(error: RuntimeWorkerError) -> String {
-    error.message
 }
 
 #[cfg(test)]
@@ -1417,7 +1360,7 @@ struct FeishuStreamingToolState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FeishuStreamingCardState {
     user_message: String,
-    status: crate::sse::TurnStatus,
+    status: ChannelTurnStatus,
     reasoning: String,
     streaming_text: String,
     completed_segments: Vec<String>,
@@ -1431,7 +1374,7 @@ impl FeishuStreamingCardState {
     fn new(user_message: String, started_at_ms: u64) -> Self {
         Self {
             user_message,
-            status: crate::sse::TurnStatus::Waiting,
+            status: ChannelTurnStatus::Waiting,
             reasoning: String::new(),
             streaming_text: String::new(),
             completed_segments: Vec::new(),
@@ -1630,17 +1573,17 @@ fn apply_stream_event_to_feishu_card_state(
     match event {
         agent_core::StreamEvent::ThinkingDelta { text } => {
             state.reasoning.push_str(text);
-            state.status = crate::sse::TurnStatus::Thinking;
+            state.status = ChannelTurnStatus::Thinking;
         }
         agent_core::StreamEvent::TextDelta { text } => {
             state.streaming_text.push_str(text);
-            state.status = crate::sse::TurnStatus::Generating;
+            state.status = ChannelTurnStatus::Generating;
         }
         agent_core::StreamEvent::ToolCallDetected { invocation_id, tool_name, .. }
         | agent_core::StreamEvent::ToolCallStarted { invocation_id, tool_name, .. } => {
             let tool = find_or_insert_tool_state(state, invocation_id, tool_name);
             tool.status = FeishuStreamingToolStatus::Running;
-            state.status = crate::sse::TurnStatus::Working;
+            state.status = ChannelTurnStatus::Working;
         }
         agent_core::StreamEvent::ToolOutputDelta { invocation_id, text, .. } => {
             if let Some(tool) =
@@ -1648,7 +1591,7 @@ fn apply_stream_event_to_feishu_card_state(
             {
                 tool.output.push_str(text);
             }
-            state.status = crate::sse::TurnStatus::Working;
+            state.status = ChannelTurnStatus::Working;
         }
         agent_core::StreamEvent::ToolCallCompleted {
             invocation_id,
@@ -1670,7 +1613,7 @@ fn apply_stream_event_to_feishu_card_state(
                 }
                 tool.output.push_str(content);
             }
-            state.status = crate::sse::TurnStatus::Working;
+            state.status = ChannelTurnStatus::Working;
         }
         agent_core::StreamEvent::Done => {
             state.finished_at_ms = Some(current_timestamp_ms());
@@ -1681,7 +1624,7 @@ fn apply_stream_event_to_feishu_card_state(
 
 fn update_feishu_card_state_from_snapshot(
     state: &mut FeishuStreamingCardState,
-    snapshot: &CurrentTurnSnapshot,
+    snapshot: &ChannelCurrentTurnSnapshot,
 ) {
     state.user_message = snapshot.user_message.clone();
     state.status = snapshot.status.clone();
@@ -1704,11 +1647,8 @@ fn finalize_feishu_card_state(
         }
     }
     state.finished_at_ms = Some(finished_at_ms);
-    state.status = if state.failed {
-        crate::sse::TurnStatus::Cancelled
-    } else {
-        crate::sse::TurnStatus::Generating
-    };
+    state.status =
+        if state.failed { ChannelTurnStatus::Cancelled } else { ChannelTurnStatus::Generating };
 }
 
 fn extract_assistant_segments_from_turn(turn: &agent_runtime::TurnLifecycle) -> Vec<String> {
@@ -2272,48 +2212,6 @@ impl FeishuWsResponse {
     }
 }
 
-fn profile_fingerprint(profile: &ChannelProfile) -> String {
-    format!(
-        "{}|{}|{}|{}|{}|{}|{}",
-        profile.id,
-        profile.enabled,
-        profile.config.app_id,
-        profile.config.app_secret,
-        profile.config.base_url,
-        profile.config.require_mention,
-        profile.config.thread_mode,
-    )
-}
-
-fn reconcile_runtime_workers(
-    existing: &HashMap<String, RuntimeWorkerState>,
-    desired_profiles: &[ChannelProfile],
-) -> (Vec<String>, Vec<ChannelProfile>) {
-    let desired_fingerprints = desired_profiles
-        .iter()
-        .map(|profile| (profile.id.clone(), profile_fingerprint(profile)))
-        .collect::<HashMap<_, _>>();
-
-    let stop_ids = existing
-        .iter()
-        .filter_map(|(profile_id, state)| match desired_fingerprints.get(profile_id) {
-            Some(desired) if desired == &state.fingerprint && !state.finished => None,
-            _ => Some(profile_id.clone()),
-        })
-        .collect::<Vec<_>>();
-    let start_profiles = desired_profiles
-        .iter()
-        .filter(|profile| {
-            existing.get(&profile.id).is_none_or(|state| {
-                state.finished || state.fingerprint != profile_fingerprint(profile)
-            })
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-
-    (stop_ids, start_profiles)
-}
-
 fn encode_varint_field(buffer: &mut Vec<u8>, field_number: u64, value: u64) {
     encode_varint(buffer, field_number << 3);
     encode_varint(buffer, value);
@@ -2421,23 +2319,12 @@ fn skip_unknown_field(input: &[u8], cursor: &mut usize, wire_type: u64) -> Resul
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, sync::Arc};
-
     use channel_registry::ChannelProfile;
-    use std::sync::RwLock;
 
     use super::*;
 
     fn sample_profile() -> ChannelProfile {
         ChannelProfile::new_feishu("default", "默认飞书", "cli_app", "secret")
-    }
-
-    fn temp_runtime_dir(name: &str) -> std::path::PathBuf {
-        let suffix = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        std::env::temp_dir().join(format!("aia-feishu-runtime-{name}-{suffix}"))
     }
 
     fn group_event() -> EventBody {
@@ -2457,81 +2344,6 @@ mod tests {
             },
             chat: None,
         }
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn resolve_session_id_recreates_deleted_bound_session() {
-        let temp_root = temp_runtime_dir("stale-binding");
-        let sessions_dir = temp_root.join("sessions");
-        std::fs::create_dir_all(&sessions_dir).expect("sessions dir should exist");
-        let store = Arc::new(
-            agent_store::AiaStore::new(temp_root.join("store.sqlite3"))
-                .expect("sqlite store should initialize"),
-        );
-        let registry = provider_registry::ProviderRegistry::default();
-        let broadcast_tx = tokio::sync::broadcast::channel(32).0;
-        let session_manager = crate::session_manager::spawn_session_manager(
-            crate::session_manager::SessionManagerConfig {
-                sessions_dir,
-                store: store.clone(),
-                registry: registry.clone(),
-                store_path: temp_root.join("providers.json"),
-                broadcast_tx: broadcast_tx.clone(),
-                provider_registry_snapshot: Arc::new(RwLock::new(registry)),
-                provider_info_snapshot: Arc::new(RwLock::new(
-                    crate::session_manager::ProviderInfoSnapshot {
-                        name: "bootstrap".into(),
-                        model: "bootstrap".into(),
-                        connected: true,
-                    },
-                )),
-                workspace_root: temp_root.clone(),
-                user_agent: "test-agent".into(),
-            },
-        );
-
-        let session = session_manager
-            .create_session(Some("Deleted session".into()))
-            .await
-            .expect("session should be created");
-        let key = ExternalConversationKey {
-            channel_kind: "feishu".into(),
-            profile_id: "default".into(),
-            scope: "group".into(),
-            conversation_key: "oc_group_1".into(),
-        };
-        store
-            .upsert_channel_binding_async(agent_store::ChannelSessionBinding::new(
-                key.clone(),
-                session.id.clone(),
-            ))
-            .await
-            .expect("binding should save");
-        session_manager.delete_session(session.id.clone()).await.expect("session should delete");
-
-        let deps = ChannelRuntimeDeps {
-            store: store.clone(),
-            session_manager: session_manager.clone(),
-            broadcast_tx,
-        };
-        let recreated_session_id = resolve_or_create_session(
-            &deps.store,
-            &deps.session_manager,
-            key.clone(),
-            build_session_title(&sample_profile(), &group_event()),
-        )
-        .await
-        .expect("deleted binding should self-heal");
-
-        assert_ne!(recreated_session_id, session.id);
-        let rebound = store
-            .get_channel_binding_async(key)
-            .await
-            .expect("binding should load")
-            .expect("binding should exist");
-        assert_eq!(rebound.session_id, recreated_session_id);
-
-        let _ = std::fs::remove_dir_all(temp_root);
     }
 
     #[test]
@@ -2635,46 +2447,6 @@ mod tests {
         assert_eq!(decoded, frame);
     }
 
-    #[test]
-    fn reconcile_runtime_workers_restarts_changed_profiles() {
-        let existing = HashMap::from([
-            (
-                "default".to_string(),
-                RuntimeWorkerState { fingerprint: "same".to_string(), finished: false },
-            ),
-            (
-                "legacy".to_string(),
-                RuntimeWorkerState { fingerprint: "old".to_string(), finished: false },
-            ),
-        ]);
-        let mut desired = vec![sample_profile()];
-        desired[0].id = "default".into();
-        desired[0].config.base_url = "https://different.feishu.cn".into();
-
-        let (stop_ids, start_profiles) = reconcile_runtime_workers(&existing, &desired);
-
-        assert!(stop_ids.contains(&"default".to_string()));
-        assert!(stop_ids.contains(&"legacy".to_string()));
-        assert_eq!(start_profiles.len(), 1);
-        assert_eq!(start_profiles[0].id, "default");
-    }
-
-    #[test]
-    fn reconcile_runtime_workers_restarts_finished_workers_even_if_fingerprint_matches() {
-        let mut profile = sample_profile();
-        profile.id = "default".into();
-        let fingerprint = profile_fingerprint(&profile);
-        let existing = HashMap::from([(
-            "default".to_string(),
-            RuntimeWorkerState { fingerprint, finished: true },
-        )]);
-
-        let (stop_ids, start_profiles) = reconcile_runtime_workers(&existing, &[profile.clone()]);
-
-        assert_eq!(stop_ids, vec!["default".to_string()]);
-        assert_eq!(start_profiles, vec![profile]);
-    }
-
     #[tokio::test(flavor = "current_thread")]
     async fn resolve_reply_target_uses_chat_id_from_event_chat_for_p2p() {
         let profile = sample_profile();
@@ -2760,7 +2532,7 @@ mod tests {
     fn streaming_card_payload_renders_reasoning_answer_and_tool_status() {
         let state = FeishuStreamingCardState {
             user_message: "用户问题".into(),
-            status: crate::sse::TurnStatus::Generating,
+            status: ChannelTurnStatus::Generating,
             reasoning: "先分析上下文".into(),
             streaming_text: String::new(),
             completed_segments: vec!["最终回答内容".into()],

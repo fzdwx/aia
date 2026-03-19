@@ -12,6 +12,7 @@ agent-runtime = { path = "../../crates/agent-runtime" }
 builtin-tools = { path = "../../crates/builtin-tools" }
 agent-store = { path = "../../crates/agent-store" }
 channel-bridge = { path = "../../crates/channel-bridge" }
+channel-feishu = { path = "../../crates/channel-feishu" }
 channel-registry = { path = "../../crates/channel-registry" }
 openai-adapter = { path = "../../crates/openai-adapter" }
 provider-registry = { path = "../../crates/provider-registry" }

@@ -4,12 +4,12 @@ use std::{
 };
 
 use agent_store::AiaStore;
+use channel_bridge::ChannelRuntimeSupervisor;
 use channel_registry::ChannelRegistry;
 use provider_registry::ProviderRegistry;
 use tokio::sync::broadcast;
 
 use crate::{
-    channel_runtime::ChannelRuntimeSupervisor,
     session_manager::{ProviderInfoSnapshot, SessionManagerHandle},
     sse::SsePayload,
 };

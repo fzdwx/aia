@@ -1,5 +1,5 @@
 mod bootstrap;
-mod channel_runtime;
+mod channel_host;
 mod cli;
 mod model;
 mod routes;

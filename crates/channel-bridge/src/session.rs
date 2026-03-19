@@ -14,7 +14,7 @@ pub struct ChannelSessionInfo {
 }
 
 #[async_trait]
-pub trait ChannelSessionService {
+pub trait ChannelSessionService: Send + Sync {
     async fn session_exists(&self, session_id: &str) -> Result<bool, ChannelBridgeError>;
 
     async fn create_session(&self, title: String) -> Result<String, ChannelBridgeError>;
@@ -28,7 +28,7 @@ pub trait ChannelSessionService {
 }
 
 #[async_trait]
-pub trait ChannelBindingStore {
+pub trait ChannelBindingStore: Send + Sync {
     async fn get_channel_binding(
         &self,
         key: ExternalConversationKey,
@@ -75,10 +75,13 @@ impl ChannelBindingStore for Arc<AiaStore> {
     }
 }
 
-pub async fn prepare_session_for_turn(
-    sessions: &impl ChannelSessionService,
+pub async fn prepare_session_for_turn<S>(
+    sessions: &S,
     session_id: &str,
-) -> Result<(), ChannelBridgeError> {
+) -> Result<(), ChannelBridgeError>
+where
+    S: ChannelSessionService + ?Sized,
+{
     let info = sessions.session_info(session_id).await?;
     if info.pressure_ratio.is_some_and(|ratio| ratio >= AUTO_COMPRESSION_THRESHOLD) {
         sessions.auto_compress_session(session_id).await?;
@@ -86,12 +89,16 @@ pub async fn prepare_session_for_turn(
     Ok(())
 }
 
-pub async fn resolve_or_create_session(
-    store: &impl ChannelBindingStore,
-    sessions: &impl ChannelSessionService,
+pub async fn resolve_or_create_session<S, T>(
+    store: &S,
+    sessions: &T,
     key: ExternalConversationKey,
     title: String,
-) -> Result<String, ChannelBridgeError> {
+) -> Result<String, ChannelBridgeError>
+where
+    S: ChannelBindingStore + ?Sized,
+    T: ChannelSessionService + ?Sized,
+{
     if let Some(binding) = store.get_channel_binding(key.clone()).await?
         && sessions.session_exists(&binding.session_id).await?
     {
@@ -103,13 +110,16 @@ pub async fn resolve_or_create_session(
     Ok(session_id)
 }
 
-pub async fn record_channel_message_receipt(
-    store: &impl ChannelBindingStore,
+pub async fn record_channel_message_receipt<S>(
+    store: &S,
     channel_kind: &str,
     profile_id: &str,
     external_message_id: &str,
     session_id: &str,
-) -> Result<bool, ChannelBridgeError> {
+) -> Result<bool, ChannelBridgeError>
+where
+    S: ChannelBindingStore + ?Sized,
+{
     store
         .record_channel_message_receipt(ChannelMessageReceipt::new(
             channel_kind,

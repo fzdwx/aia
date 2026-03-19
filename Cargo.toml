@@ -10,6 +10,7 @@ members = [
   "crates/agent-store",
   "crates/channel-registry",
   "crates/channel-bridge",
+  "crates/channel-feishu",
   "crates/openai-adapter",
   "crates/provider-registry",
   "crates/session-tape",

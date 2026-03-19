@@ -25,6 +25,7 @@ README 里真正难的是这些能力：
 - `agent-runtime`：运行时编排与最小 turn 执行
 - `channel-registry`：外部 channel 配置、启停状态与本地持久化
 - `channel-bridge`：外部 channel 入口共享的 session 绑定、预压缩与幂等 helper
+- `channel-feishu`：飞书 channel 的协议实现、回复控制与 adapter
 - `provider-registry`：provider 资料、活动项与本地持久化
 - `openai-adapter`：首个真实模型适配层，负责把统一请求映射到 Responses 风格接口，并已切到原生 async `reqwest` 主链
 - `agent-store`：本地 SQLite session / trace 存储与查询
@@ -37,7 +38,7 @@ README 里真正难的是这些能力：
 
 - 各 crate 的 `lib.rs` 保持为薄 façade，只负责 `mod` 声明与稳定 `pub use`
 - 领域模型、协议映射、存储后端、兼容层、错误与测试分别落到独立模块，避免继续把实现堆在单个入口文件
-- 内部模块化不改变 crate 级职责边界；跨 crate 的公开抽象仍以 `aia-config`、`agent-core`、`session-tape`、`agent-runtime`、`channel-registry`、`channel-bridge`、`provider-registry`、`openai-adapter`、`agent-store` 的现有职责划分为准
+- 内部模块化不改变 crate 级职责边界；跨 crate 的公开抽象仍以 `aia-config`、`agent-core`、`session-tape`、`agent-runtime`、`channel-registry`、`channel-bridge`、`channel-feishu`、`provider-registry`、`openai-adapter`、`agent-store` 的现有职责划分为准
 
 ### `aia-config`
 
@@ -146,13 +147,25 @@ README 里真正难的是这些能力：
 
 ### `channel-bridge`
 
-负责外部 channel 入口共享的桥接 helper：
+负责外部 channel 入口共享的桥接抽象：
 
 - 暴露 transport-neutral 的 `ChannelSessionService` / `ChannelBindingStore` 契约
+- 暴露 `ChannelRuntimeAdapter` trait 与通用 `ChannelRuntimeSupervisor`，让 app 壳只实现各平台 adapter，而不是把 transport 分发硬编码在 supervisor 内
+- 暴露 transport-neutral 的 `ChannelRuntimeHost`、`ChannelRuntimeEvent`、`ChannelTurnStatus` 等宿主事件/回调边界，让具体 channel crate 不再定义带平台前缀的宿主契约
 - 统一承接 external conversation → `session_id` 绑定恢复、turn 前预压缩与消息幂等回执 helper
 - 为多个 channel transport 复用同一套 session 准备语义，而不是在各个 app 壳 adapter 内重复复制这类 glue code
 - 不承载平台协议 payload、WebSocket 生命周期、回复渲染或 provider/runtime 业务主链
 - 保持共享抽象停留在“可复用的 bridge helper”层级，不把 app 壳特有的 HTTP/SSE/飞书细节反向污染到共享层
+
+### `channel-feishu`
+
+负责飞书 channel 的平台实现：
+
+- 持有飞书 WebSocket 长连接生命周期、二进制帧编解码、endpoint 拉取与重连策略
+- 持有飞书事件 payload、回复目标解析、卡片流式控制与回复发送链路
+- 实现 `channel-bridge` 暴露的通用 `ChannelRuntimeAdapter`，作为第一个真实 transport adapter
+- 通过 `channel-bridge` 提供的通用宿主接口向上请求 session 绑定、turn 提交与运行时事件订阅，不直接依赖 `apps/agent-server` 本地类型
+- 不承载 channel 静态配置持久化，也不接管 app 壳的 HTTP/SSE 路由与全局状态装配
 
 ### `openai-adapter`
 
@@ -228,7 +241,7 @@ README 里真正难的是这些能力：
 - SSE 在线分发层显式暴露“需要重同步”语义：当 `broadcast` 接收端因慢客户端而 `Lagged` 时，`/api/events` 不再静默吞掉错误，而是发出 `sync_required` 事件；Web 侧据此补拉 session 列表，并重拉当前 session 的历史、当前 turn 与上下文压力，把实时分发层与持久化恢复边界连接起来
 - 暴露 provider、session、turn、cancel、handoff、trace 等 HTTP API
 - 现已额外暴露 `channels` 控制面：`/api/channels` 负责飞书 channel 的列表、创建、更新、删除；飞书事件入口已收口为 app 壳内部持有的长连接 worker，不再继续暴露 webhook 过渡路由
-- channel 桥接遵循“薄 ingress bridge”原则：平台事件解析、回复模式、长连接/WebSocket 生命周期与平台协议细节继续停留在 app 壳；而 external conversation → `session_id` 绑定恢复、turn 前预压缩与消息回执幂等这类可复用 bridge helper 已收口到 `channel-bridge`，避免未来新增 transport 时继续在 `apps/agent-server` 里复制粘贴同类 glue code
+- channel 桥接遵循“薄 ingress bridge”原则：`apps/agent-server` 只保留宿主注册、配置读取、状态持有与运行时事件映射；`channel-bridge` 提供通用 `ChannelRuntimeAdapter` trait + `ChannelRuntimeSupervisor`；`channel-feishu` 承接飞书平台协议、长连接与回复控制，实现真正的 transport adapter；external conversation → `session_id` 绑定恢复、turn 前预压缩与消息回执幂等继续走共享 helper，避免未来新增 transport 时继续改 supervisor 本体或在 app 壳里复制粘贴 glue code
 - `POST /api/turn` 仍保持 fire-and-forget，但真正的 turn 执行、事件回收与 session 条目追加都在 worker 内串行完成
 - turn 执行与 session manager 已切到原生 Tokio async task：`apps/agent-server` 不再依赖 `tokio::spawn_blocking`、`std::thread::Builder`、`LocalSet` 或 `spawn_local` 承载 turn 主链；worker 直接 await `AgentRuntime::handle_turn_streaming(...)`，压缩路径也直接 await `AgentRuntime::auto_compress_now()`，运行中 `session/info` 通过 slot 内的 `ContextStats` 快照读取 live stats，turn 结束后仍沿用显式 runtime ownership 归还路径
 - 运行中的条目会实时 append 到 `.aia/session.jsonl`

@@ -33,14 +33,6 @@ pub struct ChannelMessageReceipt {
     pub created_at: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct FeishuMessageTarget {
-    pub receive_id: String,
-    pub receive_id_type: String,
-    pub reply_to_message_id: Option<String>,
-    pub reply_in_thread: bool,
-}
-
 impl ChannelSessionBinding {
     pub fn new(key: ExternalConversationKey, session_id: impl Into<String>) -> Self {
         let now = iso8601_now();
@@ -340,10 +332,7 @@ mod tests {
         let key = sample_key();
         let binding = ChannelSessionBinding::new(key.clone(), "session-stale");
 
-        store
-            .upsert_channel_binding_async(binding)
-            .await
-            .expect("binding should save async");
+        store.upsert_channel_binding_async(binding).await.expect("binding should save async");
 
         let deleted = store
             .delete_channel_bindings_by_session_id_async("session-stale")

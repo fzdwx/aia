@@ -5,9 +5,13 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+agent-core = { path = "../agent-core" }
 agent-prompts = { path = "../agent-prompts" }
+agent-runtime = { path = "../agent-runtime" }
 agent-store = { path = "../agent-store" }
+channel-registry = { path = "../channel-registry" }
 async-trait = "0.1"
+tokio = { version = "1", features = ["rt", "sync", "time"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }
