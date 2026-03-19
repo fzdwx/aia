@@ -13,7 +13,7 @@ use channel_bridge::{
     SupportedChannelDefinition, prepare_session_for_turn, record_channel_message_receipt,
     resolve_or_create_session,
 };
-use channel_registry::{ChannelProfile, ChannelTransport};
+use channel_bridge::{ChannelProfile, ChannelTransport};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -31,10 +31,7 @@ pub struct FeishuMessageTarget {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, DeriveToolArgsSchema)]
 #[serde(deny_unknown_fields)]
 struct FeishuChannelConfig {
-    #[tool_schema(
-        description = "App ID",
-        meta(key = "x-label", value = "App ID")
-    )]
+    #[tool_schema(description = "App ID", meta(key = "x-label", value = "App ID"))]
     app_id: String,
     #[tool_schema(
         description = "编辑时留空表示保持现有 secret",
@@ -2400,8 +2397,6 @@ fn skip_unknown_field(input: &[u8], cursor: &mut usize, wire_type: u64) -> Resul
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-
-    use channel_registry::ChannelProfile;
 
     use super::*;
 

@@ -4,7 +4,8 @@
 
 - 阶段：核心工作区搭建之后的当前细分步骤：Web 界面 ↔ 运行时桥接收口
 - 最新前端进展：`apps/web` 已补齐与 `Settings` 平行的 `Channels` 配置页，当前支持飞书 channel 的列表、创建、编辑、删除与启停；入口已接入侧边栏 `Trace/Channels/Settings` 同组导航，前端 store 与 `/api/channels` CRUD 调用链也已打通。
-- 最新后端进展：新增 `channel-registry` 共享库与 `agent-store` 的 channel 映射/幂等表；`apps/agent-server` 已补齐 `/api/channels` 控制面，并把飞书 channel 从过渡 webhook 入口收口为正式长连接 worker。当前长连接会按 profile 启停与重连，收到事件后先快速确认，再异步走既有 `session_manager.submit_turn(...)` 主链与飞书回复链路。
+- 最新后端进展：`agent-store` 已承接 channel 映射/幂等表与配置档案持久化，`apps/agent-server` 已补齐 `/api/channels` 控制面，并把飞书 channel 从过渡 webhook 入口收口为正式长连接 worker。当前长连接会按 profile 启停与重连，收到事件后先快速确认，再异步走既有 `session_manager.submit_turn(...)` 主链与飞书回复链路。
+- 最新 channel 持久化收口：`channel-registry` crate 已从工作区移除；`ChannelProfile` 现统一由 `channel-bridge::ChannelProfileRegistry` 作为 store façade 管理，`apps/agent-server` 启动时直接从 `agent-store` 的 `channel_profiles` 表加载。`/api/channels` 的增删改也已先写 SQLite 再更新内存快照，避免 store 失败后 runtime 继续拿到脏 profile 状态。
 - 最新 channel 抽象进展：`channel-bridge` 现在不只承接 session 绑定恢复、turn 前预压缩与消息回执幂等 helper，还新增了通用 `ChannelRuntimeAdapter` / `ChannelRuntimeSupervisor` 与去平台化的 `ChannelRuntimeHost` / `ChannelRuntimeEvent` 边界；与此同时新增 `channel-feishu` crate，飞书 WebSocket、CardKit、回复控制与协议实现已从 `apps/agent-server` 迁出，`agent-server` 现在只保留宿主注册、状态装配与 SSE→通用 channel 运行时事件映射。
 - 最新飞书修复进展：私聊回复路径已从“总是 reply 当前消息”收紧为“私聊按 `chat_id` 直发、群聊按需 reply/thread”；SSE 现已补齐 `current_turn_started` 事件，前端对外部 channel 触发的当前执行态支持即时显示与流式恢复，不再依赖手动刷新；飞书消息进入处理中后会先加 `Typing` 表情，结束后再移除；同时飞书回包已进一步切到 `CardKit`：先创建 card entity，再用 `element_id` 按流事件更新正文，最后关闭 streaming mode 并收口为最终卡片。
 - 最新飞书消息覆盖修复：同一个 turn 内若模型产出多段 assistant message，飞书最终卡片不再只取最后一段 `assistant_message`，而是优先按 `TurnBlock::Assistant` 顺序拼接所有回复块，避免后一段覆盖前一段。
@@ -55,9 +56,11 @@
 - 完成 `apps/agent-server` 向 runtime 显式传入 `workspace_root`，保证相对路径工具调用语义稳定
 - 完成 Web 端 provider 创建、更新、删除、切换与当前 provider / provider 列表刷新链路
 - 完成 Web 端 Channels 配置链路：`AppView`/Sidebar/MainContent 已接入 `channels` 视图，前端 store 与 `/api/channels` 的 list/create/update/delete 已连通，当前先只支持飞书 channel
-- 完成 `channel-registry`：飞书 channel 静态配置当前已统一落盘到 `.aia/channels.json`
+- 完成 channel profile 持久化迁移：已配置 channel 档案当前统一落盘到 `.aia/store.sqlite3`
+- 完成 `channel-registry` crate 退场：共享 profile 模型与 store façade 已并入 `channel-bridge`，旧 `.aia/channels.json` 路径约定也已从共享配置中移除
 - 完成 channel 配置模型再收口：`ChannelProfile` 现只保留通用 profile 元数据 + raw `config` payload，具体配置结构与校验改由 adapter 自己定义；旧版 Feishu 裸配置 JSON 继续可读
-- 完成 channel catalog 首轮打通：`channel-bridge` 现在额外提供 `ChannelRuntimeAdapterRegistry` 与 `SupportedChannelDefinition.config_schema`；`agent-server` 已暴露支持的 channel catalog，Web 端 Channels 面板可按 server 下发的 schema 动态渲染，而不是继续写死 Feishu 表单
+- 完成 channel catalog 首轮打通：`channel-bridge` 现在额外提供 `ChannelAdapterCatalog` 与 `SupportedChannelDefinition.config_schema`；`agent-server` 已暴露支持的 channel catalog，Web 端 Channels 面板可按 server 下发的 schema 动态渲染，而不是继续写死 Feishu 表单
+- 完成命名与边界收口：代码层把“已配置渠道档案”的 store façade 统一命名为 `ChannelProfileRegistry`，并把运行时支持的实现目录明确命名为 `ChannelAdapterCatalog`，避免两类 registry 继续混淆
 - 完成 `channel-bridge` 首轮 trait 化落地：共享 `ChannelSessionService` / `ChannelBindingStore` 契约、session 绑定恢复、turn 预压缩、消息回执幂等 helper，以及 adapter 化 `ChannelRuntimeSupervisor` 已从 `apps/agent-server` 抽离，供多渠道入口复用
 - 完成 `channel-feishu` 首轮迁移：飞书协议、长连接、回复控制、卡片流式状态与相关单测已迁入独立 crate，`agent-server` 只保留宿主桥接
 - 完成 `agent-store` 的 channel 动态索引：外部会话键 → `session_id` 映射与 `message_id` 幂等去重已进入 SQLite

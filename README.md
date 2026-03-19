@@ -27,8 +27,7 @@ this repository currently runs as a library-first rust workspace with a web-firs
 - `crates/agent-core`: core domain types for models, tools, and portable tool specs
 - `crates/session-tape`: append-only tape with flat entries (`{id, kind, payload, meta, date}`), anchors, handoff events, query slicing, fork/merge, and jsonl replay snapshots
 - `crates/agent-runtime`: runtime orchestration for models, tools, sessions, compression, cancellation, and event flow
-- `crates/channel-registry`: static channel profiles, transport selection, enablement, and local persistence
-- `crates/channel-bridge`: shared channel session-binding and turn-preparation abstractions for multi-channel ingress
+- `crates/channel-bridge`: shared channel models, configured profile persistence facade, adapter catalog, session-binding, and turn-preparation abstractions for multi-channel ingress
 - `crates/channel-feishu`: Feishu-specific websocket protocol, reply orchestration, and channel adapter implementation
 - `crates/provider-registry`: local provider profiles, active selection, and persistence
 - `crates/openai-adapter`: real model adapter layer covering both Responses-style and OpenAI-compatible Chat Completions HTTP interfaces
@@ -41,7 +40,7 @@ this repository currently runs as a library-first rust workspace with a web-firs
 ## current behavior
 
 - provider state persists under `.aia/providers.json`
-- channel state persists under `.aia/channels.json`
+- channel profile state persists under `.aia/store.sqlite3`
 - session replay data appends to `.aia/session.jsonl`
 - local SQLite state persists under `.aia/store.sqlite3`
 - server startup derives these defaults through `crates/aia-config`
@@ -55,7 +54,7 @@ this repository currently runs as a library-first rust workspace with a web-firs
 - context compression calls now emit their own trace records and can be inspected in a dedicated compression-log view instead of being mixed into the regular trace list
 - trace workbench now loads its filtered summary + page data through a single overview request; overview page results are truly item-paginated, while summary data is served from a SQLite overview-summary snapshot instead of being recomputed on every request
 - feishu channels now run through a long-lived websocket bridge in `apps/agent-server`; inbound events are acknowledged quickly and the actual agent turn + reply path continues asynchronously through the existing session manager/runtime chain
-- channel ingress now shares session-binding, stale-binding recovery, turn preparation, message-receipt idempotency, generic adapter supervision, and adapter-exposed config schema through `crates/channel-bridge`; the Feishu websocket/protocol/reply implementation now lives in `crates/channel-feishu`, while `crates/channel-registry` only persists transport-neutral profiles plus raw config payloads
+- channel ingress now shares session-binding, stale-binding recovery, turn preparation, message-receipt idempotency, configured profile persistence facade, generic adapter catalog, and adapter-exposed config schema through `crates/channel-bridge`; the Feishu websocket/protocol/reply implementation now lives in `crates/channel-feishu`
 
 ## web workspace
 

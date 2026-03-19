@@ -3,8 +3,9 @@ use axum::{
     extract::{Path, State},
     response::IntoResponse,
 };
-use channel_bridge::SupportedChannelDefinition;
-use channel_registry::{ChannelProfile, ChannelTransport};
+use channel_bridge::{
+    ChannelProfile, ChannelProfileRegistry, ChannelTransport, SupportedChannelDefinition,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -15,11 +16,16 @@ use crate::{
 
 use super::common::{JsonResponse, error_response, ok_response};
 
+enum ChannelMutation {
+    Upsert { next: ChannelProfile, previous: Option<ChannelProfile> },
+    Delete { deleted: ChannelProfile },
+}
+
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub(crate) struct ChannelListItem {
     pub id: String,
     pub name: String,
-    pub transport: String,
+    pub transport: ChannelTransport,
     pub enabled: bool,
     pub config: Value,
     pub secret_fields_set: Vec<String>,
@@ -29,7 +35,7 @@ pub(crate) struct ChannelListItem {
 pub(crate) struct CreateChannelRequest {
     pub id: String,
     pub name: String,
-    pub transport: String,
+    pub transport: ChannelTransport,
     pub enabled: bool,
     pub config: Value,
 }
@@ -39,22 +45,6 @@ pub(crate) struct UpdateChannelRequest {
     pub name: Option<String>,
     pub enabled: Option<bool>,
     pub config: Option<Value>,
-}
-
-fn transport_label(transport: &ChannelTransport) -> &'static str {
-    match transport {
-        ChannelTransport::Feishu => "feishu",
-    }
-}
-
-fn parse_transport(value: &str) -> Result<ChannelTransport, JsonResponse> {
-    match value {
-        "feishu" => Ok(ChannelTransport::Feishu),
-        _ => Err(error_response(
-            axum::http::StatusCode::BAD_REQUEST,
-            format!("未知通道协议：{value}"),
-        )),
-    }
 }
 
 fn sanitize_config_for_display(
@@ -136,22 +126,89 @@ fn channel_list_item(
     ChannelListItem {
         id: profile.id.clone(),
         name: profile.name.clone(),
-        transport: transport_label(&profile.transport).into(),
+        transport: profile.transport.clone(),
         enabled: profile.enabled,
         config,
         secret_fields_set,
     }
 }
 
+async fn apply_channel_mutation(
+    state: &SharedState,
+    previous_registry: ChannelProfileRegistry,
+    next_registry: ChannelProfileRegistry,
+    mutation: ChannelMutation,
+) -> Result<(), JsonResponse> {
+    persist_channel_mutation(&state.store, &mutation).await.map_err(|error| {
+        error_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
+    })?;
+
+    *crate::session_manager::write_lock(&state.channel_profile_registry_snapshot) = next_registry;
+    if let Err(sync_error) = sync_channel_runtime(state.as_ref()).await {
+        let rollback_error = rollback_channel_mutation(state, previous_registry, mutation).await;
+        let message = match rollback_error {
+            Ok(()) => format!("channel runtime 同步失败，已回滚：{sync_error}"),
+            Err(rollback_error) => {
+                format!(
+                    "channel runtime 同步失败且回滚失败：{sync_error}；回滚错误：{rollback_error}"
+                )
+            }
+        };
+        return Err(error_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, message));
+    }
+
+    Ok(())
+}
+
+async fn persist_channel_mutation(
+    store: &std::sync::Arc<agent_store::AiaStore>,
+    mutation: &ChannelMutation,
+) -> Result<(), channel_bridge::ChannelBridgeError> {
+    match mutation {
+        ChannelMutation::Upsert { next, .. } => {
+            ChannelProfileRegistry::upsert_into_store(store, next.clone()).await
+        }
+        ChannelMutation::Delete { deleted } => {
+            ChannelProfileRegistry::delete_from_store(store, &deleted.id).await
+        }
+    }
+}
+
+async fn rollback_channel_mutation(
+    state: &SharedState,
+    previous_registry: ChannelProfileRegistry,
+    mutation: ChannelMutation,
+) -> Result<(), String> {
+    match mutation {
+        ChannelMutation::Upsert { previous, next } => match previous {
+            Some(previous) => ChannelProfileRegistry::upsert_into_store(&state.store, previous)
+                .await
+                .map_err(|error| error.to_string())?,
+            None => ChannelProfileRegistry::delete_from_store(&state.store, &next.id)
+                .await
+                .map_err(|error| error.to_string())?,
+        },
+        ChannelMutation::Delete { deleted } => {
+            ChannelProfileRegistry::upsert_into_store(&state.store, deleted)
+                .await
+                .map_err(|error| error.to_string())?
+        }
+    }
+
+    *crate::session_manager::write_lock(&state.channel_profile_registry_snapshot) =
+        previous_registry;
+    sync_channel_runtime(state.as_ref()).await
+}
+
 pub(crate) async fn list_supported_channels(
     State(state): State<SharedState>,
 ) -> Json<Vec<SupportedChannelDefinition>> {
-    Json(supported_channel_definitions(state.channel_adapter_registry.as_ref()))
+    Json(supported_channel_definitions(state.channel_adapter_catalog.as_ref()))
 }
 
 pub(crate) async fn list_channels(State(state): State<SharedState>) -> Json<Vec<ChannelListItem>> {
-    let definitions = supported_channel_definitions(state.channel_adapter_registry.as_ref());
-    let registry = crate::session_manager::read_lock(&state.channel_registry_snapshot);
+    let definitions = supported_channel_definitions(state.channel_adapter_catalog.as_ref());
+    let registry = crate::session_manager::read_lock(&state.channel_profile_registry_snapshot);
     Json(
         registry
             .channels()
@@ -170,14 +227,12 @@ pub(crate) async fn create_channel(
     State(state): State<SharedState>,
     Json(body): Json<CreateChannelRequest>,
 ) -> impl IntoResponse {
-    let transport = match parse_transport(&body.transport) {
-        Ok(transport) => transport,
-        Err(response) => return response,
-    };
-    let Some(adapter) = state.channel_adapter_registry.adapter_for(&transport) else {
+    let _mutation_guard = state.channel_mutation_lock.lock().await;
+    let transport = body.transport;
+    let Some(adapter) = state.channel_adapter_catalog.adapter_for(&transport) else {
         return error_response(
             axum::http::StatusCode::BAD_REQUEST,
-            format!("当前服务未注册 transport={} 的 channel adapter", body.transport),
+            format!("当前服务未注册 transport={} 的 channel adapter", transport),
         );
     };
     if let Err(error) = adapter.validate_config(&body.config) {
@@ -192,17 +247,21 @@ pub(crate) async fn create_channel(
         config: body.config,
     };
 
-    let save_result = {
-        let mut registry = crate::session_manager::write_lock(&state.channel_registry_snapshot);
-        registry.upsert(profile);
-        registry.save(&state.channel_registry_path)
-    };
+    let previous_registry =
+        crate::session_manager::read_lock(&state.channel_profile_registry_snapshot).clone();
+    let mut next_registry = previous_registry.clone();
+    let previous_profile = next_registry.get(&profile.id).cloned();
+    next_registry.upsert(profile.clone());
 
-    if let Err(error) = save_result {
-        return error_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
-    }
-    if let Err(error) = sync_channel_runtime(state.as_ref()).await {
-        return error_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, error);
+    if let Err(response) = apply_channel_mutation(
+        &state,
+        previous_registry,
+        next_registry,
+        ChannelMutation::Upsert { next: profile, previous: previous_profile },
+    )
+    .await
+    {
+        return response;
     }
     ok_response()
 }
@@ -212,10 +271,12 @@ pub(crate) async fn update_channel(
     Path(channel_id): Path<String>,
     Json(body): Json<UpdateChannelRequest>,
 ) -> impl IntoResponse {
-    let definitions = supported_channel_definitions(state.channel_adapter_registry.as_ref());
-    let save_result = {
-        let mut registry = crate::session_manager::write_lock(&state.channel_registry_snapshot);
-        let Some(existing) = registry.get(&channel_id).cloned() else {
+    let _mutation_guard = state.channel_mutation_lock.lock().await;
+    let definitions = supported_channel_definitions(state.channel_adapter_catalog.as_ref());
+    let previous_registry =
+        crate::session_manager::read_lock(&state.channel_profile_registry_snapshot).clone();
+    let updated_profile = {
+        let Some(existing) = previous_registry.get(&channel_id).cloned() else {
             return error_response(
                 axum::http::StatusCode::NOT_FOUND,
                 format!("channel 不存在：{channel_id}"),
@@ -225,19 +286,13 @@ pub(crate) async fn update_channel(
         else {
             return error_response(
                 axum::http::StatusCode::BAD_REQUEST,
-                format!(
-                    "当前服务未注册 transport={} 的 channel adapter",
-                    transport_label(&existing.transport)
-                ),
+                format!("当前服务未注册 transport={} 的 channel adapter", existing.transport),
             );
         };
-        let Some(adapter) = state.channel_adapter_registry.adapter_for(&existing.transport) else {
+        let Some(adapter) = state.channel_adapter_catalog.adapter_for(&existing.transport) else {
             return error_response(
                 axum::http::StatusCode::BAD_REQUEST,
-                format!(
-                    "当前服务未注册 transport={} 的 channel adapter",
-                    transport_label(&existing.transport)
-                ),
+                format!("当前服务未注册 transport={} 的 channel adapter", existing.transport),
             );
         };
         let merged_config = match merge_channel_config(&existing.config, body.config, definition) {
@@ -249,22 +304,28 @@ pub(crate) async fn update_channel(
         if let Err(error) = adapter.validate_config(&merged_config) {
             return error_response(axum::http::StatusCode::BAD_REQUEST, error.to_string());
         }
-        let profile = ChannelProfile {
+        ChannelProfile {
             id: existing.id,
             name: body.name.unwrap_or(existing.name),
             transport: existing.transport,
             enabled: body.enabled.unwrap_or(existing.enabled),
             config: merged_config,
-        };
-        registry.upsert(profile);
-        registry.save(&state.channel_registry_path)
+        }
     };
 
-    if let Err(error) = save_result {
-        return error_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
-    }
-    if let Err(error) = sync_channel_runtime(state.as_ref()).await {
-        return error_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, error);
+    let previous_profile = previous_registry.get(&channel_id).cloned();
+    let mut next_registry = previous_registry.clone();
+    next_registry.upsert(updated_profile.clone());
+
+    if let Err(response) = apply_channel_mutation(
+        &state,
+        previous_registry,
+        next_registry,
+        ChannelMutation::Upsert { next: updated_profile, previous: previous_profile },
+    )
+    .await
+    {
+        return response;
     }
     ok_response()
 }
@@ -273,42 +334,39 @@ pub(crate) async fn delete_channel(
     State(state): State<SharedState>,
     Path(channel_id): Path<String>,
 ) -> impl IntoResponse {
-    let save_result = {
-        let mut registry = crate::session_manager::write_lock(&state.channel_registry_snapshot);
-        match registry.remove(&channel_id) {
-            Ok(()) => registry.save(&state.channel_registry_path),
-            Err(error) => {
-                return error_response(axum::http::StatusCode::NOT_FOUND, error.to_string());
-            }
-        }
+    let _mutation_guard = state.channel_mutation_lock.lock().await;
+    let previous_registry =
+        crate::session_manager::read_lock(&state.channel_profile_registry_snapshot).clone();
+    let Some(deleted_profile) = previous_registry.get(&channel_id).cloned() else {
+        return error_response(
+            axum::http::StatusCode::NOT_FOUND,
+            format!("channel 不存在：{channel_id}"),
+        );
     };
-
-    if let Err(error) = save_result {
+    let mut next_registry = previous_registry.clone();
+    if let Err(error) = next_registry.remove(&channel_id) {
         return error_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
     }
-    if let Err(error) = sync_channel_runtime(state.as_ref()).await {
-        return error_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, error);
-    }
+
+    if let Err(response) = apply_channel_mutation(
+        &state,
+        previous_registry,
+        next_registry,
+        ChannelMutation::Delete { deleted: deleted_profile },
+    )
+    .await
+    {
+        return response;
+    };
     ok_response()
 }
 
 #[cfg(test)]
 mod tests {
-    use channel_bridge::SupportedChannelDefinition;
-    use channel_registry::ChannelTransport;
+    use channel_bridge::{ChannelTransport, SupportedChannelDefinition};
     use serde_json::json;
 
-    use super::{merge_channel_config, parse_transport};
-
-    #[test]
-    fn parse_transport_accepts_feishu() {
-        assert!(parse_transport("feishu").is_ok());
-    }
-
-    #[test]
-    fn parse_transport_rejects_unknown_transport() {
-        assert!(parse_transport("slack").is_err());
-    }
+    use super::merge_channel_config;
 
     #[test]
     fn merge_channel_config_keeps_secret_when_patch_is_blank() {

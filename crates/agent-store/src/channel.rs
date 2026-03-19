@@ -33,6 +33,17 @@ pub struct ChannelMessageReceipt {
     pub created_at: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StoredChannelProfile {
+    pub id: String,
+    pub name: String,
+    pub transport: String,
+    pub enabled: bool,
+    pub config_json: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 impl ChannelSessionBinding {
     pub fn new(key: ExternalConversationKey, session_id: impl Into<String>) -> Self {
         let now = iso8601_now();
@@ -65,6 +76,27 @@ impl ChannelMessageReceipt {
     }
 }
 
+impl StoredChannelProfile {
+    pub fn new(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        transport: impl Into<String>,
+        enabled: bool,
+        config_json: impl Into<String>,
+    ) -> Self {
+        let now = iso8601_now();
+        Self {
+            id: id.into(),
+            name: name.into(),
+            transport: transport.into(),
+            enabled,
+            config_json: config_json.into(),
+            created_at: now.clone(),
+            updated_at: now,
+        }
+    }
+}
+
 impl AiaStore {
     pub(crate) fn init_channel_schema(&self) -> Result<(), AiaStoreError> {
         self.with_conn(|conn| {
@@ -86,6 +118,15 @@ impl AiaStore {
                     session_id          TEXT NOT NULL,
                     created_at          TEXT NOT NULL,
                     PRIMARY KEY (channel_kind, profile_id, external_message_id)
+                );
+                CREATE TABLE IF NOT EXISTS channel_profiles (
+                    id          TEXT NOT NULL PRIMARY KEY,
+                    name        TEXT NOT NULL,
+                    transport   TEXT NOT NULL,
+                    enabled     INTEGER NOT NULL,
+                    config_json TEXT NOT NULL,
+                    created_at  TEXT NOT NULL,
+                    updated_at  TEXT NOT NULL
                 );",
             )?;
             Ok(())
@@ -255,6 +296,66 @@ impl AiaStore {
         })
         .await
     }
+
+    pub async fn list_channel_profiles_async(
+        self: &Arc<Self>,
+    ) -> Result<Vec<StoredChannelProfile>, AiaStoreError> {
+        self.with_conn_async(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, name, transport, enabled, config_json, created_at, updated_at
+                 FROM channel_profiles
+                 ORDER BY id ASC",
+            )?;
+            let rows = stmt.query_map([], read_channel_profile)?.collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        })
+        .await
+    }
+
+    pub async fn upsert_channel_profile_async(
+        self: &Arc<Self>,
+        profile: StoredChannelProfile,
+    ) -> Result<(), AiaStoreError> {
+        self.with_conn_async(move |conn| {
+            let now = iso8601_now();
+            conn.execute(
+                "INSERT INTO channel_profiles
+                 (id, name, transport, enabled, config_json, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(id)
+                 DO UPDATE SET
+                   name = excluded.name,
+                   transport = excluded.transport,
+                   enabled = excluded.enabled,
+                   config_json = excluded.config_json,
+                   updated_at = excluded.updated_at",
+                (
+                    profile.id.as_str(),
+                    profile.name.as_str(),
+                    profile.transport.as_str(),
+                    i64::from(profile.enabled),
+                    profile.config_json.as_str(),
+                    profile.created_at.as_str(),
+                    now.as_str(),
+                ),
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn delete_channel_profile_async(
+        self: &Arc<Self>,
+        channel_id: impl Into<String>,
+    ) -> Result<usize, AiaStoreError> {
+        let channel_id = channel_id.into();
+        self.with_conn_async(move |conn| {
+            let changed =
+                conn.execute("DELETE FROM channel_profiles WHERE id = ?1", [channel_id])?;
+            Ok(changed)
+        })
+        .await
+    }
 }
 
 fn read_channel_binding(row: &Row<'_>) -> rusqlite::Result<ChannelSessionBinding> {
@@ -264,6 +365,18 @@ fn read_channel_binding(row: &Row<'_>) -> rusqlite::Result<ChannelSessionBinding
         scope: row.get(2)?,
         conversation_key: row.get(3)?,
         session_id: row.get(4)?,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
+    })
+}
+
+fn read_channel_profile(row: &Row<'_>) -> rusqlite::Result<StoredChannelProfile> {
+    Ok(StoredChannelProfile {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        transport: row.get(2)?,
+        enabled: row.get::<_, i64>(3)? != 0,
+        config_json: row.get(4)?,
         created_at: row.get(5)?,
         updated_at: row.get(6)?,
     })
@@ -342,5 +455,26 @@ mod tests {
 
         assert_eq!(deleted, 1);
         assert_eq!(found, None);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn channel_profile_round_trip_works() {
+        let store = Arc::new(AiaStore::in_memory().expect("store init"));
+        let profile = StoredChannelProfile::new(
+            "default",
+            "默认飞书",
+            "feishu",
+            true,
+            r#"{"app_id":"cli_app"}"#,
+        );
+
+        store
+            .upsert_channel_profile_async(profile.clone())
+            .await
+            .expect("profile should save async");
+
+        let listed = store.list_channel_profiles_async().await.expect("profiles should list");
+
+        assert_eq!(listed, vec![profile]);
     }
 }

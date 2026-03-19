@@ -138,11 +138,7 @@ impl ToolSchemaProperty {
         self
     }
 
-    pub fn meta(
-        mut self,
-        key: impl Into<String>,
-        value: ToolSchemaMetadataValue,
-    ) -> Self {
+    pub fn meta(mut self, key: impl Into<String>, value: ToolSchemaMetadataValue) -> Self {
         if let Some(object) = self.value.as_object_mut() {
             object.insert(key.into(), value.into_value());
         }

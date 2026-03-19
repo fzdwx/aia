@@ -86,10 +86,7 @@ struct ExtendedArgsSchema {
 #[derive(Serialize, Deserialize, ToolArgsSchema)]
 #[serde(deny_unknown_fields)]
 struct DecoratedArgsSchema {
-    #[tool_schema(
-        description = "应用标识",
-        meta(key = "x-label", value = "App ID")
-    )]
+    #[tool_schema(description = "应用标识", meta(key = "x-label", value = "App ID"))]
     app_id: String,
     #[tool_schema(
         description = "应用密钥",
@@ -131,10 +128,7 @@ fn 自研_schema_可附加属性级扩展元信息() {
         ToolDefinition::new("channel", "通道配置").with_parameters_schema::<DecoratedArgsSchema>();
 
     assert_eq!(definition.parameters["properties"]["app_id"]["x-label"], "App ID");
-    assert_eq!(
-        definition.parameters["properties"]["app_secret"]["x-label"],
-        "App Secret"
-    );
+    assert_eq!(definition.parameters["properties"]["app_secret"]["x-label"], "App Secret");
     assert_eq!(definition.parameters["properties"]["app_secret"]["x-secret"], true);
     assert_eq!(definition.parameters["properties"]["base_url"]["format"], "uri");
     assert_eq!(

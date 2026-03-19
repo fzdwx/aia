@@ -1,11 +1,11 @@
 use std::sync::{Arc, RwLock};
 
 use agent_store::{AiaStore, SessionRecord, generate_session_id};
-use channel_registry::ChannelRegistry;
+use channel_bridge::ChannelProfileRegistry;
 use provider_registry::ProviderRegistry;
 
 use crate::{
-    channel_host::{build_channel_adapter_registry, build_channel_runtime, sync_channel_runtime},
+    channel_host::{build_channel_adapter_catalog, build_channel_runtime, sync_channel_runtime},
     model::{ProviderLaunchChoice, build_model_from_selection},
     session_manager::{ProviderInfoSnapshot, SessionManagerConfig, spawn_session_manager},
     state::AppState,
@@ -37,7 +37,6 @@ impl std::error::Error for ServerInitError {}
 
 pub async fn bootstrap_state() -> Result<Arc<AppState>, ServerInitError> {
     let registry_path = provider_registry::default_registry_path();
-    let channel_registry_path = channel_registry::default_registry_path();
     let aia_store_path = aia_config::store_path_from_registry_path(&registry_path);
     let sessions_dir = aia_config::sessions_dir_from_registry_path(&registry_path);
     let workspace_root = std::env::current_dir()
@@ -45,13 +44,13 @@ pub async fn bootstrap_state() -> Result<Arc<AppState>, ServerInitError> {
 
     let registry = ProviderRegistry::load_or_default(&registry_path)
         .map_err(|error| ServerInitError::new("provider 注册表加载", error.to_string()))?;
-    let channel_registry = ChannelRegistry::load_or_default(&channel_registry_path)
-        .map_err(|error| ServerInitError::new("channel 注册表加载", error.to_string()))?;
-
     let store = Arc::new(
         AiaStore::new(&aia_store_path)
             .map_err(|error| ServerInitError::new("数据库初始化", error.to_string()))?,
     );
+    let channel_profile_registry = ChannelProfileRegistry::load_from_store(&store)
+        .await
+        .map_err(|error| ServerInitError::new("channel 档案注册表加载", error.to_string()))?;
 
     std::fs::create_dir_all(&sessions_dir)
         .map_err(|error| ServerInitError::new("sessions 目录创建", error.to_string()))?;
@@ -91,7 +90,7 @@ pub async fn bootstrap_state() -> Result<Arc<AppState>, ServerInitError> {
     let provider_registry_snapshot = Arc::new(RwLock::new(registry.clone()));
     let provider_info_snapshot =
         Arc::new(RwLock::new(ProviderInfoSnapshot::from_identity(&identity)));
-    let channel_registry_snapshot = Arc::new(RwLock::new(channel_registry));
+    let channel_profile_registry_snapshot = Arc::new(RwLock::new(channel_profile_registry));
 
     let session_manager = spawn_session_manager(SessionManagerConfig {
         sessions_dir,
@@ -104,13 +103,13 @@ pub async fn bootstrap_state() -> Result<Arc<AppState>, ServerInitError> {
         workspace_root,
         user_agent: build_server_user_agent(),
     });
-    let channel_adapter_registry = Arc::new(build_channel_adapter_registry(
+    let channel_adapter_catalog = Arc::new(build_channel_adapter_catalog(
         store.clone(),
         session_manager.clone(),
         broadcast_tx.clone(),
     ));
     let channel_runtime = Arc::new(tokio::sync::Mutex::new(build_channel_runtime(
-        channel_adapter_registry.as_ref().clone(),
+        channel_adapter_catalog.as_ref().clone(),
     )));
 
     let state = Arc::new(AppState {
@@ -118,10 +117,10 @@ pub async fn bootstrap_state() -> Result<Arc<AppState>, ServerInitError> {
         broadcast_tx,
         provider_registry_snapshot,
         provider_info_snapshot,
-        channel_registry_path,
-        channel_registry_snapshot,
+        channel_profile_registry_snapshot,
+        channel_mutation_lock: Arc::new(tokio::sync::Mutex::new(())),
         store,
-        channel_adapter_registry,
+        channel_adapter_catalog,
         channel_runtime,
     });
 

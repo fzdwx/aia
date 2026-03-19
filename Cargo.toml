@@ -8,7 +8,6 @@ members = [
   "crates/agent-runtime",
   "crates/builtin-tools",
   "crates/agent-store",
-  "crates/channel-registry",
   "crates/channel-bridge",
   "crates/channel-feishu",
   "crates/openai-adapter",

@@ -7,7 +7,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use rusqlite::Connection;
 
-pub use channel::{ChannelMessageReceipt, ChannelSessionBinding, ExternalConversationKey};
+pub use channel::{
+    ChannelMessageReceipt, ChannelSessionBinding, ExternalConversationKey, StoredChannelProfile,
+};
 pub use session::{SessionRecord, generate_session_id, iso8601_now};
 pub use trace::{
     LlmTraceEvent, LlmTraceListItem, LlmTraceLoopDetail, LlmTraceLoopItem, LlmTraceLoopPage,

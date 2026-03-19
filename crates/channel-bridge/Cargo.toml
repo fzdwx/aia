@@ -9,7 +9,6 @@ agent-core = { path = "../agent-core" }
 agent-prompts = { path = "../agent-prompts" }
 agent-runtime = { path = "../agent-runtime" }
 agent-store = { path = "../agent-store" }
-channel-registry = { path = "../channel-registry" }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

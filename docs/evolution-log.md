@@ -1,5 +1,17 @@
 # 演进日志
 
+## 2026-03-19 Session 72
+
+**Diagnosis**：channel 抽象与 SQLite 持久化主体已经落地，但仓库里还残留两类收尾问题：一是 `apps/agent-server` 的 `/api/channels` 仍按“先改内存快照、再写 store”执行，若 SQLite 写入失败会把 `channel_profile_registry_snapshot` 留在脏状态；二是 `aia-config` 和文档叙事里还带着历史 `.aia/channels.json` / `channel-registry` 词汇，和当前代码现实不一致。
+**Decision**：不再保留任何旧 JSON 配置路径语义，直接做最终收口：`/api/channels` 统一改成“先持久化到 `agent-store`，成功后再更新内存快照并同步 runtime”；同时从 `aia-config` 删除旧 `channels.json` 常量与 helper，并更新架构/需求/状态文档，明确 `channel-bridge` + `agent-store` 才是当前唯一有效的 channel profile 路径。
+**Changes**：
+- `apps/agent-server/src/routes/channel.rs`：创建、更新、删除 channel 现统一先写 SQLite，再更新 `channel_profile_registry_snapshot`，避免 store 失败导致内存与持久化分叉。
+- `crates/aia-config/src/{paths.rs,lib.rs}`：删除 `channels.json` 相关常量、helper 与测试断言，只保留仍在使用的 providers/session/store/sessions 默认路径。
+- `docs/{architecture.md,requirements.md,status.md}`：同步去掉旧 `.aia/channels.json` / 独立 `channel-registry` crate 叙事，补充当前 store-backed profile façade 的真实边界。
+**Verification**：待本轮统一执行 `cargo fmt --all`、定向测试与 `cargo check --workspace` 后补充。
+**Commit**：未提交。
+**Next direction**：若本轮验证全部通过，channel 这一条线的下一个优先级应回到 adapter 扩展与外部协议映射，而不是继续维护历史兼容层。
+
 ## 2026-03-18 Session 62
 
 **Diagnosis**：飞书 channel 的控制面、去重和会话映射都已经落地，但真正的长连接运行态仍是空函数；同时现有 webhook/事件处理路径会把“等待模型完成并回飞书”放在入口确认链上，不符合飞书长连接需要快速确认的约束。

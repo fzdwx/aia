@@ -6,7 +6,8 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
 };
-use channel_registry::ChannelRegistry;
+use channel_bridge::ChannelProfileRegistry;
+use channel_bridge::ChannelTransport;
 use provider_registry::{ModelConfig, ModelLimit, ProviderRegistry};
 
 use super::{
@@ -17,7 +18,7 @@ use super::{
     turn::CancelTurnRequest,
 };
 use crate::{
-    channel_host::{build_channel_adapter_registry, build_channel_runtime},
+    channel_host::{build_channel_adapter_catalog, build_channel_runtime},
     session_manager::{ProviderInfoSnapshot, SessionManagerHandle},
     state::AppState,
 };
@@ -26,7 +27,7 @@ fn test_state() -> Arc<AppState> {
     let session_manager = SessionManagerHandle::test_handle();
     let broadcast_tx = tokio::sync::broadcast::channel(8).0;
     let store = Arc::new(agent_store::AiaStore::in_memory().expect("memory store"));
-    let channel_adapter_registry = Arc::new(build_channel_adapter_registry(
+    let channel_adapter_catalog = Arc::new(build_channel_adapter_catalog(
         store.clone(),
         session_manager.clone(),
         broadcast_tx.clone(),
@@ -40,12 +41,12 @@ fn test_state() -> Arc<AppState> {
             model: "bootstrap".into(),
             connected: true,
         })),
-        channel_registry_path: aia_config::default_channels_path(),
-        channel_registry_snapshot: Arc::new(RwLock::new(ChannelRegistry::default())),
+        channel_profile_registry_snapshot: Arc::new(RwLock::new(ChannelProfileRegistry::default())),
+        channel_mutation_lock: Arc::new(tokio::sync::Mutex::new(())),
         store: store.clone(),
-        channel_adapter_registry: channel_adapter_registry.clone(),
+        channel_adapter_catalog: channel_adapter_catalog.clone(),
         channel_runtime: Arc::new(tokio::sync::Mutex::new(build_channel_runtime(
-            channel_adapter_registry.as_ref().clone(),
+            channel_adapter_catalog.as_ref().clone(),
         ))),
     })
 }
@@ -204,7 +205,7 @@ fn create_channel_request_deserializes_feishu_payload() {
     .expect("create channel request should deserialize");
 
     assert_eq!(parsed.id, "default");
-    assert_eq!(parsed.transport, "feishu");
+    assert_eq!(parsed.transport, ChannelTransport::Feishu);
     assert_eq!(parsed.config["thread_mode"], true);
 }
 

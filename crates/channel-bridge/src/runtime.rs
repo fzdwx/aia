@@ -1,14 +1,54 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, fmt, sync::Arc};
 
 use agent_core::StreamEvent;
 use agent_runtime::TurnLifecycle;
-use channel_registry::{ChannelProfile, ChannelTransport};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::task::JoinHandle;
 
 use crate::{ChannelBindingStore, ChannelBridgeError, ChannelSessionService};
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelTransport {
+    Feishu,
+}
+
+impl ChannelTransport {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Feishu => "feishu",
+        }
+    }
+}
+
+impl fmt::Display for ChannelTransport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelProfile {
+    pub id: String,
+    pub name: String,
+    pub transport: ChannelTransport,
+    pub enabled: bool,
+    #[serde(default)]
+    pub config: Value,
+}
+
+impl ChannelProfile {
+    pub fn new(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        transport: ChannelTransport,
+        config: Value,
+    ) -> Self {
+        Self { id: id.into(), name: name.into(), transport, enabled: true, config }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ChannelTurnStatus {
@@ -65,11 +105,11 @@ pub trait ChannelRuntimeAdapter: Send + Sync {
 }
 
 #[derive(Clone, Default)]
-pub struct ChannelRuntimeAdapterRegistry {
+pub struct ChannelAdapterCatalog {
     adapters: Vec<Arc<dyn ChannelRuntimeAdapter>>,
 }
 
-impl ChannelRuntimeAdapterRegistry {
+impl ChannelAdapterCatalog {
     pub fn new() -> Self {
         Self::default()
     }
@@ -109,12 +149,12 @@ struct DesiredWorker {
 }
 
 pub struct ChannelRuntimeSupervisor {
-    adapters: ChannelRuntimeAdapterRegistry,
+    adapters: ChannelAdapterCatalog,
     workers: HashMap<String, RunningChannelWorker>,
 }
 
 impl ChannelRuntimeSupervisor {
-    pub fn new(adapters: ChannelRuntimeAdapterRegistry) -> Self {
+    pub fn new(adapters: ChannelAdapterCatalog) -> Self {
         Self { adapters, workers: HashMap::new() }
     }
 
@@ -291,7 +331,7 @@ mod tests {
 
     #[test]
     fn sync_errors_when_transport_has_no_adapter() {
-        let mut supervisor = ChannelRuntimeSupervisor::new(ChannelRuntimeAdapterRegistry::new());
+        let mut supervisor = ChannelRuntimeSupervisor::new(ChannelAdapterCatalog::new());
 
         let error = supervisor
             .sync(vec![sample_profile("default")])
@@ -325,7 +365,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn sync_spawns_enabled_profile_once_when_fingerprint_matches() {
         let adapter = Arc::new(FakeAdapter::new(ChannelTransport::Feishu));
-        let mut registry = ChannelRuntimeAdapterRegistry::new();
+        let mut registry = ChannelAdapterCatalog::new();
         registry.register(adapter.clone());
         let mut supervisor = ChannelRuntimeSupervisor::new(registry);
         let profile = sample_profile("default");
@@ -342,12 +382,21 @@ mod tests {
     #[test]
     fn registry_returns_supported_definitions() {
         let adapter = Arc::new(FakeAdapter::new(ChannelTransport::Feishu));
-        let mut registry = ChannelRuntimeAdapterRegistry::new();
+        let mut registry = ChannelAdapterCatalog::new();
         registry.register(adapter);
 
         let definitions = registry.definitions();
 
         assert_eq!(definitions.len(), 1);
         assert_eq!(definitions[0].transport, ChannelTransport::Feishu);
+    }
+
+    #[test]
+    fn channel_transport_serializes_to_wire_literal() {
+        let value = serde_json::to_value(ChannelTransport::Feishu)
+            .expect("channel transport should serialize");
+
+        assert_eq!(value, serde_json::json!("feishu"));
+        assert_eq!(ChannelTransport::Feishu.to_string(), "feishu");
     }
 }

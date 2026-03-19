@@ -3,10 +3,9 @@ use std::sync::Arc;
 use agent_store::{AiaStore, ChannelSessionBinding, ExternalConversationKey};
 use async_trait::async_trait;
 use channel_bridge::{
-    ChannelBindingStore, ChannelBridgeError, ChannelCurrentTurnSnapshot,
-    ChannelRuntimeAdapterRegistry, ChannelRuntimeEvent, ChannelRuntimeHost,
-    ChannelRuntimeSupervisor, ChannelSessionInfo, ChannelSessionService, ChannelTurnStatus,
-    SupportedChannelDefinition,
+    ChannelAdapterCatalog, ChannelBindingStore, ChannelBridgeError, ChannelCurrentTurnSnapshot,
+    ChannelRuntimeEvent, ChannelRuntimeHost, ChannelRuntimeSupervisor, ChannelSessionInfo,
+    ChannelSessionService, ChannelTurnStatus, SupportedChannelDefinition,
 };
 use channel_feishu::build_feishu_runtime_adapter;
 
@@ -24,31 +23,35 @@ struct AgentServerChannelHost {
     broadcast_tx: tokio::sync::broadcast::Sender<SsePayload>,
 }
 
-pub fn build_channel_adapter_registry(
+pub fn build_channel_adapter_catalog(
     store: Arc<AiaStore>,
     session_manager: SessionManagerHandle,
     broadcast_tx: tokio::sync::broadcast::Sender<SsePayload>,
-) -> ChannelRuntimeAdapterRegistry {
+) -> ChannelAdapterCatalog {
     let host = Arc::new(AgentServerChannelHost { store, session_manager, broadcast_tx });
-    let mut registry = ChannelRuntimeAdapterRegistry::new();
-    registry.register(build_feishu_runtime_adapter(host));
-    registry
+    let mut catalog = ChannelAdapterCatalog::new();
+    catalog.register(build_feishu_runtime_adapter(host));
+    catalog
 }
 
-pub fn build_channel_runtime(registry: ChannelRuntimeAdapterRegistry) -> ChannelRuntimeSupervisor {
-    ChannelRuntimeSupervisor::new(registry)
+pub fn build_channel_runtime(catalog: ChannelAdapterCatalog) -> ChannelRuntimeSupervisor {
+    ChannelRuntimeSupervisor::new(catalog)
 }
 
 pub fn supported_channel_definitions(
-    registry: &ChannelRuntimeAdapterRegistry,
+    catalog: &ChannelAdapterCatalog,
 ) -> Vec<SupportedChannelDefinition> {
-    registry.definitions()
+    catalog.definitions()
 }
 
 pub async fn sync_channel_runtime(state: &AppState) -> Result<(), String> {
-    let registry = read_lock(&state.channel_registry_snapshot).clone();
-    let desired_profiles =
-        registry.channels().iter().filter(|profile| profile.enabled).cloned().collect::<Vec<_>>();
+    let profile_registry = read_lock(&state.channel_profile_registry_snapshot).clone();
+    let desired_profiles = profile_registry
+        .channels()
+        .iter()
+        .filter(|profile| profile.enabled)
+        .cloned()
+        .collect::<Vec<_>>();
     let mut runtime = state.channel_runtime.lock().await;
     runtime.sync(desired_profiles).map_err(|error| error.to_string())
 }
@@ -247,9 +250,9 @@ mod tests {
         let store = Arc::new(AiaStore::in_memory().expect("memory store"));
         let session_manager = SessionManagerHandle::test_handle();
         let broadcast_tx = tokio::sync::broadcast::channel(8).0;
-        let registry = build_channel_adapter_registry(store, session_manager, broadcast_tx);
+        let catalog = build_channel_adapter_catalog(store, session_manager, broadcast_tx);
 
-        let _runtime: ChannelRuntimeSupervisor = build_channel_runtime(registry);
+        let _runtime: ChannelRuntimeSupervisor = build_channel_runtime(catalog);
     }
 
     #[test]

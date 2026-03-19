@@ -2,8 +2,8 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{
-    parse_macro_input, Attribute, Data, DataStruct, DeriveInput, Expr, Fields, GenericArgument,
-    LitInt, LitStr, PathArguments, Type,
+    Attribute, Data, DataStruct, DeriveInput, Expr, Fields, GenericArgument, LitInt, LitStr,
+    PathArguments, Type, parse_macro_input,
 };
 
 #[proc_macro_derive(ToolArgsSchema, attributes(serde, tool_schema))]

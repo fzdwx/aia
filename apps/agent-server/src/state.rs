@@ -1,11 +1,7 @@
-use std::{
-    path::PathBuf,
-    sync::{Arc, RwLock},
-};
+use std::sync::{Arc, RwLock};
 
 use agent_store::AiaStore;
-use channel_bridge::{ChannelRuntimeAdapterRegistry, ChannelRuntimeSupervisor};
-use channel_registry::ChannelRegistry;
+use channel_bridge::{ChannelAdapterCatalog, ChannelProfileRegistry, ChannelRuntimeSupervisor};
 use provider_registry::ProviderRegistry;
 use tokio::sync::broadcast;
 
@@ -21,9 +17,9 @@ pub struct AppState {
     pub broadcast_tx: broadcast::Sender<SsePayload>,
     pub provider_registry_snapshot: Arc<RwLock<ProviderRegistry>>,
     pub provider_info_snapshot: Arc<RwLock<ProviderInfoSnapshot>>,
-    pub channel_registry_path: PathBuf,
-    pub channel_registry_snapshot: Arc<RwLock<ChannelRegistry>>,
+    pub channel_profile_registry_snapshot: Arc<RwLock<ChannelProfileRegistry>>,
+    pub channel_mutation_lock: Arc<tokio::sync::Mutex<()>>,
     pub store: Arc<AiaStore>,
-    pub channel_adapter_registry: Arc<ChannelRuntimeAdapterRegistry>,
+    pub channel_adapter_catalog: Arc<ChannelAdapterCatalog>,
     pub channel_runtime: Arc<tokio::sync::Mutex<ChannelRuntimeSupervisor>>,
 }

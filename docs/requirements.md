@@ -41,10 +41,9 @@
 ### 已完成
 
 - Rust 工作区骨架已建立
-- 共享核心库边界已拆分为 `aia-config`、`agent-core`、`session-tape`、`agent-runtime`、`channel-registry`、`channel-bridge`、`channel-feishu`、`provider-registry`、`openai-adapter`、`agent-store`
+- 共享核心库边界已拆分为 `aia-config`、`agent-core`、`session-tape`、`agent-runtime`、`channel-bridge`、`channel-feishu`、`provider-registry`、`openai-adapter`、`agent-store`
 - `aia-config` 已承担跨 crate 复用的应用级路径、默认值、稳定标识与构造 helper
-- `channel-registry` 已承担外部 channel 静态配置与本地持久化
-- `channel-bridge` 已承担外部 channel 共享的 session 绑定恢复、turn 预压缩、消息回执幂等 helper，以及基于 adapter trait 的通用 runtime supervisor
+- `channel-bridge` 已承担外部 channel 共享模型、已配置渠道档案的 store façade、session 绑定恢复、turn 预压缩、消息回执幂等 helper，以及基于 adapter trait 的通用 runtime supervisor
 - `channel-feishu` 已承担飞书 channel 的平台协议、长连接与回复控制实现，不再由 `apps/agent-server` 持有这部分细节
 - `provider-registry` 已承担本地 provider 管理与持久化
 - 首个真实模型适配库 `openai-adapter` 已建立，并已同时覆盖 Responses 与 OpenAI 兼容 Chat Completions 两条协议链路
@@ -61,8 +60,8 @@
 - 旧格式 JSONL 可兼容载入并自动转换为新扁平格式
 - `.aia/session.jsonl` 当前统一以扁平 `TapeEntry` JSONL 形式 append-only 落盘
 - provider 本地资料当前落盘在 `.aia/providers.json`
-- channel 本地资料当前落盘在 `.aia/channels.json`
-- channel 配置模型必须保持“通用 profile 元数据 + raw config payload”的结构；具体配置结构、校验与字段 schema 由各 channel adapter 定义，而不是由 `channel-registry` 持有
+- channel 本地资料当前落盘在 `.aia/store.sqlite3`
+- channel 配置模型必须保持“通用 profile 元数据 + raw config payload”的结构；具体配置结构、校验与字段 schema 由各 channel adapter 定义，并由 `channel-bridge` 暴露统一 profile façade，而不是保留独立 registry crate
 - 本地 SQLite 状态当前落盘在 `.aia/store.sqlite3`
 - provider 当前已具备协议级区分能力，可在同一地址 / 模型下区分 Responses 与 Chat Completions
 - `apps/web` 已建立为实际主工作台，而不是仅布局骨架
