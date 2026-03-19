@@ -1,13 +1,179 @@
+use std::{
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+
 use agent_core::{Completion, CompletionRequest, CompletionStopReason, StreamEvent};
-use agent_store::{LlmTraceEvent, LlmTraceRecord};
+use agent_store::{AiaStore, LlmTraceEvent, LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus};
 use serde_json::{Value, json};
-use std::time::{SystemTime, UNIX_EPOCH};
+
+use super::{ServerModel, ServerModelError, ServerModelInner};
 
 pub(super) struct TraceEventCollector {
     started_at_ms: u64,
     first_reasoning_at_ms: Option<u64>,
     first_text_at_ms: Option<u64>,
     events: Vec<LlmTraceEvent>,
+}
+
+pub(super) struct ModelTraceRecorder {
+    store: Option<Arc<AiaStore>>,
+    trace_seed: Option<LlmTraceRecord>,
+    event_collector: TraceEventCollector,
+    started_at_ms: u64,
+}
+
+impl ModelTraceRecorder {
+    pub(super) fn new(
+        model: &ServerModel,
+        request: &CompletionRequest,
+        started_at_ms: u64,
+        streaming: bool,
+    ) -> Self {
+        Self {
+            store: model.trace_store.clone(),
+            trace_seed: build_trace_seed(model, request, streaming),
+            event_collector: TraceEventCollector::new(started_at_ms),
+            started_at_ms,
+        }
+    }
+
+    pub(super) fn observe(&mut self, event: &StreamEvent) {
+        self.event_collector.observe(event);
+    }
+
+    pub(super) fn finish(
+        mut self,
+        duration: Duration,
+        result: &Result<Completion, ServerModelError>,
+    ) {
+        let Some(store) = self.store.take() else {
+            return;
+        };
+        let Some(mut record) = self.trace_seed.take() else {
+            return;
+        };
+
+        record.started_at_ms = self.started_at_ms;
+        record.finished_at_ms =
+            Some(self.started_at_ms.saturating_add(duration.as_millis() as u64));
+        record.duration_ms = Some(duration.as_millis() as u64);
+
+        match result {
+            Ok(completion) => {
+                record.status = LlmTraceStatus::Succeeded;
+                record.status_code = completion.http_status_code;
+                record.stop_reason = Some(stop_reason_label(&completion.stop_reason));
+                record.response_summary = response_summary(completion);
+                record.response_body =
+                    completion.response_body.clone().or_else(|| Some(completion.plain_text()));
+                record.input_tokens = completion.usage.as_ref().map(|usage| usage.input_tokens);
+                record.output_tokens = completion.usage.as_ref().map(|usage| usage.output_tokens);
+                record.total_tokens = completion.usage.as_ref().map(|usage| usage.total_tokens);
+                record.cached_tokens = completion.usage.as_ref().map(|usage| usage.cached_tokens);
+                update_trace_attributes_from_completion(&mut record, completion);
+                self.event_collector.finish_success(&mut record, completion);
+            }
+            Err(error) => {
+                record.status = LlmTraceStatus::Failed;
+                record.error = Some(error.to_string());
+                record.status_code =
+                    error.status_code().or_else(|| parse_status_code(error.to_string().as_str()));
+                record.response_body = error.response_body().map(str::to_string);
+                record.response_summary = json!({
+                    "error": error.to_string(),
+                    "http_status_code": record.status_code,
+                });
+                update_trace_attributes_from_error(&mut record);
+                self.event_collector.finish_error(&mut record);
+            }
+        }
+
+        std::thread::spawn(move || {
+            if let Err(error) = agent_store::LlmTraceStore::record(store.as_ref(), &record) {
+                eprintln!("trace record failed: {error}");
+            }
+        });
+    }
+}
+
+fn build_trace_seed(
+    model: &ServerModel,
+    request: &CompletionRequest,
+    streaming: bool,
+) -> Option<LlmTraceRecord> {
+    let context = request.trace_context.as_ref()?;
+    let (provider, protocol, base_url, endpoint_path, provider_request) = match &model.inner {
+        ServerModelInner::Bootstrap(_) => return None,
+        ServerModelInner::OpenAiResponses(model) => (
+            "openai".to_string(),
+            "openai-responses".to_string(),
+            model.config().base_url.clone(),
+            "/responses".to_string(),
+            if streaming {
+                model.build_streaming_request_body(request)
+            } else {
+                model.build_request_body(request)
+            },
+        ),
+        ServerModelInner::OpenAiChatCompletions(model) => (
+            "openai".to_string(),
+            "openai-chat-completions".to_string(),
+            model.config().base_url.clone(),
+            "/chat/completions".to_string(),
+            if streaming {
+                model.build_streaming_request_body(request)
+            } else {
+                model.build_request_body(request)
+            },
+        ),
+    };
+
+    let otel_attributes = trace_attributes(
+        request,
+        context,
+        provider.as_str(),
+        base_url.as_str(),
+        endpoint_path.as_str(),
+        streaming,
+    );
+
+    Some(LlmTraceRecord {
+        id: context.span_id.clone(),
+        trace_id: context.trace_id.clone(),
+        span_id: context.span_id.clone(),
+        parent_span_id: context.parent_span_id.clone(),
+        root_span_id: context.root_span_id.clone(),
+        operation_name: context.operation_name.clone(),
+        span_kind: LlmTraceSpanKind::Client,
+        turn_id: context.turn_id.clone(),
+        run_id: context.run_id.clone(),
+        request_kind: context.request_kind.clone(),
+        step_index: context.step_index,
+        provider,
+        protocol,
+        model: request.model.name.clone(),
+        base_url,
+        endpoint_path,
+        streaming,
+        started_at_ms: 0,
+        finished_at_ms: None,
+        duration_ms: None,
+        status_code: None,
+        status: LlmTraceStatus::Succeeded,
+        stop_reason: None,
+        error: None,
+        request_summary: request_summary(request),
+        provider_request,
+        response_summary: Value::Null,
+        response_body: None,
+        input_tokens: None,
+        output_tokens: None,
+        total_tokens: None,
+        cached_tokens: None,
+        otel_attributes,
+        events: vec![],
+    })
 }
 
 impl TraceEventCollector {
