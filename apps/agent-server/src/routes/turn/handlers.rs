@@ -7,7 +7,6 @@ use axum::{
         sse::{Event, KeepAlive, Sse},
     },
 };
-use serde::Deserialize;
 use std::convert::Infallible;
 use tokio_stream::{
     StreamExt,
@@ -16,20 +15,12 @@ use tokio_stream::{
 
 use crate::{sse::SsePayload, state::SharedState};
 
-use super::common::{prepare_session_for_turn, require_session_id, runtime_worker_error_response};
+use super::dto::{CancelTurnRequest, TurnRequest};
+use crate::routes::common::{
+    prepare_session_for_turn, require_session_id, runtime_worker_error_response,
+};
 
-#[derive(Deserialize)]
-pub(crate) struct TurnRequest {
-    pub prompt: String,
-    pub session_id: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub(crate) struct CancelTurnRequest {
-    pub session_id: Option<String>,
-}
-
-fn map_broadcast_result(
+pub(crate) fn map_broadcast_result(
     result: Result<SsePayload, BroadcastStreamRecvError>,
 ) -> Option<Result<Event, Infallible>> {
     match result {
@@ -81,18 +72,5 @@ pub(crate) async fn cancel_turn(
     match state.session_manager.cancel_turn(session_id).await {
         Ok(cancelled) => (StatusCode::OK, Json(serde_json::json!({ "cancelled": cancelled }))),
         Err(error) => runtime_worker_error_response(error),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
-
-    use super::map_broadcast_result;
-
-    #[test]
-    fn lagged_broadcast_result_maps_to_sync_required_event() {
-        let mapped = map_broadcast_result(Err(BroadcastStreamRecvError::Lagged(5)));
-        assert!(mapped.is_some());
     }
 }

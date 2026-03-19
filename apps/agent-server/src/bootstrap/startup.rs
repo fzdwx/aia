@@ -10,7 +10,6 @@ use provider_registry::ProviderRegistry;
 use crate::{
     channel_host::{build_channel_adapter_catalog, build_channel_runtime, sync_channel_runtime},
     model::{ProviderLaunchChoice, model_identity_from_selection},
-    routes::ProviderRouteService,
     session_manager::{ProviderInfoSnapshot, SessionManagerConfig, spawn_session_manager},
     state::AppState,
 };
@@ -157,16 +156,11 @@ impl ServerBootstrap {
         let channel_runtime = Arc::new(tokio::sync::Mutex::new(build_channel_runtime(
             channel_adapter_catalog.as_ref().clone(),
         )));
-        let provider_routes = ProviderRouteService::new(
-            session_manager.clone(),
-            snapshots.provider_registry_snapshot.clone(),
-            snapshots.provider_info_snapshot.clone(),
-        );
 
         Arc::new(AppState {
             session_manager,
-            provider_routes,
             broadcast_tx: snapshots.broadcast_tx,
+            provider_registry_snapshot: snapshots.provider_registry_snapshot,
             provider_info_snapshot: snapshots.provider_info_snapshot,
             channel_profile_registry_snapshot: snapshots.channel_profile_registry_snapshot,
             channel_mutation_lock: Arc::new(tokio::sync::Mutex::new(())),

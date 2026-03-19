@@ -4,38 +4,14 @@ use axum::{
     http::StatusCode,
     response::IntoResponse,
 };
-use serde::Deserialize;
 
 use crate::state::SharedState;
 
-use super::common::{
+use super::dto::{AutoCompressRequest, CreateSessionRequest, HandoffRequest, SessionQuery};
+use crate::routes::common::{
     JsonResponse, json_response, require_session_id, resolve_session_id,
     runtime_worker_error_response, session_resolution_error_response,
 };
-
-#[derive(Deserialize)]
-pub(crate) struct CreateSessionRequest {
-    pub title: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub(crate) struct HandoffRequest {
-    pub name: String,
-    pub summary: String,
-    pub session_id: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub(crate) struct AutoCompressRequest {
-    pub session_id: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub(crate) struct SessionQuery {
-    pub session_id: Option<String>,
-    pub before_turn_id: Option<String>,
-    pub limit: Option<usize>,
-}
 
 pub(crate) async fn list_sessions(State(state): State<SharedState>) -> JsonResponse {
     match state.store.list_sessions_async().await {

@@ -2,18 +2,13 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
 };
-use serde::Deserialize;
 
 use crate::state::SharedState;
 
-use super::common::{JsonResponse, error_response, json_response, trace_store_error_response};
-
-#[derive(Deserialize)]
-pub(crate) struct TraceListQuery {
-    pub page: Option<usize>,
-    pub page_size: Option<usize>,
-    pub request_kind: Option<String>,
-}
+use super::dto::TraceListQuery;
+use crate::routes::common::{
+    JsonResponse, error_response, json_response, trace_store_error_response,
+};
 
 pub(crate) async fn list_traces(
     State(state): State<SharedState>,
