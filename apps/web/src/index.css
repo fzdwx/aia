@@ -54,6 +54,8 @@
   --input: oklch(0.14 0 0);
   --ring: oklch(0.4 0 0);
   --sidebar: oklch(0.06 0 0);
+  --code-block-language: oklch(0.66 0 0 / 72%);
+  --code-block-language-hover: oklch(0.77 0 0 / 88%);
 }
 
 .light {
@@ -76,6 +78,8 @@
   --input: oklch(0.94 0 0);
   --ring: oklch(0.55 0 0);
   --sidebar: oklch(0.97 0 0);
+  --code-block-language: oklch(0.46 0 0 / 68%);
+  --code-block-language-hover: oklch(0.31 0 0 / 84%);
 }
 
 * {
@@ -261,6 +265,16 @@ pre {
   text-underline-offset: 0.25rem;
 }
 
+.markdown-content .chat-markdown-link {
+  overflow-wrap: anywhere;
+  text-decoration-color: oklch(from var(--border) l c h / 75%);
+}
+
+.markdown-content .chat-markdown-link:hover {
+  color: var(--foreground);
+  text-decoration-color: currentColor;
+}
+
 .markdown-content .hr-node,
 .markdown-content .thematic-break {
   margin: 1rem 0;
@@ -310,9 +324,7 @@ pre {
 .markdown-content .code-block-node,
 .markdown-content .code-block-body,
 .markdown-content .code-block-content {
-  border: none !important;
-  border-radius: 0 !important;
-  background: transparent !important;
+  border-radius: 12px !important;
   box-shadow: none !important;
   color: inherit;
 }
@@ -322,47 +334,152 @@ pre {
 .markdown-content .code-block-node {
   margin: 0.25rem 0 0.75rem;
   padding: 0;
-  overflow: visible;
+  overflow: hidden;
 }
 
-.markdown-content .code-block-header {
-  min-height: 1.5rem;
-  padding: 0 0 0.375rem 0.125rem;
-  color: var(--muted-foreground);
+.markdown-content .chat-code-block {
+  margin: 0.125rem 0 0.625rem;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.markdown-content .chat-code-block > .code-block-container {
+  margin: 0;
+  border: 0 !important;
+  border-top: 0 !important;
+  border-radius: 0 !important;
   background: transparent !important;
-  border-bottom: none !important;
 }
 
-.markdown-content .code-block-language {
+.markdown-content .chat-code-block-header {
+  min-height: 1.75rem;
+  padding: 0.125rem 0 0.375rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
   color: var(--muted-foreground);
+  background: transparent;
+  backdrop-filter: none;
 }
 
-.markdown-content .code-block-actions {
-  gap: 0.125rem;
+.markdown-content .chat-code-block-language {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--code-block-language);
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-overflow: ellipsis;
+  transition: color 150ms ease;
+  white-space: nowrap;
+}
+
+.markdown-content .chat-code-block:hover .chat-code-block-language,
+.markdown-content .chat-code-block:focus-within .chat-code-block-language {
+  color: var(--code-block-language-hover);
+}
+
+.markdown-content .chat-code-block-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 150ms ease;
 }
 
-.markdown-content .code-block-container:hover .code-block-actions,
-.markdown-content .code-block-container:focus-within .code-block-actions {
+.markdown-content .chat-code-block:hover .chat-code-block-actions,
+.markdown-content .chat-code-block:focus-within .chat-code-block-actions {
   opacity: 1;
+  pointer-events: auto;
 }
 
-.markdown-content .code-block-btn {
-  border: none;
+.markdown-content .chat-code-block-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
   background: transparent;
-  padding: 0.25rem;
+  padding: 0;
   color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: color 150ms ease;
 }
 
-.markdown-content .code-block-btn:hover {
-  background: transparent;
+.markdown-content .chat-code-block-copy:hover,
+.markdown-content .chat-code-block-copy:focus-visible {
+  color: var(--foreground);
+  outline: none;
+}
+
+.markdown-content .chat-code-block[data-state="copied"] .chat-code-block-copy {
+  color: var(--foreground);
+}
+
+.markdown-content .code-block-container:focus,
+.markdown-content .code-block-container:focus-within,
+.markdown-content .code-block-body pre:focus,
+.markdown-content .code-block-body pre:focus-visible,
+.markdown-content pre[class^="language-"]:focus,
+.markdown-content pre[class*=" language-"]:focus,
+.markdown-content pre[class^="language-"]:focus-visible,
+.markdown-content pre[class*=" language-"]:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.markdown-content .code-block-container {
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.markdown-content .code-block-header {
+  min-height: 2.25rem;
+  padding: 0.625rem 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: var(--muted-foreground);
+  background: oklch(from var(--background) l c h / 55%) !important;
+  border-bottom: 1px solid oklch(from var(--border) l c h / 35%) !important;
+  backdrop-filter: blur(6px);
+}
+
+.markdown-content .code-block-btn,
+.markdown-content .code-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid oklch(from var(--border) l c h / 35%);
+  border-radius: 8px;
+  background: oklch(from var(--background) l c h / 38%);
+  padding: 0.375rem;
+  color: var(--muted-foreground);
+  transition:
+    background-color 150ms ease,
+    color 150ms ease,
+    border-color 150ms ease;
+}
+
+.markdown-content .code-block-btn:hover,
+.markdown-content .code-action-btn:hover {
+  background: oklch(from var(--accent) l c h / 55%);
+  border-color: oklch(from var(--border) l c h / 55%);
   color: var(--foreground);
 }
 
 .markdown-content .code-block-body {
   min-height: 0;
-  padding: 0;
+  padding: 0.875rem 1rem 1rem;
 }
 
 .markdown-content .code-block-body pre,
@@ -370,13 +487,36 @@ pre {
 .markdown-content .code-fallback-plain {
   margin: 0;
   background: transparent;
+  color: color-mix(in oklch, var(--foreground) 92%, transparent);
   padding: 0;
-  color: inherit;
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.markdown-content .code-block-content .shiki,
+.markdown-content .code-block-content .shiki code,
+.markdown-content .code-block-content .shiki-fallback,
+.markdown-content .code-block-content .shiki-fallback code {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+.markdown-content pre[class^="language-"],
+.markdown-content pre[class*=" language-"] {
+  margin: 0.25rem 0 0.75rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: normal;
+  word-break: normal;
   font-size: 13px;
   line-height: 1.7;
 }
 
-.markdown-content .code-block-body pre code,
-.markdown-content .code-fallback-plain code {
-  color: inherit;
+.markdown-content pre[class^="language-"] > code,
+.markdown-content pre[class*=" language-"] > code {
+  display: block;
+  white-space: inherit;
 }

@@ -1,28 +1,22 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react"
-import { ArrowLeft, Pencil, Plus, Trash2 } from "lucide-react"
+import { ArrowLeft, Trash2 } from "lucide-react"
 
-import { listSupportedChannels } from "@/lib/api"
 import type {
   ChannelListItem,
   ChannelTransport,
   SupportedChannelDefinition,
 } from "@/lib/types"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
-import { cn } from "@/lib/utils"
+import { useChannelsStore } from "@/stores/channels-store"
 import { useChatStore } from "@/stores/chat-store"
 
 type ChannelSchemaProperty = Record<string, unknown>
 
 type ChannelFormState = {
-  id: string
-  name: string
-  transport: ChannelTransport
   enabled: boolean
   config: Record<string, unknown>
 }
@@ -100,9 +94,6 @@ function emptyChannelForm(
   definition: SupportedChannelDefinition | null
 ): ChannelFormState {
   return {
-    id: "",
-    name: "",
-    transport: definition?.transport ?? "",
     enabled: true,
     config: definitionDefaults(definition),
   }
@@ -121,44 +112,52 @@ function isMissingRequiredValue(
   return typeof value !== "string" || value.trim().length === 0
 }
 
-function fieldPreview(
-  key: string,
-  schema: ChannelSchemaProperty,
-  channel: ChannelListItem
-): string | null {
-  const label = fieldLabel(key, schema)
-  if (fieldKind(schema) === "secret") {
-    return channel.secret_fields_set.includes(key) ? `${label}: set` : null
-  }
-  const value = channel.config[key]
-  if (fieldKind(schema) === "boolean") {
-    return `${label}: ${value === true ? "on" : "off"}`
-  }
-  if (typeof value === "string" && value.trim().length > 0) {
-    return `${label}: ${value}`
-  }
-  return null
+function configuredChannelsForTransport(
+  configuredChannels: ChannelListItem[],
+  transport: ChannelTransport | null
+): ChannelListItem[] {
+  if (!transport) return []
+  return configuredChannels.filter((channel) => channel.transport === transport)
 }
 
 export function ChannelsPanel() {
-  const channelList = useChatStore((s) => s.channelList)
   const setView = useChatStore((s) => s.setView)
-  const refreshChannels = useChatStore((s) => s.refreshChannels)
-  const storeCreateChannel = useChatStore((s) => s.createChannel)
-  const storeUpdateChannel = useChatStore((s) => s.updateChannel)
-  const storeDeleteChannel = useChatStore((s) => s.deleteChannel)
+  const initializeChannels = useChannelsStore((s) => s.initialize)
+  const supportedChannels = useChannelsStore((s) => s.supportedChannels)
+  const configuredChannels = useChannelsStore((s) => s.configuredChannels)
+  const selectedTransport = useChannelsStore((s) => s.selectedTransport)
+  const channelsLoading = useChannelsStore((s) => s.loading)
+  const channelsError = useChannelsStore((s) => s.error)
+  const createChannel = useChannelsStore((s) => s.createChannel)
+  const updateChannel = useChannelsStore((s) => s.updateChannel)
+  const deleteChannel = useChannelsStore((s) => s.deleteChannel)
 
-  const [catalog, setCatalog] = useState<SupportedChannelDefinition[]>([])
-  const [loadingCatalog, setLoadingCatalog] = useState(true)
   const [form, setForm] = useState<ChannelFormState>(emptyChannelForm(null))
   const [submitting, setSubmitting] = useState(false)
-  const [editing, setEditing] = useState<string | null>(null)
-  const [formOpen, setFormOpen] = useState(channelList.length === 0)
 
-  const selectedDefinition = useMemo(
-    () => catalog.find((item) => item.transport === form.transport) ?? null,
-    [catalog, form.transport]
+  useEffect(() => {
+    void initializeChannels().catch(() => {})
+  }, [initializeChannels])
+
+  const selectedDefinition = useMemo(() => {
+    if (selectedTransport) {
+      const selected =
+        supportedChannels.find((channel) => channel.transport === selectedTransport) ??
+        null
+      if (selected) return selected
+    }
+    return supportedChannels[0] ?? null
+  }, [selectedTransport, supportedChannels])
+
+  const matchingChannels = useMemo(
+    () =>
+      configuredChannelsForTransport(
+        configuredChannels,
+        selectedDefinition?.transport ?? null
+      ),
+    [configuredChannels, selectedDefinition]
   )
+  const configuredChannel = matchingChannels[0] ?? null
   const selectedProperties = useMemo(
     () => schemaProperties(selectedDefinition),
     [selectedDefinition]
@@ -169,30 +168,18 @@ export function ChannelsPanel() {
   )
 
   useEffect(() => {
-    void refreshChannels().catch(() => {})
-    void (async () => {
-      try {
-        const definitions = await listSupportedChannels()
-        setCatalog(definitions)
-        setForm((prev) => {
-          if (prev.transport || editing) return prev
-          return emptyChannelForm(definitions[0] ?? null)
-        })
-      } finally {
-        setLoadingCatalog(false)
-      }
-    })()
-  }, [editing, refreshChannels])
+    if (!selectedDefinition) return
 
-  useEffect(() => {
-    if (channelList.length === 0 && !editing) {
-      setFormOpen(true)
+    if (configuredChannel) {
+      setForm({
+        enabled: configuredChannel.enabled,
+        config: normalizeConfigForForm(selectedDefinition, configuredChannel.config),
+      })
+      return
     }
-  }, [channelList.length, editing])
 
-  function updateForm(patch: Partial<ChannelFormState>) {
-    setForm((prev) => ({ ...prev, ...patch }))
-  }
+    setForm(emptyChannelForm(selectedDefinition))
+  }, [configuredChannel, selectedDefinition])
 
   function updateConfigField(key: string, value: unknown) {
     setForm((prev) => ({
@@ -204,366 +191,225 @@ export function ChannelsPanel() {
     }))
   }
 
-  function resetForm(nextTransport?: string) {
-    const definition =
-      catalog.find((item) => item.transport === nextTransport) ??
-      catalog[0] ??
-      null
-    setForm(emptyChannelForm(definition))
-    setEditing(null)
-  }
-
-  function startEdit(channelId: string) {
-    const channel = channelList.find((item) => item.id === channelId)
-    if (!channel) return
-    const definition =
-      catalog.find((item) => item.transport === channel.transport) ?? null
-    setForm({
-      id: channel.id,
-      name: channel.name,
-      transport: channel.transport,
-      enabled: channel.enabled,
-      config: normalizeConfigForForm(definition, channel.config),
-    })
-    setEditing(channelId)
-    setFormOpen(true)
-  }
-
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!selectedDefinition) return
+
     setSubmitting(true)
 
     try {
-      if (editing) {
-        await storeUpdateChannel(editing, {
-          name: form.name.trim(),
+      if (configuredChannel) {
+        await updateChannel(configuredChannel.id, {
           enabled: form.enabled,
           config: form.config,
         })
       } else {
-        await storeCreateChannel({
-          id: form.id.trim(),
-          name: form.name.trim(),
-          transport: form.transport,
+        await createChannel({
+          id: selectedDefinition.transport,
+          name: selectedDefinition.label,
+          transport: selectedDefinition.transport,
           enabled: form.enabled,
           config: form.config,
         })
       }
-      resetForm(form.transport)
-      setFormOpen(false)
     } finally {
       setSubmitting(false)
     }
   }
 
-  async function handleDelete(channelId: string) {
-    await storeDeleteChannel(channelId)
-    if (editing === channelId) resetForm()
+  async function handleDelete() {
+    if (!configuredChannel) return
+    await deleteChannel(configuredChannel.id)
   }
 
   const canSubmit =
-    form.id.trim() &&
-    form.name.trim() &&
-    form.transport &&
-    selectedDefinition &&
+    Boolean(selectedDefinition) &&
     selectedProperties.every(([key, schema]) => {
       return !isMissingRequiredValue(
         key,
         schema,
         form.config[key],
-        Boolean(editing),
+        Boolean(configuredChannel),
         selectedRequired
       )
     })
 
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <div className="mx-auto max-w-[800px] px-6 py-8">
-        <div className="mb-8 flex items-center gap-3">
+      <div className="mx-auto max-w-[920px] px-4 py-6 sm:px-6 sm:py-8">
+        <div className="mb-6 flex items-start gap-3">
           <button
             onClick={() => setView("chat")}
-            className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+            className="flex size-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
           >
             <ArrowLeft className="size-4" />
           </button>
-          <h1 className="text-lg font-semibold">Channels</h1>
+          <div>
+            <h1 className="text-lg font-semibold">Channels</h1>
+            <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+              Select a supported channel type from the sidebar, then configure
+              its runtime settings here.
+            </p>
+          </div>
         </div>
 
-        <section className="mb-8">
-          <h2 className="mb-3 text-[13px] font-medium text-muted-foreground">
-            Configured channels
-          </h2>
-          {channelList.length === 0 ? (
-            <p className="text-[13px] text-muted-foreground/60">
-              No channels configured yet.
+        {!selectedDefinition ? (
+          <div className="px-1 py-8">
+            <p className="text-sm font-medium">No supported channels available.</p>
+            <p className="mt-2 text-[12px] leading-5 text-muted-foreground">
+              {channelsLoading
+                ? "Loading channel catalog..."
+                : channelsError ?? "The server did not return any supported channel type."}
             </p>
-          ) : (
-            <div className="space-y-2">
-              {channelList.map((channel) => {
-                const definition =
-                  catalog.find(
-                    (item) => item.transport === channel.transport
-                  ) ?? null
-                const previews = definition
-                  ? schemaProperties(definition)
-                      .map(([key, schema]) =>
-                        fieldPreview(key, schema, channel)
-                      )
-                      .filter((value): value is string => Boolean(value))
-                  : []
-                return (
-                  <Card
-                    key={channel.id}
-                    className={cn(
-                      "flex items-center justify-between px-4 py-3",
-                      channel.enabled && "border-foreground/20"
-                    )}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-[13px] font-medium">
-                          {channel.name}
-                        </span>
-                        <Badge variant="secondary" className="text-[10px]">
-                          {definition?.label ?? channel.transport}
-                        </Badge>
-                        <Badge variant="outline" className="text-[10px]">
-                          {channel.enabled ? "enabled" : "disabled"}
-                        </Badge>
-                      </div>
-                      <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                        {channel.id}
-                      </p>
-                      <div className="mt-1 flex flex-wrap gap-1.5">
-                        {previews.map((preview) => (
-                          <Badge
-                            key={`${channel.id}-${preview}`}
-                            variant="outline"
-                            className="text-[10px] font-normal"
-                          >
-                            {preview}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="ml-3 flex shrink-0 gap-1">
-                      <button
-                        onClick={() => startEdit(channel.id)}
-                        className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-                      >
-                        <Pencil className="size-3.5" />
-                      </button>
-                      <button
-                        onClick={() => void handleDelete(channel.id)}
-                        className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                      >
-                        <Trash2 className="size-3.5" />
-                      </button>
-                    </div>
-                  </Card>
-                )
-              })}
-            </div>
-          )}
-        </section>
-
-        <Separator className="mb-8 opacity-30" />
-
-        <section>
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-[13px] font-medium text-muted-foreground">
-              {editing ? `Edit Channel — ${editing}` : "Add Channel"}
-            </h2>
-            {!formOpen ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  resetForm()
-                  setFormOpen(true)
-                }}
-              >
-                <Plus className="mr-1.5 size-3.5" />
-                Add
-              </Button>
-            ) : editing ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  resetForm()
-                  setFormOpen(false)
-                }}
-              >
-                Cancel
-              </Button>
-            ) : null}
           </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <h2 className="text-base font-semibold">
+                  {selectedDefinition.label}
+                </h2>
+              </div>
 
-          {formOpen ? (
-            <Card className="p-4">
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div>
-                    <label className="mb-1 block text-[12px] text-muted-foreground">
-                      ID
-                    </label>
-                    <Input
-                      value={form.id}
-                      onChange={(event) =>
-                        updateForm({ id: event.target.value })
-                      }
-                      placeholder="e.g. feishu-main"
-                      className="h-8 text-[13px]"
-                      disabled={!!editing}
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-[12px] text-muted-foreground">
-                      Name
-                    </label>
-                    <Input
-                      value={form.name}
-                      onChange={(event) =>
-                        updateForm({ name: event.target.value })
-                      }
-                      placeholder="e.g. Main workspace"
-                      className="h-8 text-[13px]"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-[12px] text-muted-foreground">
-                    Transport
-                  </label>
-                  <select
-                    value={form.transport}
-                    disabled={!!editing || loadingCatalog}
-                    onChange={(event) => {
-                      const next =
-                        catalog.find(
-                          (item) => item.transport === event.target.value
-                        ) ?? null
-                      setForm((prev) => ({
-                        ...prev,
-                        transport: event.target.value,
-                        config: definitionDefaults(next),
-                      }))
-                    }}
-                    className="flex h-8 w-full items-center rounded-lg border border-input bg-transparent px-2.5 text-[13px] text-foreground"
-                  >
-                    {catalog.map((definition) => (
-                      <option
-                        key={definition.transport}
-                        value={definition.transport}
-                      >
-                        {definition.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {selectedDefinition ? (
-                  <div className="space-y-3">
-                    {selectedDefinition.description ? (
-                      <p className="text-[12px] text-muted-foreground">
-                        {selectedDefinition.description}
-                      </p>
-                    ) : null}
-
-                    {selectedProperties.map(([key, schema]) => {
-                      const kind = fieldKind(schema)
-                      const label = fieldLabel(key, schema)
-                      const description =
-                        typeof schema.description === "string"
-                          ? schema.description
-                          : null
-                      const value = form.config[key]
-
-                      if (kind === "boolean") {
-                        return (
-                          <label
-                            key={key}
-                            className="flex items-center justify-between gap-3 rounded-lg border border-border/30 bg-muted/20 px-3 py-2 text-[12px] text-foreground"
-                          >
-                            <span>{label}</span>
-                            <Switch
-                              checked={value === true}
-                              onCheckedChange={(checked: boolean) =>
-                                updateConfigField(key, checked)
-                              }
-                            />
-                          </label>
-                        )
-                      }
-
-                      return (
-                        <div key={key}>
-                          <label className="mb-1 block text-[12px] text-muted-foreground">
-                            {label}
-                            {editing && kind === "secret"
-                              ? " (leave blank to keep existing)"
-                              : ""}
-                          </label>
-                          <Input
-                            type={
-                              kind === "secret"
-                                ? "password"
-                                : kind === "url"
-                                  ? "url"
-                                  : "text"
-                            }
-                            value={typeof value === "string" ? value : ""}
-                            onChange={(event) =>
-                              updateConfigField(key, event.target.value)
-                            }
-                            placeholder={
-                              typeof schema.default === "string"
-                                ? schema.default
-                                : undefined
-                            }
-                            className="h-8 text-[13px]"
-                          />
-                          {description ? (
-                            <p className="mt-1 text-[11px] text-muted-foreground/70">
-                              {description}
-                            </p>
-                          ) : null}
-                        </div>
-                      )
-                    })}
-                  </div>
-                ) : (
-                  <p className="text-[12px] text-muted-foreground">
-                    No supported channel definitions available.
-                  </p>
-                )}
-
-                <label className="flex items-center justify-between gap-3 rounded-lg border border-border/30 bg-muted/20 px-3 py-2 text-[12px] text-foreground">
-                  <span>Enabled</span>
-                  <Switch
-                    checked={form.enabled}
-                    onCheckedChange={(checked: boolean) =>
-                      updateForm({ enabled: checked })
-                    }
-                  />
-                </label>
-
+              {configuredChannel ? (
                 <Button
-                  type="submit"
+                  variant="ghost"
                   size="sm"
-                  disabled={submitting || !canSubmit}
-                  className="mt-2 w-full"
+                  className="shrink-0 self-start text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  onClick={() => void handleDelete()}
                 >
-                  <Plus className="mr-1.5 size-3.5" />
-                  {editing ? "Update Channel" : "Add Channel"}
+                  <Trash2 className="mr-1.5 size-3.5" />
+                  Delete
                 </Button>
-              </form>
-            </Card>
-          ) : null}
-        </section>
+              ) : null}
+            </div>
+
+            <Separator className="opacity-40" />
+
+            {matchingChannels.length > 1 ? (
+              <section className="rounded-xl bg-amber-500/10 px-4 py-3 text-[12px] leading-5 text-amber-950 dark:text-amber-100">
+                Multiple saved profiles were found for this transport. This
+                panel is currently editing the first configured profile:
+                <span className="ml-1 font-medium">{configuredChannel?.id}</span>
+              </section>
+            ) : null}
+
+            <section className="space-y-4">
+              {selectedProperties.length > 0 ? (
+                <div className="divide-y divide-border/30">
+                  {selectedProperties.map(([key, schema]) => {
+                    const kind = fieldKind(schema)
+                    const label = fieldLabel(key, schema)
+                    const description =
+                      typeof schema.description === "string"
+                        ? schema.description
+                        : null
+                    const value = form.config[key]
+
+                    if (kind === "boolean") {
+                      return (
+                        <label
+                          key={key}
+                          className="flex items-center justify-between gap-3 py-3 text-[12px] text-foreground"
+                        >
+                          <div className="pr-4">
+                            <p className="font-medium">{label}</p>
+                            {description ? (
+                              <p className="mt-1 text-[11px] text-muted-foreground">
+                                {description}
+                              </p>
+                            ) : null}
+                          </div>
+                          <Switch
+                            checked={value === true}
+                            onCheckedChange={(checked: boolean) =>
+                              updateConfigField(key, checked)
+                            }
+                          />
+                        </label>
+                      )
+                    }
+
+                    return (
+                      <div key={key} className="py-3">
+                        <label className="mb-1.5 block text-[12px] text-muted-foreground">
+                          {label}
+                          {selectedRequired.has(key) ? " *" : ""}
+                          {configuredChannel && kind === "secret"
+                            ? " (leave blank to keep existing)"
+                            : ""}
+                        </label>
+                        <Input
+                          type={
+                            kind === "secret"
+                              ? "password"
+                              : kind === "url"
+                                ? "url"
+                                : "text"
+                          }
+                          value={typeof value === "string" ? value : ""}
+                          onChange={(event) =>
+                            updateConfigField(key, event.target.value)
+                          }
+                          placeholder={
+                            typeof schema.default === "string"
+                              ? schema.default
+                              : undefined
+                          }
+                          className="h-9 text-[13px]"
+                        />
+                        {description ? (
+                          <p className="mt-1.5 text-[11px] leading-5 text-muted-foreground">
+                            {description}
+                          </p>
+                        ) : null}
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <p className="text-[12px] text-muted-foreground">
+                  This channel type does not expose configurable fields.
+                </p>
+              )}
+            </section>
+
+            <Separator className="opacity-40" />
+
+            <label className="flex items-center justify-between gap-3 py-1 text-[12px] text-foreground">
+                <div className="min-w-0">
+                  <p className="font-medium">Enabled</p>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Turn this off to keep the profile stored without running its
+                    transport worker.
+                  </p>
+                </div>
+              <Switch
+                checked={form.enabled}
+                onCheckedChange={(checked: boolean) =>
+                  setForm((prev) => ({ ...prev, enabled: checked }))
+                }
+              />
+            </label>
+
+            <Separator className="opacity-40" />
+
+            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-[11px] leading-5 text-muted-foreground">
+                {configuredChannel
+                  ? "Changes are saved back to the current transport profile."
+                  : "Saving creates a default profile for this transport type."}
+              </p>
+              <Button
+                type="submit"
+                disabled={submitting || !canSubmit}
+                className="sm:min-w-[200px]"
+              >
+                {configuredChannel ? "Save Configuration" : "Create Configuration"}
+              </Button>
+            </div>
+          </form>
+        )}
       </div>
     </ScrollArea>
   )

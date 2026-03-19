@@ -1,19 +1,24 @@
+use axum::Router;
+use tower_http::cors::CorsLayer;
+
+use crate::state::SharedState;
+
 mod channel;
 mod common;
 mod provider;
 mod session;
 #[cfg(test)]
-mod tests;
+mod test_support;
 mod trace;
 mod turn;
 
-pub(crate) use channel::{
-    create_channel, delete_channel, list_channels, list_supported_channels, update_channel,
-};
-pub(crate) use provider::ProviderRouteService;
-pub(crate) use session::{
-    auto_compress_session, create_handoff, create_session, delete_session, get_current_turn,
-    get_history, get_session_info, list_sessions,
-};
-pub(crate) use trace::{get_trace, get_trace_overview, get_trace_summary, list_traces};
-pub(crate) use turn::{cancel_turn, events, submit_turn};
+pub(crate) fn router(state: SharedState) -> Router {
+    Router::<SharedState>::new()
+        .merge(provider::router())
+        .merge(channel::router())
+        .merge(trace::router())
+        .merge(session::router())
+        .merge(turn::router())
+        .layer(CorsLayer::permissive())
+        .with_state(state)
+}

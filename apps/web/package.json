@@ -24,6 +24,9 @@
     "motion": "^12.36.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "shiki": "^4.0.2",
+    "stream-markdown": "^0.0.14",
+    "stream-markdown-parser": "^0.0.72",
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "^4.1.17",
     "zustand": "^5.0.11"

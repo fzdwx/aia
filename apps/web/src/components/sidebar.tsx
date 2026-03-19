@@ -1,7 +1,9 @@
+import { useEffect } from "react"
 import { PanelRightDashed, Plus, Settings, Waypoints, X } from "lucide-react"
 import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat-store"
+import { useChannelsStore } from "@/stores/channels-store"
 
 export function Sidebar() {
   const provider = useChatStore((s) => s.provider)
@@ -13,6 +15,16 @@ export function Sidebar() {
   const createSession = useChatStore((s) => s.createSession)
   const switchSession = useChatStore((s) => s.switchSession)
   const deleteSession = useChatStore((s) => s.deleteSession)
+  const initializeChannels = useChannelsStore((s) => s.initialize)
+  const supportedChannels = useChannelsStore((s) => s.supportedChannels)
+  const selectedTransport = useChannelsStore((s) => s.selectedTransport)
+  const selectTransport = useChannelsStore((s) => s.selectTransport)
+  const channelsLoading = useChannelsStore((s) => s.loading)
+
+  useEffect(() => {
+    if (view !== "channels") return
+    void initializeChannels().catch(() => {})
+  }, [initializeChannels, view])
 
   return (
     <aside className="flex h-full w-[280px] shrink-0 flex-col border-r border-border/50 bg-sidebar">
@@ -25,64 +37,108 @@ export function Sidebar() {
 
       <Separator className="opacity-30" />
 
-      {/* New session button */}
-      <div className="px-2 pt-2">
-        <button
-          onClick={() => createSession()}
-          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-[7px] text-[13px] text-muted-foreground transition-colors duration-150 hover:bg-accent/50 hover:text-foreground/80"
-        >
-          <Plus className="size-[14px] opacity-60" />
-          <span>New session</span>
-        </button>
-      </div>
-
-      {/* Session list */}
-      <div className="flex-1 overflow-y-auto px-2 pt-1 pb-2">
-        {sessions.map((session) => {
-          const isActive = session.id === activeSessionId
-          const isSwitchingTo = isActive && sessionHydrating
-
-          return (
-            <div
-              key={session.id}
-              className={cn(
-                "group flex w-full items-center rounded-lg px-2.5 py-[7px] text-[13px] transition-colors duration-150",
-                isActive
-                  ? "bg-accent/50 text-foreground/80"
-                  : "text-muted-foreground hover:bg-accent/30 hover:text-foreground/80"
-              )}
-            >
-              <button
-                className="min-w-0 flex-1 truncate text-left disabled:cursor-default"
-                onClick={() => void switchSession(session.id)}
-                disabled={isSwitchingTo}
-                aria-current={isActive ? "page" : undefined}
-                aria-busy={isSwitchingTo}
-              >
-                {isActive && (
-                  <span className="mr-1.5 inline-block size-1.5 rounded-full bg-foreground/50" />
-                )}
-                {session.title || session.id}
-                {isSwitchingTo && (
-                  <span className="ml-2 text-[11px] text-muted-foreground/70">
-                    Loading…
-                  </span>
-                )}
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  void deleteSession(session.id)
-                }}
-                disabled={isSwitchingTo}
-                className="ml-1 hidden shrink-0 rounded p-0.5 text-muted-foreground/50 group-hover:block hover:text-foreground/80 disabled:opacity-30"
-              >
-                <X className="size-3" />
-              </button>
+      {view === "channels" ? (
+        <>
+          <div className="px-2 pt-2">
+            <div className="rounded-lg border border-border/30 bg-muted/20 px-3 py-2.5">
+              <p className="text-[13px] font-medium text-foreground/80">Channels</p>
             </div>
-          )
-        })}
-      </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-2 pt-2 pb-2">
+            {channelsLoading && supportedChannels.length === 0 ? (
+              <p className="px-2.5 py-2 text-[12px] text-muted-foreground">
+                Loading channels...
+              </p>
+            ) : supportedChannels.length === 0 ? (
+              <p className="px-2.5 py-2 text-[12px] text-muted-foreground">
+                No supported channels available.
+              </p>
+            ) : (
+              supportedChannels.map((channel) => {
+                const isActive = channel.transport === selectedTransport
+
+                return (
+                  <button
+                    key={channel.transport}
+                    type="button"
+                    onClick={() => selectTransport(channel.transport)}
+                    className={cn(
+                      "mb-1 flex w-full items-center rounded-lg px-2.5 py-[8px] text-left text-[13px] transition-colors duration-150",
+                      isActive
+                        ? "bg-accent/50 text-foreground/80"
+                        : "text-muted-foreground hover:bg-accent/30 hover:text-foreground/80"
+                    )}
+                  >
+                    <span className="min-w-0 flex-1 truncate text-[12px]">
+                      {channel.label}
+                    </span>
+                  </button>
+                )
+              })
+            )}
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="px-2 pt-2">
+            <button
+              onClick={() => createSession()}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-[7px] text-[13px] text-muted-foreground transition-colors duration-150 hover:bg-accent/50 hover:text-foreground/80"
+            >
+              <Plus className="size-[14px] opacity-60" />
+              <span>New session</span>
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-2 pt-1 pb-2">
+            {sessions.map((session) => {
+              const isActive = session.id === activeSessionId
+              const isSwitchingTo = isActive && sessionHydrating
+
+              return (
+                <div
+                  key={session.id}
+                  className={cn(
+                    "group flex w-full items-center rounded-lg px-2.5 py-[7px] text-[13px] transition-colors duration-150",
+                    isActive
+                      ? "bg-accent/50 text-foreground/80"
+                      : "text-muted-foreground hover:bg-accent/30 hover:text-foreground/80"
+                  )}
+                >
+                  <button
+                    className="min-w-0 flex-1 truncate text-left disabled:cursor-default"
+                    onClick={() => void switchSession(session.id)}
+                    disabled={isSwitchingTo}
+                    aria-current={isActive ? "page" : undefined}
+                    aria-busy={isSwitchingTo}
+                  >
+                    {isActive && (
+                      <span className="mr-1.5 inline-block size-1.5 rounded-full bg-foreground/50" />
+                    )}
+                    {session.title || session.id}
+                    {isSwitchingTo && (
+                      <span className="ml-2 text-[11px] text-muted-foreground/70">
+                        Loading…
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      void deleteSession(session.id)
+                    }}
+                    disabled={isSwitchingTo}
+                    className="ml-1 hidden shrink-0 rounded p-0.5 text-muted-foreground/50 group-hover:block hover:text-foreground/80 disabled:opacity-30"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
 
       <Separator className="opacity-30" />
 

@@ -3,7 +3,7 @@
 ## 当前阶段
 
 - 阶段：核心工作区搭建之后的当前细分步骤：Web 界面 ↔ 运行时桥接收口
-- 最新前端进展：`apps/web` 已补齐与 `Settings` 平行的 `Channels` 配置页，当前支持飞书 channel 的列表、创建、编辑、删除与启停；入口已接入侧边栏 `Trace/Channels/Settings` 同组导航，前端 store 与 `/api/channels` CRUD 调用链也已打通。
+- 最新前端进展：`apps/web` 的 `Channels` 入口已改成 transport-centric 配置台：左侧常驻 sidebar 在 `channels` 视图下直接列出 server 返回的全部 supported channel type，右侧主面板只展示当前 type 的 schema 配置项与启停状态；对应的 catalog/profile 读取、CRUD 与当前选中 transport 也已从 `chat-store` 拆到独立 `channels-store`，避免继续把配置面板状态混进会话/SSE 主链。
 - 最新后端进展：`agent-store` 已承接 channel 映射/幂等表与配置档案持久化，`apps/agent-server` 已补齐 `/api/channels` 控制面，并把飞书 channel 从过渡 webhook 入口收口为正式长连接 worker。当前长连接会按 profile 启停与重连，收到事件后先快速确认，再异步走既有 `session_manager.submit_turn(...)` 主链与飞书回复链路。
 - 最新 channel 持久化收口：`channel-registry` crate 已从工作区移除；`ChannelProfile` 现统一由 `channel-bridge::ChannelProfileRegistry` 作为 store façade 管理，`apps/agent-server` 启动时直接从 `agent-store` 的 `channel_profiles` 表加载。`/api/channels` 的增删改也已先写 SQLite 再更新内存快照，避免 store 失败后 runtime 继续拿到脏 profile 状态。
 - 最新后端架构收口：`apps/agent-server/src/routes/channel.rs` 已按职责拆成目录模块，`mod.rs` 仅保留 façade，`dto`、配置脱敏/合并、持久化回滚事务与 handler 已分别下沉到子模块，避免单个路由文件继续混合 HTTP 边界、配置语义与运行态回滚细节。
@@ -12,8 +12,8 @@
 - 最新 channel-feishu 内部细拆：`crates/channel-feishu/src/runtime.rs` 又继续按职责拆出 `config.rs`、`protocol.rs`、`card.rs` 与 `tests.rs`；配置 schema/解析、协议 DTO/帧编解码、卡片状态机/请求构造与测试已分层，主流程文件开始回到“长连接与回复编排主线”角色。
 - 最新 session_manager 收口：`apps/agent-server/src/session_manager.rs` 在先前拆出 `query_ops` 之后，又继续把 provider 注册表同步与 turn worker/SSE 投影主线下沉到 `session_manager/{provider_sync,turn_execution}.rs`；同时根模块也已从“散落函数集合”收口为 `SessionManagerLoop`、`SessionSlotFactory` 等职责对象，provider/query/turn/tool-trace 分别由显式服务对象承接，避免同一文件继续混合运行时归还、SSE 广播与 provider 重绑细节。
 - 最新 self-chat 收口：`agent-server self` 不再在运行时读取 `docs/self.md`，而是改为编译期内嵌 prompt；同时 `self` 子命令现在支持附加启动任务参数，让首轮对话可直接带着用户指定目标启动。
-- 最新 Web Markdown 收口：`apps/web` 的共享 Markdown 渲染入口已从 `streamdown` 切到 `markstream-react`，继续保留流式渲染调用面，同时把样式适配收口到现有 `MarkdownContent` 门面，减少聊天区与推理区后续继续绑定旧 renderer 私有 DOM 结构。
-- 最新 Web Markdown 微调：`MarkdownContent` 现已透传当前明暗主题到 `markstream-react`，代码块/表格样式也进一步压回 aia 现有聊天视觉层级，避免 renderer 切换后出现亮暗色不一致或默认卡片边框过重。
+- 最新 Web Markdown 收口：`apps/web` 的共享 Markdown 渲染入口已从 `streamdown` 切到 `markstream-react`，继续保留流式渲染调用面，同时把样式适配收口到现有 `MarkdownContent` 门面；当前聊天 Markdown 也已进一步按官方 React 组件/迁移文档对齐为 `NodeRenderer + setCustomComponents` 形态，流式消息优先走 parsed `nodes`，代码块改回官方 `codeBlockProps` 配置，外链节点则通过自定义 `link` 组件统一补上安全打开语义，减少继续依赖旧 renderer 私有 DOM 结构或过厚本地 override。
+- 最新 Web Markdown 微调：`MarkdownContent` 现已透传当前明暗主题到 `markstream-react`，聊天代码块也已改成自定义极简 header，语言标签按 hover 轻微提亮；同时 `apps/web` 已显式接入 `shiki` 与 `stream-markdown`，并按官方 React 安装路径改为 `code_block -> MarkdownCodeBlockNode` 渲染，避免 renderer 切换后继续退回 plain code 或默认卡片边框过重。
 - 最新 model 收口：`apps/agent-server/src/model.rs` 已从“根模块同时承载 provider 选择、model 构建、trace 执行与 trace 落盘”继续收口为薄门面；当前 `model/factory.rs` 承接 provider→model 构建，`model/runner.rs` 承接带 trace 的完成链路，`model/trace.rs` 通过显式 `ModelTraceRecorder` 对象承接 trace 种子、事件收集与异步持久化，根模块只保留稳定类型、`LanguageModel` 适配与 façade 入口。
 - 最新 bootstrap 收口：`apps/agent-server/src/bootstrap.rs` 已从单个启动大函数收口为薄 façade，真实启动主线下沉到 `bootstrap/startup.rs` 的 `ServerBootstrap` 对象；路径/工作区发现、持久化依赖加载、默认 session 补种、snapshot 构建、`AppState` 装配与 channel runtime 激活都已归入显式启动上下文与阶段方法，避免根模块继续同时混合环境发现、持久化变更与长生命周期 actor 启动。
 - 最新 agent-server 路由收口：`apps/agent-server/src/routes` 现已统一按资源目录模块组织。`provider`、`session`、`trace`、`turn` 都已收口为 `mod.rs + dto.rs + handlers.rs`；其中 provider handler 直接依赖 `AppState` 中的 provider 快照与 `session_manager`，不再额外包一层 `ProviderRouteService`。与此同时，`routes.rs` 现统一 merge 各资源子 router，`server.rs` 只保留 listener 启动与顶层 router 调用，避免继续在启动文件里堆整张 `/api/*` 路由表。

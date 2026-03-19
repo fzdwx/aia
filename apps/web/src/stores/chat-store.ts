@@ -1,21 +1,17 @@
 import { create } from "zustand"
 import {
-  createChannel as apiCreateChannel,
   fetchCurrentTurn,
   fetchHistory,
   fetchProviders,
   fetchSessionInfo,
   fetchSessions as apiFetchSessions,
-  deleteChannel as apiDeleteChannel,
   createSession as apiCreateSession,
   deleteSession as apiDeleteSession,
-  listChannels as apiListChannels,
   listProviders as apiListProviders,
   switchProvider as apiSwitchProvider,
   submitTurn as apiSubmitTurn,
   cancelTurn as apiCancelTurn,
   createProvider as apiCreateProvider,
-  updateChannel as apiUpdateChannel,
   updateProvider as apiUpdateProvider,
   deleteProvider as apiDeleteProvider,
 } from "@/lib/api"
@@ -28,9 +24,7 @@ import { normalizeToolArguments } from "@/lib/tool-display"
 import type {
   AppView,
   ChatState,
-  ChannelListItem,
   ContextCompressionNotice,
-  CreateChannelRequest,
   CurrentTurnSnapshot,
   ModelConfig,
   ProviderInfo,
@@ -40,7 +34,6 @@ import type {
   StreamingTurn,
   TurnLifecycle,
   TurnStatus,
-  UpdateChannelRequest,
 } from "@/lib/types"
 
 const SESSION_HISTORY_PAGE_SIZE = 5
@@ -219,7 +212,6 @@ type ChatStore = {
   chatState: ChatState
   provider: ProviderInfo | null
   providerList: ProviderListItem[]
-  channelList: ChannelListItem[]
   error: string | null
   view: AppView
   contextPressure: number | null
@@ -233,7 +225,6 @@ type ChatStore = {
   cancelTurn: () => Promise<void>
   switchModel: (providerName: string, modelId?: string) => void
   refreshProviders: () => void
-  refreshChannels: () => Promise<void>
   setView: (view: AppView) => void
   createProvider: (body: {
     name: string
@@ -254,9 +245,6 @@ type ChatStore = {
     }
   ) => Promise<void>
   deleteProvider: (name: string) => Promise<void>
-  createChannel: (body: CreateChannelRequest) => Promise<void>
-  updateChannel: (id: string, body: UpdateChannelRequest) => Promise<void>
-  deleteChannel: (id: string) => Promise<void>
   fetchSessions: () => Promise<void>
   createSession: () => Promise<void>
   switchSession: (id: string) => Promise<void>
@@ -484,7 +472,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
     chatState: "idle",
     provider: null,
     providerList: [],
-    channelList: [],
     error: null,
     view: "chat",
     contextPressure: null,
@@ -513,9 +500,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
         .catch(() => {})
 
       get().refreshProviders()
-      get()
-        .refreshChannels()
-        .catch(() => {})
     },
 
     handleSseEvent: (event: SseEvent) => {
@@ -1192,11 +1176,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
         .catch(() => {})
     },
 
-    refreshChannels: async () => {
-      const channelList = await apiListChannels()
-      set({ channelList })
-    },
-
     setView: (view: AppView) => set({ view }),
 
     createProvider: async (body) => {
@@ -1212,21 +1191,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
     deleteProvider: async (name) => {
       await apiDeleteProvider(name)
       get().refreshProviders()
-    },
-
-    createChannel: async (body) => {
-      await apiCreateChannel(body)
-      await get().refreshChannels()
-    },
-
-    updateChannel: async (id, body) => {
-      await apiUpdateChannel(id, body)
-      await get().refreshChannels()
-    },
-
-    deleteChannel: async (id) => {
-      await apiDeleteChannel(id)
-      await get().refreshChannels()
     },
 
     fetchSessions: async () => {

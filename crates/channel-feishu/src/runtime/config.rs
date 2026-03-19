@@ -31,14 +31,14 @@ pub(super) struct FeishuChannelConfig {
     pub(super) base_url: String,
     #[serde(default)]
     #[tool_schema(
-        description = "Require mention",
+        description = "群聊中仅在消息带有 @ 提及时才处理；关闭后会处理所有群聊文本消息",
         meta(key = "x-label", value = "Require mention"),
         meta(key = "default", value = true)
     )]
     pub(super) require_mention: bool,
     #[serde(default)]
     #[tool_schema(
-        description = "Thread mode",
+        description = "群聊按飞书话题线程拆分会话并在原线程中回复；关闭后整个群聊共用一个会话",
         meta(key = "x-label", value = "Thread mode"),
         meta(key = "default", value = true)
     )]
