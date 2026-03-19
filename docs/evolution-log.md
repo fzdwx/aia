@@ -22,6 +22,18 @@
 **Commit**：未提交。
 **Next direction**：如果继续沿 `AGENTS.md` 收口后端，下一优先级应落到 `crates/channel-feishu/src/lib.rs`，把 crate 根文件也收回 façade 角色。
 
+## 2026-03-19 Session 75
+
+**Diagnosis**：在 app 壳里的 route 和 channel host 都已做过 façade 化后，`crates/channel-feishu/src/lib.rs` 仍把 adapter、配置、长连接、CardKit、协议帧与测试整包堆在 crate 根文件里，直接违背仓库对 `lib.rs`“只做稳定导出和模块声明”的要求。
+**Decision**：先做一轮低风险但高收益的根文件瘦身：保持公开 API 不变，把整套实现整体下沉到 `runtime.rs`，让 `lib.rs` 只保留模块声明与稳定 re-export。这样先修掉最明显的 crate 根文件越界，再为后续继续把 `runtime.rs` 细拆成更小子模块留出稳定入口。
+**Changes**：
+- `crates/channel-feishu/src/lib.rs`：改为薄 façade，仅保留 `mod runtime;` 与稳定 re-export。
+- `crates/channel-feishu/src/runtime.rs`：承接原先 `lib.rs` 的实现与测试内容。
+- `docs/status.md`：同步记录 `channel-feishu` crate 根文件已瘦身。
+**Verification**：待本轮统一执行 `cargo fmt --all`、`cargo test -p channel-feishu`、`cargo test -p agent-server`、`cargo check --workspace` 后补充。
+**Commit**：未提交。
+**Next direction**：后续应继续把 `crates/channel-feishu/src/runtime.rs` 内部再切成 adapter/config/protocol/reply/tests 等更细模块，而不是止步于“把大文件从 `lib.rs` 挪到 `runtime.rs`”。
+
 ## 2026-03-19 Session 72
 
 **Diagnosis**：channel 抽象与 SQLite 持久化主体已经落地，但仓库里还残留两类收尾问题：一是 `apps/agent-server` 的 `/api/channels` 仍按“先改内存快照、再写 store”执行，若 SQLite 写入失败会把 `channel_profile_registry_snapshot` 留在脏状态；二是 `aia-config` 和文档叙事里还带着历史 `.aia/channels.json` / `channel-registry` 词汇，和当前代码现实不一致。
