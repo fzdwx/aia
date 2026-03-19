@@ -233,8 +233,10 @@ README 里真正难的是这些能力：
 - 启动时从 `.aia/providers.json`、`.aia/session.jsonl`、`.aia/store.sqlite3` 恢复本地状态
 - 通过后台 runtime worker 独占 `AgentRuntime`、provider registry 与 session 落盘状态
 - HTTP 路由已按 `provider`、`session`、`trace`、`turn` 领域模块拆分，共享错误响应、session 解析与 JSON helper 收口到 `routes::common`，避免 app 壳控制面继续堆在单个超大入口文件里
+- `routes/provider` 现在也已比照 `routes/channel` 收口为目录模块：根 `mod.rs` 只保留 façade 导出，`dto.rs` 承接 HTTP DTO；真正持有依赖与行为的是在 bootstrap 阶段装配进 `AppState` 的 `ProviderRouteService`，其 handler 入口以关联函数形式暴露给 Axum，避免每次请求再临时构造借用上下文；provider 路由局部所需的纯映射/纯投影 helper 直接内聚在 `handlers.rs`，既避免无状态 helper 过度对象化，也避免为几段小型纯函数继续制造碎片化子文件
 - `session_manager` 已进一步按职责拆成子模块：命令发送 handle、共享 slot/command 类型、query/cancel 读取、current-turn 流式投影、tool trace 持久化、provider 注册表同步、turn worker/SSE 投影与测试辅助分别独立；根模块本身也已收口为 `SessionManagerLoop` 与 `SessionSlotFactory` 这类显式职责对象，provider/query/turn/tool-trace 都由各自服务对象承接，避免 provider 重绑与 turn 执行细节长期滞留在 façade 根模块
-- `model` 也已按职责拆成子模块：bootstrap mock、trace 事件收集/摘要/helper 与测试分别独立，主文件只保留 provider 选择、`ServerModel` 适配与 trace 落盘主流程
+- `model` 也已按职责拆成子模块：bootstrap mock、provider→model 构建工厂、带 trace 的完成链路 runner、trace 记录器与测试分别独立；根模块仅保留 `ServerModel` / `ProviderLaunchChoice` / `ServerModelError` 等稳定类型、`LanguageModel` 适配与 façade 入口，避免 provider 构建与 trace 执行细节长期滞留在根模块
+- `bootstrap` 也已从“大一统启动函数”收口为薄 façade：根模块只保留 `ServerInitError`、用户代理 helper 与 `bootstrap_state()` 入口；真实启动主线由 `bootstrap/startup.rs` 中的 `ServerBootstrap` 对象承接，并通过显式阶段方法串起路径发现、持久化加载、默认 session 补种、snapshot 构建、`AppState` 装配与 channel runtime 激活，避免 app 壳继续在单函数里混合环境发现、持久化写入与长生命周期运行时启动
 - `runtime_worker` 已按职责拆成子模块：共享类型、tape 快照重建/legacy decode helper 与测试分别独立，主文件只保留稳定 re-export 入口
 - `runtime_worker::projection` 现承接 current-turn 共享投影语义：live stream 更新与 tape→snapshot 重建共用对象归一化、tool block 构造与 `TurnLifecycle` / `TurnBlock` → `CurrentTurn*` 映射 helper，避免 `session_manager` 与 `runtime_worker` 分别维护两套 `CurrentTurnBlock` / `CurrentToolOutput` 投影逻辑
 - provider 当前信息、history 与 current turn 通过共享快照读取，避免长时间 turn 把所有路由一起锁住
