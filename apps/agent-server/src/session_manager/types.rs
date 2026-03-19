@@ -5,6 +5,7 @@ use agent_core::ToolRegistry;
 use agent_runtime::{AgentRuntime, ContextStats, RuntimeSubscriberId, TurnLifecycle};
 use agent_store::{AiaStore, SessionRecord};
 use provider_registry::ProviderRegistry;
+use session_tape::SessionProviderBinding;
 use tokio::sync::{broadcast, oneshot};
 
 use crate::{
@@ -32,6 +33,7 @@ pub(crate) struct SessionSlot {
     pub(crate) current_turn: Arc<RwLock<Option<CurrentTurnSnapshot>>>,
     pub(crate) context_stats: Arc<RwLock<ContextStats>>,
     pub(crate) running_turn: Option<RunningTurnHandle>,
+    pub(crate) pending_provider_binding: Option<SessionProviderBinding>,
     pub(crate) status: SlotStatus,
 }
 

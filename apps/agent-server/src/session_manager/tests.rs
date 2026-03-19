@@ -7,9 +7,9 @@ use crate::runtime_worker::RunningTurnHandle;
 use crate::sse::TurnStatus;
 
 use super::{
-    CurrentTurnSnapshot, SessionManagerConfig, SessionSlot, SlotStatus, collect_runtime_events,
-    handle_cancel_turn, handle_get_session_info, read_lock, spawn_session_manager,
-    update_current_turn_status, write_lock,
+    CurrentTurnSnapshot, SessionManagerConfig, SessionQueryService, SessionSlot, SlotStatus,
+    collect_runtime_events, read_lock, spawn_session_manager, update_current_turn_status,
+    write_lock,
 };
 
 fn run_async<T>(future: impl Future<Output = T>) -> T {
@@ -76,12 +76,13 @@ fn get_session_info_uses_cached_stats_when_turn_is_running() {
                 pressure_ratio: Some(42.0 / 1024.0),
             })),
             running_turn: None,
+            pending_provider_binding: None,
             status: SlotStatus::Running,
         },
     );
 
-    let stats =
-        handle_get_session_info(&slots, "session-1").expect("session info should use cache");
+    let query = SessionQueryService::new(&mut slots);
+    let stats = query.session_info("session-1").expect("session info should use cache");
 
     assert_eq!(stats.total_entries, 3);
     assert_eq!(stats.anchor_count, 1);
@@ -160,11 +161,12 @@ fn handle_cancel_turn_marks_running_snapshot_as_cancelled() {
                 pressure_ratio: None,
             })),
             running_turn: Some(handle),
+            pending_provider_binding: None,
             status: SlotStatus::Running,
         },
     );
     let (broadcast_tx, _broadcast_rx) = tokio::sync::broadcast::channel(8);
-    let config = SessionManagerConfig {
+    let _config = SessionManagerConfig {
         sessions_dir: std::path::PathBuf::new(),
         store: Arc::new(agent_store::AiaStore::new(":memory:").expect("memory store")),
         registry: provider_registry::ProviderRegistry::default(),
@@ -182,7 +184,8 @@ fn handle_cancel_turn_marks_running_snapshot_as_cancelled() {
         user_agent: "test-agent".into(),
     };
 
-    let cancelled = handle_cancel_turn(&mut slots, &config, "session-1").expect("cancel succeeds");
+    let mut query = SessionQueryService::new(&mut slots);
+    let cancelled = query.cancel_turn("session-1").expect("cancel succeeds");
 
     assert!(cancelled);
     assert!(control.abort_signal().is_aborted());
