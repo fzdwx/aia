@@ -9,7 +9,7 @@
 - `apps/web/src/index.css`：移除 `streamdown` 的样式源与私有 DOM 选择器适配，改为导入 `markstream-react/index.css` 并覆盖当前聊天区需要的标题、引用、表格、代码块等视觉语义。
 - `apps/web/package.json`、`apps/web/pnpm-lock.yaml`、`apps/web/README.md`、`docs/status.md`、`docs/evolution-log.md`：新增 `markstream-react` 依赖并同步记录 renderer 切换进展。
 **Verification**：`just web-typecheck`、`just web-test`、`just web-build` 通过。
-**Commit**：未提交。
+**Commit**：`e6b6b85 feat(web): switch markdown renderer to markstream-react`。
 **Next direction**：若 `markstream-react` 在高频 streaming 下表现稳定，下一步应继续评估是否把聊天区增量 Markdown 解析进一步前移到 store/流消费层，避免每个 chunk 都在组件内重新解析完整字符串。
 
 ## 2026-03-19 Session 78
