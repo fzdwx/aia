@@ -10,10 +10,7 @@ mod turn;
 pub(crate) use channel::{
     create_channel, delete_channel, list_channels, list_supported_channels, update_channel,
 };
-pub(crate) use provider::{
-    create_provider, delete_provider, get_providers, list_providers, switch_provider,
-    update_provider,
-};
+pub(crate) use provider::ProviderRouteService;
 pub(crate) use session::{
     auto_compress_session, create_handoff, create_session, delete_session, get_current_turn,
     get_history, get_session_info, list_sessions,

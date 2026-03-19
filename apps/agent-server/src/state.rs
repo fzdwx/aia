@@ -2,10 +2,10 @@ use std::sync::{Arc, RwLock};
 
 use agent_store::AiaStore;
 use channel_bridge::{ChannelAdapterCatalog, ChannelProfileRegistry, ChannelRuntimeSupervisor};
-use provider_registry::ProviderRegistry;
 use tokio::sync::broadcast;
 
 use crate::{
+    routes::ProviderRouteService,
     session_manager::{ProviderInfoSnapshot, SessionManagerHandle},
     sse::SsePayload,
 };
@@ -14,8 +14,8 @@ pub type SharedState = Arc<AppState>;
 
 pub struct AppState {
     pub session_manager: SessionManagerHandle,
+    pub provider_routes: ProviderRouteService,
     pub broadcast_tx: broadcast::Sender<SsePayload>,
-    pub provider_registry_snapshot: Arc<RwLock<ProviderRegistry>>,
     pub provider_info_snapshot: Arc<RwLock<ProviderInfoSnapshot>>,
     pub channel_profile_registry_snapshot: Arc<RwLock<ChannelProfileRegistry>>,
     pub channel_mutation_lock: Arc<tokio::sync::Mutex<()>>,

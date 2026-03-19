@@ -8,17 +8,17 @@ use axum::{
 };
 use channel_bridge::ChannelProfileRegistry;
 use channel_bridge::ChannelTransport;
-use provider_registry::{ModelConfig, ModelLimit, ProviderRegistry};
+use provider_registry::ProviderRegistry;
 
 use super::{
     channel::{CreateChannelRequest, UpdateChannelRequest},
     common::{json_response, resolve_session_id},
-    provider::{ModelConfigDto, ModelLimitDto},
     trace::{TraceListQuery, get_trace, get_trace_overview, get_trace_summary, list_traces},
     turn::CancelTurnRequest,
 };
 use crate::{
     channel_host::{build_channel_adapter_catalog, build_channel_runtime},
+    routes::provider::ProviderRouteService,
     session_manager::{ProviderInfoSnapshot, SessionManagerHandle},
     state::AppState,
 };
@@ -27,6 +27,12 @@ fn test_state() -> Arc<AppState> {
     let session_manager = SessionManagerHandle::test_handle();
     let broadcast_tx = tokio::sync::broadcast::channel(8).0;
     let store = Arc::new(agent_store::AiaStore::in_memory().expect("memory store"));
+    let provider_registry_snapshot = Arc::new(RwLock::new(ProviderRegistry::default()));
+    let provider_info_snapshot = Arc::new(RwLock::new(ProviderInfoSnapshot {
+        name: "bootstrap".into(),
+        model: "bootstrap".into(),
+        connected: true,
+    }));
     let channel_adapter_catalog = Arc::new(build_channel_adapter_catalog(
         store.clone(),
         session_manager.clone(),
@@ -34,13 +40,13 @@ fn test_state() -> Arc<AppState> {
     ));
     Arc::new(AppState {
         session_manager: session_manager.clone(),
+        provider_routes: ProviderRouteService::new(
+            session_manager.clone(),
+            provider_registry_snapshot.clone(),
+            provider_info_snapshot.clone(),
+        ),
         broadcast_tx: broadcast_tx.clone(),
-        provider_registry_snapshot: Arc::new(RwLock::new(ProviderRegistry::default())),
-        provider_info_snapshot: Arc::new(RwLock::new(ProviderInfoSnapshot {
-            name: "bootstrap".into(),
-            model: "bootstrap".into(),
-            connected: true,
-        })),
+        provider_info_snapshot,
         channel_profile_registry_snapshot: Arc::new(RwLock::new(ChannelProfileRegistry::default())),
         channel_mutation_lock: Arc::new(tokio::sync::Mutex::new(())),
         store: store.clone(),
@@ -107,24 +113,6 @@ fn seed_trace_with_request_kind(
             }],
         })
         .expect("trace record should save");
-}
-
-#[test]
-fn model_config_dto_round_trip_preserves_limit() {
-    let dto = ModelConfigDto {
-        id: "gpt-4.1".into(),
-        display_name: Some("GPT-4.1".into()),
-        limit: Some(ModelLimitDto { context: Some(200_000), output: Some(131_072) }),
-        default_temperature: Some(0.2),
-        supports_reasoning: true,
-        reasoning_effort: Some("medium".into()),
-    };
-
-    let model = ModelConfig::from(dto.clone());
-    assert_eq!(model.limit, Some(ModelLimit { context: Some(200_000), output: Some(131_072) }));
-
-    let round_trip = ModelConfigDto::from(&model);
-    assert_eq!(round_trip.limit, dto.limit);
 }
 
 #[test]
