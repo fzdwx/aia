@@ -1,5 +1,16 @@
 # 演进日志
 
+## 2026-03-19 Session 73
+
+**Diagnosis**：虽然 channel profile 的 store-backed 收口已经完成，但 `apps/agent-server/src/routes/channel.rs` 仍然同时承载 DTO、配置脱敏/secret merge、持久化+回滚事务、HTTP handler 与内联测试，直接命中仓库 `AGENTS.md` 对“路由/DTO/状态/测试混在一处”的禁忌，也让 app 壳继续偏厚。
+**Decision**：不再继续把逻辑堆在单文件里，而是按仓库现有 Rust 模式把 channel 路由拆成目录模块：`mod.rs` 只做 façade，`dto.rs` 放请求/响应类型，`config.rs` 放纯配置映射与 secret 处理，`mutation.rs` 放持久化/回滚事务编排，`handlers.rs` 保留薄 HTTP 边界，测试移到 sibling `tests.rs`。
+**Changes**：
+- `apps/agent-server/src/routes/channel/{mod.rs,dto.rs,config.rs,mutation.rs,handlers.rs,tests.rs}`：完成按职责拆分；原 `channel.rs` 删除。
+- `docs/status.md`：同步记录 route 壳层已进一步瘦身，channel 控制面不再混杂 DTO、配置处理与回滚事务。
+**Verification**：待本轮统一执行 `cargo fmt --all`、`cargo test -p agent-server`、`cargo check --workspace` 后补充。
+**Commit**：未提交。
+**Next direction**：同类模式下一步应优先继续收口 `apps/agent-server/src/channel_host.rs` 或 `crates/channel-feishu/src/lib.rs`，让 app 壳与 crate 根文件都进一步回到 façade 角色。
+
 ## 2026-03-19 Session 72
 
 **Diagnosis**：channel 抽象与 SQLite 持久化主体已经落地，但仓库里还残留两类收尾问题：一是 `apps/agent-server` 的 `/api/channels` 仍按“先改内存快照、再写 store”执行，若 SQLite 写入失败会把 `channel_profile_registry_snapshot` 留在脏状态；二是 `aia-config` 和文档叙事里还带着历史 `.aia/channels.json` / `channel-registry` 词汇，和当前代码现实不一致。
