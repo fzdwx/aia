@@ -1,27 +1,23 @@
-use std::{
-    path::Path,
-    time::{SystemTime, UNIX_EPOCH},
-};
-
-use crate::bootstrap::ServerInitError;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) const SELF_SESSION_TITLE_PREFIX: &str = "Self evolution";
+const EMBEDDED_SELF_PATH: &str = "docs/self.md";
+const EMBEDDED_SELF_CONTENT: &str = include_str!("../../../../docs/self.md");
 
-pub(crate) async fn load_self_prompt() -> Result<String, ServerInitError> {
-    let workspace_root = std::env::current_dir()
-        .map_err(|error| ServerInitError::new("workspace 根目录获取", error.to_string()))?;
-    let self_path = workspace_root.join("docs/self.md");
-    let content = tokio::fs::read_to_string(&self_path)
-        .await
-        .map_err(|error| ServerInitError::new("docs/self.md 读取", error.to_string()))?;
-    Ok(build_self_prompt(&self_path, &content))
-}
+pub(crate) fn build_initial_self_prompt(startup_task: Option<&str>) -> String {
+    let task_section = startup_task
+        .map(str::trim)
+        .filter(|task| !task.is_empty())
+        .map(|task| {
+            format!(
+                "\n\n本次启动附加任务（来自用户启动参数）：\n{task}\n\n请在遵守上述约束的前提下，优先完成这项任务。"
+            )
+        })
+        .unwrap_or_default();
 
-pub(crate) fn build_self_prompt(path: &Path, content: &str) -> String {
     format!(
-        "请先完整阅读 `{}` 的内容，并把它当作当前自我进化对话的工作约束。不要复述整份文件，只需吸收它，然后直接开始本轮对话。\n\n```md\n{}\n```",
-        path.display(),
-        content.trim()
+        "以下内容来自编译期内嵌的 `{EMBEDDED_SELF_PATH}`。请先完整吸收，不要复述整份文件，只需按其中约束直接开始本轮对话。\n\n<docs-self-md>\n{}\n</docs-self-md>{task_section}",
+        EMBEDDED_SELF_CONTENT.trim()
     )
 }
 
@@ -35,16 +31,24 @@ pub(crate) fn build_self_session_title() -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
-    use super::{SELF_SESSION_TITLE_PREFIX, build_self_prompt, build_self_session_title};
+    use super::{
+        EMBEDDED_SELF_PATH, SELF_SESSION_TITLE_PREFIX, build_initial_self_prompt,
+        build_self_session_title,
+    };
 
     #[test]
-    fn self_prompt_wraps_docs_self_contents() {
-        let prompt = build_self_prompt(Path::new("docs/self.md"), "hello self");
-        assert!(prompt.contains("docs/self.md"));
-        assert!(prompt.contains("hello self"));
+    fn self_prompt_embeds_self_contents() {
+        let prompt = build_initial_self_prompt(None);
+        assert!(prompt.contains(EMBEDDED_SELF_PATH));
+        assert!(prompt.contains("<docs-self-md>"));
         assert!(prompt.contains("直接开始本轮对话"));
+    }
+
+    #[test]
+    fn self_prompt_appends_startup_task() {
+        let prompt = build_initial_self_prompt(Some("stabilize self chat boot flow"));
+        assert!(prompt.contains("启动附加任务"));
+        assert!(prompt.contains("stabilize self chat boot flow"));
     }
 
     #[test]

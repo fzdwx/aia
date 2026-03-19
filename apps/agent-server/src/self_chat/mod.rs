@@ -9,13 +9,16 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use crate::{bootstrap::ServerInitError, state::AppState};
 
 use self::commands::{SelfCommand, parse_self_command, print_help};
-use self::prompt::{build_self_session_title, load_self_prompt};
+use self::prompt::{build_initial_self_prompt, build_self_session_title};
 use self::session::{
     print_session_status, run_handoff, run_manual_compress, submit_prompt_and_wait,
 };
 
-pub async fn run_self_chat(state: Arc<AppState>) -> Result<(), ServerInitError> {
-    let self_prompt = load_self_prompt().await?;
+pub async fn run_self_chat(
+    state: Arc<AppState>,
+    startup_task: Option<String>,
+) -> Result<(), ServerInitError> {
+    let self_prompt = build_initial_self_prompt(startup_task.as_deref());
     let mut events = state.broadcast_tx.subscribe();
     let session = state
         .session_manager
@@ -31,6 +34,9 @@ pub async fn run_self_chat(state: Arc<AppState>) -> Result<(), ServerInitError> 
 
     println!("[self] session: {}", session.id);
     println!("[self] provider: {}/{}", provider_info.name, provider_info.model);
+    if let Some(task) = startup_task.as_deref() {
+        println!("[self] startup task: {task}");
+    }
     print_help();
 
     submit_prompt_and_wait(&state, &mut events, &session.id, self_prompt).await?;

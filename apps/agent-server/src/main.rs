@@ -35,6 +35,6 @@ async fn run(command: CliCommand) -> Result<(), ServerInitError> {
     let state = bootstrap_state().await?;
     match command {
         CliCommand::Serve => run_server(state).await,
-        CliCommand::SelfChat => run_self_chat(state).await,
+        CliCommand::SelfChat { startup_task } => run_self_chat(state, startup_task).await,
     }
 }
