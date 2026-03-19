@@ -111,6 +111,19 @@
 **Commit**：未提交。
 **Next direction**：如果继续向 `openclaw-lark` 看齐，下一步应补上真正的 `UnavailableGuard`：当源消息在飞书侧被撤回/删除时，通过下一次 API 调用识别终止条件，及时停止 reply pipeline，而不是只依赖本地 session/binding 自愈。
 
+## 2026-03-18 Session 71
+
+**Diagnosis**：日志显示 `stream.kind="done"` 会比 `turn_completed` 早数秒到达。代码排查后确认：前端并没有额外等待，它只是在 `turn_completed` 才把 `chatState` 置回 `idle`；而服务端在收到 `StreamEvent::Done` 时既不会广播终末状态，也会在 `turn_completed` 前同步等待 tool trace 持久化。结果就是：LLM 已经不再返回文本，但 UI 还继续显示为 `generating`。
+**Decision**：不把 `done` 直接伪装成真正完成，而是引入一个更准确的中间态 `finishing`：模型流结束后立刻进入“收尾中”，这样用户能立刻看到生成已停止；与此同时把 `persist_tool_trace_spans(...)` 从 `turn_completed` 之前的关键路径移到后台异步任务，减少 tool-heavy turn 的尾延迟。这样既改善体验，又不谎报 turn 已彻底完成。
+**Changes**：
+- `apps/agent-server/src/sse.rs`、`apps/agent-server/src/session_manager/current_turn.rs`：新增 `TurnStatus::Finishing`。
+- `apps/agent-server/src/session_manager.rs`：`StreamEvent::Done` 现在立刻切换到 `finishing` 并广播对应 `Status`；`persist_tool_trace_spans(...)` 改为在 `turn_completed` 广播后后台异步执行，不再阻塞终态 SSE。
+- `apps/web/src/{lib/types.ts,features/chat/message-sections.tsx,stores/chat-store.test.ts}`：前端类型与展示文案补齐 `finishing`，并新增回归测试锁住“done 后立即进入收尾中”的状态切换。
+- `apps/agent-server/src/self_chat/session.rs`：自聊输出补齐 `finishing` 状态打印，保持 CLI 行为一致。
+**Verification**：`cargo fmt --all`、`cargo test -p agent-server`、`./node_modules/.bin/vp test src/stores/chat-store.test.ts`、`./node_modules/.bin/tsc --noEmit` 通过。
+**Commit**：未提交。
+**Next direction**：如果还要继续降低“done → turn_completed”间隔，下一步应进一步追 `openai-adapter` / completion 汇总阶段，确认 `StreamEvent::Done` 是否被过早发出，再决定是否需要引入一个更靠近模型完成语义的 runtime 事件，而不是复用传输层 done。
+
 ## 2026-03-18 Session 61
 
 **Diagnosis**：仓库已有统一的 `session_manager.submit_turn(...)` + SSE/runtime 主链，也已有 provider settings 模式，但还缺一条“外部聊天平台消息 → 现有会话主链”的稳定桥接层；如果直接把飞书协议细节塞进 `session_manager` 或只做前端配置页，都无法真正形成可复用的 channel 能力。
