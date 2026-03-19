@@ -1,5 +1,17 @@
 # 演进日志
 
+## 2026-03-19 Session 78
+
+**Diagnosis**：`agent-server self` 仍在运行时读取 `docs/self.md`，让 CLI 启动依赖工作区文件存在；同时也没有办法在启动时直接附带“这次先做什么”，使自驱模式进入首轮前还要再补一条任务描述。
+**Decision**：把 self prompt 改成编译期内嵌 `docs/self.md`，让终端自聊不再依赖运行时文件读取；同时扩展 CLI，让 `agent-server self <task...>` 把用户提供的附加任务直接拼进首轮 prompt，在不增加第二条初始化 turn 的前提下给自驱模式一个明确起点。
+**Changes**：
+- `apps/agent-server/src/{cli.rs,main.rs}`：`self` 子命令新增可选启动任务参数，并把命令结构改为显式携带 `startup_task`。
+- `apps/agent-server/src/self_chat/{mod.rs,prompt.rs}`：移除运行时读取 `docs/self.md` 的逻辑，改为编译期内嵌 prompt，并在启动时显示/注入附加任务。
+- `README.md`、`docs/{requirements.md,self.md,evolution-log.md}`：同步更新 self 模式现已改为内嵌 prompt，并支持启动附加任务；`docs/self.md` 也同步收口为新的编译期内嵌约束文本。
+**Verification**：`cargo fmt --all`、`cargo check -p agent-server`、`cargo test -p agent-server -- --nocapture`。
+**Commit**：`6c86baf feat: support startup tasks in self chat`。
+**Next direction**：如果继续增强 `self` 模式，下一步可考虑把启动任务与 session 标题或 evolution-log 模板更紧密关联，让“本轮目标”在后续检索与 handoff 中更容易回看。
+
 ## 2026-03-19 Session 73
 
 **Diagnosis**：虽然 channel profile 的 store-backed 收口已经完成，但 `apps/agent-server/src/routes/channel.rs` 仍然同时承载 DTO、配置脱敏/secret merge、持久化+回滚事务、HTTP handler 与内联测试，直接命中仓库 `AGENTS.md` 对“路由/DTO/状态/测试混在一处”的禁忌，也让 app 壳继续偏厚。
