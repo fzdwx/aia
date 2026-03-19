@@ -46,6 +46,18 @@
 **Commit**：未提交。
 **Next direction**：如果继续沿这条线收口，下一步应考虑把 `runtime.rs` 中剩余的 adapter 装配和 reply/job orchestration 再拆成更专注的子模块，或转向 `apps/agent-server/src/session_manager.rs` 这类更高杠杆热点。
 
+## 2026-03-19 Session 77
+
+**Diagnosis**：`session_manager.rs` 仍然很大，但探索结果显示其高风险块（turn worker、provider sync）测试面偏薄；反而 `cancel/history/current-turn/session-info` 这一组 helper 已有直接测试覆盖，是最适合先做 façade 化的低风险切口。
+**Decision**：先不碰流式执行和 provider 重绑主线，而是优先把 query/cancel 这一组下沉到 `session_manager/query_ops.rs`，让 `session_manager.rs` 保持命令循环与高风险 orchestration，先用已有测试保护最稳的一刀。
+**Changes**：
+- `apps/agent-server/src/session_manager/query_ops.rs`：新增并承接 `handle_cancel_turn`、`handle_get_history`、`handle_get_current_turn`、`handle_get_session_info`。
+- `apps/agent-server/src/session_manager.rs`：改为从子模块导入上述 handler，删除内联实现。
+- `docs/status.md`：同步记录 `session_manager` 已开始 façade 化。
+**Verification**：`cargo fmt --all`、`cargo test -p agent-server`、`cargo check --workspace` 通过。
+**Commit**：未提交。
+**Next direction**：下一步若继续拆 `session_manager`，建议在补测试后再碰 `provider_sync` 或 `turn_worker`，不要直接把高并发主线大块挪动。
+
 ## 2026-03-19 Session 72
 
 **Diagnosis**：channel 抽象与 SQLite 持久化主体已经落地，但仓库里还残留两类收尾问题：一是 `apps/agent-server` 的 `/api/channels` 仍按“先改内存快照、再写 store”执行，若 SQLite 写入失败会把 `channel_profile_registry_snapshot` 留在脏状态；二是 `aia-config` 和文档叙事里还带着历史 `.aia/channels.json` / `channel-registry` 词汇，和当前代码现实不一致。

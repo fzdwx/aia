@@ -1,5 +1,6 @@
 mod current_turn;
 mod handle;
+mod query_ops;
 #[cfg(test)]
 mod tests;
 mod tool_trace;
@@ -28,6 +29,9 @@ use current_turn::{
     update_current_turn_from_stream, update_current_turn_status,
 };
 pub use handle::SessionManagerHandle;
+use query_ops::{
+    handle_cancel_turn, handle_get_current_turn, handle_get_history, handle_get_session_info,
+};
 use tool_trace::persist_tool_trace_spans;
 pub use types::SessionManagerConfig;
 use types::{RuntimeReturn, SessionCommand, SessionId, SessionSlot, SlotStatus};
@@ -509,63 +513,6 @@ async fn run_turn_worker(
     }
 
     RuntimeReturn { session_id, runtime, subscriber }
-}
-
-fn handle_cancel_turn(
-    slots: &mut HashMap<SessionId, SessionSlot>,
-    _config: &SessionManagerConfig,
-    session_id: &str,
-) -> Result<bool, RuntimeWorkerError> {
-    let slot = slots
-        .get_mut(session_id)
-        .ok_or_else(|| RuntimeWorkerError::not_found(format!("session not found: {session_id}")))?;
-
-    if slot.status != SlotStatus::Running {
-        return Ok(false);
-    }
-
-    let Some(running_turn) = slot.running_turn.as_ref() else {
-        return Err(RuntimeWorkerError::internal("running turn handle missing"));
-    };
-
-    running_turn.control.cancel();
-    update_current_turn_status(&slot.current_turn, TurnStatus::Cancelled);
-    Ok(true)
-}
-
-fn handle_get_history(
-    slots: &HashMap<SessionId, SessionSlot>,
-    session_id: &str,
-) -> Result<Vec<TurnLifecycle>, RuntimeWorkerError> {
-    let slot = slots
-        .get(session_id)
-        .ok_or_else(|| RuntimeWorkerError::not_found(format!("session not found: {session_id}")))?;
-    Ok(read_lock(&slot.history).clone())
-}
-
-fn handle_get_current_turn(
-    slots: &HashMap<SessionId, SessionSlot>,
-    session_id: &str,
-) -> Result<Option<CurrentTurnSnapshot>, RuntimeWorkerError> {
-    let slot = slots
-        .get(session_id)
-        .ok_or_else(|| RuntimeWorkerError::not_found(format!("session not found: {session_id}")))?;
-    Ok(read_lock(&slot.current_turn).clone())
-}
-
-fn handle_get_session_info(
-    slots: &HashMap<SessionId, SessionSlot>,
-    session_id: &str,
-) -> Result<ContextStats, RuntimeWorkerError> {
-    let slot = slots
-        .get(session_id)
-        .ok_or_else(|| RuntimeWorkerError::not_found(format!("session not found: {session_id}")))?;
-
-    if let Some(runtime) = slot.runtime.as_ref() {
-        return Ok(runtime.context_stats());
-    }
-
-    Ok(read_lock(&slot.context_stats).clone())
 }
 
 fn handle_create_handoff(
