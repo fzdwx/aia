@@ -229,11 +229,11 @@ README 里真正难的是这些能力：
 负责 Web ↔ 运行时桥接：
 
 - 基于 axum 构建 HTTP + SSE 服务器，监听端口 3434
-- `agent-server` 二进制默认仍启动 HTTP + SSE server，但现在也提供 `self` 子命令：读取 `docs/self.md` 后直接走同一套 session manager / runtime turn 主链进行终端对话，用于自我进化与无前端场景下的本地驱动；CLI 内的 `/help`、`/status`、`/compress`、`/handoff` 同样复用现有 session manager 命令面，而不是旁路操作 runtime；格式错误的内建命令会在 CLI 本地直接报 usage，而不会误作为普通 prompt 送给模型
+- `agent-server` 二进制默认仍启动 HTTP + SSE server，但现在也提供 `self` 子命令：以编译期内嵌的 `docs/self.md` 约束直接走同一套 session manager / runtime turn 主链进行终端对话，用于自我进化与无前端场景下的本地驱动；CLI 还支持在 `self` 后追加启动任务参数，让首轮直接带着用户指定方向开始；CLI 内的 `/help`、`/status`、`/compress`、`/handoff` 同样复用现有 session manager 命令面，而不是旁路操作 runtime；格式错误的内建命令会在 CLI 本地直接报 usage，而不会误作为普通 prompt 送给模型
 - 启动时从 `.aia/providers.json`、`.aia/session.jsonl`、`.aia/store.sqlite3` 恢复本地状态
 - 通过后台 runtime worker 独占 `AgentRuntime`、provider registry 与 session 落盘状态
 - HTTP 路由已按 `provider`、`session`、`trace`、`turn` 领域模块拆分，共享错误响应、session 解析与 JSON helper 收口到 `routes::common`，避免 app 壳控制面继续堆在单个超大入口文件里
-- `session_manager` 已进一步按职责拆成子模块：命令发送 handle、共享 slot/command 类型、current-turn 流式投影、tool trace 持久化与测试辅助分别独立，主文件只保留 session loop、slot 生命周期与 provider/runtime 同步主流程
+- `session_manager` 已进一步按职责拆成子模块：命令发送 handle、共享 slot/command 类型、query/cancel 读取、current-turn 流式投影、tool trace 持久化、provider 注册表同步、turn worker/SSE 投影与测试辅助分别独立；根模块本身也已收口为 `SessionManagerLoop` 与 `SessionSlotFactory` 这类显式职责对象，provider/query/turn/tool-trace 都由各自服务对象承接，避免 provider 重绑与 turn 执行细节长期滞留在 façade 根模块
 - `model` 也已按职责拆成子模块：bootstrap mock、trace 事件收集/摘要/helper 与测试分别独立，主文件只保留 provider 选择、`ServerModel` 适配与 trace 落盘主流程
 - `runtime_worker` 已按职责拆成子模块：共享类型、tape 快照重建/legacy decode helper 与测试分别独立，主文件只保留稳定 re-export 入口
 - `runtime_worker::projection` 现承接 current-turn 共享投影语义：live stream 更新与 tape→snapshot 重建共用对象归一化、tool block 构造与 `TurnLifecycle` / `TurnBlock` → `CurrentTurn*` 映射 helper，避免 `session_manager` 与 `runtime_worker` 分别维护两套 `CurrentTurnBlock` / `CurrentToolOutput` 投影逻辑
