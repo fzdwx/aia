@@ -170,7 +170,7 @@ fn handle_cancel_turn_marks_running_snapshot_as_cancelled() {
         sessions_dir: std::path::PathBuf::new(),
         store: Arc::new(agent_store::AiaStore::new(":memory:").expect("memory store")),
         registry: provider_registry::ProviderRegistry::default(),
-        store_path: std::path::PathBuf::new(),
+        provider_registry_path: std::path::PathBuf::new(),
         broadcast_tx,
         provider_registry_snapshot: Arc::new(RwLock::new(
             provider_registry::ProviderRegistry::default(),
@@ -212,7 +212,7 @@ fn spawned_turn_worker_completes_bootstrap_turn() {
             sessions_dir,
             store,
             registry: registry.clone(),
-            store_path: temp_root.join("providers.json"),
+            provider_registry_path: temp_root.join("providers.json"),
             broadcast_tx,
             provider_registry_snapshot: Arc::new(RwLock::new(registry)),
             provider_info_snapshot: Arc::new(RwLock::new(super::ProviderInfoSnapshot {

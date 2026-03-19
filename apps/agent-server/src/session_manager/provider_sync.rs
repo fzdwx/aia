@@ -73,8 +73,11 @@ impl<'a> RuntimeSyncContext<'a> {
         };
 
         let (identity, new_model) =
-            build_model_from_selection(selection.clone(), Some(self.store.clone()))
-                .map_err(|error| RuntimeWorkerError::internal(error.to_string()))?;
+            build_model_from_selection(selection.clone(), Some(self.store.clone())).map_err(
+                |error: crate::model::ServerSetupError| {
+                    RuntimeWorkerError::internal(error.to_string())
+                },
+            )?;
         runtime.replace_model(new_model, identity);
         runtime.set_prompt_cache(prompt_cache_for_selection(&selection, self.session_id));
         Ok(())
@@ -228,7 +231,7 @@ impl<'a> ProviderSyncService<'a> {
         let (info, _, _, _) =
             prepare_runtime_sync(&candidate_registry, Some(self.config.store.clone()))?;
 
-        candidate_registry.save(&self.config.store_path).map_err(|error| {
+        candidate_registry.save(&self.config.provider_registry_path).map_err(|error| {
             RuntimeWorkerError::internal(format!("provider registry save failed: {error}"))
         })?;
 
@@ -355,7 +358,7 @@ mod tests {
             sessions_dir: root.join("sessions"),
             store,
             registry: registry.clone(),
-            store_path: root.join("providers.json"),
+            provider_registry_path: root.join("providers.json"),
             broadcast_tx: tokio::sync::broadcast::channel(8).0,
             provider_registry_snapshot: Arc::new(RwLock::new(registry)),
             provider_info_snapshot: Arc::new(RwLock::new(provider_info)),

@@ -328,8 +328,11 @@ impl<'a> SessionSlotFactory<'a> {
         let selection = choose_provider_for_tape(&self.config.registry, &tape);
         let prompt_cache = prompt_cache_for_selection(&selection, session_id);
         let (identity, model) =
-            build_model_from_selection(selection, Some(self.config.store.clone()))
-                .map_err(|error| RuntimeWorkerError::internal(error.to_string()))?;
+            build_model_from_selection(selection, Some(self.config.store.clone())).map_err(
+                |error: crate::model::ServerSetupError| {
+                    RuntimeWorkerError::internal(error.to_string())
+                },
+            )?;
 
         let session_append_path = session_path.clone();
         let workspace_root = self.config.workspace_root.clone();
@@ -415,8 +418,9 @@ fn prepare_runtime_sync(
         .map(ProviderLaunchChoice::OpenAi)
         .unwrap_or(ProviderLaunchChoice::Bootstrap);
 
-    let (identity, model) = build_model_from_selection(selection, trace_store)
-        .map_err(|error| RuntimeWorkerError::internal(error.to_string()))?;
+    let (identity, model) = build_model_from_selection(selection, trace_store).map_err(
+        |error: crate::model::ServerSetupError| RuntimeWorkerError::internal(error.to_string()),
+    )?;
 
     let binding = match registry.active_provider() {
         Some(profile) => SessionProviderBinding::Provider {
