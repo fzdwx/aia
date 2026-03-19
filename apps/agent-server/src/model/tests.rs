@@ -10,7 +10,7 @@ use agent_core::{
     AbortSignal, CompletionRequest, ConversationItem, LanguageModel, Message, ModelDisposition,
     ModelIdentity, Role,
 };
-use agent_store::{AiaStore, LlmTraceStatus, LlmTraceStore};
+use agent_store::{AiaStore, LlmTraceStatus};
 use provider_registry::{ModelConfig, ModelLimit, ProviderKind, ProviderProfile};
 use serde_json::json;
 
@@ -29,6 +29,22 @@ fn complete_model<M: LanguageModel>(
     request: CompletionRequest,
 ) -> Result<agent_core::Completion, M::Error> {
     run_async(model.complete_streaming(request, &AbortSignal::new(), &mut |_| {}))
+}
+
+fn wait_for_trace(store: &Arc<AiaStore>, id: &str) -> agent_store::LlmTraceRecord {
+    let trace_id = id.to_string();
+    let store = Arc::clone(store);
+    run_async(async move {
+        for _ in 0..50 {
+            if let Some(trace) =
+                store.get_async(trace_id.clone()).await.expect("trace query should succeed")
+            {
+                return trace;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("trace should exist")
+    })
 }
 
 #[test]
@@ -174,7 +190,7 @@ fn responses_model_call_writes_llm_trace_record() {
     assert_eq!(identity.name, "gpt-5.4");
     assert_eq!(completion.plain_text(), "trace ok");
 
-    let trace = store.get("trace-1").expect("trace query should succeed").expect("trace exists");
+    let trace = wait_for_trace(&store, "trace-1");
     assert_eq!(trace.trace_id, "aia-trace-turn-1");
     assert_eq!(trace.parent_span_id.as_deref(), Some("aia-span-turn-1-root"));
     assert_eq!(trace.operation_name, "chat");
@@ -263,7 +279,7 @@ fn responses_http_502_writes_failed_trace_record() {
     handle.join().expect("server thread should exit");
     assert!(error.to_string().contains("502"));
 
-    let trace = store.get("trace-502").expect("trace query should succeed").expect("trace exists");
+    let trace = wait_for_trace(&store, "trace-502");
     assert_eq!(trace.status, LlmTraceStatus::Failed);
     assert_eq!(trace.status_code, Some(502));
     assert!(trace.response_body.as_deref().is_some_and(|body| body.contains("gateway failure")));

@@ -122,8 +122,13 @@ impl ServerModel {
                 .map_err(ServerModelError::OpenAi),
         };
 
-        self.persist_trace(trace_seed, started_at_ms, started.elapsed(), &result, event_collector)
-            .await;
+        self.persist_trace_detached(
+            trace_seed,
+            started_at_ms,
+            started.elapsed(),
+            &result,
+            event_collector,
+        );
         result
     }
 
@@ -204,7 +209,7 @@ impl ServerModel {
         })
     }
 
-    async fn persist_trace(
+    fn persist_trace_detached(
         &self,
         trace_seed: Option<LlmTraceRecord>,
         started_at_ms: u64,
@@ -212,7 +217,7 @@ impl ServerModel {
         result: &Result<Completion, ServerModelError>,
         mut event_collector: TraceEventCollector,
     ) {
-        let Some(store) = self.trace_store.as_ref() else {
+        let Some(store) = self.trace_store.as_ref().cloned() else {
             return;
         };
         let Some(mut record) = trace_seed else {
@@ -252,9 +257,11 @@ impl ServerModel {
             }
         }
 
-        if let Err(error) = store.record_async(record).await {
-            eprintln!("trace record failed: {error}");
-        }
+        std::thread::spawn(move || {
+            if let Err(error) = agent_store::LlmTraceStore::record(store.as_ref(), &record) {
+                eprintln!("trace record failed: {error}");
+            }
+        });
     }
 }
 
