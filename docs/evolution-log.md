@@ -11,6 +11,17 @@
 **Commit**：未提交。
 **Next direction**：同类模式下一步应优先继续收口 `apps/agent-server/src/channel_host.rs` 或 `crates/channel-feishu/src/lib.rs`，让 app 壳与 crate 根文件都进一步回到 façade 角色。
 
+## 2026-03-19 Session 74
+
+**Diagnosis**：在拆薄 `routes/channel` 之后，`apps/agent-server/src/channel_host.rs` 仍然把宿主 trait 实现、Feishu adapter 装配、SSE→channel 事件映射与测试堆在同一个文件里，继续拉厚 app 壳桥接层，也不符合仓库里 `runtime_worker` / `routes/channel` 这类 façade + 子模块的既有 Rust 模式。
+**Decision**：继续按同一套仓库范式收口：把 `channel_host` 改成目录模块，`mod.rs` 只保留稳定导出；`host.rs` 承接 `ChannelRuntimeHost` / `ChannelSessionService` / `ChannelBindingStore` 实现，`mapping.rs` 承接 `SsePayload` 到通用 channel 事件的纯映射，`runtime.rs` 只做 catalog/runtime/sync 装配，测试迁到 sibling `tests.rs`。
+**Changes**：
+- `apps/agent-server/src/channel_host/{mod.rs,host.rs,mapping.rs,runtime.rs,tests.rs}`：完成职责拆分；原 `channel_host.rs` 删除。
+- `docs/status.md`：同步记录 app 壳 channel host 已进一步瘦身。
+**Verification**：待本轮统一执行 `cargo fmt --all`、`cargo test -p agent-server`、`cargo check --workspace` 后补充。
+**Commit**：未提交。
+**Next direction**：如果继续沿 `AGENTS.md` 收口后端，下一优先级应落到 `crates/channel-feishu/src/lib.rs`，把 crate 根文件也收回 façade 角色。
+
 ## 2026-03-19 Session 72
 
 **Diagnosis**：channel 抽象与 SQLite 持久化主体已经落地，但仓库里还残留两类收尾问题：一是 `apps/agent-server` 的 `/api/channels` 仍按“先改内存快照、再写 store”执行，若 SQLite 写入失败会把 `channel_profile_registry_snapshot` 留在脏状态；二是 `aia-config` 和文档叙事里还带着历史 `.aia/channels.json` / `channel-registry` 词汇，和当前代码现实不一致。
