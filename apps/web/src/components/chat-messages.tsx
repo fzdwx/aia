@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react"
 import {
   CompressionNotice,
   MemoizedStreamingView,
@@ -70,7 +76,7 @@ export function ChatMessages() {
     } catch {
       autoLoadingOlderTurnsRef.current = false
     }
-  }, [activeSessionId, loadOlderTurns])
+  }, [loadOlderTurns])
 
   useEffect(() => {
     historyHasMoreRef.current = historyHasMore

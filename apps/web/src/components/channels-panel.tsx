@@ -142,8 +142,9 @@ export function ChannelsPanel() {
   const selectedDefinition = useMemo(() => {
     if (selectedTransport) {
       const selected =
-        supportedChannels.find((channel) => channel.transport === selectedTransport) ??
-        null
+        supportedChannels.find(
+          (channel) => channel.transport === selectedTransport
+        ) ?? null
       if (selected) return selected
     }
     return supportedChannels[0] ?? null
@@ -173,7 +174,10 @@ export function ChannelsPanel() {
     if (configuredChannel) {
       setForm({
         enabled: configuredChannel.enabled,
-        config: normalizeConfigForForm(selectedDefinition, configuredChannel.config),
+        config: normalizeConfigForForm(
+          selectedDefinition,
+          configuredChannel.config
+        ),
       })
       return
     }
@@ -255,11 +259,14 @@ export function ChannelsPanel() {
 
         {!selectedDefinition ? (
           <div className="px-1 py-8">
-            <p className="text-sm font-medium">No supported channels available.</p>
+            <p className="text-sm font-medium">
+              No supported channels available.
+            </p>
             <p className="mt-2 text-[12px] leading-5 text-muted-foreground">
               {channelsLoading
                 ? "Loading channel catalog..."
-                : channelsError ?? "The server did not return any supported channel type."}
+                : (channelsError ??
+                  "The server did not return any supported channel type.")}
             </p>
           </div>
         ) : (
@@ -290,7 +297,9 @@ export function ChannelsPanel() {
               <section className="rounded-xl bg-amber-500/10 px-4 py-3 text-[12px] leading-5 text-amber-950 dark:text-amber-100">
                 Multiple saved profiles were found for this transport. This
                 panel is currently editing the first configured profile:
-                <span className="ml-1 font-medium">{configuredChannel?.id}</span>
+                <span className="ml-1 font-medium">
+                  {configuredChannel?.id}
+                </span>
               </section>
             ) : null}
 
@@ -377,13 +386,13 @@ export function ChannelsPanel() {
             <Separator className="opacity-40" />
 
             <label className="flex items-center justify-between gap-3 py-1 text-[12px] text-foreground">
-                <div className="min-w-0">
-                  <p className="font-medium">Enabled</p>
-                  <p className="mt-1 text-[11px] text-muted-foreground">
-                    Turn this off to keep the profile stored without running its
-                    transport worker.
-                  </p>
-                </div>
+              <div className="min-w-0">
+                <p className="font-medium">Enabled</p>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Turn this off to keep the profile stored without running its
+                  transport worker.
+                </p>
+              </div>
               <Switch
                 checked={form.enabled}
                 onCheckedChange={(checked: boolean) =>
@@ -405,7 +414,9 @@ export function ChannelsPanel() {
                 disabled={submitting || !canSubmit}
                 className="sm:min-w-[200px]"
               >
-                {configuredChannel ? "Save Configuration" : "Create Configuration"}
+                {configuredChannel
+                  ? "Save Configuration"
+                  : "Create Configuration"}
               </Button>
             </div>
           </form>

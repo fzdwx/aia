@@ -36,7 +36,10 @@ function compressionTrace(overrides?: Partial<TraceListItem>): TraceListItem {
   }
 }
 
-function loopFromTrace(trace: TraceListItem, overrides?: Partial<TraceLoopItem>): TraceLoopItem {
+function loopFromTrace(
+  trace: TraceListItem,
+  overrides?: Partial<TraceLoopItem>
+): TraceLoopItem {
   return {
     id: trace.trace_id,
     trace_id: trace.trace_id,
@@ -50,7 +53,9 @@ function loopFromTrace(trace: TraceListItem, overrides?: Partial<TraceLoopItem>)
     latest_started_at_ms: trace.started_at_ms,
     started_at_ms: trace.started_at_ms,
     finished_at_ms:
-      trace.duration_ms != null ? trace.started_at_ms + trace.duration_ms : null,
+      trace.duration_ms != null
+        ? trace.started_at_ms + trace.duration_ms
+        : null,
     duration_ms: trace.duration_ms,
     total_tokens: trace.total_tokens ?? 0,
     total_cached_tokens: trace.cached_tokens ?? 0,
@@ -78,18 +83,20 @@ describe("trace presentation", () => {
     const groups = buildTraceLoopGroups(
       [
         loopFromTrace(compressionTrace()),
-        loopFromTrace(compressionTrace({
-          id: "trace-chat-1",
-          trace_id: "trace-chat-group",
-          span_id: "trace-chat-1",
-          root_span_id: "trace-chat-root",
-          parent_span_id: "trace-chat-root",
-          turn_id: "turn-chat-1",
-          run_id: "turn-chat-1",
-          operation_name: "chat",
-          request_kind: "completion",
-          user_message: "hello",
-        })),
+        loopFromTrace(
+          compressionTrace({
+            id: "trace-chat-1",
+            trace_id: "trace-chat-group",
+            span_id: "trace-chat-1",
+            root_span_id: "trace-chat-root",
+            parent_span_id: "trace-chat-root",
+            turn_id: "turn-chat-1",
+            run_id: "turn-chat-1",
+            operation_name: "chat",
+            request_kind: "completion",
+            user_message: "hello",
+          })
+        ),
       ],
       []
     )
