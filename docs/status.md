@@ -10,7 +10,8 @@
 - 最新宿主桥接收口：`apps/agent-server/src/channel_host` 也已从单文件拆成目录模块；当前由 façade `mod.rs` 暴露稳定装配接口，宿主 trait 实现、SSE→channel 事件映射与运行态装配分别下沉，继续把 `agent-server` 保持在“桥接壳层”而非巨石入口。
 - 最新 channel-feishu 收口：`crates/channel-feishu/src/lib.rs` 已收回为薄 façade，公开接口继续保持 `build_feishu_runtime_adapter` 与 `FeishuMessageTarget`，具体实现整体下沉到 `runtime.rs`，不再把 2800+ 行实现细节长期堆在 crate 根文件。
 - 最新 channel-feishu 内部细拆：`crates/channel-feishu/src/runtime.rs` 又继续按职责拆出 `config.rs`、`protocol.rs`、`card.rs` 与 `tests.rs`；配置 schema/解析、协议 DTO/帧编解码、卡片状态机/请求构造与测试已分层，主流程文件开始回到“长连接与回复编排主线”角色。
-- 最新 session_manager 收口：`apps/agent-server/src/session_manager.rs` 已先把最稳的 query/cancel 逻辑拆到 `session_manager/query_ops.rs`；主模块继续保留命令循环与高风险 turn/provider 主线，`cancel/history/current-turn/session-info` 这一组已从 façade 中下沉，且现有测试已覆盖其核心行为。
+- 最新 session_manager 收口：`apps/agent-server/src/session_manager.rs` 在先前拆出 `query_ops` 之后，又继续把 provider 注册表同步与 turn worker/SSE 投影主线下沉到 `session_manager/{provider_sync,turn_execution}.rs`；同时根模块也已从“散落函数集合”收口为 `SessionManagerLoop`、`SessionSlotFactory` 等职责对象，provider/query/turn/tool-trace 分别由显式服务对象承接，避免同一文件继续混合运行时归还、SSE 广播与 provider 重绑细节。
+- 最新 self-chat 收口：`agent-server self` 不再在运行时读取 `docs/self.md`，而是改为编译期内嵌 prompt；同时 `self` 子命令现在支持附加启动任务参数，让首轮对话可直接带着用户指定目标启动。
 - 最新 channel 抽象进展：`channel-bridge` 现在不只承接 session 绑定恢复、turn 前预压缩与消息回执幂等 helper，还新增了通用 `ChannelRuntimeAdapter` / `ChannelRuntimeSupervisor` 与去平台化的 `ChannelRuntimeHost` / `ChannelRuntimeEvent` 边界；与此同时新增 `channel-feishu` crate，飞书 WebSocket、CardKit、回复控制与协议实现已从 `apps/agent-server` 迁出，`agent-server` 现在只保留宿主注册、状态装配与 SSE→通用 channel 运行时事件映射。
 - 最新飞书修复进展：私聊回复路径已从“总是 reply 当前消息”收紧为“私聊按 `chat_id` 直发、群聊按需 reply/thread”；SSE 现已补齐 `current_turn_started` 事件，前端对外部 channel 触发的当前执行态支持即时显示与流式恢复，不再依赖手动刷新；飞书消息进入处理中后会先加 `Typing` 表情，结束后再移除；同时飞书回包已进一步切到 `CardKit`：先创建 card entity，再用 `element_id` 按流事件更新正文，最后关闭 streaming mode 并收口为最终卡片。
 - 最新飞书消息覆盖修复：同一个 turn 内若模型产出多段 assistant message，飞书最终卡片不再只取最后一段 `assistant_message`，而是优先按 `TurnBlock::Assistant` 顺序拼接所有回复块，避免后一段覆盖前一段。
@@ -127,6 +128,7 @@
 - 完成 trace 查询路由的 async 控制面收口：`/api/traces`、`/api/traces/{id}` 与 `/api/traces/summary` 已去掉 per-request `spawn_blocking` 包装，直接复用共享 SQLite store 读取路径，并补齐了路由回归测试
 - 完成 `apps/agent-server` 路由模块化：`routes.rs` 不再承载全部 provider/session/trace/turn handler，现已拆分为 `provider`、`session`、`trace`、`turn`、`common` 与独立测试模块，并把重复的 session 解析、JSON/error/ok 响应 helper 收口到共享模块
 - 完成 `apps/agent-server` 的 `session_manager` 模块化：主文件只保留 session loop、slot 生命周期与 provider/runtime 同步逻辑；命令发送模板、共享类型、current-turn 流式投影、tool trace 持久化与测试都已分别拆到 `session_manager::{handle,types,current_turn,tool_trace,tests}`
+- 完成 `apps/agent-server` 的 `session_manager` 第二轮收口：provider 注册表同步与 turn worker/SSE 投影已进一步拆到 `session_manager::{provider_sync,turn_execution}`，主文件继续缩回 façade 式编排入口
 - 完成 `apps/agent-server` 的 `model` 模块化：主文件只保留 `ServerModel`、provider 选择与 trace 落盘主流程；bootstrap mock、trace helper 与测试分别拆到 `model::{bootstrap,trace,tests}`
 - 完成 `agent-store::trace` 模块化：根文件只保留 trace 类型与 trait；schema 初始化、store 实现、row 映射/JSON 解码与测试分别拆到 `trace::{schema,store,mapping,tests}`，并收口了重复的 JSON 列解析逻辑
 - 完成 `apps/agent-server` 的 `runtime_worker` 模块化：根文件只保留薄 façade；共享类型、tape 快照重建/legacy decode helper 与测试分别拆到 `runtime_worker::{types,snapshots,tests}`
@@ -171,7 +173,8 @@
 - 完成 compression 日志独立视图：`apps/agent-server` 的 trace 列表/汇总已支持按 `request_kind` 过滤，`apps/web` 把普通对话 trace 与上下文压缩日志拆成独立视图，不再混合展示
 - 完成 trace 首屏请求合并与查询提速：`apps/agent-server` 新增 `/api/traces/overview` 单次概览读取，`apps/web` 的 trace store 会合并同页重复刷新，`agent-store` 也已为 trace 列表/汇总热点查询补齐复合索引
 - 修正 `/api/traces/overview` 分页语义：`agent-store` 的 trace page 现真正按返回 `items` 数量分页，`page_size` 不再只是“loop 数上限”；同时 overview summary 也已落到本地 SQLite 快照表 `llm_trace_overview_summaries`，减少每次请求重新聚合扫描
-- 完成 `agent-server` 基础 CLI 双入口：二进制默认仍启动 HTTP+SSE server，同时新增 `self` 子命令读取 `docs/self.md` 并直接进入终端对话；其 turn 提交、自动预压缩与事件消费复用同一套 session manager / runtime 主链，而不是另造一条 CLI 专用 agent loop
+- 完成 `agent-server` 基础 CLI 双入口：二进制默认仍启动 HTTP+SSE server，同时新增 `self` 子命令以内嵌 `docs/self.md` prompt 直接进入终端对话；其 turn 提交、自动预压缩与事件消费复用同一套 session manager / runtime 主链，而不是另造一条 CLI 专用 agent loop
+- 完成 `agent-server self` 启动任务注入：`self` 子命令现可在启动时附带用户想优先处理的任务文本，并把它拼进首轮 prompt，而不必先进对话后再手动补一条说明
 - 完成 `agent-server self` 首批内建命令：`/help`、`/status`、`/compress`、`/handoff <name> <summary>` 已接到现有 session manager 命令面，便于在终端自我进化模式下查看命令说明、上下文压力、手动压缩和创建 handoff，而不必回到 Web；格式错误的内建命令也会在本地直接返回 usage，而不是误发给模型
 - 完成 Web 聊天区一次 session 切换滚动抖动收口：`ChatMessages` 在切换 session 时改为用 `useLayoutEffect` 同步恢复到底部，避免首帧先渲染旧滚动位置再跳动到最新消息
 - 完成 `read` 工具元信息文案纠偏：聊天内工具时间线里，`read` 的 meta 改为显示真实 1-based 行号范围（如 `L121-160`），不再把 `offset` 和 `lines_read` 误显示成含糊区间
