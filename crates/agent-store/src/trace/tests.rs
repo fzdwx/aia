@@ -1,8 +1,14 @@
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use serde_json::json;
 
-use super::{LlmTraceEvent, LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus, LlmTraceStore};
+use super::{
+    LlmTraceDashboardRange, LlmTraceEvent, LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus,
+    LlmTraceStore,
+};
 use crate::AiaStore;
 
 #[test]
@@ -585,4 +591,114 @@ fn mixed_non_tool_loop_shapes_are_rejected() {
     assert_eq!(summary.total_requests, 1);
     assert_eq!(summary.unique_models, 1);
     assert_eq!(summary.total_tokens, 15);
+}
+
+#[test]
+fn dashboard_activity_rollup_tracks_day_moves_distinct_sessions_and_backfill() {
+    let store = AiaStore::in_memory().expect("store should initialize");
+    let day_ms = 24 * 60 * 60 * 1000_u64;
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after unix epoch")
+        .as_millis() as u64;
+    let build_record = |id: &str,
+                        trace_id: &str,
+                        session_id: &str,
+                        step_index: u32,
+                        started_at_ms: u64,
+                        total_tokens: u64| LlmTraceRecord {
+        id: id.into(),
+        trace_id: trace_id.into(),
+        span_id: id.into(),
+        parent_span_id: Some(format!("{trace_id}-root")),
+        root_span_id: format!("{trace_id}-root"),
+        operation_name: "chat".into(),
+        span_kind: LlmTraceSpanKind::Client,
+        session_id: Some(session_id.into()),
+        turn_id: format!("turn-{trace_id}"),
+        run_id: format!("run-{trace_id}"),
+        request_kind: "completion".into(),
+        step_index,
+        provider: "openai".into(),
+        protocol: "openai-responses".into(),
+        model: "gpt-5.4".into(),
+        base_url: "https://api.example.com".into(),
+        endpoint_path: "/responses".into(),
+        streaming: false,
+        started_at_ms,
+        finished_at_ms: Some(started_at_ms + 25),
+        duration_ms: Some(25),
+        status_code: Some(200),
+        status: LlmTraceStatus::Succeeded,
+        stop_reason: Some("stop".into()),
+        error: None,
+        request_summary: json!({"user_message": "dashboard activity"}),
+        provider_request: json!({}),
+        response_summary: json!({}),
+        response_body: None,
+        input_tokens: Some(total_tokens.saturating_sub(5)),
+        output_tokens: Some(5),
+        total_tokens: Some(total_tokens),
+        cached_tokens: Some(0),
+        otel_attributes: json!({}),
+        events: vec![],
+    };
+
+    let day_one = now_ms.saturating_sub(2 * day_ms);
+    let day_two = now_ms.saturating_sub(day_ms);
+
+    store
+        .record(&build_record("loop-a-step-0", "loop-a", "session-1", 0, day_one + 100, 15))
+        .expect("first loop record should persist");
+    store
+        .record(&build_record("loop-a-step-1", "loop-a", "session-1", 1, day_two + 200, 24))
+        .expect("loop update should persist");
+    store
+        .record(&build_record("loop-b-step-0", "loop-b", "session-1", 0, day_two + 400, 18))
+        .expect("same-session loop should persist");
+    store
+        .record(&build_record("loop-c-step-0", "loop-c", "session-2", 0, day_two + 800, 30))
+        .expect("second-session loop should persist");
+
+    let dashboard = store
+        .trace_dashboard(LlmTraceDashboardRange::Month)
+        .expect("dashboard query should succeed");
+    let day_one_bucket = (day_one / day_ms) * day_ms;
+    let day_two_bucket = (day_two / day_ms) * day_ms;
+    let day_one_point = dashboard
+        .activity
+        .iter()
+        .find(|point| point.day_start_ms == day_one_bucket)
+        .expect("day one bucket should exist");
+    let day_two_point = dashboard
+        .activity
+        .iter()
+        .find(|point| point.day_start_ms == day_two_bucket)
+        .expect("day two bucket should exist");
+
+    assert_eq!(day_one_point.total_requests, 0);
+    assert_eq!(day_one_point.total_sessions, 0);
+    assert_eq!(day_two_point.total_requests, 3);
+    assert_eq!(day_two_point.total_sessions, 2);
+    assert_eq!(day_two_point.total_tokens, 87);
+
+    store
+        .with_conn(|conn| {
+            conn.execute("DELETE FROM llm_trace_activity_daily", [])?;
+            conn.execute("DELETE FROM llm_trace_activity_daily_sessions", [])?;
+            Ok(())
+        })
+        .expect("clearing activity rollups should succeed");
+
+    let rebuilt = store
+        .trace_dashboard(LlmTraceDashboardRange::Month)
+        .expect("dashboard should rebuild activity rollups");
+    let rebuilt_day_two = rebuilt
+        .activity
+        .iter()
+        .find(|point| point.day_start_ms == day_two_bucket)
+        .expect("rebuilt day two bucket should exist");
+    assert_eq!(rebuilt_day_two.total_requests, 3);
+    assert_eq!(rebuilt_day_two.total_sessions, 2);
+    assert_eq!(rebuilt_day_two.total_tokens, 87);
 }

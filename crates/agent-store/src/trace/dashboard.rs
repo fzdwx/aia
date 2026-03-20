@@ -12,8 +12,9 @@ use super::{
     LlmTraceDashboard, LlmTraceDashboardActivityPoint, LlmTraceDashboardRange,
     LlmTraceDashboardSummary, LlmTraceDashboardTrendPoint,
     store::{
-        enqueue_legacy_trace_loop_backfill_with_conn, load_summary_snapshot_with_conn,
-        reconcile_dirty_trace_loops_with_conn, with_write_transaction,
+        enqueue_legacy_trace_loop_backfill_with_conn, ensure_activity_rollup_state_with_conn,
+        load_summary_snapshot_with_conn, reconcile_dirty_trace_loops_with_conn,
+        with_write_transaction,
     },
 };
 
@@ -45,6 +46,7 @@ fn load_trace_dashboard_with_conn(
         enqueue_legacy_trace_loop_backfill_with_conn(conn)?;
         reconcile_dirty_trace_loops_with_conn(conn)
     })?;
+    ensure_activity_rollup_state_with_conn(conn)?;
 
     let now_ms = current_timestamp_ms();
     let current_window = dashboard_window(range, now_ms);
@@ -252,21 +254,20 @@ fn load_dashboard_activity_with_conn(
     let end_ms = now_ms.saturating_add(DAY_MS);
     let mut stmt = conn.prepare(
         "
-        SELECT ((latest_started_at_ms / ?1) * ?1) AS day_start_ms,
-               COUNT(*) AS total_requests,
-               COUNT(DISTINCT session_id) AS total_sessions,
-               COALESCE(SUM(estimated_cost_micros), 0) AS total_cost_micros,
-               COALESCE(SUM(total_tokens), 0) AS total_tokens,
-               COALESCE(SUM(lines_added + lines_removed), 0) AS total_lines_changed
-        FROM llm_trace_loops
-        WHERE latest_started_at_ms >= ?2 AND latest_started_at_ms < ?3
-        GROUP BY day_start_ms
+        SELECT day_start_ms,
+               total_requests,
+               total_sessions,
+               total_cost_micros,
+               total_tokens,
+               total_lines_changed
+        FROM llm_trace_activity_daily
+        WHERE day_start_ms >= ?1 AND day_start_ms < ?2
         ORDER BY day_start_ms ASC
         ",
     )?;
 
     let rows = stmt
-        .query_map([DAY_MS, start_ms, end_ms], |row| {
+        .query_map([start_ms, end_ms], |row| {
             Ok(LlmTraceDashboardActivityPoint {
                 day_start_ms: row.get(0)?,
                 total_requests: row.get(1)?,

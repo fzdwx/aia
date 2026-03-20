@@ -133,6 +133,24 @@ impl AiaStore {
                 );
                 CREATE INDEX IF NOT EXISTS idx_llm_trace_loops_request_kind_latest_started
                     ON llm_trace_loops(request_kind, latest_started_at_ms DESC, trace_id DESC);
+                CREATE INDEX IF NOT EXISTS idx_llm_trace_loops_latest_started
+                    ON llm_trace_loops(latest_started_at_ms DESC);
+
+                CREATE TABLE IF NOT EXISTS llm_trace_activity_daily (
+                    day_start_ms INTEGER PRIMARY KEY,
+                    total_requests INTEGER NOT NULL DEFAULT 0,
+                    total_sessions INTEGER NOT NULL DEFAULT 0,
+                    total_cost_micros INTEGER NOT NULL DEFAULT 0,
+                    total_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_lines_changed INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE IF NOT EXISTS llm_trace_activity_daily_sessions (
+                    day_start_ms INTEGER NOT NULL,
+                    session_id TEXT NOT NULL,
+                    loop_count INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (day_start_ms, session_id)
+                );
                 ",
             )?;
 

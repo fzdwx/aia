@@ -10,6 +10,8 @@ use super::{
     LlmTraceRecord, LlmTraceStatus, LlmTraceStore, LlmTraceSummary, mapping::read_trace_record,
 };
 
+const ACTIVITY_DAY_MS: u64 = 24 * 60 * 60 * 1000;
+
 #[derive(Debug, Clone, PartialEq)]
 struct LoopTraceRollupRow {
     id: String,
@@ -242,6 +244,7 @@ fn record_trace_with_rollups(
     record_with_conn(conn, record)?;
     let change = refresh_loop_snapshot_with_conn(conn, record.trace_id.as_str())?;
     refresh_summary_rollups_with_conn(conn, &change)?;
+    refresh_activity_rollups_with_conn(conn, &change)?;
     clear_trace_loop_dirty_with_conn(conn, record.trace_id.as_str())
 }
 
@@ -302,6 +305,7 @@ pub(super) fn reconcile_dirty_trace_loops_with_conn(
     for trace_id in trace_ids {
         let change = refresh_loop_snapshot_with_conn(conn, trace_id.as_str())?;
         refresh_summary_rollups_with_conn(conn, &change)?;
+        refresh_activity_rollups_with_conn(conn, &change)?;
         clear_trace_loop_dirty_with_conn(conn, trace_id.as_str())?;
     }
 
@@ -963,6 +967,32 @@ fn ensure_summary_rollup_state_with_conn(conn: &Connection) -> Result<(), AiaSto
     })
 }
 
+pub(super) fn ensure_activity_rollup_state_with_conn(
+    conn: &Connection,
+) -> Result<(), AiaStoreError> {
+    let has_loops =
+        conn.query_row("SELECT EXISTS(SELECT 1 FROM llm_trace_loops LIMIT 1)", [], |row| {
+            row.get::<_, i64>(0)
+        })? != 0;
+    if !has_loops {
+        return Ok(());
+    }
+
+    let total_loop_requests =
+        conn.query_row("SELECT COUNT(*) FROM llm_trace_loops", [], |row| row.get::<_, u64>(0))?;
+    let materialized_requests = conn.query_row(
+        "SELECT COALESCE(SUM(total_requests), 0) FROM llm_trace_activity_daily",
+        [],
+        |row| row.get::<_, u64>(0),
+    )?;
+
+    if materialized_requests == total_loop_requests {
+        return Ok(());
+    }
+
+    with_write_transaction(conn, rebuild_activity_rollup_state_with_conn)
+}
+
 fn backfill_loop_input_output_tokens_with_conn(conn: &Connection) -> Result<(), AiaStoreError> {
     conn.execute(
         "
@@ -1024,6 +1054,54 @@ fn rebuild_summary_rollup_state_with_conn(conn: &Connection) -> Result<(), AiaSt
 
     for snapshot in rows {
         refresh_summary_rollups_with_conn(
+            conn,
+            &LoopSummaryChange { previous: None, current: Some(snapshot) },
+        )?;
+    }
+
+    Ok(())
+}
+
+fn rebuild_activity_rollup_state_with_conn(conn: &Connection) -> Result<(), AiaStoreError> {
+    conn.execute("DELETE FROM llm_trace_activity_daily", [])?;
+    conn.execute("DELETE FROM llm_trace_activity_daily_sessions", [])?;
+
+    let mut stmt = conn.prepare(
+        "
+        SELECT trace_id, request_kind, session_id, model, latest_started_at_ms, duration_ms,
+               total_input_tokens, total_output_tokens, total_tokens, total_cached_tokens,
+               estimated_cost_micros, lines_added, lines_removed,
+               llm_span_count, tool_span_count, failed_tool_count, final_status
+        FROM llm_trace_loops
+        ",
+    )?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(LoopSummarySnapshot {
+                trace_id: row.get(0)?,
+                request_kind: row.get(1)?,
+                session_id: row.get(2)?,
+                model: row.get(3)?,
+                latest_started_at_ms: row.get(4)?,
+                duration_ms: row.get(5)?,
+                total_input_tokens: row.get(6)?,
+                total_output_tokens: row.get(7)?,
+                total_tokens: row.get(8)?,
+                total_cached_tokens: row.get(9)?,
+                estimated_cost_micros: row.get(10)?,
+                lines_added: row.get(11)?,
+                lines_removed: row.get(12)?,
+                llm_span_count: row.get(13)?,
+                tool_span_count: row.get(14)?,
+                failed_tool_count: row.get(15)?,
+                final_status: LlmTraceLoopStatus::from_str(row.get::<_, String>(16)?.as_str()),
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(AiaStoreError::from)?;
+
+    for snapshot in rows {
+        refresh_activity_rollups_with_conn(
             conn,
             &LoopSummaryChange { previous: None, current: Some(snapshot) },
         )?;
@@ -1113,6 +1191,135 @@ pub(super) fn refresh_summary_rollups_with_conn(
     }
 
     Ok(())
+}
+
+pub(super) fn refresh_activity_rollups_with_conn(
+    conn: &Connection,
+    change: &LoopSummaryChange,
+) -> Result<(), AiaStoreError> {
+    if let Some(previous) = change.previous.as_ref() {
+        apply_activity_rollup_snapshot_delta_with_conn(conn, previous, -1)?;
+    }
+    if let Some(current) = change.current.as_ref() {
+        apply_activity_rollup_snapshot_delta_with_conn(conn, current, 1)?;
+    }
+    Ok(())
+}
+
+fn apply_activity_rollup_snapshot_delta_with_conn(
+    conn: &Connection,
+    snapshot: &LoopSummarySnapshot,
+    direction: i64,
+) -> Result<(), AiaStoreError> {
+    let day_start_ms = align_activity_day(snapshot.latest_started_at_ms);
+    let lines_changed = snapshot.lines_added.saturating_add(snapshot.lines_removed);
+    let session_delta = apply_activity_session_delta_with_conn(
+        conn,
+        day_start_ms,
+        snapshot.session_id.as_str(),
+        direction,
+    )?;
+
+    conn.execute(
+        "
+        INSERT INTO llm_trace_activity_daily (
+            day_start_ms,
+            total_requests,
+            total_sessions,
+            total_cost_micros,
+            total_tokens,
+            total_lines_changed
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        ON CONFLICT(day_start_ms) DO UPDATE SET
+            total_requests = total_requests + excluded.total_requests,
+            total_sessions = total_sessions + excluded.total_sessions,
+            total_cost_micros = total_cost_micros + excluded.total_cost_micros,
+            total_tokens = total_tokens + excluded.total_tokens,
+            total_lines_changed = total_lines_changed + excluded.total_lines_changed
+        ",
+        params![
+            day_start_ms as i64,
+            direction,
+            session_delta,
+            signed_i64(snapshot.estimated_cost_micros, direction)?,
+            signed_i64(snapshot.total_tokens, direction)?,
+            signed_i64(lines_changed, direction)?,
+        ],
+    )?;
+    conn.execute(
+        "
+        DELETE FROM llm_trace_activity_daily
+        WHERE day_start_ms = ?1
+          AND total_requests <= 0
+          AND total_sessions <= 0
+          AND total_cost_micros <= 0
+          AND total_tokens <= 0
+          AND total_lines_changed <= 0
+        ",
+        [day_start_ms as i64],
+    )?;
+    Ok(())
+}
+
+fn apply_activity_session_delta_with_conn(
+    conn: &Connection,
+    day_start_ms: u64,
+    session_id: &str,
+    direction: i64,
+) -> Result<i64, AiaStoreError> {
+    let current = conn
+        .query_row(
+            "
+            SELECT loop_count
+            FROM llm_trace_activity_daily_sessions
+            WHERE day_start_ms = ?1 AND session_id = ?2
+            ",
+            params![day_start_ms as i64, session_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?;
+
+    let next = current.unwrap_or(0) + direction;
+    if next < 0 {
+        return Err(AiaStoreError::new(format!(
+            "activity session rollup underflow for day {day_start_ms} session {session_id}"
+        )));
+    }
+
+    match next {
+        0 => {
+            conn.execute(
+                "
+                DELETE FROM llm_trace_activity_daily_sessions
+                WHERE day_start_ms = ?1 AND session_id = ?2
+                ",
+                params![day_start_ms as i64, session_id],
+            )?;
+            Ok(if current.unwrap_or(0) > 0 { -1 } else { 0 })
+        }
+        next_count => {
+            conn.execute(
+                "
+                INSERT INTO llm_trace_activity_daily_sessions (day_start_ms, session_id, loop_count)
+                VALUES (?1, ?2, ?3)
+                ON CONFLICT(day_start_ms, session_id) DO UPDATE SET
+                    loop_count = excluded.loop_count
+                ",
+                params![day_start_ms as i64, session_id, next_count],
+            )?;
+            Ok(if current.unwrap_or(0) == 0 { 1 } else { 0 })
+        }
+    }
+}
+
+fn signed_i64(value: u64, direction: i64) -> Result<i64, AiaStoreError> {
+    let magnitude = i64::try_from(value)
+        .map_err(|_| AiaStoreError::new(format!("rollup value {value} exceeds i64 range")))?;
+    Ok(magnitude.saturating_mul(direction))
+}
+
+fn align_activity_day(value: u64) -> u64 {
+    (value / ACTIVITY_DAY_MS) * ACTIVITY_DAY_MS
 }
 
 fn apply_summary_rollup_for_key_with_conn(

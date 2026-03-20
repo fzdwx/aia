@@ -11,7 +11,8 @@
 - `apps/web/src/{lib/types.ts,lib/api.ts,stores/trace-overview-store.ts,stores/trace-overview-store.test.ts,components/trace-overview-panel.tsx}`：overview 页面改为读取 dashboard 接口，重组为范围切换 + KPI 卡片 + 自绘趋势图 + 年度热力图 + conversation/compression 入口卡。
 - `docs/{status.md,architecture.md,evolution-log.md}`：同步记录 trace dashboard 新分析层与 Web 页面改造。
 **Update**：同日继续按用户反馈把 overview 收口为更高密度诊断面：`dashboard` summary / trend 新增 `failed_requests`、`partial_requests` 与 `input/output/cache` token 序列，overview 首屏去掉大标题与低价值说明文案，把失败态提升为显性 KPI，并把原先的成本趋势改成 token 趋势图；对应测试也补进了失败 trace 样例，锁住失败调用在 overview 中可见。
-**Verification**：`cargo fmt --all`、`cargo check --workspace`、`cargo test --workspace`、`just web-typecheck`、`just web-check`、`just web-test` 通过。
+**Update**：同日继续按 dashboard 查询路径排查把 activity 热力图从“读时聚合”改成“写时物化”：`llm_trace_loops` 新增独立 `latest_started_at_ms` 索引，覆盖不带 `request_kind` 的 dashboard summary / trend 范围查询；同时新增 `llm_trace_activity_daily` 与 `llm_trace_activity_daily_sessions`，按 loop 旧值/新值差量维护每日 requests / sessions / cost / tokens / lines_changed，dashboard 读取年度热力图时不再对 loop 表执行 `GROUP BY day + COUNT(DISTINCT session_id)`，只在检测到老数据尚未回填时做一次性 rebuild。
+**Verification**：初始 dashboard 落地阶段已跑通 `cargo fmt --all`、`cargo check --workspace`、`cargo test --workspace`、`just web-typecheck`、`just web-check`、`just web-test`；本轮 activity 日桶物化与索引优化额外复跑了 `cargo fmt --all`、`cargo test -p agent-store`、`cargo test -p agent-server get_trace_dashboard_returns_metrics_trend_and_activity`。
 **Commit**：未提交。
 **Next direction**：若 dashboard 数据继续增长，下一步优先评估把当前 dirty-trace reconciliation 再下沉为显式 analytics materialization 版本位或增量日桶，而不是把更多按时间窗聚合继续堆到 overview 读请求里。
 
