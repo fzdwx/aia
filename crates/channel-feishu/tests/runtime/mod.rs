@@ -3,10 +3,12 @@ use serde_json::json;
 use super::card::{FeishuStreamingToolState, FeishuStreamingToolStatus};
 use super::protocol::{
     Chat, EventBody, FEISHU_FRAME_TYPE_DATA, FEISHU_HEADER_MESSAGE_ID, FEISHU_HEADER_TYPE,
-    FEISHU_MESSAGE_TYPE_EVENT, FeishuFrame, FeishuHeader, FeishuServerClientConfig,
-    FeishuWebsocketEndpoint, FeishuWebsocketEndpointResponse, Mention, Message, Sender, SenderId,
+    FeishuFrame, FeishuHeader, FeishuServerClientConfig, FeishuWebsocketEndpoint,
+    FeishuWebsocketEndpointResponse, Mention, Message, Sender, SenderId,
 };
 use super::*;
+
+const FEISHU_MESSAGE_TYPE_EVENT: &str = "event";
 
 fn sample_profile() -> ChannelProfile {
     ChannelProfile::new(
@@ -116,6 +118,16 @@ fn webhook_challenge_round_trip() {
         serde_json::from_slice(&encoded).expect("deserialize endpoint");
     assert_eq!(decoded.code, 0);
     assert_eq!(decoded.data.expect("endpoint data").url, "wss://open.feishu.cn/ws?service_id=12");
+}
+
+fn extract_final_answer_from_turn(turn: &agent_runtime::TurnLifecycle) -> Option<String> {
+    let assistant_blocks = extract_assistant_segments_from_turn(turn);
+
+    if !assistant_blocks.is_empty() {
+        return Some(assistant_blocks.join("\n\n"));
+    }
+
+    turn.assistant_message.clone().filter(|message| !message.trim().is_empty())
 }
 
 #[test]

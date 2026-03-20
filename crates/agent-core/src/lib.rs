@@ -9,6 +9,7 @@ mod tooling;
 mod traits;
 
 #[cfg(test)]
+#[path = "../tests/lib/mod.rs"]
 mod tests;
 
 pub use completion::{

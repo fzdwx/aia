@@ -106,6 +106,7 @@ pub(crate) struct SwitchProviderRequest {
 
 mod handlers;
 #[cfg(test)]
+#[path = "../../../tests/routes/provider/mod.rs"]
 mod tests;
 
 pub(crate) fn router() -> Router<SharedState> {

@@ -1,5 +1,20 @@
 # 演进日志
 
+## 2026-03-20 Session 90
+
+**Diagnosis**：Rust 工作区里虽然很多模块已经有独立测试文件，但形态长期不一致：一部分还是内联 `mod tests { ... }`，一部分挂在同级 `tests.rs`，还有少量 `test_support.rs` / test-only `parsing.rs` / `#[cfg(test)]` helper 混在生产文件里。这样既让目录风格不统一，也继续把测试实现与生产模块边界搅在一起。
+**Decision**：统一按“`tests/` 与 `src/` 同级，并镜像源模块树”的形态收口：生产模块继续通过 `#[cfg(test)] #[path = "../tests/..."] mod tests;` 挂回测试实现；同时把少量 test-only support/helper 一并迁到 crate/app 根的 `tests/` 子目录，不再继续保留内联 `mod tests`、平铺 `tests.rs` 或单独的 `test_support.rs`。
+**Changes**：
+- `apps/agent-server/tests/**`、`crates/*/tests/**`：镜像源模块树承接原 `src/**/tests.rs`、内联 `mod tests { ... }` 和局部 support/helper 测试代码；生产模块统一改为通过 `#[path = ".../tests/.../mod.rs"]` 回挂。
+- `apps/agent-server/tests/routes/support.rs`：接管原 `routes/test_support.rs`，`routes/mod.rs` 改为通过 `tests::support` 暴露同名测试支持模块。
+- `apps/agent-server/tests/session_manager/handle/mod.rs`：承接 `SessionManagerHandle::test_handle()` 这类 test-only helper，不再把 `#[cfg(test)]` 方法留在生产文件里。
+- `crates/channel-feishu/tests/runtime/mod.rs`：接管原来散在 `runtime.rs` / `protocol.rs` 的 test-only helper 与常量。
+- `crates/openai-adapter/tests/{chat_completions,responses}/`：接管原 test-only `parsing.rs` 实现，避免继续把仅测试使用的解析 helper 留在生产模块平级位置。
+- `docs/evolution-log.md`：记录本轮测试目录标准化。
+**Verification**：`cargo fmt --all`、`cargo test --workspace` 通过。
+**Commit**：未提交。
+**Next direction**：如果下一轮还要继续统一目录风格，优先检查非 Rust 侧是否也存在类似“测试实现散在生产目录”的情况；Rust 这边当前已经统一到“crate/app 根 `tests/` 镜像 `src/` 模块树”的入口风格。
+
 ## 2026-03-20 Session 89
 
 **Diagnosis**：`apps/agent-server/src` 根层虽然已经清掉了一批无意义的薄转发，但模块落点仍是扁平的 `bootstrap.rs`、`model.rs`、`runtime_worker.rs`、`session_manager.rs`、`sse.rs`、`state.rs` 等同名文件；这和仓库里其余已经目录化的资源模块风格不一致，也继续让根层显得拥挤。与此同时，上一轮路由 DTO 已经并回资源 `mod.rs`，说明这里更适合统一成“目录 + mod.rs”而不是再挂一层平铺入口。

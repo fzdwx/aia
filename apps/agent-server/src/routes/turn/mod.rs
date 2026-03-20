@@ -19,6 +19,7 @@ pub(crate) struct CancelTurnRequest {
 
 mod handlers;
 #[cfg(test)]
+#[path = "../../../tests/routes/turn/mod.rs"]
 mod tests;
 
 pub(crate) fn router() -> Router<SharedState> {

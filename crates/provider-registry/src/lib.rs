@@ -3,6 +3,7 @@ mod model;
 mod registry;
 
 #[cfg(test)]
+#[path = "../tests/lib/mod.rs"]
 mod tests;
 
 pub use error::ProviderRegistryError;

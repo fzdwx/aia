@@ -17,6 +17,7 @@ pub(crate) struct TraceDashboardQuery {
 
 mod handlers;
 #[cfg(test)]
+#[path = "../../../tests/routes/trace/mod.rs"]
 mod tests;
 
 pub(crate) fn router() -> Router<SharedState> {

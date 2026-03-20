@@ -11,6 +11,10 @@ use crate::runtime_worker::{
 
 use super::types::SessionCommand;
 
+#[cfg(test)]
+#[path = "../../tests/session_manager/handle/mod.rs"]
+mod tests;
+
 #[derive(Clone)]
 pub struct SessionManagerHandle {
     pub(super) tx: mpsc::Sender<SessionCommand>,
@@ -115,12 +119,6 @@ impl SessionManagerHandle {
         input: SwitchProviderInput,
     ) -> Result<ProviderInfoSnapshot, RuntimeWorkerError> {
         self.request(|reply| SessionCommand::SwitchProvider { input, reply }).await
-    }
-
-    #[cfg(test)]
-    pub(crate) fn test_handle() -> Self {
-        let (tx, _rx) = mpsc::channel(1);
-        Self { tx }
     }
 }
 

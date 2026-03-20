@@ -2,7 +2,7 @@ use agent_core::{Completion, CompletionSegment, ToolCall};
 
 use crate::{OpenAiAdapterError, parse_tool_arguments};
 
-use super::{
+use super::super::{
     OpenAiResponsesModel,
     payloads::{ReasoningSummaryPart, ResponsesContent, ResponsesOutput, ResponsesResponse},
 };

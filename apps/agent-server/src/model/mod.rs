@@ -1,4 +1,5 @@
 #[cfg(test)]
+#[path = "../../tests/model/mod.rs"]
 mod tests;
 mod trace;
 

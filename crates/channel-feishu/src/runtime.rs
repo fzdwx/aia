@@ -2,6 +2,7 @@ mod card;
 mod config;
 mod protocol;
 #[cfg(test)]
+#[path = "../tests/runtime/mod.rs"]
 mod tests;
 
 use std::{sync::Arc, time::Duration};
@@ -640,17 +641,6 @@ async fn create_interactive_patch_mode(
         );
         None
     })
-}
-
-#[cfg(test)]
-fn extract_final_answer_from_turn(turn: &agent_runtime::TurnLifecycle) -> Option<String> {
-    let assistant_blocks = extract_assistant_segments_from_turn(turn);
-
-    if !assistant_blocks.is_empty() {
-        return Some(assistant_blocks.join("\n\n"));
-    }
-
-    turn.assistant_message.clone().filter(|message| !message.trim().is_empty())
 }
 
 fn build_turn_prompt(prompt: &str, event: &EventBody) -> String {

@@ -6,6 +6,7 @@ mod helpers;
 mod request;
 mod tape_tools;
 #[cfg(test)]
+#[path = "../tests/runtime/mod.rs"]
 mod tests;
 mod tool_calls;
 mod turn;

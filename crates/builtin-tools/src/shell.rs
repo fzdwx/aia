@@ -1,6 +1,7 @@
 mod capture;
 mod execution;
 #[cfg(test)]
+#[path = "../tests/shell/mod.rs"]
 mod tests;
 
 use std::path::Path;

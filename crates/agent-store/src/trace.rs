@@ -3,6 +3,7 @@ mod mapping;
 mod schema;
 mod store;
 #[cfg(test)]
+#[path = "../tests/trace/mod.rs"]
 mod tests;
 
 use serde::{Deserialize, Serialize};

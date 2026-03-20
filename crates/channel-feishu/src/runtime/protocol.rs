@@ -11,8 +11,6 @@ pub(super) const FEISHU_HEADER_SUM: &str = "sum";
 pub(super) const FEISHU_HEADER_SEQ: &str = "seq";
 pub(super) const FEISHU_HEADER_BIZ_RT: &str = "biz_rt";
 pub(super) const FEISHU_HEADER_SERVICE_ID: &str = "service_id";
-#[cfg(test)]
-pub(super) const FEISHU_MESSAGE_TYPE_EVENT: &str = "event";
 pub(super) const FEISHU_MESSAGE_TYPE_PING: &str = "ping";
 pub(super) const FEISHU_MESSAGE_TYPE_PONG: &str = "pong";
 pub(super) const FEISHU_FRAME_TYPE_CONTROL: i32 = 0;

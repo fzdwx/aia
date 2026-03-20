@@ -6,6 +6,7 @@ mod responses;
 mod streaming;
 
 #[cfg(test)]
+#[path = "../tests/lib/mod.rs"]
 mod tests;
 
 pub use chat_completions::{OpenAiChatCompletionsConfig, OpenAiChatCompletionsModel};

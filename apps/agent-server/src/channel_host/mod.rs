@@ -2,6 +2,7 @@ mod host;
 mod mapping;
 mod runtime;
 #[cfg(test)]
+#[path = "../../tests/channel_host/mod.rs"]
 mod tests;
 
 pub(crate) use runtime::{

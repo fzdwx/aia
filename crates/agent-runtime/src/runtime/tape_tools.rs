@@ -171,35 +171,5 @@ pub(super) fn is_runtime_tool(name: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        TapeHandoffTool, TapeHandoffToolArgs, TapeInfoTool, TapeInfoToolArgs,
-        runtime_tool_definitions,
-    };
-    use crate::runtime::tape_tools::Tool;
-    use agent_core::ToolDefinition;
-
-    #[test]
-    fn runtime_tool_definitions_match_derive_schema_output() {
-        let definitions = runtime_tool_definitions();
-        assert_eq!(definitions.len(), 2);
-
-        let tape_info = TapeInfoTool.definition();
-        assert!(definitions.iter().any(|definition| definition == &tape_info));
-        assert_eq!(
-            tape_info.parameters,
-            ToolDefinition::new("tape_info", "ignored")
-                .with_parameters_schema::<TapeInfoToolArgs>()
-                .parameters
-        );
-
-        let tape_handoff = TapeHandoffTool.definition();
-        assert!(definitions.iter().any(|definition| definition == &tape_handoff));
-        assert_eq!(
-            tape_handoff.parameters,
-            ToolDefinition::new("tape_handoff", "ignored")
-                .with_parameters_schema::<TapeHandoffToolArgs>()
-                .parameters
-        );
-    }
-}
+#[path = "../../tests/runtime/tape_tools/mod.rs"]
+mod tests;

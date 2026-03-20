@@ -1,5 +1,6 @@
 mod snapshots;
 #[cfg(test)]
+#[path = "../../tests/runtime_worker/mod.rs"]
 mod tests;
 
 use agent_runtime::TurnControl;

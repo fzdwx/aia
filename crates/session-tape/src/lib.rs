@@ -9,6 +9,7 @@ mod tape;
 mod view;
 
 #[cfg(test)]
+#[path = "../tests/lib/mod.rs"]
 mod tests;
 
 pub use binding::SessionProviderBinding;

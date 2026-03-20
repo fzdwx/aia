@@ -3,6 +3,7 @@ mod handle;
 mod provider_sync;
 mod query_ops;
 #[cfg(test)]
+#[path = "../../tests/session_manager/mod.rs"]
 mod tests;
 mod tool_trace;
 mod turn_execution;

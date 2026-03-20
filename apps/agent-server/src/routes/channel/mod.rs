@@ -38,6 +38,7 @@ mod config;
 mod handlers;
 mod mutation;
 #[cfg(test)]
+#[path = "../../../tests/routes/channel/mod.rs"]
 mod tests;
 
 pub(crate) fn router() -> Router<SharedState> {

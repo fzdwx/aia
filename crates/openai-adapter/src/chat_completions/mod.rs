@@ -1,9 +1,10 @@
 mod client;
-#[cfg(test)]
-mod parsing;
 mod payloads;
 mod request;
 mod streaming;
+#[cfg(test)]
+#[path = "../../tests/chat_completions/mod.rs"]
+mod tests;
 
 use crate::OpenAiAdapterError;
 

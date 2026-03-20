@@ -8,7 +8,10 @@ mod common;
 mod provider;
 mod session;
 #[cfg(test)]
-mod test_support;
+#[path = "../../tests/routes/mod.rs"]
+mod tests;
+#[cfg(test)]
+pub(crate) use tests::support as test_support;
 mod trace;
 mod turn;
 
