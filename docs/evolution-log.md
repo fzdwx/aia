@@ -1,5 +1,31 @@
 # 演进日志
 
+## 2026-03-20 Session 82
+
+**Diagnosis**：虽然 `Trace` 页面已经拆出 `Overview` 子工作台，但现有前端 still 只是在浏览器里并发拉三份 `/api/traces/summary`，只能展示累计请求/延迟/缓存复用，既支撑不了目标图里的成本趋势、行变更和活跃热力图，也无法把 “session 维度” 真正贯到 trace 诊断面。
+**Decision**：不再继续把 analytics 拼装留给前端，而是直接新增一条 server 侧 `/api/traces/dashboard` 分析读路径：runtime 把 `session_id` 随 trace 上下文贯到 `agent-store`；`llm_trace_loops` 再扩展为 loop 级分析记录，承接 `session_id`、估算成本和代码增删行；与此同时不让 dashboard 读路径每次都全量重刷全部 loop，而是额外引入 `llm_trace_dirty_loops` 作为脏 trace 队列，只对需要 reconciliation 的 trace 刷新 loop 快照；overview 页面则改为一次消费 dashboard 响应，直接渲染 KPI 卡片、成本趋势图和年度活跃热力图。
+**Changes**：
+- `crates/agent-core/src/completion.rs`、`crates/agent-runtime/src/runtime/{helpers,request,compress}.rs`、`crates/agent-runtime/src/{runtime.rs,types.rs}`、`apps/agent-server/src/session_manager.rs`：把 `session_id` 从 session runtime 显式注入到 LLM/tool trace 上下文，确保后续 trace 记录可感知真实会话维度。
+- `crates/agent-store/src/trace/{schema.rs,store.rs,dashboard.rs,tests.rs}`、`crates/agent-store/src/{trace.rs,lib.rs}`：原始 trace 记录新增 `session_id`；`llm_trace_loops` 扩展为携带 `session_id`、估算成本、代码增删行的 loop 级分析记录；新增 `llm_trace_dirty_loops` 脏队列表；普通写路径在同事务里刷新受影响 loop 并清掉 dirty，dashboard 查询则只对 dirty / legacy loop 做 reconciliation，再按时间窗聚合 overview KPI、模型成本趋势和年度 activity 数据；补 route/store 相关回归测试。
+- `apps/agent-server/src/routes/{trace/mod.rs,trace/dto.rs,trace/handlers.rs,trace/tests.rs,test_support.rs}`：新增 `GET /api/traces/dashboard`，并补测试锁住 session 数、代码行变更和成本趋势基础语义。
+- `apps/web/src/{lib/types.ts,lib/api.ts,stores/trace-overview-store.ts,stores/trace-overview-store.test.ts,components/trace-overview-panel.tsx}`：overview 页面改为读取 dashboard 接口，重组为范围切换 + KPI 卡片 + 自绘趋势图 + 年度热力图 + conversation/compression 入口卡。
+- `docs/{status.md,architecture.md,evolution-log.md}`：同步记录 trace dashboard 新分析层与 Web 页面改造。
+**Update**：同日继续按用户反馈把 overview 收口为更高密度诊断面：`dashboard` summary / trend 新增 `failed_requests`、`partial_requests` 与 `input/output/cache` token 序列，overview 首屏去掉大标题与低价值说明文案，把失败态提升为显性 KPI，并把原先的成本趋势改成 token 趋势图；对应测试也补进了失败 trace 样例，锁住失败调用在 overview 中可见。
+**Verification**：`cargo fmt --all`、`cargo check --workspace`、`cargo test --workspace`、`just web-typecheck`、`just web-check`、`just web-test` 通过。
+**Commit**：未提交。
+**Next direction**：若 dashboard 数据继续增长，下一步优先评估把当前 dirty-trace reconciliation 再下沉为显式 analytics materialization 版本位或增量日桶，而不是把更多按时间窗聚合继续堆到 overview 读请求里。
+
+## 2026-03-20 Session 81
+
+**Diagnosis**：`agent-store` 虽然已经把 trace overview summary 落到本地 SQLite 快照表，但当前写路径仍在每条 span 入库后对 `request_kind` 汇总和全局汇总各做一次全量聚合；随着同一 loop 内多次 LLM/tool span 持续追加，这条路径会把“单 loop 增量变化”放大成“整表重扫”，和前一轮演进日志里记录的下一步方向一致。
+**Decision**：不再引入第二套对外 summary 协议，而是在保留 `llm_trace_overview_summaries` 作为稳定读快照的前提下，把写路径改成“单 loop 差量驱动”的增量维护：`llm_trace_loops` 补齐 per-loop input/output token 汇总，summary 本体按旧 loop/new loop 差量更新；对于不能靠简单求和维护的 `unique_models` 与 `p95_duration_ms`，新增两张辅助聚合表分别维护模型引用计数与 duration 桶。
+**Changes**：
+- `crates/agent-store/src/trace/{schema.rs,store.rs,tests.rs}`：为 `llm_trace_loops` 增加 per-loop input/output token 列；新增 `llm_trace_summary_model_counts`、`llm_trace_summary_duration_buckets` 两张辅助表；trace 写路径改为先刷新单个 loop，再按旧/新 loop 差量维护 `llm_trace_overview_summaries`，并补齐 legacy loop token 回填与汇总状态重建；新增“同一 loop 不重复累计 request 数”“tool span 增长不重复累计 requests_with_tools”的回归测试。
+- `docs/{architecture.md,status.md,evolution-log.md}`：同步记录 trace summary 已从“写时全量重算”收口为“loop 差量驱动的增量维护”。
+**Verification**：`cargo fmt --all`、`cargo test -p agent-store` 通过；`cargo check --workspace` 待本轮代码与文档全部收口后执行。
+**Commit**：未提交。
+**Next direction**：若 trace 数据继续增长，下一步优先评估是否把 loop 列表的 `OFFSET` 分页也收口为游标翻页，并观察 `llm_trace_summary_duration_buckets` 是否需要按常见筛选维度补更明确的索引，而不是再把 summary 读路径拉回查询期临时聚合。
+
 ## 2026-03-19 Session 80
 
 **Diagnosis**：虽然上一轮已把共享 Markdown renderer 切到 `markstream-react`，但接入仍有两个直接影响聊天观感的缺口：一是没有把当前明暗主题透传给 renderer，代码块等富节点仍可能沿用默认浅色语义；二是表格与代码块的默认边框/阴影比 aia 现有聊天视觉更重，切换后有明显“第三方组件感”。

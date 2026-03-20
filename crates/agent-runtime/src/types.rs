@@ -35,6 +35,7 @@ pub type RuntimeSubscriberId = u64;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ToolTraceContext {
+    pub session_id: Option<String>,
     pub trace_id: String,
     pub span_id: String,
     pub parent_span_id: String,

@@ -16,6 +16,7 @@ fn store_records_round_trip_and_summary() {
         root_span_id: "root-span-1".into(),
         operation_name: "chat".into(),
         span_kind: LlmTraceSpanKind::Client,
+        session_id: Some("session-1".into()),
         turn_id: "turn-1".into(),
         run_id: "turn-1".into(),
         request_kind: "completion".into(),
@@ -87,6 +88,7 @@ fn trace_operations_recover_after_poisoned_mutex() {
         root_span_id: "trace-poisoned-root".into(),
         operation_name: "chat".into(),
         span_kind: LlmTraceSpanKind::Client,
+        session_id: Some("session-poisoned".into()),
         turn_id: "turn-poisoned".into(),
         run_id: "turn-poisoned".into(),
         request_kind: "completion".into(),
@@ -142,6 +144,7 @@ async fn overview_returns_loop_page_instead_of_single_spans() {
                 root_span_id: "root-1".into(),
                 operation_name: "chat".into(),
                 span_kind: LlmTraceSpanKind::Client,
+                session_id: Some("session-loop-1".into()),
                 turn_id: "turn-1".into(),
                 run_id: "turn-1".into(),
                 request_kind: "completion".into(),
@@ -201,6 +204,7 @@ async fn async_trace_methods_work() {
         root_span_id: "trace-async-root".into(),
         operation_name: "chat".into(),
         span_kind: LlmTraceSpanKind::Client,
+        session_id: Some("session-async".into()),
         turn_id: "turn-async".into(),
         run_id: "turn-async".into(),
         request_kind: "completion".into(),
@@ -262,6 +266,7 @@ async fn async_trace_filters_can_separate_compression_logs() {
                     "chat".into()
                 },
                 span_kind: LlmTraceSpanKind::Client,
+                session_id: Some(format!("session-{id}")),
                 turn_id: format!("turn-{id}"),
                 run_id: format!("run-{id}"),
                 request_kind: request_kind.into(),
@@ -326,4 +331,258 @@ async fn async_trace_filters_can_separate_compression_logs() {
         .expect("compression summary async");
     assert_eq!(compression_summary.total_requests, 1);
     assert_eq!(compression_summary.total_tokens, 15);
+}
+
+#[test]
+fn summary_rollup_updates_same_loop_without_double_counting_requests() {
+    let store = AiaStore::in_memory().expect("store should initialize");
+    let build_record = |id: &str,
+                        span_id: &str,
+                        step_index: u32,
+                        started_at_ms: u64,
+                        duration_ms: u64,
+                        input_tokens: u64,
+                        output_tokens: u64,
+                        total_tokens: u64,
+                        cached_tokens: u64| LlmTraceRecord {
+        id: id.into(),
+        trace_id: "loop-incremental".into(),
+        span_id: span_id.into(),
+        parent_span_id: Some("loop-incremental-root".into()),
+        root_span_id: "loop-incremental-root".into(),
+        operation_name: "chat".into(),
+        span_kind: LlmTraceSpanKind::Client,
+        session_id: Some("session-incremental".into()),
+        turn_id: "turn-incremental".into(),
+        run_id: "run-incremental".into(),
+        request_kind: "completion".into(),
+        step_index,
+        provider: "openai".into(),
+        protocol: "openai-responses".into(),
+        model: "gpt-5.4".into(),
+        base_url: "https://api.example.com".into(),
+        endpoint_path: "/responses".into(),
+        streaming: false,
+        started_at_ms,
+        finished_at_ms: Some(started_at_ms + duration_ms),
+        duration_ms: Some(duration_ms),
+        status_code: Some(200),
+        status: LlmTraceStatus::Succeeded,
+        stop_reason: Some("stop".into()),
+        error: None,
+        request_summary: json!({"user_message": "hello"}),
+        provider_request: json!({}),
+        response_summary: json!({}),
+        response_body: None,
+        input_tokens: Some(input_tokens),
+        output_tokens: Some(output_tokens),
+        total_tokens: Some(total_tokens),
+        cached_tokens: Some(cached_tokens),
+        otel_attributes: json!({}),
+        events: vec![],
+    };
+
+    store
+        .record(&build_record("loop-step-0", "loop-step-0", 0, 100, 80, 12, 6, 18, 4))
+        .expect("first record should persist");
+    store
+        .record(&build_record("loop-step-1", "loop-step-1", 1, 200, 20, 5, 3, 8, 0))
+        .expect("second record should persist");
+
+    let summary = store.summary().expect("summary should succeed");
+    assert_eq!(summary.total_requests, 1);
+    assert_eq!(summary.total_llm_spans, 2);
+    assert_eq!(summary.total_input_tokens, 17);
+    assert_eq!(summary.total_output_tokens, 9);
+    assert_eq!(summary.total_tokens, 26);
+    assert_eq!(summary.total_cached_tokens, 4);
+    assert_eq!(summary.avg_duration_ms, Some(120.0));
+    assert_eq!(summary.p95_duration_ms, Some(120));
+}
+
+#[test]
+fn summary_rollup_updates_tool_counts_without_double_counting_requests_with_tools() {
+    let store = AiaStore::in_memory().expect("store should initialize");
+
+    store
+        .record(&LlmTraceRecord {
+            id: "loop-tools-client".into(),
+            trace_id: "loop-tools".into(),
+            span_id: "loop-tools-client".into(),
+            parent_span_id: Some("loop-tools-root".into()),
+            root_span_id: "loop-tools-root".into(),
+            operation_name: "chat".into(),
+            span_kind: LlmTraceSpanKind::Client,
+            session_id: Some("session-tools".into()),
+            turn_id: "turn-tools".into(),
+            run_id: "run-tools".into(),
+            request_kind: "completion".into(),
+            step_index: 0,
+            provider: "openai".into(),
+            protocol: "openai-responses".into(),
+            model: "gpt-5.4".into(),
+            base_url: "https://api.example.com".into(),
+            endpoint_path: "/responses".into(),
+            streaming: false,
+            started_at_ms: 100,
+            finished_at_ms: Some(180),
+            duration_ms: Some(80),
+            status_code: Some(200),
+            status: LlmTraceStatus::Succeeded,
+            stop_reason: Some("stop".into()),
+            error: None,
+            request_summary: json!({"user_message": "needs tools"}),
+            provider_request: json!({}),
+            response_summary: json!({}),
+            response_body: None,
+            input_tokens: Some(10),
+            output_tokens: Some(5),
+            total_tokens: Some(15),
+            cached_tokens: Some(0),
+            otel_attributes: json!({}),
+            events: vec![],
+        })
+        .expect("client record should persist");
+
+    for step_index in 1..=2_u32 {
+        store
+            .record(&LlmTraceRecord {
+                id: format!("loop-tools-tool-{step_index}"),
+                trace_id: "loop-tools".into(),
+                span_id: format!("loop-tools-tool-{step_index}"),
+                parent_span_id: Some("loop-tools-client".into()),
+                root_span_id: "loop-tools-root".into(),
+                operation_name: "tool".into(),
+                span_kind: LlmTraceSpanKind::Internal,
+                session_id: Some("session-tools".into()),
+                turn_id: "turn-tools".into(),
+                run_id: "run-tools".into(),
+                request_kind: "tool".into(),
+                step_index,
+                provider: "builtin".into(),
+                protocol: "local".into(),
+                model: "tool-executor".into(),
+                base_url: "local".into(),
+                endpoint_path: "/tool".into(),
+                streaming: false,
+                started_at_ms: 180 + u64::from(step_index) * 10,
+                finished_at_ms: Some(185 + u64::from(step_index) * 10),
+                duration_ms: Some(5),
+                status_code: None,
+                status: LlmTraceStatus::Failed,
+                stop_reason: None,
+                error: Some("tool failed".into()),
+                request_summary: json!({}),
+                provider_request: json!({}),
+                response_summary: json!({}),
+                response_body: None,
+                input_tokens: None,
+                output_tokens: None,
+                total_tokens: None,
+                cached_tokens: None,
+                otel_attributes: json!({}),
+                events: vec![],
+            })
+            .expect("tool record should persist");
+    }
+
+    let summary = store.summary().expect("summary should succeed");
+    assert_eq!(summary.total_requests, 1);
+    assert_eq!(summary.partial_requests, 1);
+    assert_eq!(summary.failed_requests, 0);
+    assert_eq!(summary.total_tool_spans, 2);
+    assert_eq!(summary.requests_with_tools, 1);
+    assert_eq!(summary.failed_tool_calls, 2);
+}
+
+#[test]
+fn mixed_non_tool_loop_shapes_are_rejected() {
+    let store = AiaStore::in_memory().expect("store should initialize");
+
+    store
+        .record(&LlmTraceRecord {
+            id: "mixed-loop-0".into(),
+            trace_id: "mixed-loop".into(),
+            span_id: "mixed-loop-0".into(),
+            parent_span_id: Some("mixed-root".into()),
+            root_span_id: "mixed-root".into(),
+            operation_name: "chat".into(),
+            span_kind: LlmTraceSpanKind::Client,
+            session_id: Some("session-mixed".into()),
+            turn_id: "turn-mixed".into(),
+            run_id: "run-mixed".into(),
+            request_kind: "completion".into(),
+            step_index: 0,
+            provider: "openai".into(),
+            protocol: "openai-responses".into(),
+            model: "gpt-5.4".into(),
+            base_url: "https://api.example.com".into(),
+            endpoint_path: "/responses".into(),
+            streaming: false,
+            started_at_ms: 100,
+            finished_at_ms: Some(180),
+            duration_ms: Some(80),
+            status_code: Some(200),
+            status: LlmTraceStatus::Succeeded,
+            stop_reason: Some("stop".into()),
+            error: None,
+            request_summary: json!({}),
+            provider_request: json!({}),
+            response_summary: json!({}),
+            response_body: None,
+            input_tokens: Some(10),
+            output_tokens: Some(5),
+            total_tokens: Some(15),
+            cached_tokens: Some(0),
+            otel_attributes: json!({}),
+            events: vec![],
+        })
+        .expect("first record should persist");
+
+    let error = store
+        .record(&LlmTraceRecord {
+            id: "mixed-loop-1".into(),
+            trace_id: "mixed-loop".into(),
+            span_id: "mixed-loop-1".into(),
+            parent_span_id: Some("mixed-root".into()),
+            root_span_id: "mixed-root".into(),
+            operation_name: "compress".into(),
+            span_kind: LlmTraceSpanKind::Client,
+            session_id: Some("session-mixed".into()),
+            turn_id: "turn-mixed".into(),
+            run_id: "run-mixed".into(),
+            request_kind: "compression".into(),
+            step_index: 1,
+            provider: "openai".into(),
+            protocol: "openai-responses".into(),
+            model: "gpt-5.4-mini".into(),
+            base_url: "https://api.example.com".into(),
+            endpoint_path: "/responses".into(),
+            streaming: false,
+            started_at_ms: 200,
+            finished_at_ms: Some(220),
+            duration_ms: Some(20),
+            status_code: Some(200),
+            status: LlmTraceStatus::Succeeded,
+            stop_reason: Some("stop".into()),
+            error: None,
+            request_summary: json!({}),
+            provider_request: json!({}),
+            response_summary: json!({}),
+            response_body: None,
+            input_tokens: Some(2),
+            output_tokens: Some(1),
+            total_tokens: Some(3),
+            cached_tokens: Some(0),
+            otel_attributes: json!({}),
+            events: vec![],
+        })
+        .expect_err("mixed loop should be rejected");
+
+    assert!(error.to_string().contains("mixed non-tool request kinds"));
+
+    let summary = store.summary().expect("summary should stay consistent");
+    assert_eq!(summary.total_requests, 1);
+    assert_eq!(summary.unique_models, 1);
+    assert_eq!(summary.total_tokens, 15);
 }

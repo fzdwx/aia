@@ -161,6 +161,7 @@ impl Completion {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LlmTraceRequestContext {
+    pub session_id: Option<String>,
     pub trace_id: String,
     pub span_id: String,
     pub parent_span_id: Option<String>,

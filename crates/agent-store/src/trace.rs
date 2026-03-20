@@ -1,3 +1,4 @@
+mod dashboard;
 mod mapping;
 mod schema;
 mod store;
@@ -68,6 +69,7 @@ pub struct LlmTraceRecord {
     pub root_span_id: String,
     pub operation_name: String,
     pub span_kind: LlmTraceSpanKind,
+    pub session_id: Option<String>,
     pub turn_id: String,
     pub run_id: String,
     pub request_kind: String,
@@ -215,6 +217,82 @@ pub struct LlmTraceLoopDetail {
 pub struct LlmTraceOverview {
     pub summary: LlmTraceSummary,
     pub page: LlmTraceLoopPage,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LlmTraceDashboardRange {
+    Today,
+    Week,
+    Month,
+}
+
+impl LlmTraceDashboardRange {
+    pub fn from_str(value: &str) -> Self {
+        match value {
+            "today" => Self::Today,
+            "week" => Self::Week,
+            _ => Self::Month,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Today => "today",
+            Self::Week => "week",
+            Self::Month => "month",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LlmTraceDashboardSummary {
+    pub total_cost_usd: f64,
+    pub total_requests: u64,
+    pub failed_requests: u64,
+    pub partial_requests: u64,
+    pub total_sessions: u64,
+    pub total_input_tokens: u64,
+    pub total_output_tokens: u64,
+    pub total_tokens: u64,
+    pub total_cached_tokens: u64,
+    pub total_lines_added: u64,
+    pub total_lines_removed: u64,
+    pub total_lines_changed: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LlmTraceDashboardTrendPoint {
+    pub bucket_start_ms: u64,
+    pub total_requests: u64,
+    pub failed_requests: u64,
+    pub partial_requests: u64,
+    pub total_input_tokens: u64,
+    pub total_output_tokens: u64,
+    pub total_cached_tokens: u64,
+    pub total_tokens: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LlmTraceDashboardActivityPoint {
+    pub day_start_ms: u64,
+    pub total_requests: u64,
+    pub total_sessions: u64,
+    pub total_cost_usd: f64,
+    pub total_tokens: u64,
+    pub total_lines_changed: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LlmTraceDashboard {
+    pub range: LlmTraceDashboardRange,
+    pub current: LlmTraceDashboardSummary,
+    pub previous: LlmTraceDashboardSummary,
+    pub trend: Vec<LlmTraceDashboardTrendPoint>,
+    pub activity: Vec<LlmTraceDashboardActivityPoint>,
+    pub overall_summary: LlmTraceSummary,
+    pub conversation_summary: LlmTraceSummary,
+    pub compression_summary: LlmTraceSummary,
 }
 
 pub trait LlmTraceStore: Send + Sync {

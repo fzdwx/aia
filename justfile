@@ -9,13 +9,7 @@ test:
 
 # 安装前端依赖（优先复用本地 Vite+，首次引导时回退到 pnpm）
 web-install:
-	#!/usr/bin/env bash
-	set -e
-	if [ -x apps/web/node_modules/.bin/vp ]; then
-		cd apps/web && ./node_modules/.bin/vp install
-	else
-		cd apps/web && pnpm install
-	fi
+	cd apps/web && pnpm install
 
 # 启动前端开发服务器
 web-dev:

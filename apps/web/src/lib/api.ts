@@ -9,6 +9,8 @@ import type {
   SessionListItem,
   SseEvent,
   SupportedChannelDefinition,
+  TraceDashboard,
+  TraceDashboardRange,
   TraceDetailResponse,
   TraceOverview,
   TraceSummary,
@@ -173,6 +175,18 @@ export async function fetchTraceOverview(params?: {
   const res = await fetch(`/api/traces/overview${query}`)
   if (!res.ok) throw new Error(`GET /api/traces/overview failed: ${res.status}`)
   return (await res.json()) as Promise<TraceOverview>
+}
+
+export async function fetchTraceDashboard(params?: {
+  range?: TraceDashboardRange
+}): Promise<TraceDashboard> {
+  const search = new URLSearchParams()
+  if (params?.range) search.set("range", params.range)
+  const query = search.size > 0 ? `?${search.toString()}` : ""
+  const res = await fetch(`/api/traces/dashboard${query}`)
+  if (!res.ok)
+    throw new Error(`GET /api/traces/dashboard failed: ${res.status}`)
+  return (await res.json()) as Promise<TraceDashboard>
 }
 
 export async function createProvider(body: {

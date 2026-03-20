@@ -15,6 +15,7 @@ impl AiaStore {
                     root_span_id TEXT NOT NULL,
                     operation_name TEXT NOT NULL,
                     span_kind TEXT NOT NULL,
+                    session_id TEXT,
                     turn_id TEXT NOT NULL,
                     run_id TEXT NOT NULL,
                     request_kind TEXT NOT NULL,
@@ -75,6 +76,27 @@ impl AiaStore {
                     total_output_tokens INTEGER NOT NULL DEFAULT 0,
                     total_tokens INTEGER NOT NULL DEFAULT 0,
                     total_cached_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_duration_ms INTEGER NOT NULL DEFAULT 0,
+                    duration_sample_count INTEGER NOT NULL DEFAULT 0,
+                    updated_at_ms INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE IF NOT EXISTS llm_trace_summary_model_counts (
+                    request_kind TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    loop_count INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (request_kind, model)
+                );
+
+                CREATE TABLE IF NOT EXISTS llm_trace_summary_duration_buckets (
+                    request_kind TEXT NOT NULL,
+                    duration_ms INTEGER NOT NULL,
+                    sample_count INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (request_kind, duration_ms)
+                );
+
+                CREATE TABLE IF NOT EXISTS llm_trace_dirty_loops (
+                    trace_id TEXT PRIMARY KEY,
                     updated_at_ms INTEGER NOT NULL DEFAULT 0
                 );
 
@@ -82,6 +104,7 @@ impl AiaStore {
                     id TEXT PRIMARY KEY,
                     trace_id TEXT NOT NULL,
                     request_kind TEXT NOT NULL,
+                    session_id TEXT NOT NULL DEFAULT '',
                     turn_id TEXT NOT NULL,
                     run_id TEXT NOT NULL,
                     root_span_id TEXT NOT NULL,
@@ -92,8 +115,13 @@ impl AiaStore {
                     started_at_ms INTEGER NOT NULL,
                     finished_at_ms INTEGER,
                     duration_ms INTEGER,
+                    total_input_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_output_tokens INTEGER NOT NULL DEFAULT 0,
                     total_tokens INTEGER NOT NULL DEFAULT 0,
                     total_cached_tokens INTEGER NOT NULL DEFAULT 0,
+                    estimated_cost_micros INTEGER NOT NULL DEFAULT 0,
+                    lines_added INTEGER NOT NULL DEFAULT 0,
+                    lines_removed INTEGER NOT NULL DEFAULT 0,
                     llm_span_count INTEGER NOT NULL DEFAULT 0,
                     tool_span_count INTEGER NOT NULL DEFAULT 0,
                     failed_tool_count INTEGER NOT NULL DEFAULT 0,
@@ -124,6 +152,7 @@ impl AiaStore {
                 "span_kind",
                 "TEXT NOT NULL DEFAULT 'CLIENT'",
             )?;
+            ensure_column(conn, "llm_request_traces", "session_id", "TEXT")?;
             ensure_column(
                 conn,
                 "llm_request_traces",
@@ -173,6 +202,54 @@ impl AiaStore {
                 "llm_trace_overview_summaries",
                 "latest_request_started_at_ms",
                 "INTEGER",
+            )?;
+            ensure_column(
+                conn,
+                "llm_trace_overview_summaries",
+                "total_duration_ms",
+                "INTEGER NOT NULL DEFAULT 0",
+            )?;
+            ensure_column(
+                conn,
+                "llm_trace_overview_summaries",
+                "duration_sample_count",
+                "INTEGER NOT NULL DEFAULT 0",
+            )?;
+            ensure_column(
+                conn,
+                "llm_trace_loops",
+                "session_id",
+                "TEXT NOT NULL DEFAULT ''",
+            )?;
+            ensure_column(
+                conn,
+                "llm_trace_loops",
+                "total_input_tokens",
+                "INTEGER NOT NULL DEFAULT 0",
+            )?;
+            ensure_column(
+                conn,
+                "llm_trace_loops",
+                "total_output_tokens",
+                "INTEGER NOT NULL DEFAULT 0",
+            )?;
+            ensure_column(
+                conn,
+                "llm_trace_loops",
+                "estimated_cost_micros",
+                "INTEGER NOT NULL DEFAULT 0",
+            )?;
+            ensure_column(
+                conn,
+                "llm_trace_loops",
+                "lines_added",
+                "INTEGER NOT NULL DEFAULT 0",
+            )?;
+            ensure_column(
+                conn,
+                "llm_trace_loops",
+                "lines_removed",
+                "INTEGER NOT NULL DEFAULT 0",
             )?;
 
             Ok(())

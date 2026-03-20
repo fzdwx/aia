@@ -29,6 +29,7 @@ type TapeEntryListener =
     Arc<dyn Fn(&TapeEntry) -> Result<(), SessionTapeError> + Send + Sync + 'static>;
 
 pub struct AgentRuntime<M, T> {
+    session_id: Option<String>,
     model: M,
     tools: Arc<T>,
     tape: SessionTape,
@@ -69,6 +70,7 @@ where
             .and_then(|v| v.as_u64());
 
         Self {
+            session_id: None,
             model,
             tools: Arc::new(tools),
             tape,
@@ -96,6 +98,11 @@ where
 
     pub fn with_user_agent(mut self, user_agent: impl Into<String>) -> Self {
         self.user_agent = Some(user_agent.into());
+        self
+    }
+
+    pub fn with_session_id(mut self, session_id: impl Into<String>) -> Self {
+        self.session_id = Some(session_id.into());
         self
     }
 

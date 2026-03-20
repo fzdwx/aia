@@ -1,54 +1,44 @@
 import { create } from "zustand"
 
-import { fetchTraceSummary } from "@/lib/api"
-import type { TraceSummary } from "@/lib/types"
+import { fetchTraceDashboard } from "@/lib/api"
+import type { TraceDashboard, TraceDashboardRange } from "@/lib/types"
 
 type TraceOverviewStore = {
-  overallSummary: TraceSummary | null
-  conversationSummary: TraceSummary | null
-  compressionSummary: TraceSummary | null
+  dashboard: TraceDashboard | null
+  range: TraceDashboardRange
   loading: boolean
   initialized: boolean
   error: string | null
   initialize: () => Promise<void>
-  refresh: () => Promise<void>
+  refresh: (range?: TraceDashboardRange) => Promise<void>
+  setRange: (range: TraceDashboardRange) => Promise<void>
 }
 
 export const useTraceOverviewStore = create<TraceOverviewStore>((set, get) => ({
-  overallSummary: null,
-  conversationSummary: null,
-  compressionSummary: null,
+  dashboard: null,
+  range: "month",
   loading: false,
   initialized: false,
   error: null,
 
   initialize: async () => {
     if (get().initialized || get().loading) return
-    await get().refresh()
+    await get().refresh(get().range)
   },
 
-  refresh: async () => {
+  refresh: async (nextRange) => {
     if (get().loading) return
 
-    set({
-      loading: true,
-      error: null,
-    })
+    const range = nextRange ?? get().range
+    set({ loading: true, error: null, range })
 
     try {
-      const [overallSummary, conversationSummary, compressionSummary] =
-        await Promise.all([
-          fetchTraceSummary(),
-          fetchTraceSummary({ request_kind: "completion" }),
-          fetchTraceSummary({ request_kind: "compression" }),
-        ])
-
+      const dashboard = await fetchTraceDashboard({ range })
       set({
-        overallSummary,
-        conversationSummary,
-        compressionSummary,
+        dashboard,
         loading: false,
         initialized: true,
+        range,
       })
     } catch (error) {
       set({
@@ -60,5 +50,10 @@ export const useTraceOverviewStore = create<TraceOverviewStore>((set, get) => ({
       })
       throw error
     }
+  },
+
+  setRange: async (range) => {
+    if (get().range === range && get().dashboard) return
+    await get().refresh(range)
   },
 }))

@@ -41,7 +41,13 @@ pub(crate) fn test_state() -> Arc<AppState> {
 }
 
 pub(crate) fn seed_trace(state: &AppState, id: &str, started_at_ms: u64) {
-    seed_trace_with_request_kind(state, id, started_at_ms, "completion");
+    seed_trace_with_request_kind_and_status(
+        state,
+        id,
+        started_at_ms,
+        "completion",
+        LlmTraceStatus::Succeeded,
+    );
 }
 
 pub(crate) fn seed_trace_with_request_kind(
@@ -50,7 +56,24 @@ pub(crate) fn seed_trace_with_request_kind(
     started_at_ms: u64,
     request_kind: &str,
 ) {
+    seed_trace_with_request_kind_and_status(
+        state,
+        id,
+        started_at_ms,
+        request_kind,
+        LlmTraceStatus::Succeeded,
+    );
+}
+
+pub(crate) fn seed_trace_with_request_kind_and_status(
+    state: &AppState,
+    id: &str,
+    started_at_ms: u64,
+    request_kind: &str,
+    status: LlmTraceStatus,
+) {
     let loop_id = id.split("-step-").next().unwrap_or(id);
+    let is_failed = status == LlmTraceStatus::Failed;
     state
         .store
         .record(&LlmTraceRecord {
@@ -61,6 +84,7 @@ pub(crate) fn seed_trace_with_request_kind(
             root_span_id: format!("root-{loop_id}"),
             operation_name: "responses.create".into(),
             span_kind: LlmTraceSpanKind::Client,
+            session_id: Some(format!("session-{loop_id}")),
             turn_id: format!("turn-{loop_id}"),
             run_id: format!("run-{loop_id}"),
             request_kind: request_kind.into(),
@@ -74,26 +98,99 @@ pub(crate) fn seed_trace_with_request_kind(
             started_at_ms,
             finished_at_ms: Some(started_at_ms + 25),
             duration_ms: Some(25),
-            status_code: Some(200),
-            status: LlmTraceStatus::Succeeded,
-            stop_reason: Some("completed".into()),
-            error: None,
+            status_code: if is_failed { Some(500) } else { Some(200) },
+            status,
+            stop_reason: if is_failed {
+                Some("error".into())
+            } else {
+                Some("completed".into())
+            },
+            error: if is_failed {
+                Some("request failed".into())
+            } else {
+                None
+            },
             request_summary: serde_json::json!({
                 "user_message": if request_kind == "compression" { serde_json::Value::Null } else { serde_json::json!("hi") }
             }),
             provider_request: serde_json::json!({ "model": "gpt-5.4" }),
             response_summary: serde_json::json!({ "output_text": "hello" }),
-            response_body: Some("{\"ok\":true}".into()),
+            response_body: Some(
+                if is_failed {
+                    "{\"ok\":false}".into()
+                } else {
+                    "{\"ok\":true}".into()
+                }
+            ),
             input_tokens: Some(10),
             output_tokens: Some(5),
             total_tokens: Some(15),
             cached_tokens: Some(2),
             otel_attributes: serde_json::json!({ "http.method": "POST" }),
             events: vec![LlmTraceEvent {
-                name: "response.completed".into(),
+                name: if is_failed {
+                    "response.failed".into()
+                } else {
+                    "response.completed".into()
+                },
                 at_ms: started_at_ms + 25,
                 attributes: serde_json::json!({}),
             }],
         })
         .expect("trace record should save");
+}
+
+pub(crate) fn seed_tool_trace_with_changes(
+    state: &AppState,
+    loop_id: &str,
+    started_at_ms: u64,
+    tool_name: &str,
+    added: u64,
+    removed: u64,
+) {
+    state
+        .store
+        .record(&LlmTraceRecord {
+            id: format!("{loop_id}-tool-{started_at_ms}"),
+            trace_id: format!("trace-loop-{loop_id}"),
+            span_id: format!("span-{loop_id}-tool-{started_at_ms}"),
+            parent_span_id: Some(format!("span-{loop_id}-parent")),
+            root_span_id: format!("root-{loop_id}"),
+            operation_name: "execute_tool".into(),
+            span_kind: LlmTraceSpanKind::Internal,
+            session_id: Some(format!("session-{loop_id}")),
+            turn_id: format!("turn-{loop_id}"),
+            run_id: format!("run-{loop_id}"),
+            request_kind: "tool".into(),
+            step_index: 9,
+            provider: "builtin".into(),
+            protocol: "local".into(),
+            model: tool_name.into(),
+            base_url: "local".into(),
+            endpoint_path: format!("/{tool_name}"),
+            streaming: false,
+            started_at_ms,
+            finished_at_ms: Some(started_at_ms + 10),
+            duration_ms: Some(10),
+            status_code: None,
+            status: LlmTraceStatus::Succeeded,
+            stop_reason: None,
+            error: None,
+            request_summary: serde_json::json!({}),
+            provider_request: serde_json::json!({}),
+            response_summary: serde_json::json!({}),
+            response_body: None,
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            cached_tokens: None,
+            otel_attributes: serde_json::json!({
+                "aia.tool.details": {
+                    "added": added,
+                    "removed": removed,
+                }
+            }),
+            events: vec![],
+        })
+        .expect("tool trace should save");
 }

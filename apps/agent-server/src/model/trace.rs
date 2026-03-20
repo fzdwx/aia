@@ -146,6 +146,7 @@ fn build_trace_seed(
         root_span_id: context.root_span_id.clone(),
         operation_name: context.operation_name.clone(),
         span_kind: LlmTraceSpanKind::Client,
+        session_id: context.session_id.clone(),
         turn_id: context.turn_id.clone(),
         run_id: context.run_id.clone(),
         request_kind: context.request_kind.clone(),

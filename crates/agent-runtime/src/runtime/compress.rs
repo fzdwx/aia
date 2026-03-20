@@ -44,7 +44,13 @@ where
             user_agent: None,
             timeout: self.request_timeout.clone(),
             trace_context: turn_id.map(|turn_id| {
-                build_llm_trace_context(turn_id, turn_id, "compression", step_index)
+                build_llm_trace_context(
+                    self.session_id.as_deref(),
+                    turn_id,
+                    turn_id,
+                    "compression",
+                    step_index,
+                )
             }),
         };
 

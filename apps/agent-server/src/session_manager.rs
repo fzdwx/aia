@@ -345,6 +345,7 @@ impl<'a> SessionSlotFactory<'a> {
                     agent_prompts::AUTO_COMPRESSION_THRESHOLD,
                 ),
             ))
+            .with_session_id(session_id.to_string())
             .with_user_agent(self.config.user_agent.clone())
             .with_workspace_root(workspace_root)
             .with_tape_entry_listener(move |entry| {

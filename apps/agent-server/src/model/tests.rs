@@ -170,6 +170,7 @@ fn responses_model_call_writes_llm_trace_record() {
             user_agent: Some("aia-test/1.0".into()),
             timeout: None,
             trace_context: Some(agent_core::LlmTraceRequestContext {
+                session_id: Some("session-1".into()),
                 trace_id: "aia-trace-turn-1".into(),
                 span_id: "trace-1".into(),
                 parent_span_id: Some("aia-span-turn-1-root".into()),
@@ -262,6 +263,7 @@ fn responses_http_502_writes_failed_trace_record() {
             user_agent: Some("aia-test/1.0".into()),
             timeout: None,
             trace_context: Some(agent_core::LlmTraceRequestContext {
+                session_id: Some("session-1".into()),
                 trace_id: "aia-trace-turn-1".into(),
                 span_id: "trace-502".into(),
                 parent_span_id: Some("aia-span-turn-1-root".into()),

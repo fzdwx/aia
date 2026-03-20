@@ -39,6 +39,7 @@ where
             user_agent: self.user_agent.clone(),
             timeout: self.request_timeout.clone(),
             trace_context: Some(build_llm_trace_context(
+                self.session_id.as_deref(),
                 turn_id,
                 turn_id,
                 request_kind,

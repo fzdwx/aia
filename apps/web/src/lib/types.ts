@@ -370,6 +370,7 @@ export type TraceRecord = {
   root_span_id: string
   operation_name: string
   span_kind: TraceSpanKind
+  session_id: string | null
   turn_id: string
   run_id: string
   request_kind: string
@@ -415,6 +416,54 @@ export type TraceSummary = {
   total_output_tokens: number
   total_tokens: number
   total_cached_tokens: number
+}
+
+export type TraceDashboardRange = "today" | "week" | "month"
+
+export type TraceDashboardSummary = {
+  total_cost_usd: number
+  total_requests: number
+  failed_requests: number
+  partial_requests: number
+  total_sessions: number
+  total_input_tokens: number
+  total_output_tokens: number
+  total_tokens: number
+  total_cached_tokens: number
+  total_lines_added: number
+  total_lines_removed: number
+  total_lines_changed: number
+}
+
+export type TraceDashboardTrendPoint = {
+  bucket_start_ms: number
+  total_requests: number
+  failed_requests: number
+  partial_requests: number
+  total_input_tokens: number
+  total_output_tokens: number
+  total_cached_tokens: number
+  total_tokens: number
+}
+
+export type TraceDashboardActivityPoint = {
+  day_start_ms: number
+  total_requests: number
+  total_sessions: number
+  total_cost_usd: number
+  total_tokens: number
+  total_lines_changed: number
+}
+
+export type TraceDashboard = {
+  range: TraceDashboardRange
+  current: TraceDashboardSummary
+  previous: TraceDashboardSummary
+  trend: TraceDashboardTrendPoint[]
+  activity: TraceDashboardActivityPoint[]
+  overall_summary: TraceSummary
+  conversation_summary: TraceSummary
+  compression_summary: TraceSummary
 }
 
 export type TraceDetailResponse = TraceRecord | TraceLoopDetail

@@ -3,9 +3,11 @@ use axum::{
     http::StatusCode,
 };
 
+use agent_store::LlmTraceDashboardRange;
+
 use crate::state::SharedState;
 
-use super::dto::TraceListQuery;
+use super::dto::{TraceDashboardQuery, TraceListQuery};
 use crate::routes::common::{
     JsonResponse, error_response, json_response, trace_store_error_response,
 };
@@ -75,6 +77,22 @@ pub(crate) async fn get_trace_summary(
 
     match result {
         Ok(summary) => json_response(StatusCode::OK, summary),
+        Err(error) => trace_store_error_response(error),
+    }
+}
+
+pub(crate) async fn get_trace_dashboard(
+    State(state): State<SharedState>,
+    Query(query): Query<TraceDashboardQuery>,
+) -> JsonResponse {
+    let range = query
+        .range
+        .as_deref()
+        .map(LlmTraceDashboardRange::from_str)
+        .unwrap_or(LlmTraceDashboardRange::Month);
+
+    match state.store.trace_dashboard_async(range).await {
+        Ok(dashboard) => json_response(StatusCode::OK, dashboard),
         Err(error) => trace_store_error_response(error),
     }
 }

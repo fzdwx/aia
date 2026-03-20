@@ -62,6 +62,7 @@ pub(super) fn anchor_state_message(anchor: &Anchor) -> Option<Message> {
 }
 
 pub(super) fn build_llm_trace_context(
+    session_id: Option<&str>,
     turn_id: &str,
     run_id: &str,
     request_kind: &str,
@@ -77,6 +78,7 @@ pub(super) fn build_llm_trace_context(
     .to_string();
 
     LlmTraceRequestContext {
+        session_id: session_id.map(ToOwned::to_owned),
         trace_id,
         span_id,
         parent_span_id: Some(root_span_id.clone()),
@@ -94,6 +96,7 @@ pub(super) fn build_tool_trace_context(
     call: &ToolCall,
 ) -> ToolTraceContext {
     ToolTraceContext {
+        session_id: parent.session_id.clone(),
         trace_id: parent.trace_id.clone(),
         span_id: aia_config::build_tool_span_id(&parent.run_id, &call.invocation_id),
         parent_span_id: parent.span_id.clone(),

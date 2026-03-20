@@ -12,9 +12,10 @@ pub use channel::{
 };
 pub use session::{SessionRecord, generate_session_id, iso8601_now};
 pub use trace::{
-    LlmTraceEvent, LlmTraceListItem, LlmTraceLoopDetail, LlmTraceLoopItem, LlmTraceLoopPage,
-    LlmTraceLoopStatus, LlmTraceOverview, LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus,
-    LlmTraceStore, LlmTraceSummary,
+    LlmTraceDashboard, LlmTraceDashboardActivityPoint, LlmTraceDashboardRange,
+    LlmTraceDashboardSummary, LlmTraceDashboardTrendPoint, LlmTraceEvent, LlmTraceListItem,
+    LlmTraceLoopDetail, LlmTraceLoopItem, LlmTraceLoopPage, LlmTraceLoopStatus, LlmTraceOverview,
+    LlmTraceRecord, LlmTraceSpanKind, LlmTraceStatus, LlmTraceStore, LlmTraceSummary,
 };
 
 #[derive(Debug)]

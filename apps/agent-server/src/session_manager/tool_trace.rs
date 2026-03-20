@@ -98,6 +98,7 @@ impl ToolTraceRecorder {
                 root_span_id: context.root_span_id.clone(),
                 operation_name: context.operation_name.clone(),
                 span_kind: LlmTraceSpanKind::Internal,
+                session_id: context.session_id.clone(),
                 turn_id: turn.turn_id.clone(),
                 run_id: turn.turn_id.clone(),
                 request_kind: "tool".into(),
