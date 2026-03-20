@@ -2,7 +2,10 @@ import { describe, expect, test } from "vite-plus/test"
 
 import {
   buildTraceLoopGroups,
-  partitionTraceLoopGroups,
+  formatTraceDuration,
+  formatTraceLoopHeadline,
+  resolveActiveTraceLoopKey,
+  selectVisibleTraceLoopGroups,
 } from "@/lib/trace-presentation"
 import type { TraceListItem, TraceLoopItem } from "@/lib/types"
 
@@ -79,7 +82,7 @@ describe("trace presentation", () => {
     expect(groups[0]?.requestKind).toBe("compression")
   })
 
-  test("separates compression groups from conversation groups", () => {
+  test("selects compression groups separately from conversation groups", () => {
     const groups = buildTraceLoopGroups(
       [
         loopFromTrace(compressionTrace()),
@@ -101,11 +104,57 @@ describe("trace presentation", () => {
       []
     )
 
-    const partitioned = partitionTraceLoopGroups(groups)
+    const compression = selectVisibleTraceLoopGroups(groups, "compression")
+    const conversation = selectVisibleTraceLoopGroups(groups, "conversation")
 
-    expect(partitioned.compression).toHaveLength(1)
-    expect(partitioned.conversation).toHaveLength(1)
-    expect(partitioned.compression[0]?.requestKind).toBe("compression")
-    expect(partitioned.conversation[0]?.requestKind).toBe("completion")
+    expect(compression).toHaveLength(1)
+    expect(conversation).toHaveLength(1)
+    expect(compression[0]?.requestKind).toBe("compression")
+    expect(conversation[0]?.requestKind).toBe("completion")
+  })
+
+  test("falls back to the first visible group when active loop is missing", () => {
+    const groups = buildTraceLoopGroups(
+      [
+        loopFromTrace(compressionTrace()),
+        loopFromTrace(
+          compressionTrace({
+            id: "trace-chat-1",
+            trace_id: "trace-chat-group",
+            span_id: "trace-chat-1",
+            root_span_id: "trace-chat-root",
+            parent_span_id: "trace-chat-root",
+            turn_id: "turn-chat-1",
+            run_id: "turn-chat-1",
+            operation_name: "chat",
+            request_kind: "completion",
+            user_message: "hello",
+          })
+        ),
+      ],
+      []
+    )
+
+    const conversation = selectVisibleTraceLoopGroups(groups, "conversation")
+    expect(resolveActiveTraceLoopKey(conversation, "missing-loop")).toBe(
+      "trace-chat-group"
+    )
+  })
+
+  test("formats loop headlines with configurable compression labels", () => {
+    const [compressionGroup] = buildTraceLoopGroups(
+      [loopFromTrace(compressionTrace())],
+      []
+    )
+
+    expect(
+      formatTraceLoopHeadline(compressionGroup!, {
+        compressionLabel: "Context compression log",
+      })
+    ).toBe("Context compression log")
+  })
+
+  test("formats long trace durations consistently", () => {
+    expect(formatTraceDuration(90_000)).toBe("1m 30s")
   })
 })

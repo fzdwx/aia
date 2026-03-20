@@ -1,7 +1,7 @@
 use channel_bridge::{ChannelProfile, SupportedChannelDefinition};
 use serde_json::Value;
 
-use super::dto::ChannelListItem;
+use super::ChannelListItem;
 
 pub(crate) fn channel_list_item(
     profile: &ChannelProfile,

@@ -1,4 +1,4 @@
-use agent_store::LlmTraceStoreError;
+use agent_store::AiaStoreError;
 use axum::{Json, http::StatusCode};
 use channel_bridge::prepare_session_for_turn as prepare_channel_session_for_turn;
 use serde::Serialize;
@@ -20,7 +20,7 @@ pub(crate) fn runtime_worker_error_response(error: RuntimeWorkerError) -> JsonRe
     error_response(error.status, error.message)
 }
 
-pub(crate) fn trace_store_error_response(error: LlmTraceStoreError) -> JsonResponse {
+pub(crate) fn trace_store_error_response(error: AiaStoreError) -> JsonResponse {
     error_response(StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
 }
 

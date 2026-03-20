@@ -15,7 +15,7 @@ use tokio_stream::{
 
 use crate::{sse::SsePayload, state::SharedState};
 
-use super::dto::{CancelTurnRequest, TurnRequest};
+use super::{CancelTurnRequest, TurnRequest};
 use crate::routes::common::{
     prepare_session_for_turn, require_session_id, runtime_worker_error_response,
 };

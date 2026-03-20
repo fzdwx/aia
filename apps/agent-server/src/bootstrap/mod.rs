@@ -14,9 +14,35 @@ use crate::{
     state::AppState,
 };
 
-use super::{ServerInitError, build_server_user_agent};
+pub fn build_server_user_agent() -> String {
+    aia_config::build_user_agent(aia_config::APP_NAME, env!("CARGO_PKG_VERSION"))
+}
 
-pub(super) struct ServerBootstrap {
+#[derive(Debug)]
+pub struct ServerInitError {
+    step: &'static str,
+    message: String,
+}
+
+impl ServerInitError {
+    pub fn new(step: &'static str, message: impl Into<String>) -> Self {
+        Self { step, message: message.into() }
+    }
+}
+
+impl std::fmt::Display for ServerInitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{step}失败: {message}", step = self.step, message = self.message)
+    }
+}
+
+impl std::error::Error for ServerInitError {}
+
+pub async fn bootstrap_state() -> Result<Arc<AppState>, ServerInitError> {
+    ServerBootstrap::discover()?.bootstrap().await
+}
+
+struct ServerBootstrap {
     paths: BootstrapPaths,
 }
 
@@ -41,15 +67,15 @@ struct BootstrapSnapshots {
 }
 
 impl ServerBootstrap {
-    pub(super) fn discover() -> Result<Self, ServerInitError> {
+    fn discover() -> Result<Self, ServerInitError> {
         Ok(Self { paths: BootstrapPaths::discover()? })
     }
 
-    pub(super) async fn bootstrap(self) -> Result<Arc<AppState>, ServerInitError> {
+    async fn bootstrap(self) -> Result<Arc<AppState>, ServerInitError> {
         let resources = self.load_resources().await?;
         self.prepare_sessions_dir()?;
         self.ensure_default_session(&resources).await?;
-        let snapshots = self.build_snapshots(&resources)?;
+        let snapshots = self.build_snapshots(&resources);
         let state = self.assemble_state(resources, snapshots);
         self.start_channel_runtime(state).await
     }
@@ -104,10 +130,7 @@ impl ServerBootstrap {
             .map_err(|error| ServerInitError::new("默认 session 创建", error.to_string()))
     }
 
-    fn build_snapshots(
-        &self,
-        resources: &BootstrapResources,
-    ) -> Result<BootstrapSnapshots, ServerInitError> {
+    fn build_snapshots(&self, resources: &BootstrapResources) -> BootstrapSnapshots {
         let selection = resources
             .registry
             .active_provider()
@@ -124,12 +147,12 @@ impl ServerBootstrap {
         let channel_profile_registry_snapshot =
             Arc::new(RwLock::new(resources.channel_profile_registry.clone()));
 
-        Ok(BootstrapSnapshots {
+        BootstrapSnapshots {
             broadcast_tx,
             provider_registry_snapshot,
             provider_info_snapshot,
             channel_profile_registry_snapshot,
-        })
+        }
     }
 
     fn assemble_state(
@@ -157,17 +180,16 @@ impl ServerBootstrap {
             channel_adapter_catalog.as_ref().clone(),
         )));
 
-        Arc::new(AppState {
+        Arc::new(AppState::new(
             session_manager,
-            broadcast_tx: snapshots.broadcast_tx,
-            provider_registry_snapshot: snapshots.provider_registry_snapshot,
-            provider_info_snapshot: snapshots.provider_info_snapshot,
-            channel_profile_registry_snapshot: snapshots.channel_profile_registry_snapshot,
-            channel_mutation_lock: Arc::new(tokio::sync::Mutex::new(())),
-            store: resources.store,
+            snapshots.broadcast_tx,
+            snapshots.provider_registry_snapshot,
+            snapshots.provider_info_snapshot,
+            snapshots.channel_profile_registry_snapshot,
+            resources.store,
             channel_adapter_catalog,
             channel_runtime,
-        })
+        ))
     }
 
     async fn start_channel_runtime(

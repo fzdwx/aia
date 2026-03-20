@@ -6,10 +6,8 @@ use axum::{
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{
-    dto::{TraceDashboardQuery, TraceListQuery},
-    handlers::{
-        get_trace, get_trace_dashboard, get_trace_overview, get_trace_summary, list_traces,
-    },
+    TraceDashboardQuery, TraceListQuery,
+    handlers::{get_trace, get_trace_dashboard, get_trace_overview, list_traces},
 };
 use crate::routes::test_support::{
     seed_tool_trace_with_changes, seed_trace, seed_trace_with_request_kind,
@@ -110,56 +108,6 @@ async fn get_trace_can_return_loop_detail_by_loop_id() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["loop_item"]["trace_id"], "trace-loop-trace-chat");
     assert_eq!(body["trace_details"].as_array().map(Vec::len), Some(2));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn get_trace_summary_returns_aggregate_counts() {
-    let state = test_state();
-    seed_trace(state.as_ref(), "trace-1", 1_000);
-    seed_trace(state.as_ref(), "trace-2", 2_000);
-
-    let (status, Json(body)) = get_trace_summary(
-        State(state),
-        Query(TraceListQuery { page: None, page_size: None, request_kind: None }),
-    )
-    .await;
-
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["total_requests"], 2);
-    assert_eq!(body["failed_requests"], 0);
-    assert_eq!(body["partial_requests"], 0);
-    assert_eq!(body["total_llm_spans"], 2);
-    assert_eq!(body["total_tool_spans"], 0);
-    assert_eq!(body["requests_with_tools"], 0);
-    assert_eq!(body["failed_tool_calls"], 0);
-    assert_eq!(body["unique_models"], 1);
-    assert_eq!(body["latest_request_started_at_ms"], 2_000);
-    assert_eq!(body["total_input_tokens"], 20);
-    assert_eq!(body["total_output_tokens"], 10);
-    assert_eq!(body["total_tokens"], 30);
-    assert_eq!(body["total_cached_tokens"], 4);
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn get_trace_summary_can_filter_compression_logs() {
-    let state = test_state();
-    seed_trace(state.as_ref(), "trace-chat", 1_000);
-    seed_trace_with_request_kind(state.as_ref(), "trace-compression", 2_000, "compression");
-
-    let (status, Json(body)) = get_trace_summary(
-        State(state),
-        Query(TraceListQuery {
-            page: None,
-            page_size: None,
-            request_kind: Some("compression".into()),
-        }),
-    )
-    .await;
-
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["total_requests"], 1);
-    assert_eq!(body["total_llm_spans"], 1);
-    assert_eq!(body["total_tokens"], 15);
 }
 
 #[tokio::test(flavor = "current_thread")]

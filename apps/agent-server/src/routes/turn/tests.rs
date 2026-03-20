@@ -1,6 +1,6 @@
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
-use super::{dto::CancelTurnRequest, handlers::map_broadcast_result};
+use super::{CancelTurnRequest, handlers::map_broadcast_result};
 
 #[test]
 fn cancel_turn_request_deserializes_session_id() {

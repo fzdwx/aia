@@ -27,28 +27,21 @@ import {
 } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
+import {
+  asArray,
+  asRecord,
+  asString,
+  extractTraceText,
+  type JsonRecord,
+} from "@/lib/trace-inspection"
 import { getToolDisplayName } from "@/lib/tool-display"
 import type { TraceRecord } from "@/lib/types"
 import { cn } from "@/lib/utils"
-
-type JsonRecord = Record<string, unknown>
 
 type PromptEntry = {
   label: string
   source: string
   content: string
-}
-
-function isRecord(value: unknown): value is JsonRecord {
-  return value != null && typeof value === "object" && !Array.isArray(value)
-}
-
-function asRecord(value: unknown): JsonRecord | null {
-  return isRecord(value) ? value : null
-}
-
-function asString(value: unknown): string | null {
-  return typeof value === "string" && value.length > 0 ? value : null
 }
 
 function asNumber(value: unknown): number | null {
@@ -57,10 +50,6 @@ function asNumber(value: unknown): number | null {
 
 function asBoolean(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null
-}
-
-function asArray(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : []
 }
 
 function formatDateTime(value: number) {
@@ -89,32 +78,6 @@ function formatPrimitive(value: unknown) {
 
 function truncate(text: string, max: number) {
   return text.length > max ? `${text.slice(0, max)}…` : text
-}
-
-function extractText(value: unknown): string {
-  if (typeof value === "string") return value
-
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => extractText(item))
-      .filter(Boolean)
-      .join("\n")
-      .trim()
-  }
-
-  const record = asRecord(value)
-  if (!record) return ""
-
-  for (const key of ["text", "summary_text", "content", "output", "value"]) {
-    const text = extractText(record[key])
-    if (text) return text
-  }
-
-  return Object.values(record)
-    .map((item) => extractText(item))
-    .filter(Boolean)
-    .join(" ")
-    .trim()
 }
 
 function summarizeSchema(schema: JsonRecord | null) {
@@ -207,7 +170,7 @@ function extractContent(item: JsonRecord): string {
       : "[tool calls]"
   }
 
-  return extractText(item.content) || extractText(item.output) || ""
+  return extractTraceText(item.content) || extractTraceText(item.output) || ""
 }
 
 function summarizeMessageKinds(items: unknown[]) {

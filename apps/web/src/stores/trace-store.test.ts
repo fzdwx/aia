@@ -16,7 +16,6 @@ const initialState = {
   selectedTraceId: null,
   selectedTrace: null,
   selectedLoop: null,
-  traceSummary: null,
   traceLoading: false,
   traceError: null,
 }
@@ -135,6 +134,5 @@ describe("trace store", () => {
 
     expect(fetchCount).toBe(1)
     expect(useTraceStore.getState().traces).toHaveLength(1)
-    expect(useTraceStore.getState().traceSummary?.total_requests).toBe(1)
   })
 })

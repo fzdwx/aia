@@ -49,12 +49,6 @@ impl From<serde_json::Error> for AiaStoreError {
     }
 }
 
-/// Backward compatibility alias.
-pub type LlmTraceStoreError = AiaStoreError;
-
-/// Backward compatibility alias.
-pub type SqliteLlmTraceStore = AiaStore;
-
 pub struct AiaStore {
     pub(crate) conn: Mutex<Connection>,
 }

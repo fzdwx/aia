@@ -11,7 +11,7 @@ use crate::{
     state::SharedState,
 };
 
-use super::dto::{
+use super::{
     CreateProviderRequest, ModelConfigDto, ProviderInfo, ProviderListItem, SwitchProviderRequest,
     UpdateProviderRequest,
 };

@@ -12,7 +12,7 @@ mod test_support;
 mod trace;
 mod turn;
 
-pub(crate) fn router(state: SharedState) -> Router {
+pub fn build_router(state: SharedState) -> Router {
     Router::<SharedState>::new()
         .merge(provider::router())
         .merge(channel::router())

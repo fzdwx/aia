@@ -1,5 +1,69 @@
 # 演进日志
 
+## 2026-03-20 Session 89
+
+**Diagnosis**：`apps/agent-server/src` 根层虽然已经清掉了一批无意义的薄转发，但模块落点仍是扁平的 `bootstrap.rs`、`model.rs`、`runtime_worker.rs`、`session_manager.rs`、`sse.rs`、`state.rs` 等同名文件；这和仓库里其余已经目录化的资源模块风格不一致，也继续让根层显得拥挤。与此同时，上一轮路由 DTO 已经并回资源 `mod.rs`，说明这里更适合统一成“目录 + mod.rs”而不是再挂一层平铺入口。
+**Decision**：按目录形态收口 `agent-server` 根模块：把 `bootstrap/model/routes/runtime_worker/session_manager/sse/state` 全部迁到各自目录的 `mod.rs`；恢复 `cli` 与 `server` 为独立目录模块，让 `main.rs` 只保留启动装配。逻辑上不再额外追求继续摊平，而是以“根层不留这些同名 `*.rs`、目录内保留真实边界”为准。
+**Changes**：
+- `apps/agent-server/src/{bootstrap,model,routes,runtime_worker,session_manager,sse,state}/mod.rs`：将原根层模块迁入对应目录根模块；其中 `bootstrap`、`model`、`runtime_worker` 保留上一轮已完成的内部收口结果。
+- `apps/agent-server/src/{cli,server}/mod.rs`：恢复 CLI 解析与 server listener 入口为独立目录模块，不再把它们挂成根层单文件。
+- `apps/agent-server/src/main.rs`：改回只做启动装配，重新从 `cli` / `server` 目录模块导入入口。
+- `docs/status.md`、`docs/evolution-log.md`：同步更新当前 `agent-server` 模块布局叙述，移除对 `routes.rs`、`server.rs`、`bootstrap/startup.rs`、独立 `dto.rs` 的过时描述。
+**Verification**：`cargo fmt --all`、`cargo test -p agent-server` 通过。
+**Commit**：未提交。
+**Next direction**：若后续继续压缩 `apps/agent-server`，优先针对目录内真正还在做单层转发的子模块动手，而不是再回到根层平铺更多入口文件。
+
+
+## 2026-03-20 Session 88
+
+**Diagnosis**：`apps/agent-server/src/routes/*` 虽然已经按资源目录模块化，但 `channel/provider/session/trace/turn` 这几组路由仍各自额外挂着一个只有几行类型定义的 `dto.rs`。这些 DTO 并没有独立演化出复杂映射逻辑，继续拆成单文件只会让 `mod.rs` / `handlers.rs` / `tests.rs` 多一层跳转。
+**Decision**：不把 DTO 再继续包装成单独子模块，而是直接把每组路由自己的请求/响应类型并回对应 `mod.rs`，让 `mod.rs` 同时承担 façade 和本资源的局部类型定义；`handlers.rs`、`config.rs`、`tests.rs` 等同级模块统一从 `super` 直接拿类型。
+**Changes**：
+- `apps/agent-server/src/routes/{channel,provider,session,trace,turn}/mod.rs`：把原 `dto.rs` 中的类型与相关转换实现并回各自 `mod.rs`。
+- `apps/agent-server/src/routes/{channel,provider,session,trace,turn}/{handlers,config,tests}.rs`：改为从 `super` 直接导入类型，删除 `dto` 子模块引用。
+- `apps/agent-server/src/routes/{channel,provider,session,trace,turn}/dto.rs`：删除。
+- `docs/evolution-log.md`：记录本轮路由局部 DTO 收口。
+**Verification**：`cargo fmt --all`、`cargo test -p agent-server` 通过。
+**Commit**：未提交。
+**Next direction**：若继续压缩 `agent-server` 路由层，下一步优先检查每个资源模块里是否还存在只服务单一路由的内联 JSON 拼装，适合继续收口到共享 response helper，而不是重新拆回更多薄文件。
+
+## 2026-03-20 Session 87
+
+**Diagnosis**：`TracePanel` 与 `TraceDetailModal` 在前面几轮清理后，仍各自内嵌了一套相同的 JSON payload 读取 helper：`asRecord`、`asArray`、`asString`、`extractText`。这些函数是纯提取逻辑，继续散在组件里没有展示价值，只会让后续 trace payload 形态调整出现双份维护点。
+**Decision**：不把 `trace-detail-modal` 里更偏本地语义的 `formatJson`、`asNumber`、`asBoolean` 一起抽走，避免为了“全收口”把共享模块做成新的杂物堆；只新增一个轻量 `trace-inspection` helper，承接跨组件重复的 JSON record/string/array 提取与通用文本抽取逻辑。
+**Changes**：
+- `apps/web/src/lib/{trace-inspection.ts,trace-inspection.test.ts}`：新增共享 `asRecord(...)`、`asArray(...)`、`asString(...)`、`extractTraceText(...)` 与对应测试。
+- `apps/web/src/components/{trace-panel.tsx,trace-detail-modal.tsx}`：改用共享 trace inspection helper，删除各自重复的 JSON 提取函数。
+- `docs/evolution-log.md`：补记本轮 trace payload 提取 helper 下沉。
+**Verification**：`just web-typecheck`、`just web-test` 通过。
+**Commit**：未提交。
+**Next direction**：若继续压缩 trace 代码，下一步优先检查 `trace-detail-modal` 内部的 provider-protocol 分支展示是否值得拆成更小的局部 section 组件，而不是继续扩大全局 helper 面。
+
+## 2026-03-20 Session 86
+
+**Diagnosis**：`TracePanel` 与 `TraceSidebar` 在前两轮清理后仍各自保留一份 `duration/headline` 展示 helper；与此同时，`agent-store` 还留着 `LlmTraceStoreError`、`SqliteLlmTraceStore` 两个历史兼容 alias，仓库内已无实际依赖，只会继续扩大 trace 相关类型面的噪音。
+**Decision**：前端继续把真正重复的 trace 展示格式 helper 下沉到 `trace-presentation`，但不把样式差异不同的 badge/class 映射强行合并；后端则直接移除仓库内已无调用的 `agent-store` 兼容 alias，并把 app-server 调用方改为显式使用 `AiaStoreError`，接受这是一处小范围 public type 面收缩。
+**Changes**：
+- `apps/web/src/lib/{trace-presentation.ts,trace-presentation.test.ts}`：新增共享 `formatTraceDuration(...)`、`formatTraceLoopHeadline(...)`，并补测试锁住格式语义。
+- `apps/web/src/components/{trace-panel.tsx,trace-sidebar.tsx}`：改为复用共享 trace 展示 helper，不再各自维护一份 headline/duration 文案逻辑。
+- `apps/agent-server/src/routes/common.rs`、`crates/agent-store/src/lib.rs`：删除 `LlmTraceStoreError` / `SqliteLlmTraceStore` alias，并让 trace 路由错误响应直接依赖 `AiaStoreError`。
+- `docs/evolution-log.md`：记录本轮展示 helper 收口与兼容 alias 清理；对外若仍有调用方引用旧 alias，需要改为 `AiaStoreError` / `AiaStore`。
+**Verification**：`cargo fmt --all`、`cargo test -p agent-store`、`cargo test -p agent-server`、`just web-typecheck`、`just web-test` 通过。
+**Commit**：未提交。
+**Next direction**：若继续压缩 trace 相关代码，下一步优先检查 `trace` 细节模态框里是否还存在只在单文件内重复的 payload/extract helper，而不是继续扩张 store 或协议层变更。
+
+## 2026-03-20 Session 85
+
+**Diagnosis**：`TracePanel` 和 `TraceSidebar` 虽然已经共用 `buildTraceLoopGroups(...)`，但仍各自重复做一遍“按 view 过滤 conversation/compression group”和“校正 active loop key”。这两段派生逻辑完全一致，继续散在组件内只会让后续 trace 交互调整出现双份修改点。
+**Decision**：不把 loop group 派生再上提到 store，避免把纯展示选择逻辑重新塞回全局状态；只在 `trace-presentation` 中补共享 helper，让 panel/sidebar 共用“visible groups + active loop key fallback”逻辑，并顺手删掉只为旧组件结构暴露的 `partitionTraceLoopGroups(...)` 导出。
+**Changes**：
+- `apps/web/src/lib/{trace-presentation.ts,trace-presentation.test.ts}`：新增 `selectVisibleTraceLoopGroups(...)` 与 `resolveActiveTraceLoopKey(...)`，并把相关测试改到新 helper。
+- `apps/web/src/components/{trace-panel.tsx,trace-sidebar.tsx}`：面板与侧栏改为共用新的 trace group 选择/回退逻辑，不再各自手写同一段派生代码。
+- `docs/evolution-log.md`：补记本轮 trace 展示派生逻辑去重。
+**Verification**：`just web-typecheck`、`just web-test` 通过。
+**Commit**：未提交。
+**Next direction**：若继续压缩 trace 展示层，下一步优先检查 `loopHeadline` 一类文案/格式 helper 是否也值得收口为共享 presentation API，而不是过早把更多展示派生塞进 store。
+
 ## 2026-03-20 Session 84
 
 **Diagnosis**：上一轮虽然已经把独立 `/api/traces/summary` 控制面删掉，但 `apps/web` 的 `trace-store` 里仍保留着 `traceSummary` 本地状态。仓库内已经没有任何组件读取这份 store 字段，实际只剩刷新链路自己赋值、测试初始化和断言，属于 overview/workspace 切分后遗留的前端冗余状态。

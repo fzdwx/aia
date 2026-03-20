@@ -5,7 +5,6 @@ import type {
   TraceLoopDetail,
   TraceLoopItem,
   TraceRecord,
-  TraceSummary,
 } from "@/lib/types"
 
 const TRACE_PAGE_SIZE = 12
@@ -19,7 +18,6 @@ function requestKindForView(view: TraceView) {
 
 let inflightOverviewKey: string | null = null
 let inflightOverviewPromise: Promise<{
-  traceSummary: TraceSummary
   traces: TraceLoopItem[]
   tracePage: number
   tracePageSize: number
@@ -38,7 +36,6 @@ type TraceStore = {
   selectedTraceId: string | null
   selectedTrace: TraceRecord | null
   selectedLoop: TraceLoopDetail | null
-  traceSummary: TraceSummary | null
   traceLoading: boolean
   traceError: string | null
   refreshTraces: (options?: {
@@ -66,7 +63,6 @@ export const useTraceStore = create<TraceStore>((set, get) => ({
   selectedTraceId: null,
   selectedTrace: null,
   selectedLoop: null,
-  traceSummary: null,
   traceLoading: false,
   traceError: null,
 
@@ -89,7 +85,6 @@ export const useTraceStore = create<TraceStore>((set, get) => ({
               page_size: tracePageSize,
               request_kind: requestKind,
             }).then((overview) => ({
-              traceSummary: overview.summary,
               traces: overview.page.items,
               tracePage: overview.page.page,
               tracePageSize: overview.page.page_size,
@@ -100,7 +95,6 @@ export const useTraceStore = create<TraceStore>((set, get) => ({
       inflightOverviewPromise = overviewPromise
 
       const {
-        traceSummary,
         traces,
         tracePage: nextTracePage,
         tracePageSize: nextTracePageSize,
@@ -125,7 +119,6 @@ export const useTraceStore = create<TraceStore>((set, get) => ({
         tracePage: nextTracePage,
         tracePageSize: nextTracePageSize,
         totalTraceItems,
-        traceSummary,
         selectedTraceId: nextSelectedId,
         selectedTrace:
           nextSelectedId != null && get().selectedTrace?.id === nextSelectedId

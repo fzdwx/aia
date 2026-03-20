@@ -2,10 +2,21 @@ use axum::{
     Router,
     routing::{get, post},
 };
+use serde::Deserialize;
 
 use crate::state::SharedState;
 
-mod dto;
+#[derive(Deserialize)]
+pub(crate) struct TurnRequest {
+    pub prompt: String,
+    pub session_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct CancelTurnRequest {
+    pub session_id: Option<String>,
+}
+
 mod handlers;
 #[cfg(test)]
 mod tests;

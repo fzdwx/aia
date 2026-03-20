@@ -7,7 +7,7 @@ use agent_store::LlmTraceDashboardRange;
 
 use crate::state::SharedState;
 
-use super::dto::{TraceDashboardQuery, TraceListQuery};
+use super::{TraceDashboardQuery, TraceListQuery};
 use crate::routes::common::{
     JsonResponse, error_response, json_response, trace_store_error_response,
 };
@@ -62,21 +62,6 @@ pub(crate) async fn get_trace_overview(
 
     match state.store.overview_by_request_kind_async(page_size, offset, request_kind).await {
         Ok(result) => json_response(StatusCode::OK, result),
-        Err(error) => trace_store_error_response(error),
-    }
-}
-
-pub(crate) async fn get_trace_summary(
-    State(state): State<SharedState>,
-    Query(query): Query<TraceListQuery>,
-) -> JsonResponse {
-    let result = match query.request_kind.as_deref() {
-        Some(request_kind) => state.store.summary_by_request_kind_async(request_kind).await,
-        None => state.store.summary_async().await,
-    };
-
-    match result {
-        Ok(summary) => json_response(StatusCode::OK, summary),
         Err(error) => trace_store_error_response(error),
     }
 }

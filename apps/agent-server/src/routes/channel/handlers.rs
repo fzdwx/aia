@@ -8,8 +8,8 @@ use channel_bridge::{ChannelProfile, SupportedChannelDefinition};
 use crate::{channel_host::supported_channel_definitions, state::SharedState};
 
 use super::{
+    ChannelListItem, CreateChannelRequest, UpdateChannelRequest,
     config::{channel_list_item, merge_channel_config},
-    dto::{ChannelListItem, CreateChannelRequest, UpdateChannelRequest},
     mutation::{ChannelMutation, apply_channel_mutation},
 };
 use crate::routes::common::{error_response, ok_response};

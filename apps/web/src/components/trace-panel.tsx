@@ -18,10 +18,20 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+import {
+  asArray,
+  asRecord,
+  asString,
+  extractTraceText,
+  type JsonRecord,
+} from "@/lib/trace-inspection"
 import type { TraceEvent, TraceRecord } from "@/lib/types"
 import {
   buildTraceLoopGroups,
-  partitionTraceLoopGroups,
+  formatTraceDuration,
+  formatTraceLoopHeadline,
+  resolveActiveTraceLoopKey,
+  selectVisibleTraceLoopGroups,
   type LoopTimelineNode,
   type TraceLoopGroup,
 } from "@/lib/trace-presentation"
@@ -31,7 +41,6 @@ import { useChatStore } from "@/stores/chat-store"
 import { useTraceOverviewStore } from "@/stores/trace-overview-store"
 import { useTraceStore } from "@/stores/trace-store"
 
-type JsonRecord = Record<string, unknown>
 type InspectorTab = "content" | "overview" | "events"
 
 function formatDateTime(value: number) {
@@ -43,16 +52,6 @@ function formatDateTime(value: number) {
     minute: "2-digit",
     second: "2-digit",
   })
-}
-
-function formatDuration(value: number | null | undefined) {
-  if (value == null) return "-"
-  if (value < 1000) return `${value} ms`
-  if (value < 60_000) return `${(value / 1000).toFixed(1)} s`
-
-  const minutes = Math.floor(value / 60_000)
-  const seconds = Math.floor((value % 60_000) / 1000)
-  return `${minutes}m ${seconds}s`
 }
 
 function formatCount(value: number | null | undefined) {
@@ -69,50 +68,8 @@ function compactId(value: string, head = 8, tail = 6) {
   return `${value.slice(0, head)}...${value.slice(-tail)}`
 }
 
-function isRecord(value: unknown): value is JsonRecord {
-  return value != null && typeof value === "object" && !Array.isArray(value)
-}
-
-function asRecord(value: unknown): JsonRecord | null {
-  return isRecord(value) ? value : null
-}
-
-function asArray(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : []
-}
-
-function asString(value: unknown): string | null {
-  return typeof value === "string" && value.length > 0 ? value : null
-}
-
 function asEventRecord(value: unknown): Record<string, unknown> | null {
-  return isRecord(value) ? value : null
-}
-
-function extractText(value: unknown): string {
-  if (typeof value === "string") return value
-
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => extractText(item))
-      .filter(Boolean)
-      .join("\n")
-      .trim()
-  }
-
-  const record = asRecord(value)
-  if (!record) return ""
-
-  for (const key of ["text", "summary_text", "content", "output", "value"]) {
-    const text = extractText(record[key])
-    if (text) return text
-  }
-
-  return Object.values(record)
-    .map((item) => extractText(item))
-    .filter(Boolean)
-    .join(" ")
-    .trim()
+  return asRecord(value)
 }
 
 function loopBadgeVariant(status: TraceLoopGroup["finalStatus"]) {
@@ -124,13 +81,6 @@ function loopBadgeVariant(status: TraceLoopGroup["finalStatus"]) {
     default:
       return "secondary" as const
   }
-}
-
-function loopHeadline(group: TraceLoopGroup) {
-  if (group.requestKind === "compression") {
-    return "Context compression log"
-  }
-  return truncate(group.userMessage ?? "User message unavailable.", 180)
 }
 
 function findActiveNode(
@@ -161,7 +111,7 @@ function collectSystemPrompts(trace: TraceRecord | null) {
   for (const item of messages) {
     const record = asRecord(item)
     if (record?.role === "system") {
-      const content = extractText(record.content)
+      const content = extractTraceText(record.content)
       if (content) prompts.push(content)
     }
   }
@@ -170,7 +120,7 @@ function collectSystemPrompts(trace: TraceRecord | null) {
   for (const item of input) {
     const record = asRecord(item)
     if (record?.role === "system") {
-      const content = extractText(record.content)
+      const content = extractTraceText(record.content)
       if (content) prompts.push(content)
     }
   }
@@ -202,7 +152,8 @@ function collectAssistantPreview(trace: TraceRecord | null) {
 
   const summary = asRecord(trace.response_summary)
   const assistantText =
-    asString(summary?.assistant_text) || extractText(summary?.assistant_text)
+    asString(summary?.assistant_text) ||
+    extractTraceText(summary?.assistant_text)
 
   if (assistantText) return assistantText
 
@@ -245,13 +196,13 @@ function extractAssistantPreviewFromSseBody(body: string) {
       const type = asString(asRecord(event)?.type)
 
       if (type === "response.output_text.delta") {
-        const text = extractText(asRecord(event)?.delta)
+        const text = extractTraceText(asRecord(event)?.delta)
         if (text) outputChunks.push(text)
         continue
       }
 
       if (type === "response.output_text.done" && outputChunks.length === 0) {
-        const text = extractText(asRecord(event)?.text)
+        const text = extractTraceText(asRecord(event)?.text)
         if (text) outputChunks.push(text)
         continue
       }
@@ -285,7 +236,7 @@ function collectAssistantTextsFromPayload(payload: unknown): string[] {
 
   const texts: string[] = []
   const push = (value: unknown) => {
-    const text = extractText(value).trim()
+    const text = extractTraceText(value).trim()
     if (text && !texts.includes(text)) {
       texts.push(text)
     }
@@ -339,7 +290,7 @@ function nodeWidthPercent(node: LoopTimelineNode, group: TraceLoopGroup) {
 
 function relativeOffsetLabel(node: LoopTimelineNode, group: TraceLoopGroup) {
   const delta = Math.max(0, node.startedAtMs - group.startedAtMs)
-  return `+${formatDuration(delta)}`
+  return `+${formatTraceDuration(delta)}`
 }
 
 function nodeTitle(node: LoopTimelineNode) {
@@ -778,7 +729,10 @@ function TraceActiveStrip({ group }: { group: TraceLoopGroup }) {
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <span className="max-w-[760px] truncate text-[18px] font-semibold tracking-tight text-foreground">
-                {loopHeadline(group)}
+                {formatTraceLoopHeadline(group, {
+                  compressionLabel: "Context compression log",
+                  maxLength: 180,
+                })}
               </span>
               <Badge
                 variant={loopBadgeVariant(group.finalStatus)}
@@ -797,7 +751,7 @@ function TraceActiveStrip({ group }: { group: TraceLoopGroup }) {
               <span className="text-border">/</span>
               <span>{formatDateTime(group.startedAtMs)}</span>
               <span className="text-border">/</span>
-              <span>{formatDuration(loopWindowMs(group))}</span>
+              <span>{formatTraceDuration(loopWindowMs(group))}</span>
               <span className="text-border">/</span>
               <span>{group.stepCount} llm</span>
               <span className="text-border">/</span>
@@ -822,7 +776,7 @@ function WaterfallScale({ group }: { group: TraceLoopGroup }) {
   const window = loopWindowMs(group)
   const markers = [0, 25, 50, 75, 100]
   const markerLabels = markers.map((marker) =>
-    formatDuration(Math.round((window * marker) / 100))
+    formatTraceDuration(Math.round((window * marker) / 100))
   )
 
   return (
@@ -946,7 +900,7 @@ function WaterfallRow({
 
         <div className="text-right">
           <div className="font-mono text-[11px] text-foreground">
-            {formatDuration(node.durationMs)}
+            {formatTraceDuration(node.durationMs)}
           </div>
           <div className="mt-0.5 text-[10px] text-muted-foreground">
             {node.kind === "llm_span"
@@ -1003,7 +957,7 @@ function LoopInspector({
         <DetailList
           items={[
             { label: "status", value: group.finalStatus },
-            { label: "window", value: formatDuration(loopWindowMs(group)) },
+            { label: "window", value: formatTraceDuration(loopWindowMs(group)) },
             { label: "started", value: formatDateTime(group.startedAtMs) },
             { label: "turn", value: group.turnId },
             { label: "llm spans", value: String(group.stepCount) },
@@ -1159,7 +1113,7 @@ function LlmInspector({
             { label: "operation", value: node.operationName },
             {
               label: "duration",
-              value: formatDuration(node.trace.duration_ms),
+              value: formatTraceDuration(node.trace.duration_ms),
             },
             {
               label: "tokens",
@@ -1276,7 +1230,7 @@ function ToolInspector({
             { label: "tool", value: toolName },
             { label: "status", value: node.status },
             { label: "operation", value: node.operationName },
-            { label: "duration", value: formatDuration(node.durationMs) },
+            { label: "duration", value: formatTraceDuration(node.durationMs) },
             { label: "started", value: formatDateTime(node.startedAtMs) },
           ]}
         />
@@ -1338,20 +1292,14 @@ export function TracePanel() {
     () => buildTraceLoopGroups(traces, turns),
     [traces, turns]
   )
-  const partitionedGroups = useMemo(
-    () => partitionTraceLoopGroups(loopGroups),
-    [loopGroups]
+  const visibleLoopGroups = useMemo(
+    () => selectVisibleTraceLoopGroups(loopGroups, traceView),
+    [loopGroups, traceView]
   )
-  const visibleLoopGroups =
-    traceView === "compression"
-      ? partitionedGroups.compression
-      : partitionedGroups.conversation
-
-  const resolvedActiveLoopKey =
-    activeLoopKey &&
-    visibleLoopGroups.some((group) => group.key === activeLoopKey)
-      ? activeLoopKey
-      : (visibleLoopGroups[0]?.key ?? null)
+  const resolvedActiveLoopKey = useMemo(
+    () => resolveActiveTraceLoopKey(visibleLoopGroups, activeLoopKey),
+    [visibleLoopGroups, activeLoopKey]
+  )
 
   const activeGroup = useMemo(
     () =>
@@ -1466,7 +1414,7 @@ export function TracePanel() {
                       </p>
                       {activeGroup ? (
                         <span className="font-mono text-[11px] text-muted-foreground">
-                          {formatDuration(loopWindowMs(activeGroup))}
+                          {formatTraceDuration(loopWindowMs(activeGroup))}
                         </span>
                       ) : null}
                     </div>

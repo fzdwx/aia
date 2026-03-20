@@ -1,10 +1,7 @@
 use channel_bridge::{ChannelTransport, SupportedChannelDefinition};
 use serde_json::json;
 
-use super::{
-    config::merge_channel_config,
-    dto::{CreateChannelRequest, UpdateChannelRequest},
-};
+use super::{CreateChannelRequest, UpdateChannelRequest, config::merge_channel_config};
 
 #[test]
 fn merge_channel_config_keeps_secret_when_patch_is_blank() {

@@ -1,7 +1,7 @@
 use provider_registry::{ModelConfig, ModelLimit, ProviderKind, ProviderProfile};
 
 use super::{
-    dto::{ModelConfigDto, ModelLimitDto},
+    ModelConfigDto, ModelLimitDto,
     handlers::{parse_provider_kind, provider_info_from_snapshot, provider_list_item},
 };
 

@@ -142,21 +142,6 @@ impl AiaStore {
         self.with_conn_async(move |conn| get_loop_with_conn(conn, &id)).await
     }
 
-    pub async fn summary_async(self: &Arc<Self>) -> Result<LlmTraceSummary, AiaStoreError> {
-        self.with_conn_async(|conn| load_summary_snapshot_with_conn(conn, None)).await
-    }
-
-    pub async fn summary_by_request_kind_async(
-        self: &Arc<Self>,
-        request_kind: impl Into<String>,
-    ) -> Result<LlmTraceSummary, AiaStoreError> {
-        let request_kind = request_kind.into();
-        self.with_conn_async(move |conn| {
-            load_summary_snapshot_with_conn(conn, Some(request_kind.as_str()))
-        })
-        .await
-    }
-
     pub async fn overview_by_request_kind_async(
         self: &Arc<Self>,
         limit: usize,

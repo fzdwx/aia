@@ -4,8 +4,10 @@ import { useMemo } from "react"
 import { cn } from "@/lib/utils"
 import {
   buildTraceLoopGroups,
-  partitionTraceLoopGroups,
-  type TraceLoopGroup,
+  formatTraceDuration,
+  formatTraceLoopHeadline,
+  resolveActiveTraceLoopKey,
+  selectVisibleTraceLoopGroups,
 } from "@/lib/trace-presentation"
 import { useChatStore } from "@/stores/chat-store"
 import { useTraceStore } from "@/stores/trace-store"
@@ -20,30 +22,9 @@ function formatCompactDateTime(value: number) {
   })
 }
 
-function formatDuration(value: number | null | undefined) {
-  if (value == null) return "-"
-  if (value < 1000) return `${value} ms`
-  if (value < 60_000) return `${(value / 1000).toFixed(1)} s`
-
-  const minutes = Math.floor(value / 60_000)
-  const seconds = Math.floor((value % 60_000) / 1000)
-  return `${minutes}m ${seconds}s`
-}
-
-function truncate(text: string, max: number) {
-  if (text.length <= max) return text
-  return `${text.slice(0, max - 1)}...`
-}
-
-function loopHeadline(group: TraceLoopGroup) {
-  if (group.requestKind === "compression") {
-    return "Context compression"
-  }
-
-  return truncate(group.userMessage ?? "User message unavailable.", 64)
-}
-
-function loopStatusTone(group: TraceLoopGroup) {
+function loopStatusTone(group: {
+  finalStatus: "completed" | "failed" | "partial"
+}) {
   switch (group.finalStatus) {
     case "failed":
       return "bg-destructive"
@@ -74,20 +55,14 @@ export function TraceSidebar() {
     () => buildTraceLoopGroups(traces, turns),
     [traces, turns]
   )
-  const partitionedGroups = useMemo(
-    () => partitionTraceLoopGroups(loopGroups),
-    [loopGroups]
+  const visibleLoopGroups = useMemo(
+    () => selectVisibleTraceLoopGroups(loopGroups, traceView),
+    [loopGroups, traceView]
   )
-  const visibleLoopGroups =
-    traceView === "compression"
-      ? partitionedGroups.compression
-      : partitionedGroups.conversation
-
-  const resolvedActiveLoopKey =
-    activeLoopKey &&
-    visibleLoopGroups.some((group) => group.key === activeLoopKey)
-      ? activeLoopKey
-      : (visibleLoopGroups[0]?.key ?? null)
+  const resolvedActiveLoopKey = useMemo(
+    () => resolveActiveTraceLoopKey(visibleLoopGroups, activeLoopKey),
+    [visibleLoopGroups, activeLoopKey]
+  )
 
   const pageCount = Math.max(1, Math.ceil(totalTraceItems / tracePageSize))
 
@@ -191,11 +166,11 @@ export function TraceSidebar() {
                 />
                 <span className="min-w-0 flex-1">
                   <span className="line-clamp-2 text-[12px] leading-4">
-                    {loopHeadline(group)}
+                    {formatTraceLoopHeadline(group, { maxLength: 64 })}
                   </span>
                   <span className="mt-1 block text-[11px] text-muted-foreground/80">
                     {formatCompactDateTime(group.latestStartedAtMs)} ·{" "}
-                    {formatDuration(group.totalDurationMs)}
+                    {formatTraceDuration(group.totalDurationMs)}
                   </span>
                   <span className="mt-0.5 block text-[11px] text-muted-foreground/65">
                     {group.stepCount} llm · {group.toolCount} tool

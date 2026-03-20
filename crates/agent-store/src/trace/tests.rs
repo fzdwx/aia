@@ -248,8 +248,9 @@ async fn async_trace_methods_work() {
     let loaded = store.get_async("trace-async").await.expect("get async").expect("trace exists");
     assert_eq!(loaded, record);
 
-    let summary = store.summary_async().await.expect("summary async");
-    assert_eq!(summary.total_requests, 1);
+    let overview =
+        store.overview_by_request_kind_async(10, 0, "completion").await.expect("overview async");
+    assert_eq!(overview.summary.total_requests, 1);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -331,12 +332,12 @@ async fn async_trace_filters_can_separate_compression_logs() {
     assert_eq!(conversation_page.items.len(), 1);
     assert_eq!(conversation_page.items[0].request_kind, "completion");
 
-    let compression_summary = store
-        .summary_by_request_kind_async("compression")
+    let compression_overview = store
+        .overview_by_request_kind_async(10, 0, "compression")
         .await
-        .expect("compression summary async");
-    assert_eq!(compression_summary.total_requests, 1);
-    assert_eq!(compression_summary.total_tokens, 15);
+        .expect("compression overview async");
+    assert_eq!(compression_overview.summary.total_requests, 1);
+    assert_eq!(compression_overview.summary.total_tokens, 15);
 }
 
 #[test]

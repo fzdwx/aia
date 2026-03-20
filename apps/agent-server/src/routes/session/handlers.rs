@@ -7,7 +7,7 @@ use axum::{
 
 use crate::state::SharedState;
 
-use super::dto::{AutoCompressRequest, CreateSessionRequest, HandoffRequest, SessionQuery};
+use super::{AutoCompressRequest, CreateSessionRequest, HandoffRequest, SessionQuery};
 use crate::routes::common::{
     JsonResponse, json_response, require_session_id, resolve_session_id,
     runtime_worker_error_response, session_resolution_error_response,

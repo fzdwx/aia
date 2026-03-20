@@ -71,23 +71,62 @@ export type TraceLoopGroup = {
   finalSpanId: string | null
 }
 
-export function isCompressionRequestKind(requestKind: string) {
+function isCompressionRequestKind(requestKind: string) {
   return requestKind === "compression"
 }
 
-export function partitionTraceLoopGroups(groups: TraceLoopGroup[]) {
-  const conversation: TraceLoopGroup[] = []
-  const compression: TraceLoopGroup[] = []
+export function selectVisibleTraceLoopGroups(
+  groups: TraceLoopGroup[],
+  surface: "conversation" | "compression"
+) {
+  return groups.filter((group) =>
+    surface === "compression"
+      ? isCompressionRequestKind(group.requestKind)
+      : !isCompressionRequestKind(group.requestKind)
+  )
+}
 
-  for (const group of groups) {
-    if (isCompressionRequestKind(group.requestKind)) {
-      compression.push(group)
-    } else {
-      conversation.push(group)
-    }
+export function resolveActiveTraceLoopKey(
+  groups: TraceLoopGroup[],
+  activeLoopKey: string | null
+) {
+  if (activeLoopKey && groups.some((group) => group.key === activeLoopKey)) {
+    return activeLoopKey
   }
 
-  return { conversation, compression }
+  return groups[0]?.key ?? null
+}
+
+export function formatTraceDuration(value: number | null | undefined) {
+  if (value == null) return "-"
+  if (value < 1000) return `${value} ms`
+  if (value < 60_000) return `${(value / 1000).toFixed(1)} s`
+
+  const minutes = Math.floor(value / 60_000)
+  const seconds = Math.floor((value % 60_000) / 1000)
+  return `${minutes}m ${seconds}s`
+}
+
+function truncateText(text: string, maxLength: number) {
+  if (text.length <= maxLength) return text
+  return `${text.slice(0, maxLength - 1)}...`
+}
+
+export function formatTraceLoopHeadline(
+  group: TraceLoopGroup,
+  options?: {
+    compressionLabel?: string
+    maxLength?: number
+  }
+) {
+  if (group.requestKind === "compression") {
+    return options?.compressionLabel ?? "Context compression"
+  }
+
+  return truncateText(
+    group.userMessage ?? "User message unavailable.",
+    options?.maxLength ?? 120
+  )
 }
 
 function isToolTrace(trace: TraceListItem) {

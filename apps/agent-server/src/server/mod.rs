@@ -1,15 +1,7 @@
-use std::sync::Arc;
+use crate::{bootstrap::ServerInitError, routes, state::SharedState};
 
-use axum::Router;
-
-use crate::{bootstrap::ServerInitError, routes, state::AppState};
-
-pub fn build_router(state: Arc<AppState>) -> Router {
-    routes::router(state)
-}
-
-pub async fn run_server(state: Arc<AppState>) -> Result<(), ServerInitError> {
-    let app = build_router(state);
+pub async fn run_server(state: SharedState) -> Result<(), ServerInitError> {
+    let app = routes::build_router(state);
     let listener = tokio::net::TcpListener::bind(aia_config::DEFAULT_SERVER_BIND_ADDR)
         .await
         .map_err(|error| ServerInitError::new("端口 3434 绑定", error.to_string()))?;

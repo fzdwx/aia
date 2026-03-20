@@ -13,7 +13,6 @@ import type {
   TraceDashboardRange,
   TraceDetailResponse,
   TraceOverview,
-  TraceSummary,
   UpdateChannelRequest,
 } from "./types"
 
@@ -148,17 +147,6 @@ export async function fetchTrace(id: string): Promise<TraceDetailResponse> {
   const res = await fetch(`/api/traces/${encodeURIComponent(id)}`)
   if (!res.ok) throw new Error(`GET /api/traces/${id} failed: ${res.status}`)
   return (await res.json()) as Promise<TraceDetailResponse>
-}
-
-export async function fetchTraceSummary(params?: {
-  request_kind?: string
-}): Promise<TraceSummary> {
-  const search = new URLSearchParams()
-  if (params?.request_kind) search.set("request_kind", params.request_kind)
-  const query = search.size > 0 ? `?${search.toString()}` : ""
-  const res = await fetch(`/api/traces/summary${query}`)
-  if (!res.ok) throw new Error(`GET /api/traces/summary failed: ${res.status}`)
-  return (await res.json()) as Promise<TraceSummary>
 }
 
 export async function fetchTraceOverview(params?: {
