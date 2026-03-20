@@ -1,4 +1,5 @@
-import { useEffect, useMemo } from "react"
+import { Bot, Layers3, Waypoints } from "lucide-react"
+import { useMemo } from "react"
 
 import { cn } from "@/lib/utils"
 import {
@@ -56,6 +57,7 @@ function loopStatusTone(group: TraceLoopGroup) {
 export function TraceSidebar() {
   const turns = useChatStore((state) => state.turns)
   const traces = useTraceStore((state) => state.traces)
+  const traceSurface = useTraceStore((state) => state.traceSurface)
   const traceView = useTraceStore((state) => state.traceView)
   const traceLoading = useTraceStore((state) => state.traceLoading)
   const traceError = useTraceStore((state) => state.traceError)
@@ -64,12 +66,9 @@ export function TraceSidebar() {
   const totalTraceItems = useTraceStore((state) => state.totalTraceItems)
   const activeLoopKey = useTraceStore((state) => state.activeLoopKey)
   const refreshTraces = useTraceStore((state) => state.refreshTraces)
-  const switchTraceView = useTraceStore((state) => state.switchTraceView)
+  const openOverview = useTraceStore((state) => state.openOverview)
+  const openWorkspace = useTraceStore((state) => state.openWorkspace)
   const selectLoop = useTraceStore((state) => state.selectLoop)
-
-  useEffect(() => {
-    void refreshTraces().catch(() => {})
-  }, [refreshTraces])
 
   const loopGroups = useMemo(
     () => buildTraceLoopGroups(traces, turns),
@@ -95,99 +94,120 @@ export function TraceSidebar() {
   return (
     <>
       <div className="px-2 pt-2">
-        <div className="rounded-lg border border-border/30 bg-muted/20 px-3 py-2.5">
-          <p className="text-[13px] font-medium text-foreground/80">Traces</p>
-          <div className="mt-2 flex items-center gap-1">
+        <div className="rounded-lg border border-border/30 bg-muted/20 px-2 py-2">
+          <p className="px-1 py-1 text-[13px] font-medium text-foreground/80">
+            Trace
+          </p>
+          <div className="mt-1 space-y-1">
             <button
               type="button"
-              onClick={() => switchTraceView("conversation").catch(() => {})}
+              onClick={openOverview}
               className={cn(
-                "rounded-md px-2 py-1 text-[11px] transition-colors",
-                traceView === "conversation"
+                "flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors duration-150",
+                traceSurface === "overview"
                   ? "bg-accent/50 text-foreground/85"
                   : "text-muted-foreground hover:bg-accent/30 hover:text-foreground/80"
               )}
             >
-              Conversation
+              <Waypoints className="mt-0.5 size-3.5 shrink-0 opacity-70" />
+              <span className="min-w-0 text-[12px]">Overview</span>
             </button>
             <button
               type="button"
-              onClick={() => switchTraceView("compression").catch(() => {})}
+              onClick={() => openWorkspace("conversation").catch(() => {})}
               className={cn(
-                "rounded-md px-2 py-1 text-[11px] transition-colors",
-                traceView === "compression"
+                "flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors duration-150",
+                traceSurface === "workspace" && traceView === "conversation"
                   ? "bg-accent/50 text-foreground/85"
                   : "text-muted-foreground hover:bg-accent/30 hover:text-foreground/80"
               )}
             >
-              Compression
+              <Bot className="mt-0.5 size-3.5 shrink-0 opacity-70" />
+              <span className="min-w-0 text-[12px]">Conversation</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => openWorkspace("compression").catch(() => {})}
+              className={cn(
+                "flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors duration-150",
+                traceSurface === "workspace" && traceView === "compression"
+                  ? "bg-accent/50 text-foreground/85"
+                  : "text-muted-foreground hover:bg-accent/30 hover:text-foreground/80"
+              )}
+            >
+              <Layers3 className="mt-0.5 size-3.5 shrink-0 opacity-70" />
+              <span className="min-w-0 text-[12px]">Compression</span>
             </button>
           </div>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-2 pt-2 pb-2">
-        {traceError && visibleLoopGroups.length === 0 ? (
-          <p className="px-2.5 py-2 text-[12px] leading-5 text-destructive">
-            {traceError}
-          </p>
-        ) : null}
+      {traceSurface === "overview" ? (
+        <div className="flex-1" />
+      ) : (
+        <div className="flex-1 overflow-y-auto px-2 pt-2 pb-2">
+          {traceError && visibleLoopGroups.length === 0 ? (
+            <p className="px-2.5 py-2 text-[12px] leading-5 text-destructive">
+              {traceError}
+            </p>
+          ) : null}
 
-        {traceLoading && visibleLoopGroups.length === 0 ? (
-          <p className="px-2.5 py-2 text-[12px] text-muted-foreground">
-            Loading traces...
-          </p>
-        ) : null}
+          {traceLoading && visibleLoopGroups.length === 0 ? (
+            <p className="px-2.5 py-2 text-[12px] text-muted-foreground">
+              Loading traces...
+            </p>
+          ) : null}
 
-        {!traceLoading && visibleLoopGroups.length === 0 ? (
-          <p className="px-2.5 py-2 text-[12px] text-muted-foreground">
-            {traceView === "compression"
-              ? "No compression logs available."
-              : "No traces available."}
-          </p>
-        ) : null}
+          {!traceLoading && visibleLoopGroups.length === 0 ? (
+            <p className="px-2.5 py-2 text-[12px] text-muted-foreground">
+              {traceView === "compression"
+                ? "No compression logs available."
+                : "No traces available."}
+            </p>
+          ) : null}
 
-        {visibleLoopGroups.map((group) => {
-          const isActive = group.key === resolvedActiveLoopKey
-          const defaultNodeId =
-            group.finalSpanId ?? group.timeline[0]?.id ?? `${group.key}:root`
+          {visibleLoopGroups.map((group) => {
+            const isActive = group.key === resolvedActiveLoopKey
+            const defaultNodeId =
+              group.finalSpanId ?? group.timeline[0]?.id ?? `${group.key}:root`
 
-          return (
-            <button
-              key={group.key}
-              type="button"
-              onClick={() => selectLoop(group.key, defaultNodeId)}
-              className={cn(
-                "mb-1.5 flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors duration-150",
-                isActive
-                  ? "bg-accent/50 text-foreground/85"
-                  : "text-muted-foreground hover:bg-accent/30 hover:text-foreground/80"
-              )}
-            >
-              <span
+            return (
+              <button
+                key={group.key}
+                type="button"
+                onClick={() => selectLoop(group.key, defaultNodeId)}
                 className={cn(
-                  "mt-1 size-1.5 shrink-0 rounded-full",
-                  loopStatusTone(group)
+                  "mb-1.5 flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors duration-150",
+                  isActive
+                    ? "bg-accent/50 text-foreground/85"
+                    : "text-muted-foreground hover:bg-accent/30 hover:text-foreground/80"
                 )}
-              />
-              <span className="min-w-0 flex-1">
-                <span className="line-clamp-2 text-[12px] leading-4">
-                  {loopHeadline(group)}
+              >
+                <span
+                  className={cn(
+                    "mt-1 size-1.5 shrink-0 rounded-full",
+                    loopStatusTone(group)
+                  )}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="line-clamp-2 text-[12px] leading-4">
+                    {loopHeadline(group)}
+                  </span>
+                  <span className="mt-1 block text-[11px] text-muted-foreground/80">
+                    {formatCompactDateTime(group.latestStartedAtMs)} ·{" "}
+                    {formatDuration(group.totalDurationMs)}
+                  </span>
+                  <span className="mt-0.5 block text-[11px] text-muted-foreground/65">
+                    {group.stepCount} llm · {group.toolCount} tool
+                  </span>
                 </span>
-                <span className="mt-1 block text-[11px] text-muted-foreground/80">
-                  {formatCompactDateTime(group.latestStartedAtMs)} ·{" "}
-                  {formatDuration(group.totalDurationMs)}
-                </span>
-                <span className="mt-0.5 block text-[11px] text-muted-foreground/65">
-                  {group.stepCount} llm · {group.toolCount} tool
-                </span>
-              </span>
-            </button>
-          )
-        })}
-      </div>
+              </button>
+            )
+          })}
+        </div>
+      )}
 
-      {pageCount > 1 ? (
+      {traceSurface === "workspace" && pageCount > 1 ? (
         <div className="px-2 pb-2">
           <div className="flex items-center justify-between rounded-lg border border-border/30 bg-muted/20 px-2.5 py-2">
             <button

@@ -402,8 +402,15 @@ export type TraceRecord = {
 export type TraceSummary = {
   total_requests: number
   failed_requests: number
+  partial_requests: number
   avg_duration_ms: number | null
   p95_duration_ms: number | null
+  total_llm_spans: number
+  total_tool_spans: number
+  requests_with_tools: number
+  failed_tool_calls: number
+  unique_models: number
+  latest_request_started_at_ms: number | null
   total_input_tokens: number
   total_output_tokens: number
   total_tokens: number

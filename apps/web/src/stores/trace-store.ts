@@ -11,6 +11,7 @@ import type {
 const TRACE_PAGE_SIZE = 12
 
 export type TraceView = "conversation" | "compression"
+export type TraceSurface = "overview" | "workspace"
 
 function requestKindForView(view: TraceView) {
   return view === "compression" ? "compression" : "completion"
@@ -27,6 +28,7 @@ let inflightOverviewPromise: Promise<{
 
 type TraceStore = {
   traces: TraceLoopItem[]
+  traceSurface: TraceSurface
   traceView: TraceView
   tracePage: number
   tracePageSize: number
@@ -43,6 +45,8 @@ type TraceStore = {
     page?: number
     view?: TraceView
   }) => Promise<void>
+  openOverview: () => void
+  openWorkspace: (view?: TraceView) => Promise<void>
   switchTraceView: (view: TraceView) => Promise<void>
   selectTrace: (traceId: string) => Promise<void>
   selectLoop: (loopKey: string | null, nodeId?: string | null) => void
@@ -52,6 +56,7 @@ type TraceStore = {
 
 export const useTraceStore = create<TraceStore>((set, get) => ({
   traces: [],
+  traceSurface: "overview",
   traceView: "conversation",
   tracePage: 1,
   tracePageSize: TRACE_PAGE_SIZE,
@@ -115,6 +120,7 @@ export const useTraceStore = create<TraceStore>((set, get) => ({
 
       set({
         traces,
+        traceSurface: "workspace",
         traceView,
         tracePage: nextTracePage,
         tracePageSize: nextTracePageSize,
@@ -150,8 +156,34 @@ export const useTraceStore = create<TraceStore>((set, get) => ({
     }
   },
 
+  openOverview: () => {
+    set({
+      traceSurface: "overview",
+      traceError: null,
+    })
+  },
+
+  openWorkspace: async (view) => {
+    const nextView = view ?? get().traceView
+
+    if (get().traceView !== nextView) {
+      await get().switchTraceView(nextView)
+      return
+    }
+
+    set({
+      traceSurface: "workspace",
+      traceError: null,
+    })
+
+    if (!get().traceLoading && get().traces.length === 0) {
+      await get().refreshTraces({ page: 1, view: nextView })
+    }
+  },
+
   switchTraceView: async (view) => {
     set({
+      traceSurface: "workspace",
       traceView: view,
       tracePage: 1,
       activeLoopKey: null,
@@ -209,6 +241,7 @@ export const useTraceStore = create<TraceStore>((set, get) => ({
 
   clearSelection: () => {
     set({
+      traceSurface: "overview",
       activeLoopKey: null,
       selectedNodeId: null,
       selectedTraceId: null,

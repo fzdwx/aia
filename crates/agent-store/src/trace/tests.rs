@@ -57,6 +57,13 @@ fn store_records_round_trip_and_summary() {
     let summary = store.summary().expect("summary should succeed");
     assert_eq!(summary.total_requests, 1);
     assert_eq!(summary.failed_requests, 0);
+    assert_eq!(summary.partial_requests, 0);
+    assert_eq!(summary.total_llm_spans, 1);
+    assert_eq!(summary.total_tool_spans, 0);
+    assert_eq!(summary.requests_with_tools, 0);
+    assert_eq!(summary.failed_tool_calls, 0);
+    assert_eq!(summary.unique_models, 1);
+    assert_eq!(summary.latest_request_started_at_ms, Some(100));
     assert_eq!(summary.total_tokens, 18);
     assert_eq!(summary.total_cached_tokens, 4);
     assert_eq!(summary.p95_duration_ms, Some(80));
@@ -117,6 +124,8 @@ fn trace_operations_recover_after_poisoned_mutex() {
     assert_eq!(loaded.id, "trace-poisoned");
     let summary = store.summary().expect("summary should succeed after poison");
     assert_eq!(summary.total_requests, 1);
+    assert_eq!(summary.total_llm_spans, 1);
+    assert_eq!(summary.unique_models, 1);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -169,6 +178,9 @@ async fn overview_returns_loop_page_instead_of_single_spans() {
         store.overview_by_request_kind_async(10, 0, "completion").await.expect("overview async");
 
     assert_eq!(overview.summary.total_requests, 1);
+    assert_eq!(overview.summary.total_llm_spans, 2);
+    assert_eq!(overview.summary.total_tool_spans, 0);
+    assert_eq!(overview.summary.unique_models, 1);
     assert_eq!(overview.summary.total_tokens, 30);
     assert_eq!(overview.page.total_items, 1);
     assert_eq!(overview.page.items.len(), 1);

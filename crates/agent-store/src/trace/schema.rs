@@ -62,8 +62,15 @@ impl AiaStore {
                     request_kind TEXT PRIMARY KEY,
                     total_requests INTEGER NOT NULL DEFAULT 0,
                     failed_requests INTEGER NOT NULL DEFAULT 0,
+                    partial_requests INTEGER NOT NULL DEFAULT 0,
                     avg_duration_ms REAL,
                     p95_duration_ms INTEGER,
+                    total_llm_spans INTEGER NOT NULL DEFAULT 0,
+                    total_tool_spans INTEGER NOT NULL DEFAULT 0,
+                    requests_with_tools INTEGER NOT NULL DEFAULT 0,
+                    failed_tool_calls INTEGER NOT NULL DEFAULT 0,
+                    unique_models INTEGER NOT NULL DEFAULT 0,
+                    latest_request_started_at_ms INTEGER,
                     total_input_tokens INTEGER NOT NULL DEFAULT 0,
                     total_output_tokens INTEGER NOT NULL DEFAULT 0,
                     total_tokens INTEGER NOT NULL DEFAULT 0,
@@ -125,6 +132,48 @@ impl AiaStore {
             )?;
             ensure_column(conn, "llm_request_traces", "events", "TEXT NOT NULL DEFAULT '[]'")?;
             ensure_column(conn, "llm_request_traces", "cached_tokens", "INTEGER")?;
+            ensure_column(
+                conn,
+                "llm_trace_overview_summaries",
+                "partial_requests",
+                "INTEGER NOT NULL DEFAULT 0",
+            )?;
+            ensure_column(
+                conn,
+                "llm_trace_overview_summaries",
+                "total_llm_spans",
+                "INTEGER NOT NULL DEFAULT 0",
+            )?;
+            ensure_column(
+                conn,
+                "llm_trace_overview_summaries",
+                "total_tool_spans",
+                "INTEGER NOT NULL DEFAULT 0",
+            )?;
+            ensure_column(
+                conn,
+                "llm_trace_overview_summaries",
+                "requests_with_tools",
+                "INTEGER NOT NULL DEFAULT 0",
+            )?;
+            ensure_column(
+                conn,
+                "llm_trace_overview_summaries",
+                "failed_tool_calls",
+                "INTEGER NOT NULL DEFAULT 0",
+            )?;
+            ensure_column(
+                conn,
+                "llm_trace_overview_summaries",
+                "unique_models",
+                "INTEGER NOT NULL DEFAULT 0",
+            )?;
+            ensure_column(
+                conn,
+                "llm_trace_overview_summaries",
+                "latest_request_started_at_ms",
+                "INTEGER",
+            )?;
 
             Ok(())
         })

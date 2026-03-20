@@ -303,15 +303,34 @@ fn summary_with_conn(
     conn: &Connection,
     request_kind: Option<&str>,
 ) -> Result<LlmTraceSummary, AiaStoreError> {
-    let (total_requests, failed_requests, total_tokens, total_cached_tokens): (u64, u64, u64, u64) =
+    let (
+        total_requests,
+        failed_requests,
+        partial_requests,
+        total_llm_spans,
+        total_tool_spans,
+        requests_with_tools,
+        failed_tool_calls,
+        unique_models,
+        total_tokens,
+        total_cached_tokens,
+        latest_request_started_at_ms,
+    ): (u64, u64, u64, u64, u64, u64, u64, u64, u64, u64, Option<u64>) =
         if let Some(request_kind) = request_kind {
             conn.query_row(
                 "
                 SELECT
                     COUNT(*),
                     SUM(CASE WHEN final_status = 'failed' THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN final_status = 'partial' THEN 1 ELSE 0 END),
+                    SUM(COALESCE(llm_span_count, 0)),
+                    SUM(COALESCE(tool_span_count, 0)),
+                    SUM(CASE WHEN tool_span_count > 0 THEN 1 ELSE 0 END),
+                    SUM(COALESCE(failed_tool_count, 0)),
+                    COUNT(DISTINCT model),
                     SUM(COALESCE(total_tokens, 0)),
-                    SUM(COALESCE(total_cached_tokens, 0))
+                    SUM(COALESCE(total_cached_tokens, 0)),
+                    MAX(latest_started_at_ms)
                 FROM llm_trace_loops
                 WHERE request_kind = ?1
                 ",
@@ -322,6 +341,13 @@ fn summary_with_conn(
                         row.get::<_, Option<u64>>(1)?.unwrap_or(0),
                         row.get::<_, Option<u64>>(2)?.unwrap_or(0),
                         row.get::<_, Option<u64>>(3)?.unwrap_or(0),
+                        row.get::<_, Option<u64>>(4)?.unwrap_or(0),
+                        row.get::<_, Option<u64>>(5)?.unwrap_or(0),
+                        row.get::<_, Option<u64>>(6)?.unwrap_or(0),
+                        row.get::<_, u64>(7)?,
+                        row.get::<_, Option<u64>>(8)?.unwrap_or(0),
+                        row.get::<_, Option<u64>>(9)?.unwrap_or(0),
+                        row.get::<_, Option<u64>>(10)?,
                     ))
                 },
             )?
@@ -331,8 +357,15 @@ fn summary_with_conn(
                 SELECT
                     COUNT(*),
                     SUM(CASE WHEN final_status = 'failed' THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN final_status = 'partial' THEN 1 ELSE 0 END),
+                    SUM(COALESCE(llm_span_count, 0)),
+                    SUM(COALESCE(tool_span_count, 0)),
+                    SUM(CASE WHEN tool_span_count > 0 THEN 1 ELSE 0 END),
+                    SUM(COALESCE(failed_tool_count, 0)),
+                    COUNT(DISTINCT model),
                     SUM(COALESCE(total_tokens, 0)),
-                    SUM(COALESCE(total_cached_tokens, 0))
+                    SUM(COALESCE(total_cached_tokens, 0)),
+                    MAX(latest_started_at_ms)
                 FROM llm_trace_loops
                 ",
                 [],
@@ -342,6 +375,13 @@ fn summary_with_conn(
                         row.get::<_, Option<u64>>(1)?.unwrap_or(0),
                         row.get::<_, Option<u64>>(2)?.unwrap_or(0),
                         row.get::<_, Option<u64>>(3)?.unwrap_or(0),
+                        row.get::<_, Option<u64>>(4)?.unwrap_or(0),
+                        row.get::<_, Option<u64>>(5)?.unwrap_or(0),
+                        row.get::<_, Option<u64>>(6)?.unwrap_or(0),
+                        row.get::<_, u64>(7)?,
+                        row.get::<_, Option<u64>>(8)?.unwrap_or(0),
+                        row.get::<_, Option<u64>>(9)?.unwrap_or(0),
+                        row.get::<_, Option<u64>>(10)?,
                     ))
                 },
             )?
@@ -400,8 +440,15 @@ fn summary_with_conn(
     Ok(LlmTraceSummary {
         total_requests,
         failed_requests,
+        partial_requests,
         avg_duration_ms,
         p95_duration_ms,
+        total_llm_spans,
+        total_tool_spans,
+        requests_with_tools,
+        failed_tool_calls,
+        unique_models,
+        latest_request_started_at_ms,
         total_input_tokens,
         total_output_tokens,
         total_tokens,
@@ -415,39 +462,28 @@ fn refresh_summary_snapshot_with_conn(
 ) -> Result<(), AiaStoreError> {
     let summary = summary_with_conn(conn, request_kind)?;
     let request_kind_key = request_kind.unwrap_or("*");
-    let updated_at_ms = if let Some(request_kind) = request_kind {
-        conn.query_row(
-            "
-            SELECT COALESCE(MAX(started_at_ms), 0)
-            FROM llm_request_traces
-            WHERE span_kind = 'CLIENT' AND request_kind = ?1
-            ",
-            [request_kind],
-            |row| row.get::<_, u64>(0),
-        )?
-    } else {
-        conn.query_row(
-            "
-            SELECT COALESCE(MAX(started_at_ms), 0)
-            FROM llm_request_traces
-            WHERE span_kind = 'CLIENT'
-            ",
-            [],
-            |row| row.get::<_, u64>(0),
-        )?
-    };
+    let updated_at_ms = summary.latest_request_started_at_ms.unwrap_or(0);
 
     conn.execute(
         "
         INSERT INTO llm_trace_overview_summaries (
-            request_kind, total_requests, failed_requests, avg_duration_ms, p95_duration_ms,
-            total_input_tokens, total_output_tokens, total_tokens, total_cached_tokens, updated_at_ms
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            request_kind, total_requests, failed_requests, partial_requests, avg_duration_ms,
+            p95_duration_ms, total_llm_spans, total_tool_spans, requests_with_tools,
+            failed_tool_calls, unique_models, latest_request_started_at_ms, total_input_tokens,
+            total_output_tokens, total_tokens, total_cached_tokens, updated_at_ms
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
         ON CONFLICT(request_kind) DO UPDATE SET
             total_requests = excluded.total_requests,
             failed_requests = excluded.failed_requests,
+            partial_requests = excluded.partial_requests,
             avg_duration_ms = excluded.avg_duration_ms,
             p95_duration_ms = excluded.p95_duration_ms,
+            total_llm_spans = excluded.total_llm_spans,
+            total_tool_spans = excluded.total_tool_spans,
+            requests_with_tools = excluded.requests_with_tools,
+            failed_tool_calls = excluded.failed_tool_calls,
+            unique_models = excluded.unique_models,
+            latest_request_started_at_ms = excluded.latest_request_started_at_ms,
             total_input_tokens = excluded.total_input_tokens,
             total_output_tokens = excluded.total_output_tokens,
             total_tokens = excluded.total_tokens,
@@ -458,8 +494,15 @@ fn refresh_summary_snapshot_with_conn(
             request_kind_key,
             summary.total_requests,
             summary.failed_requests,
+            summary.partial_requests,
             summary.avg_duration_ms,
             summary.p95_duration_ms,
+            summary.total_llm_spans,
+            summary.total_tool_spans,
+            summary.requests_with_tools,
+            summary.failed_tool_calls,
+            summary.unique_models,
+            summary.latest_request_started_at_ms,
             summary.total_input_tokens,
             summary.total_output_tokens,
             summary.total_tokens,
@@ -655,7 +698,9 @@ fn load_summary_snapshot_with_conn(
     let cached = conn
         .query_row(
             "
-            SELECT total_requests, failed_requests, avg_duration_ms, p95_duration_ms,
+            SELECT total_requests, failed_requests, partial_requests, avg_duration_ms,
+                   p95_duration_ms, total_llm_spans, total_tool_spans, requests_with_tools,
+                   failed_tool_calls, unique_models, latest_request_started_at_ms,
                    total_input_tokens, total_output_tokens, total_tokens, total_cached_tokens
             FROM llm_trace_overview_summaries
             WHERE request_kind = ?1
@@ -665,19 +710,30 @@ fn load_summary_snapshot_with_conn(
                 Ok(LlmTraceSummary {
                     total_requests: row.get(0)?,
                     failed_requests: row.get(1)?,
-                    avg_duration_ms: row.get(2)?,
-                    p95_duration_ms: row.get(3)?,
-                    total_input_tokens: row.get(4)?,
-                    total_output_tokens: row.get(5)?,
-                    total_tokens: row.get(6)?,
-                    total_cached_tokens: row.get(7)?,
+                    partial_requests: row.get(2)?,
+                    avg_duration_ms: row.get(3)?,
+                    p95_duration_ms: row.get(4)?,
+                    total_llm_spans: row.get(5)?,
+                    total_tool_spans: row.get(6)?,
+                    requests_with_tools: row.get(7)?,
+                    failed_tool_calls: row.get(8)?,
+                    unique_models: row.get(9)?,
+                    latest_request_started_at_ms: row.get(10)?,
+                    total_input_tokens: row.get(11)?,
+                    total_output_tokens: row.get(12)?,
+                    total_tokens: row.get(13)?,
+                    total_cached_tokens: row.get(14)?,
                 })
             },
         )
         .optional()?;
 
     if let Some(summary) = cached {
-        return Ok(summary);
+        let needs_refresh = summary.total_requests > 0
+            && (summary.unique_models == 0 || summary.latest_request_started_at_ms.is_none());
+        if !needs_refresh {
+            return Ok(summary);
+        }
     }
 
     refresh_summary_snapshot_with_conn(conn, request_kind)?;

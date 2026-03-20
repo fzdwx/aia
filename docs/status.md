@@ -4,7 +4,7 @@
 
 - 阶段：核心工作区搭建之后的当前细分步骤：Web 界面 ↔ 运行时桥接收口
 - 最新前端进展：`apps/web` 的 `Channels` 入口已改成 transport-centric 配置台：左侧常驻 sidebar 在 `channels` 视图下直接列出 server 返回的全部 supported channel type，右侧主面板只展示当前 type 的 schema 配置项与启停状态；对应的 catalog/profile 读取、CRUD 与当前选中 transport 也已从 `chat-store` 拆到独立 `channels-store`，避免继续把配置面板状态混进会话/SSE 主链。
-- 最新 Trace 视图收口：`apps/web` 的 `Trace` 页面现已参考 `Channels` 的信息架构改成 sidebar + detail 双栏：左侧 sidebar 负责 conversation/compression 切换、loop 列表与分页，右侧主面板只保留 summary、waterfall 与 inspector；对应的当前 active loop / selected node 也已上提到 `trace-store`，避免继续把选择态散在 `TracePanel` 本地 state 里。
+- 最新 Trace 视图收口：`apps/web` 的 `Trace` 页面现已拆成独立 `Overview` dashboard 与 `Conversation/Compression` explorer 两个子工作台：sidebar 顶部只负责页面导航，进入 explorer 后才显示 loop 列表与分页；累计指标则单独由 `trace-overview-store` 拉取 `/api/traces/summary` 聚合快照并在 overview 页展示，避免再把累计信号和当前页 waterfall 混在同一块面板里。对应的当前 active loop / selected node 也已上提到 `trace-store`，避免继续把选择态散在 `TracePanel` 本地 state 里。
 - 最新后端进展：`agent-store` 已承接 channel 映射/幂等表与配置档案持久化，`apps/agent-server` 已补齐 `/api/channels` 控制面，并把飞书 channel 从过渡 webhook 入口收口为正式长连接 worker。当前长连接会按 profile 启停与重连，收到事件后先快速确认，再异步走既有 `session_manager.submit_turn(...)` 主链与飞书回复链路。
 - 最新 channel 持久化收口：`channel-registry` crate 已从工作区移除；`ChannelProfile` 现统一由 `channel-bridge::ChannelProfileRegistry` 作为 store façade 管理，`apps/agent-server` 启动时直接从 `agent-store` 的 `channel_profiles` 表加载。`/api/channels` 的增删改也已先写 SQLite 再更新内存快照，避免 store 失败后 runtime 继续拿到脏 profile 状态。
 - 最新后端架构收口：`apps/agent-server/src/routes/channel.rs` 已按职责拆成目录模块，`mod.rs` 仅保留 façade，`dto`、配置脱敏/合并、持久化回滚事务与 handler 已分别下沉到子模块，避免单个路由文件继续混合 HTTP 边界、配置语义与运行态回滚细节。

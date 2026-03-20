@@ -75,6 +75,8 @@ async fn get_trace_overview_returns_summary_and_page_together() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["summary"]["total_requests"], 1);
+    assert_eq!(body["summary"]["total_llm_spans"], 2);
+    assert_eq!(body["summary"]["unique_models"], 1);
     assert_eq!(body["page"]["items"].as_array().map(Vec::len), Some(1));
     assert_eq!(body["page"]["total_items"], 1);
     assert_eq!(body["page"]["items"][0]["llm_span_count"], 2);
@@ -119,6 +121,13 @@ async fn get_trace_summary_returns_aggregate_counts() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["total_requests"], 2);
     assert_eq!(body["failed_requests"], 0);
+    assert_eq!(body["partial_requests"], 0);
+    assert_eq!(body["total_llm_spans"], 2);
+    assert_eq!(body["total_tool_spans"], 0);
+    assert_eq!(body["requests_with_tools"], 0);
+    assert_eq!(body["failed_tool_calls"], 0);
+    assert_eq!(body["unique_models"], 1);
+    assert_eq!(body["latest_request_started_at_ms"], 2_000);
     assert_eq!(body["total_input_tokens"], 20);
     assert_eq!(body["total_output_tokens"], 10);
     assert_eq!(body["total_tokens"], 30);
@@ -143,5 +152,6 @@ async fn get_trace_summary_can_filter_compression_logs() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["total_requests"], 1);
+    assert_eq!(body["total_llm_spans"], 1);
     assert_eq!(body["total_tokens"], 15);
 }

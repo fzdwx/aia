@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import {
-  AlertTriangle,
   ArrowLeft,
   Bot,
-  Clock3,
   ExternalLink,
   Loader2,
   RefreshCw,
@@ -12,6 +10,7 @@ import {
 } from "lucide-react"
 
 import { TraceDetailModal } from "@/components/trace-detail-modal"
+import { TraceOverviewPanel } from "@/components/trace-overview-panel"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -29,6 +28,7 @@ import {
 import { getToolDisplayName } from "@/lib/tool-display"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat-store"
+import { useTraceOverviewStore } from "@/stores/trace-overview-store"
 import { useTraceStore } from "@/stores/trace-store"
 
 type JsonRecord = Record<string, unknown>
@@ -514,44 +514,6 @@ function DetailList({
         </div>
       ))}
     </dl>
-  )
-}
-
-function SummaryItem({
-  label,
-  value,
-  icon,
-  tone = "default",
-  bare = false,
-}: {
-  label: string
-  value: string
-  icon: ReactNode
-  tone?: "default" | "warning"
-  bare?: boolean
-}) {
-  return (
-    <div
-      className={cn(
-        "px-2.5 py-2",
-        !bare && "rounded-xl border",
-        !bare &&
-          (tone === "warning"
-            ? "border-amber-500/25 bg-amber-500/[0.04]"
-            : "border-border/35 bg-background/70"),
-        bare && tone === "warning" && "bg-amber-500/[0.04]"
-      )}
-    >
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[10px] tracking-[0.12em] text-muted-foreground uppercase">
-          {label}
-        </span>
-        <span className="text-muted-foreground">{icon}</span>
-      </div>
-      <p className="mt-1 text-[14px] font-medium text-foreground tabular-nums">
-        {value}
-      </p>
-    </div>
   )
 }
 
@@ -1354,20 +1316,20 @@ export function TracePanel() {
   const setView = useChatStore((state) => state.setView)
   const turns = useChatStore((state) => state.turns)
   const traces = useTraceStore((state) => state.traces)
+  const traceSurface = useTraceStore((state) => state.traceSurface)
   const traceView = useTraceStore((state) => state.traceView)
   const activeLoopKey = useTraceStore((state) => state.activeLoopKey)
   const selectedNodeId = useTraceStore((state) => state.selectedNodeId)
   const selectedTraceId = useTraceStore((state) => state.selectedTraceId)
   const selectedTrace = useTraceStore((state) => state.selectedTrace)
   const selectedLoop = useTraceStore((state) => state.selectedLoop)
-  const traceSummary = useTraceStore((state) => state.traceSummary)
   const traceLoading = useTraceStore((state) => state.traceLoading)
   const traceError = useTraceStore((state) => state.traceError)
   const tracePage = useTraceStore((state) => state.tracePage)
-  const totalTraceItems = useTraceStore((state) => state.totalTraceItems)
   const refreshTraces = useTraceStore((state) => state.refreshTraces)
   const selectTrace = useTraceStore((state) => state.selectTrace)
   const selectNode = useTraceStore((state) => state.selectNode)
+  const refreshOverview = useTraceOverviewStore((state) => state.refresh)
 
   const [payloadOpen, setPayloadOpen] = useState(false)
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("content")
@@ -1384,19 +1346,6 @@ export function TracePanel() {
     traceView === "compression"
       ? partitionedGroups.compression
       : partitionedGroups.conversation
-
-  const listedLoopCount = totalTraceItems
-  const llmSpanCount = loopGroups.reduce(
-    (sum, group) => sum + group.stepCount,
-    0
-  )
-  const toolSpanCount = loopGroups.reduce(
-    (sum, group) => sum + group.toolCount,
-    0
-  )
-  const partialOrFailedLoops = loopGroups.filter(
-    (group) => group.finalStatus !== "completed"
-  ).length
 
   const resolvedActiveLoopKey =
     activeLoopKey &&
@@ -1424,14 +1373,16 @@ export function TracePanel() {
   )
 
   useEffect(() => {
+    if (traceSurface !== "workspace") return
     setInspectorTab("content")
-  }, [activeNode?.id])
+  }, [activeNode?.id, traceSurface])
 
   useEffect(() => {
+    if (traceSurface !== "workspace") return
     if (!activeNode || activeNode.kind === "agent_root") return
     if (selectedTraceId === activeNode.trace.id) return
     selectTrace(activeNode.trace.id).catch(() => {})
-  }, [activeNode, selectTrace, selectedTraceId])
+  }, [activeNode, selectTrace, selectedTraceId, traceSurface])
 
   const inspectedTrace =
     activeNode?.kind === "agent_root"
@@ -1460,7 +1411,11 @@ export function TracePanel() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => refreshTraces({ page: tracePage, view: traceView })}
+            onClick={() =>
+              traceSurface === "overview"
+                ? refreshOverview().catch(() => {})
+                : refreshTraces({ page: tracePage, view: traceView })
+            }
           >
             <RefreshCw className="size-3.5" />
             Refresh
@@ -1468,180 +1423,150 @@ export function TracePanel() {
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-5 py-4">
-        <div className="mx-auto flex min-h-0 w-full max-w-[1440px] flex-1 flex-col gap-3">
-          <div className="grid shrink-0 grid-cols-5 divide-x divide-border/25 overflow-hidden rounded-xl border border-border/35 bg-background/70">
-            <SummaryItem
-              bare
-              label="listed items"
-              value={String(listedLoopCount)}
-              icon={<Waypoints className="size-3.5" />}
-            />
-            <SummaryItem
-              bare
-              label="llm spans"
-              value={String(llmSpanCount)}
-              icon={<Bot className="size-3.5" />}
-            />
-            <SummaryItem
-              bare
-              label="tool spans"
-              value={String(toolSpanCount)}
-              icon={<Wrench className="size-3.5" />}
-            />
-            <SummaryItem
-              bare
-              label="p95 latency"
-              value={formatDuration(traceSummary?.p95_duration_ms)}
-              icon={<Clock3 className="size-3.5" />}
-            />
-            <SummaryItem
-              bare
-              label="attention"
-              value={String(partialOrFailedLoops)}
-              tone={partialOrFailedLoops > 0 ? "warning" : "default"}
-              icon={<AlertTriangle className="size-3.5" />}
-            />
-          </div>
+      {traceSurface === "overview" ? (
+        <TraceOverviewPanel />
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-5 py-4">
+          <div className="mx-auto flex min-h-0 w-full max-w-[1440px] flex-1 flex-col gap-3">
+            {traceError ? (
+              <div className="shrink-0 rounded-lg border border-destructive/25 bg-destructive/[0.05] px-3 py-2.5 text-[12px] text-destructive">
+                {traceError}
+              </div>
+            ) : null}
 
-          {traceError ? (
-            <div className="shrink-0 rounded-lg border border-destructive/25 bg-destructive/[0.05] px-3 py-2.5 text-[12px] text-destructive">
-              {traceError}
-            </div>
-          ) : null}
+            {visibleLoopGroups.length === 0 && !traceLoading ? (
+              <div className="flex min-h-0 flex-1 flex-col items-center justify-center py-16 text-center">
+                <Waypoints className="size-10 text-muted-foreground/30" />
+                <p className="mt-4 text-sm font-medium text-foreground/70">
+                  {traceView === "compression"
+                    ? "No compression logs yet"
+                    : "No traces yet"}
+                </p>
+                <p className="mt-1 text-[13px] text-muted-foreground">
+                  {traceView === "compression"
+                    ? "Trigger context compression to inspect compression calls and summaries here."
+                    : "Start a conversation to see agent loops and LLM spans here."}
+                </p>
+              </div>
+            ) : null}
 
-          {visibleLoopGroups.length === 0 && !traceLoading ? (
-            <div className="flex min-h-0 flex-1 flex-col items-center justify-center py-16 text-center">
-              <Waypoints className="size-10 text-muted-foreground/30" />
-              <p className="mt-4 text-sm font-medium text-foreground/70">
-                {traceView === "compression"
-                  ? "No compression logs yet"
-                  : "No traces yet"}
-              </p>
-              <p className="mt-1 text-[13px] text-muted-foreground">
-                {traceView === "compression"
-                  ? "Trigger context compression to inspect compression calls and summaries here."
-                  : "Start a conversation to see agent loops and LLM spans here."}
-              </p>
-            </div>
-          ) : null}
+            {activeGroup ? (
+              <div className="shrink-0">
+                <TraceActiveStrip group={activeGroup} />
+              </div>
+            ) : null}
 
-          {activeGroup ? (
-            <div className="shrink-0">
-              <TraceActiveStrip group={activeGroup} />
-            </div>
-          ) : null}
+            {visibleLoopGroups.length > 0 ? (
+              <div className="grid min-h-0 flex-1 overflow-hidden rounded-xl border border-border/30 xl:grid-cols-[minmax(0,1.18fr)_360px]">
+                <div className="flex min-h-0 flex-col overflow-hidden">
+                  <div className="shrink-0 border-b border-border/25 px-3 py-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
+                        Waterfall
+                      </p>
+                      {activeGroup ? (
+                        <span className="font-mono text-[11px] text-muted-foreground">
+                          {formatDuration(loopWindowMs(activeGroup))}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
 
-          {visibleLoopGroups.length > 0 ? (
-            <div className="grid min-h-0 flex-1 overflow-hidden rounded-xl border border-border/30 xl:grid-cols-[minmax(0,1.18fr)_360px]">
-              <div className="flex min-h-0 flex-col overflow-hidden">
-                <div className="shrink-0 border-b border-border/25 px-3 py-2.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
-                      Waterfall
-                    </p>
+                  <div className="min-h-0 flex-1 overflow-y-auto p-3">
                     {activeGroup ? (
-                      <span className="font-mono text-[11px] text-muted-foreground">
-                        {formatDuration(loopWindowMs(activeGroup))}
-                      </span>
+                      <div className="space-y-2">
+                        <WaterfallScale group={activeGroup} />
+                        <div className="space-y-1.5">
+                          {activeGroup.timeline.map((node) => (
+                            <WaterfallRow
+                              key={node.id}
+                              group={activeGroup}
+                              node={node}
+                              selected={node.id === activeNode?.id}
+                              loading={
+                                node.kind !== "agent_root" &&
+                                selectedTraceId === node.trace.id &&
+                                traceLoading
+                              }
+                              onSelect={() => selectNode(node.id)}
+                            />
+                          ))}
+                        </div>
+                      </div>
                     ) : null}
                   </div>
                 </div>
 
-                <div className="min-h-0 flex-1 overflow-y-auto p-3">
-                  {activeGroup ? (
-                    <div className="space-y-2">
-                      <WaterfallScale group={activeGroup} />
-                      <div className="space-y-1.5">
-                        {activeGroup.timeline.map((node) => (
-                          <WaterfallRow
-                            key={node.id}
-                            group={activeGroup}
-                            node={node}
-                            selected={node.id === activeNode?.id}
-                            loading={
-                              node.kind !== "agent_root" &&
-                              selectedTraceId === node.trace.id &&
-                              traceLoading
-                            }
-                            onSelect={() => selectNode(node.id)}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="flex min-h-0 flex-col overflow-hidden border-l border-border/25">
-                <div className="shrink-0 border-b border-border/25 px-3 py-2.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <p className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
-                        Inspector
-                      </p>
-                      {activeNode ? (
-                        <p className="mt-0.5 text-[11px] text-muted-foreground">
-                          {nodeTitle(activeNode)} · {activeNode.kind}
+                <div className="flex min-h-0 flex-col overflow-hidden border-l border-border/25">
+                  <div className="shrink-0 border-b border-border/25 px-3 py-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
+                          Inspector
                         </p>
-                      ) : null}
-                    </div>
-                    <div className="rounded-lg border border-border/35 bg-muted/20 p-1">
-                      <div className="flex items-center gap-1">
-                        <TabButton
-                          active={inspectorTab === "content"}
-                          onClick={() => setInspectorTab("content")}
-                        >
-                          content
-                        </TabButton>
-                        <TabButton
-                          active={inspectorTab === "overview"}
-                          onClick={() => setInspectorTab("overview")}
-                        >
-                          overview
-                        </TabButton>
-                        <TabButton
-                          active={inspectorTab === "events"}
-                          onClick={() => setInspectorTab("events")}
-                        >
-                          events
-                        </TabButton>
+                        {activeNode ? (
+                          <p className="mt-0.5 text-[11px] text-muted-foreground">
+                            {nodeTitle(activeNode)} · {activeNode.kind}
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="rounded-lg border border-border/35 bg-muted/20 p-1">
+                        <div className="flex items-center gap-1">
+                          <TabButton
+                            active={inspectorTab === "content"}
+                            onClick={() => setInspectorTab("content")}
+                          >
+                            content
+                          </TabButton>
+                          <TabButton
+                            active={inspectorTab === "overview"}
+                            onClick={() => setInspectorTab("overview")}
+                          >
+                            overview
+                          </TabButton>
+                          <TabButton
+                            active={inspectorTab === "events"}
+                            onClick={() => setInspectorTab("events")}
+                          >
+                            events
+                          </TabButton>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
 
-                <div className="min-h-0 flex-1 overflow-y-auto p-3">
-                  {activeGroup && activeNode ? (
-                    activeNode.kind === "agent_root" ? (
-                      <LoopInspector group={activeGroup} tab={inspectorTab} />
-                    ) : activeNode.kind === "llm_span" ? (
-                      <LlmInspector
-                        group={activeGroup}
-                        node={activeNode}
-                        trace={inspectedTrace}
-                        tab={inspectorTab}
-                        loading={traceLoading && inspectedTrace == null}
-                        onOpenPayload={() => setPayloadOpen(true)}
-                      />
+                  <div className="min-h-0 flex-1 overflow-y-auto p-3">
+                    {activeGroup && activeNode ? (
+                      activeNode.kind === "agent_root" ? (
+                        <LoopInspector group={activeGroup} tab={inspectorTab} />
+                      ) : activeNode.kind === "llm_span" ? (
+                        <LlmInspector
+                          group={activeGroup}
+                          node={activeNode}
+                          trace={inspectedTrace}
+                          tab={inspectorTab}
+                          loading={traceLoading && inspectedTrace == null}
+                          onOpenPayload={() => setPayloadOpen(true)}
+                        />
+                      ) : (
+                        <ToolInspector
+                          node={activeNode}
+                          trace={inspectedTrace}
+                          tab={inspectorTab}
+                        />
+                      )
                     ) : (
-                      <ToolInspector
-                        node={activeNode}
-                        trace={inspectedTrace}
-                        tab={inspectorTab}
-                      />
-                    )
-                  ) : (
-                    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                      Select a span.
-                    </div>
-                  )}
+                      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                        Select a span.
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          ) : null}
+            ) : null}
+          </div>
         </div>
-      </div>
+      )}
 
       <TraceDetailModal
         open={payloadOpen && selectedTraceId != null}
