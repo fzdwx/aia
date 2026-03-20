@@ -36,19 +36,73 @@ where
         failed: bool,
         on_delta: &mut (dyn FnMut(StreamEvent) + Send),
     ) -> Result<ToolInvocationLifecycle, RuntimeError> {
-        let tool_result_entry_id =
-            self.append_tape_entry(TapeEntry::tool_result(&result).with_run_id(context.turn_id))?;
-        context.source_entry_ids.push(tool_result_entry_id);
-        let tool_result_event_id = self.append_tape_entry(
-            TapeEntry::event(
+        let initial_outcome = if failed {
+            ToolInvocationOutcome::Failed { message: RuntimeError::cancelled().to_string() }
+        } else {
+            ToolInvocationOutcome::Succeeded { result }
+        };
+        let outcome = self.rewrite_tool_outcome(context.turn_id, &context.call, initial_outcome)?;
+        self.record_tool_invocation(context, outcome, failed, None, on_delta)
+    }
+
+    pub(super) fn record_failed_tool_call(
+        &mut self,
+        context: FailedToolCallContext<'_>,
+        runtime_error: RuntimeError,
+        on_delta: &mut (dyn FnMut(StreamEvent) + Send),
+    ) -> Result<ToolInvocationLifecycle, RuntimeError> {
+        let outcome = self.rewrite_tool_outcome(
+            context.lifecycle.turn_id,
+            &context.lifecycle.call,
+            ToolInvocationOutcome::Failed { message: runtime_error.to_string() },
+        )?;
+        self.record_tool_invocation(
+            context.lifecycle,
+            outcome,
+            false,
+            Some(context.event_name),
+            on_delta,
+        )
+    }
+
+    fn record_tool_invocation(
+        &mut self,
+        context: ToolCallLifecycleContext<'_>,
+        outcome: ToolInvocationOutcome,
+        failed: bool,
+        failure_event_name: Option<&str>,
+        on_delta: &mut (dyn FnMut(StreamEvent) + Send),
+    ) -> Result<ToolInvocationLifecycle, RuntimeError> {
+        let (tool_result, event_name, event_body, stream_failed) = match &outcome {
+            ToolInvocationOutcome::Succeeded { result } => (
+                result.clone(),
                 if failed { "tool_result_cancelled" } else { "tool_result_recorded" },
-                Some(json!({
+                json!({
                     "tool_name": result.tool_name.clone(),
                     "status": if failed { "cancelled" } else { "ok" },
-                })),
-            )
-            .with_run_id(context.turn_id)
-            .with_meta(
+                }),
+                failed,
+            ),
+            ToolInvocationOutcome::Failed { message } => (
+                ToolResult::from_call(context.call, message.clone()),
+                failure_event_name.unwrap_or(if failed {
+                    "tool_result_cancelled"
+                } else {
+                    "tool_call_failed"
+                }),
+                json!({
+                    "message": message,
+                    "tool_name": context.call.tool_name.clone(),
+                }),
+                true,
+            ),
+        };
+
+        let tool_result_entry_id = self
+            .append_tape_entry(TapeEntry::tool_result(&tool_result).with_run_id(context.turn_id))?;
+        context.source_entry_ids.push(tool_result_entry_id);
+        let tool_result_event_id = self.append_tape_entry(
+            TapeEntry::event(event_name, Some(event_body)).with_run_id(context.turn_id).with_meta(
                 "source_entry_ids",
                 json!(build_tool_source_entry_ids(
                     context.assistant_entry_id,
@@ -62,16 +116,11 @@ where
         on_delta(StreamEvent::ToolCallCompleted {
             invocation_id: context.call.invocation_id.clone(),
             tool_name: context.call.tool_name.clone(),
-            content: result.content.clone(),
-            details: result.details.clone(),
-            failed,
+            content: tool_result.content.clone(),
+            details: tool_result.details.clone(),
+            failed: stream_failed,
         });
 
-        let outcome = if failed {
-            ToolInvocationOutcome::Failed { message: RuntimeError::cancelled().to_string() }
-        } else {
-            ToolInvocationOutcome::Succeeded { result: result.clone() }
-        };
         self.publish_event(RuntimeEvent::ToolInvocation {
             call: context.call.clone(),
             outcome: outcome.clone(),
@@ -81,59 +130,6 @@ where
             started_at_ms: context.started_at_ms,
             finished_at_ms: now_timestamp_ms(),
             trace_context: context.tool_trace_context,
-            outcome,
-        })
-    }
-
-    pub(super) fn record_failed_tool_call(
-        &mut self,
-        context: FailedToolCallContext<'_>,
-        runtime_error: RuntimeError,
-        on_delta: &mut (dyn FnMut(StreamEvent) + Send),
-    ) -> Result<ToolInvocationLifecycle, RuntimeError> {
-        let failure_message = runtime_error.to_string();
-        let failed_result = ToolResult::from_call(context.lifecycle.call, failure_message.clone());
-        let tool_result_entry_id = self.append_tape_entry(
-            TapeEntry::tool_result(&failed_result).with_run_id(context.lifecycle.turn_id),
-        )?;
-        context.lifecycle.source_entry_ids.push(tool_result_entry_id);
-        let failure_event_id = self.append_tape_entry(
-            TapeEntry::event(
-                context.event_name,
-                Some(json!({
-                    "message": failure_message,
-                    "tool_name": context.lifecycle.call.tool_name.clone(),
-                })),
-            )
-            .with_run_id(context.lifecycle.turn_id)
-            .with_meta(
-                "source_entry_ids",
-                json!(build_tool_source_entry_ids(
-                    context.lifecycle.assistant_entry_id,
-                    context.lifecycle.tool_call_entry_id,
-                    tool_result_entry_id,
-                )),
-            ),
-        )?;
-        context.lifecycle.source_entry_ids.push(failure_event_id);
-
-        let outcome = ToolInvocationOutcome::Failed { message: runtime_error.to_string() };
-        self.publish_event(RuntimeEvent::ToolInvocation {
-            call: context.lifecycle.call.clone(),
-            outcome: outcome.clone(),
-        });
-        on_delta(StreamEvent::ToolCallCompleted {
-            invocation_id: context.lifecycle.call.invocation_id.clone(),
-            tool_name: context.lifecycle.call.tool_name.clone(),
-            content: failure_message,
-            details: None,
-            failed: true,
-        });
-        Ok(ToolInvocationLifecycle {
-            call: context.lifecycle.call.clone(),
-            started_at_ms: context.lifecycle.started_at_ms,
-            finished_at_ms: now_timestamp_ms(),
-            trace_context: context.lifecycle.tool_trace_context,
             outcome,
         })
     }

@@ -1,6 +1,6 @@
 use std::future::Future;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::runtime_worker::RunningTurnHandle;
@@ -182,6 +182,8 @@ fn handle_cancel_turn_marks_running_snapshot_as_cancelled() {
         })),
         workspace_root: std::path::PathBuf::new(),
         user_agent: "test-agent".into(),
+        system_prompt: agent_prompts::SystemPromptConfig::default(),
+        runtime_hooks: agent_runtime::RuntimeHooks::default(),
     };
 
     let mut query = SessionQueryService::new(&mut slots);
@@ -222,6 +224,8 @@ fn spawned_turn_worker_completes_bootstrap_turn() {
             })),
             workspace_root: temp_root.clone(),
             user_agent: "test-agent".into(),
+            system_prompt: agent_prompts::SystemPromptConfig::default(),
+            runtime_hooks: agent_runtime::RuntimeHooks::default(),
         });
 
         let session = handle
@@ -260,6 +264,79 @@ fn spawned_turn_worker_completes_bootstrap_turn() {
             .expect("current turn should be readable");
         assert!(current.is_none());
     });
+
+    let _ = std::fs::remove_dir_all(cleanup_root);
+}
+
+#[test]
+fn spawned_turn_worker_applies_custom_system_prompt_and_runtime_hooks() {
+    let temp_root = temp_session_dir("turn-worker-hooks");
+    let cleanup_root = temp_root.clone();
+    let sessions_dir = temp_root.join("sessions");
+    std::fs::create_dir_all(&sessions_dir).expect("sessions dir should exist");
+    let store = Arc::new(
+        agent_store::AiaStore::new(temp_root.join("store.sqlite3"))
+            .expect("sqlite store should initialize"),
+    );
+    let registry = provider_registry::ProviderRegistry::default();
+    let (broadcast_tx, _broadcast_rx) = tokio::sync::broadcast::channel(32);
+    let seen_instructions = Arc::new(Mutex::new(Vec::<String>::new()));
+
+    run_async(async {
+        let runtime_hooks = agent_runtime::RuntimeHooks::default().on_before_provider_request({
+            let seen_instructions = seen_instructions.clone();
+            move |event| {
+                if let Some(instructions) = event.request.instructions.clone() {
+                    seen_instructions.lock().expect("test mutex should lock").push(instructions);
+                }
+                Ok(())
+            }
+        });
+
+        let handle = spawn_session_manager(SessionManagerConfig {
+            sessions_dir,
+            store,
+            registry: registry.clone(),
+            provider_registry_path: temp_root.join("providers.json"),
+            broadcast_tx,
+            provider_registry_snapshot: Arc::new(RwLock::new(registry)),
+            provider_info_snapshot: Arc::new(RwLock::new(super::ProviderInfoSnapshot {
+                name: "bootstrap".into(),
+                model: "bootstrap".into(),
+                connected: true,
+            })),
+            workspace_root: temp_root.clone(),
+            user_agent: "test-agent".into(),
+            system_prompt: agent_prompts::SystemPromptConfig::default()
+                .with_custom_prompt("你是测试客户端代理。")
+                .with_append_section("额外客户端约束"),
+            runtime_hooks,
+        });
+
+        let session = handle
+            .create_session(Some("Prompt hook".into()))
+            .await
+            .expect("session should be created");
+        let _ = handle
+            .submit_turn(session.id.clone(), "hello".into())
+            .await
+            .expect("turn should be accepted");
+
+        for _ in 0..200 {
+            let history =
+                handle.get_history(session.id.clone()).await.expect("history should be readable");
+            if !history.is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+    });
+
+    let seen_instructions = seen_instructions.lock().expect("test mutex should lock");
+    assert!(!seen_instructions.is_empty());
+    assert!(seen_instructions[0].contains("你是测试客户端代理。"));
+    assert!(seen_instructions[0].contains("额外客户端约束"));
+    assert!(seen_instructions[0].contains("Context Contract"));
 
     let _ = std::fs::remove_dir_all(cleanup_root);
 }

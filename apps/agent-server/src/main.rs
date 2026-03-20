@@ -1,19 +1,8 @@
-mod bootstrap;
-mod channel_host;
-mod cli;
-mod model;
-mod routes;
-mod runtime_worker;
-mod self_chat;
-mod server;
-mod session_manager;
-mod sse;
-mod state;
+use agent_server::{ServerInitError, bootstrap_state, run_self_chat, run_server};
 
-use bootstrap::{ServerInitError, bootstrap_state};
-use cli::{CliCommand, cli_usage, parse_cli_command};
-use self_chat::run_self_chat;
-use server::run_server;
+use crate::cli::{CliCommand, cli_usage, parse_cli_command};
+
+mod cli;
 
 #[tokio::main]
 async fn main() {

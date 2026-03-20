@@ -23,6 +23,10 @@ impl RuntimeError {
         Self { message: format!("会话持久化失败：{error}"), cancelled: false }
     }
 
+    pub fn hook(error: impl fmt::Display) -> Self {
+        Self { message: format!("运行时 hook 失败：{error}"), cancelled: false }
+    }
+
     pub fn tool(error: impl fmt::Display) -> Self {
         Self { message: format!("工具执行失败：{error}"), cancelled: false }
     }

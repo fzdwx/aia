@@ -39,7 +39,7 @@ where
         let abort_signal = control.abort_signal();
         let turn_id = next_turn_id();
         let started_at_ms = now_timestamp_ms();
-        let user_input = user_input.into();
+        let user_input = self.rewrite_input(user_input.into())?;
 
         let mut llm_step_index = 0_u32;
 
@@ -47,6 +47,7 @@ where
             return Err(RuntimeError::cancelled());
         }
 
+        self.ensure_agent_started()?;
         self.maybe_auto_compress_current_context(&turn_id, &mut llm_step_index).await;
 
         if abort_signal.is_aborted() {
@@ -58,6 +59,7 @@ where
             self.append_tape_entry(TapeEntry::message(&user_message).with_run_id(&turn_id))?;
         let mut buffers = TurnBuffers::new(user_entry_id);
         self.publish_event(RuntimeEvent::UserMessage { content: user_message.content.clone() });
+        self.notify_turn_start(&turn_id, &user_message.content);
 
         let mut already_compressed = false;
 
@@ -72,7 +74,12 @@ where
                 );
             }
 
-            let request = self.build_completion_request(&turn_id, "completion", llm_step_index);
+            let request = self.prepare_request_with_hooks(
+                &turn_id,
+                "completion",
+                llm_step_index,
+                self.build_completion_request(&turn_id, "completion", llm_step_index),
+            )?;
             let llm_trace_context = request.trace_context.clone();
             llm_step_index = llm_step_index.saturating_add(1);
             let completion = match self

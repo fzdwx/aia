@@ -2,7 +2,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use agent_core::ToolRegistry;
-use agent_runtime::{AgentRuntime, ContextStats, RuntimeSubscriberId, TurnLifecycle};
+use agent_prompts::SystemPromptConfig;
+use agent_runtime::{AgentRuntime, ContextStats, RuntimeHooks, RuntimeSubscriberId, TurnLifecycle};
 use agent_store::{AiaStore, SessionRecord};
 use provider_registry::ProviderRegistry;
 use session_tape::SessionProviderBinding;
@@ -112,6 +113,8 @@ pub struct SessionManagerConfig {
     pub provider_info_snapshot: Arc<RwLock<ProviderInfoSnapshot>>,
     pub workspace_root: PathBuf,
     pub user_agent: String,
+    pub system_prompt: SystemPromptConfig,
+    pub runtime_hooks: RuntimeHooks,
 }
 
 pub(crate) fn read_lock<T>(lock: &RwLock<T>) -> RwLockReadGuard<'_, T> {

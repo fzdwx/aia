@@ -1,4 +1,7 @@
+mod system_prompt;
 pub mod tool_descriptions;
+
+pub use system_prompt::{SystemPromptBlock, SystemPromptConfig, build_system_prompt};
 
 /// Auto-compression: structured handoff summary prompt template.
 ///

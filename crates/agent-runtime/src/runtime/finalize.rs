@@ -30,7 +30,7 @@ where
         )?;
         let mut source_entry_ids = context.source_entry_ids;
         source_entry_ids.push(completion_event_id);
-        self.publish_turn_lifecycle(TurnLifecycle {
+        let turn = TurnLifecycle {
             turn_id: context.turn_id,
             started_at_ms: context.started_at_ms,
             finished_at_ms: now_timestamp_ms(),
@@ -43,7 +43,9 @@ where
             usage: context.summary.usage,
             failure_message: None,
             outcome: TurnOutcome::Succeeded,
-        });
+        };
+        self.publish_turn_lifecycle(turn.clone());
+        self.notify_turn_end(&turn);
         Ok(())
     }
 
@@ -65,7 +67,7 @@ where
         } else {
             TurnBlock::Failure { message: runtime_error.to_string() }
         });
-        self.publish_turn_lifecycle(TurnLifecycle {
+        let turn = TurnLifecycle {
             turn_id: context.turn_id.to_string(),
             started_at_ms: context.started_at_ms,
             finished_at_ms: now_timestamp_ms(),
@@ -86,7 +88,9 @@ where
             } else {
                 TurnOutcome::Failed
             },
-        });
+        };
+        self.publish_turn_lifecycle(turn.clone());
+        self.notify_turn_end(&turn);
         Ok(())
     }
 }

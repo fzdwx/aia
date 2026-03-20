@@ -101,28 +101,46 @@ where
                         return Err(RuntimeError::cancelled());
                     }
                     saw_tool_calls = true;
+                    let override_result = self.resolve_tool_call_override(turn_id, call)?;
                     let tool_call_entry_id =
                         self.append_tape_entry(TapeEntry::tool_call(call).with_run_id(turn_id))?;
                     buffers.source_entry_ids.push(tool_call_entry_id);
 
                     if tool_calls_are_parallel {
-                        parallel_calls.push((assistant_entry_id, tool_call_entry_id, call.clone()));
+                        parallel_calls.push((
+                            assistant_entry_id,
+                            tool_call_entry_id,
+                            call.clone(),
+                            override_result,
+                        ));
                     } else {
-                        let invocation = self
-                            .execute_tool_call(
-                                ExecuteToolCallContext::new(
-                                    turn_id,
-                                    llm_trace_context,
-                                    assistant_entry_id,
-                                    tool_call_entry_id,
-                                    call,
-                                    &mut buffers.seen_tool_calls,
-                                    &mut buffers.source_entry_ids,
-                                    abort_signal.clone(),
-                                ),
-                                on_delta,
-                            )
-                            .await?;
+                        let mut context = ExecuteToolCallContext::new(
+                            turn_id,
+                            llm_trace_context,
+                            assistant_entry_id,
+                            tool_call_entry_id,
+                            call,
+                            &mut buffers.seen_tool_calls,
+                            &mut buffers.source_entry_ids,
+                            abort_signal.clone(),
+                        );
+                        let invocation = match override_result {
+                            Some(result) => {
+                                on_delta(context.started_event());
+                                self.commit_prepared_tool_call(
+                                    &mut context,
+                                    super::super::tool_calls::PreparedToolCallOutcome::Completed {
+                                        started_at_ms: now_timestamp_ms(),
+                                        tool_trace_context: llm_trace_context
+                                            .map(|trace| build_tool_trace_context(trace, call)),
+                                        result,
+                                        failed: abort_signal.is_aborted(),
+                                    },
+                                    on_delta,
+                                )?
+                            }
+                            None => self.execute_tool_call(context, on_delta).await?,
+                        };
                         buffers.blocks.push(TurnBlock::ToolInvocation {
                             invocation: Box::new(invocation.clone()),
                         });
@@ -145,7 +163,7 @@ where
             let trace_context = llm_trace_context.cloned();
 
             let prepared_results = join_all(parallel_calls.iter().cloned().map(
-                |(assistant_entry_id, tool_call_entry_id, call)| {
+                |(assistant_entry_id, tool_call_entry_id, call, override_result)| {
                     let tools = tools.clone();
                     let visible_tool_names = visible_tool_names.clone();
                     let workspace_root = workspace_root.clone();
@@ -157,6 +175,21 @@ where
                         let tool_trace_context = trace_context
                             .as_ref()
                             .map(|trace| build_tool_trace_context(trace, &call));
+
+                        if let Some(result) = override_result {
+                            return (
+                                assistant_entry_id,
+                                tool_call_entry_id,
+                                call,
+                                super::super::tool_calls::PreparedToolCallOutcome::Completed {
+                                    started_at_ms,
+                                    tool_trace_context,
+                                    result,
+                                    failed: abort_signal.is_aborted(),
+                                },
+                                Vec::<ToolOutputDelta>::new(),
+                            );
+                        }
 
                         if abort_signal.is_aborted() {
                             return (

@@ -1,5 +1,31 @@
 # 演进日志
 
+## 2026-03-20 Session 92
+
+**Diagnosis**：上一轮虽然已经把 `SystemPromptConfig` 和 `RuntimeHooks` 提升到共享层，但真正想“驱动其他客户端”的调用方如果要复用 `agent-server`，仍然得自己构造底层 `SessionManagerConfig`，甚至当前 crate 还只是 bin 入口，没有一层正式的 lib façade 可供嵌入。这意味着高层扩展点虽然存在，但嵌入成本仍然偏高。
+**Decision**：把 `agent-server` 明确收口成“可直接嵌入的 control-plane façade”：保留原有 `bootstrap_state()` 默认入口，同时新增 `bootstrap_state_with_options(ServerBootstrapOptions)` 作为高层配置面，允许调用方只关心 `registry_path`、`workspace_root`、`user_agent`、`system_prompt` 和 `runtime_hooks`；并把 crate 补成 `lib + bin` 双入口，让外部 client 可以直接复用 bootstrap、`run_server`、`run_self_chat`、`AppState` 与 `SessionManagerHandle`。
+**Changes**：
+- `apps/agent-server/src/{lib.rs,main.rs}`：新增 lib façade，bin 入口改为依赖 lib 导出的 bootstrap/server/self-chat 能力；CLI 继续留在 bin 侧，不把命令行解析错误地扩散进嵌入 API。
+- `apps/agent-server/src/bootstrap/mod.rs`、`apps/agent-server/tests/bootstrap/mod.rs`：新增 `ServerBootstrapOptions` 与 `bootstrap_state_with_options(...)`，并补嵌入式回归测试锁住 `user_agent + system_prompt + runtime_hooks` 的高层注入路径。
+- `docs/{status.md,architecture.md,evolution-log.md}`：同步记录 `agent-server` 现已具备 lib 级 bootstrap façade，嵌入方应优先走 `ServerBootstrapOptions` 而不是直接手写 `SessionManagerConfig`。
+**Verification**：`cargo fmt --all`、`cargo test -p agent-server`。
+**Commit**：未提交。
+**Next direction**：如果继续沿嵌入式 control-plane 收口，下一步优先评估是否需要把 `run_server` 的 listener/bind 地址也并入高层 options，或进一步抽出“不启动 HTTP、只暴露 router/state”的更细粒度嵌入模式，而不是让其他 client 重新拼接 server 路由。
+
+## 2026-03-20 Session 91
+
+**Diagnosis**：当前 `agent-server` 的 session runtime 仍把 system prompt 直接写死在 `SessionSlotFactory` 里，而运行时对外只有一个 `with_instructions(String)` 入口；这意味着一旦别的客户端想复用同一条 session manager / runtime 主链，就只能复制 prompt 拼装逻辑或在 app 壳外侧重新 fork 一套 loop。与此同时，现有 `RuntimeEvent` 只是“事后回放流”，并不能在 provider request、tool call、tool result 这些关键点做真正的驱动侧拦截。
+**Decision**：把“驱动接口”正式上提为共享抽象，而不是继续留在 app 壳硬编码：`agent-prompts` 新增 `SystemPromptConfig + build_system_prompt(...)`，承接默认 prompt 的替换、guideline 追加与 context block 组合；`agent-runtime` 新增 `RuntimeHooks`，首轮先收口 `before_agent_start`、`input`、`before_provider_request`、`tool_call`、`tool_result`、`turn_start/turn_end` 这组真实有用的 hook。`apps/agent-server` 只负责把 aia 默认 persona + context contract 装配成默认 prompt，并通过 `SessionManagerConfig` 暴露共享 prompt/hook 配置，而不是再把 system prompt 和拦截点继续埋在 app 内部。
+**Changes**：
+- `crates/agent-prompts/src/{lib.rs,system_prompt.rs}`、`crates/agent-prompts/tests/system_prompt/mod.rs`：新增共享 `SystemPromptConfig` / `SystemPromptBlock` / `build_system_prompt(...)`，覆盖 base prompt 替换、guideline 追加、原始 section 追加与 context block 组合。
+- `crates/agent-runtime/src/{lib.rs,hooks.rs,runtime.rs}`、`crates/agent-runtime/src/runtime/{hooks.rs,turn/driver.rs,compress.rs,finalize.rs,tool_calls/{lifecycle,types}.rs}`：新增 `RuntimeHooks` 与对应事件类型；普通 turn、压缩请求、tool 生命周期与 turn 终态都已接入 hook 分发，其中 `before_provider_request` 可改写最终 `CompletionRequest`，`tool_call` 可短路真实工具执行，`tool_result` 可改写写回模型前的结果。
+- `crates/agent-runtime/tests/runtime/mod.rs`：补充 prompt 覆写、request 改写、input 改写、tool short-circuit、tool result 改写与 turn lifecycle hook 回归测试。
+- `apps/agent-server/src/session_manager/{mod.rs,prompt.rs,types.rs}`、`apps/agent-server/tests/session_manager/{mod.rs,prompt/mod.rs,provider_sync/mod.rs}`、`apps/agent-server/src/bootstrap/mod.rs`：`SessionManagerConfig` 现在显式承接 `system_prompt` 与 `runtime_hooks`，默认 session prompt 改由 `build_session_system_prompt(...)` 组合，server 侧补测锁住“自定义 prompt + runtime hook”已贯通到真正的 provider request。
+- `docs/{status.md,architecture.md,evolution-log.md}`：同步记录“共享 prompt builder + runtime hook 驱动面”已落地，明确它们与既有 `RuntimeEvent` 回放流的职责边界。
+**Verification**：`cargo fmt --all`、`cargo test -p agent-prompts -p agent-runtime -p agent-server`、`cargo check --workspace`、`cargo test --workspace`。
+**Commit**：未提交。
+**Next direction**：如果继续沿“可驱动其他客户端”的方向收口，下一步优先把 session/control-plane 级别的 hook 面也抽成稳定接口，例如 session create/switch/fork/compact 这类当前仍停留在 app 壳命令面的生命周期，而不是继续把更多客户端特化逻辑塞回 `agent-server`。
+
 ## 2026-03-20 Session 90
 
 **Diagnosis**：Rust 工作区里虽然很多模块已经有独立测试文件，但形态长期不一致：一部分还是内联 `mod tests { ... }`，一部分挂在同级 `tests.rs`，还有少量 `test_support.rs` / test-only `parsing.rs` / `#[cfg(test)]` helper 混在生产文件里。这样既让目录风格不统一，也继续把测试实现与生产模块边界搅在一起。

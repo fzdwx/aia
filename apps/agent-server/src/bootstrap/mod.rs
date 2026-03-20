@@ -3,6 +3,8 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+use agent_prompts::SystemPromptConfig;
+use agent_runtime::RuntimeHooks;
 use agent_store::{AiaStore, SessionRecord, generate_session_id};
 use channel_bridge::ChannelProfileRegistry;
 use provider_registry::ProviderRegistry;
@@ -16,6 +18,46 @@ use crate::{
 
 pub fn build_server_user_agent() -> String {
     aia_config::build_user_agent(aia_config::APP_NAME, env!("CARGO_PKG_VERSION"))
+}
+
+/// High-level bootstrap options for embedding `agent-server` as a reusable control plane.
+///
+/// This keeps callers on a stable configuration surface instead of constructing
+/// `SessionManagerConfig` directly.
+#[derive(Clone, Default)]
+pub struct ServerBootstrapOptions {
+    registry_path: Option<PathBuf>,
+    workspace_root: Option<PathBuf>,
+    user_agent: Option<String>,
+    system_prompt: SystemPromptConfig,
+    runtime_hooks: RuntimeHooks,
+}
+
+impl ServerBootstrapOptions {
+    pub fn with_registry_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.registry_path = Some(path.into());
+        self
+    }
+
+    pub fn with_workspace_root(mut self, path: impl Into<PathBuf>) -> Self {
+        self.workspace_root = Some(path.into());
+        self
+    }
+
+    pub fn with_user_agent(mut self, user_agent: impl Into<String>) -> Self {
+        self.user_agent = Some(user_agent.into());
+        self
+    }
+
+    pub fn with_system_prompt(mut self, system_prompt: SystemPromptConfig) -> Self {
+        self.system_prompt = system_prompt;
+        self
+    }
+
+    pub fn with_runtime_hooks(mut self, runtime_hooks: RuntimeHooks) -> Self {
+        self.runtime_hooks = runtime_hooks;
+        self
+    }
 }
 
 #[derive(Debug)]
@@ -39,11 +81,18 @@ impl std::fmt::Display for ServerInitError {
 impl std::error::Error for ServerInitError {}
 
 pub async fn bootstrap_state() -> Result<Arc<AppState>, ServerInitError> {
-    ServerBootstrap::discover()?.bootstrap().await
+    bootstrap_state_with_options(ServerBootstrapOptions::default()).await
+}
+
+pub async fn bootstrap_state_with_options(
+    options: ServerBootstrapOptions,
+) -> Result<Arc<AppState>, ServerInitError> {
+    ServerBootstrap::discover(options)?.bootstrap().await
 }
 
 struct ServerBootstrap {
     paths: BootstrapPaths,
+    options: ServerBootstrapOptions,
 }
 
 struct BootstrapPaths {
@@ -67,8 +116,8 @@ struct BootstrapSnapshots {
 }
 
 impl ServerBootstrap {
-    fn discover() -> Result<Self, ServerInitError> {
-        Ok(Self { paths: BootstrapPaths::discover()? })
+    fn discover(options: ServerBootstrapOptions) -> Result<Self, ServerInitError> {
+        Ok(Self { paths: BootstrapPaths::discover(&options)?, options })
     }
 
     async fn bootstrap(self) -> Result<Arc<AppState>, ServerInitError> {
@@ -169,7 +218,9 @@ impl ServerBootstrap {
             provider_registry_snapshot: snapshots.provider_registry_snapshot.clone(),
             provider_info_snapshot: snapshots.provider_info_snapshot.clone(),
             workspace_root: self.paths.workspace_root.clone(),
-            user_agent: build_server_user_agent(),
+            user_agent: self.options.user_agent.clone().unwrap_or_else(build_server_user_agent),
+            system_prompt: self.options.system_prompt.clone(),
+            runtime_hooks: self.options.runtime_hooks.clone(),
         });
         let channel_adapter_catalog = Arc::new(build_channel_adapter_catalog(
             resources.store.clone(),
@@ -204,13 +255,21 @@ impl ServerBootstrap {
 }
 
 impl BootstrapPaths {
-    fn discover() -> Result<Self, ServerInitError> {
-        let registry_path = provider_registry::default_registry_path();
+    fn discover(options: &ServerBootstrapOptions) -> Result<Self, ServerInitError> {
+        let registry_path =
+            options.registry_path.clone().unwrap_or_else(provider_registry::default_registry_path);
         let store_path = aia_config::store_path_from_registry_path(&registry_path);
         let sessions_dir = aia_config::sessions_dir_from_registry_path(&registry_path);
-        let workspace_root = std::env::current_dir()
-            .map_err(|error| ServerInitError::new("workspace 根目录获取", error.to_string()))?;
+        let workspace_root = match options.workspace_root.clone() {
+            Some(path) => path,
+            None => std::env::current_dir()
+                .map_err(|error| ServerInitError::new("workspace 根目录获取", error.to_string()))?,
+        };
 
         Ok(Self { registry_path, store_path, sessions_dir, workspace_root })
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/bootstrap/mod.rs"]
+mod tests;

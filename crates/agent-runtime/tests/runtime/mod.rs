@@ -16,7 +16,8 @@ use session_tape::SessionTape;
 
 use super::{AgentRuntime, RuntimeEvent, helpers::duration_since_unix_epoch};
 use crate::{
-    ToolInvocationLifecycle, ToolInvocationOutcome, TurnControl, TurnLifecycle, TurnOutcome,
+    RuntimeHooks, ToolInvocationLifecycle, ToolInvocationOutcome, TurnControl, TurnLifecycle,
+    TurnOutcome,
 };
 
 fn mutex_lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -1146,6 +1147,128 @@ fn 未设置自定义指令时不会自动注入预算提示词() {
 
     let requests = mutex_lock(&runtime.model.seen_requests);
     assert_eq!(requests[0].instructions, None);
+}
+
+#[test]
+fn before_agent_start_hook_可以覆盖初始系统提示词() {
+    let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced);
+    let model = BudgetRecordingModel::new();
+    let hooks = RuntimeHooks::default().on_before_agent_start(|event| {
+        event.instructions = Some("来自 hook 的 system prompt".into());
+        Ok(())
+    });
+    let mut runtime = AgentRuntime::new(model, StubTools, identity).with_hooks(hooks);
+
+    let _ = run_turn(&mut runtime, "开始").expect("应成功完成");
+
+    let requests = mutex_lock(&runtime.model.seen_requests);
+    assert_eq!(requests[0].instructions.as_deref(), Some("来自 hook 的 system prompt"));
+}
+
+#[test]
+fn before_provider_request_hook_可以改写最终请求() {
+    let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced);
+    let model = BudgetRecordingModel::new();
+    let hooks = RuntimeHooks::default().on_before_provider_request(|event| {
+        let base = event.request.instructions.clone().unwrap_or_default();
+        event.request.instructions = Some(format!("{base}\n\n客户端附加约束"));
+        Ok(())
+    });
+    let mut runtime = AgentRuntime::new(model, StubTools, identity)
+        .with_instructions("默认提示")
+        .with_hooks(hooks);
+
+    let _ = run_turn(&mut runtime, "开始").expect("应成功完成");
+
+    let requests = mutex_lock(&runtime.model.seen_requests);
+    assert_eq!(requests[0].instructions.as_deref(), Some("默认提示\n\n客户端附加约束"),);
+}
+
+#[test]
+fn input_hook_会在请求与磁带里改写用户输入() {
+    let identity = ModelIdentity::new("local", "request-recording", ModelDisposition::Balanced);
+    let model = RequestRecordingModel::new();
+    let hooks = RuntimeHooks::default().on_input(|event| {
+        event.input = format!("hook: {}", event.input);
+        Ok(())
+    });
+    let mut runtime = AgentRuntime::new(model, StubTools, identity).with_hooks(hooks);
+
+    let _ = run_turn(&mut runtime, "hello").expect("应成功完成");
+
+    let requests = mutex_lock(&runtime.model.seen_requests);
+    let user_message = requests[0]
+        .conversation
+        .iter()
+        .find_map(|item| item.as_message().map(|message| message.content.clone()));
+    assert_eq!(user_message.as_deref(), Some("hook: hello"));
+    assert_eq!(
+        runtime.tape().entries()[0].as_message().map(|message| message.content.clone()).as_deref(),
+        Some("hook: hello"),
+    );
+}
+
+#[test]
+fn tool_call_hook_可以短路真实工具执行() {
+    let identity = ModelIdentity::new("local", "stub", ModelDisposition::Balanced);
+    let hooks = RuntimeHooks::default().on_tool_call(|event| {
+        event.override_result = Some(ToolResult::from_call(&event.call, "来自 hook 的工具结果"));
+        Ok(())
+    });
+    let mut runtime = AgentRuntime::new(StubModel, FailingTools, identity).with_hooks(hooks);
+
+    let output = run_turn(&mut runtime, "你好").expect("应通过 hook 结果继续完成");
+
+    assert_eq!(output.assistant_text, "已收到：你好");
+    assert!(runtime.tape().entries().iter().any(|entry| {
+        entry.as_tool_result().is_some_and(|result| result.content == "来自 hook 的工具结果")
+    }));
+}
+
+#[test]
+fn tool_result_hook_可以改写工具结果() {
+    let identity = ModelIdentity::new("local", "stub", ModelDisposition::Balanced);
+    let hooks = RuntimeHooks::default().on_tool_result(|event| {
+        event.outcome = ToolInvocationOutcome::Succeeded {
+            result: ToolResult::from_call(&event.call, "改写后的工具结果"),
+        };
+        Ok(())
+    });
+    let mut runtime = AgentRuntime::new(StubModel, StubTools, identity).with_hooks(hooks);
+
+    let output = run_turn(&mut runtime, "你好").expect("应成功完成");
+
+    assert_eq!(output.assistant_text, "已收到：你好");
+    assert!(runtime.tape().entries().iter().any(|entry| {
+        entry.as_tool_result().is_some_and(|result| result.content == "改写后的工具结果")
+    }));
+}
+
+#[test]
+fn turn_hooks_会收到开始与结束通知() {
+    let identity = ModelIdentity::new("local", "request-recording", ModelDisposition::Balanced);
+    let model = RequestRecordingModel::new();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let hooks = RuntimeHooks::default()
+        .on_turn_start({
+            let events = events.clone();
+            move |event| {
+                mutex_lock(&events).push(format!("start:{}", event.user_message));
+            }
+        })
+        .on_turn_end({
+            let events = events.clone();
+            move |event| {
+                mutex_lock(&events).push(format!("end:{:?}", event.turn.outcome));
+            }
+        });
+    let mut runtime = AgentRuntime::new(model, StubTools, identity).with_hooks(hooks);
+
+    let _ = run_turn(&mut runtime, "hello").expect("应成功完成");
+
+    let events = mutex_lock(&events);
+    assert_eq!(events[0], "start:hello");
+    assert_eq!(events[1], "end:Succeeded");
 }
 
 #[test]

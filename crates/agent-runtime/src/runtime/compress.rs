@@ -33,26 +33,31 @@ where
             .unwrap_or(SUMMARY_OUTPUT_FALLBACK)
             .max(1);
 
-        let request = CompletionRequest {
-            model: self.model_identity.clone(),
-            instructions: Some(agent_prompts::handoff_summary(summary_max_tokens)),
-            conversation: view.conversation,
-            max_output_tokens: Some(summary_max_tokens),
-            available_tools: Vec::new(),
-            parallel_tool_calls: Some(false),
-            prompt_cache: None,
-            user_agent: None,
-            timeout: self.request_timeout.clone(),
-            trace_context: turn_id.map(|turn_id| {
-                build_llm_trace_context(
-                    self.session_id.as_deref(),
-                    turn_id,
-                    turn_id,
-                    "compression",
-                    step_index,
-                )
-            }),
-        };
+        let request = self.prepare_request_with_hooks(
+            turn_id.unwrap_or("compression"),
+            "compression",
+            step_index,
+            CompletionRequest {
+                model: self.model_identity.clone(),
+                instructions: Some(agent_prompts::handoff_summary(summary_max_tokens)),
+                conversation: view.conversation,
+                max_output_tokens: Some(summary_max_tokens),
+                available_tools: Vec::new(),
+                parallel_tool_calls: Some(false),
+                prompt_cache: None,
+                user_agent: None,
+                timeout: self.request_timeout.clone(),
+                trace_context: turn_id.map(|turn_id| {
+                    build_llm_trace_context(
+                        self.session_id.as_deref(),
+                        turn_id,
+                        turn_id,
+                        "compression",
+                        step_index,
+                    )
+                }),
+            },
+        )?;
 
         let completion = self
             .model

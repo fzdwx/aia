@@ -112,7 +112,7 @@ README 里真正难的是这些能力：
 - stop/cancel 已贯穿 server → runtime → provider streaming / embedded shell
 - `openai-adapter` 已改为原生 async `reqwest`：单次请求不再依赖 blocking client，流式读取改为 async chunk streaming + abort 轮询，避免 provider I/O 把后续 server 原生 async 化继续卡在边缘层
 - 全异步主链已完成 Phase 1-4：`agent-core` 的模型/工具 trait、`agent-runtime` turn 主链、`openai-adapter` provider I/O、`builtin-tools`、`agent-store` async façade 与 `apps/agent-server` turn/session/store 主路径都已切到 async 调用面；当前后续重点转为内部实现简化与共享层继续抽象，而不再是异步化阶段本身
-- `agent-prompts` 现除提示模板与阈值常量外，也集中承接真实工具的共享 description Markdown 文件，并通过薄加载入口暴露给 `builtin-tools` 与 runtime tools，避免多个 crate 继续各自维护工具描述字面量
+- `agent-prompts` 现除提示模板与阈值常量外，也集中承接可组合的 `SystemPromptConfig + build_system_prompt(...)` 共享入口，以及真实工具的共享 description Markdown 文件；system prompt 的替换、附加 guideline/section 与 context block 组合不再散落在 app 壳里手写字符串拼接
 - turn 主链内部已继续按职责拆为 `turn::{driver,segments,types}`：公开入口保持不变，流式 turn 驱动、completion segment 持久化与共享 turn buffer / success-failure context 分离，减少 runtime 单文件耦合与重复失败上下文拼装
 - `turn::driver` 已继续清理历史样板：重复的失败收尾路径已收口为共享 `fail_turn` helper，避免取消/stop_reason/模型错误分支继续各自拼接 `record_turn_failure + return Err(...)`
 - `agent-runtime` 对外 turn API 也已继续收口为单一异步入口 `handle_turn_streaming(user_input, control, sink)`：旧的同步 `handle_turn` 和历史命名 `handle_turn_streaming_with_control_async` 已移除，server 与测试消费方统一经由这条异步流式主链驱动 turn
@@ -120,6 +120,7 @@ README 里真正难的是这些能力：
 - `auto_compress_now()` 触发的压缩请求现在也会生成独立的 LLM trace context，不再只发 SSE 压缩通知而没有可持久化诊断记录；Web 侧通过单独的 compression 日志视图查看这类请求，而不是把它们并入常规对话 trace 列表
 - `agent-runtime::runtime::tool_calls` 内部也已收口 runtime tool / 普通 tool 共用的生命周期记账路径：结果条目落盘、事件发布、`ToolInvocationLifecycle` 组装与 `seen_tool_calls` 更新不再在两条分支里各自复制，减少后续继续扩展工具语义时的分支漂移
 - `agent-runtime::runtime::tool_calls` 现也已按职责拆为 `tool_calls::{execute,lifecycle,types}`：工具调用主流程、生命周期落盘/事件发布与共享上下文类型分离，`ExecuteToolCallContext::new(...)` / `lifecycle_context(...)` 负责收口重复的 started event 与 lifecycle context 样板，避免 runtime tool / 普通 tool 分支继续在单文件里来回复制上下文拼装
+- `agent-runtime` 在原有 `RuntimeEvent` 订阅流之外，现已额外暴露 `RuntimeHooks` 作为“驱动面”而不是“回放面”：`before_agent_start`、`input`、`before_provider_request`、`tool_call`、`tool_result`、`turn_start/turn_end` 这组 hook 用于外部 client 在不重写 agent loop 的前提下覆写 system prompt、注入 provider request 上下文、短路工具执行或改写工具结果；原 `RuntimeEvent` 继续只承担已发生事实的投影/订阅职责
 - 时间辅助函数不假设系统时间恒定晚于 `UNIX_EPOCH`，异常场景下会安全回退
 - `tape_info` / `tape_handoff` 已通过真正的 runtime tool registry 暴露，而不是字符串特判
 
@@ -230,11 +231,13 @@ README 里真正难的是这些能力：
 
 - 基于 axum 构建 HTTP + SSE 服务器，监听端口 3434
 - `agent-server` 二进制默认仍启动 HTTP + SSE server，但现在也提供 `self` 子命令：以编译期内嵌的 `docs/self.md` 约束直接走同一套 session manager / runtime turn 主链进行终端对话，用于自我进化与无前端场景下的本地驱动；CLI 还支持在 `self` 后追加启动任务参数，让首轮直接带着用户指定方向开始；CLI 内的 `/help`、`/status`、`/compress`、`/handoff` 同样复用现有 session manager 命令面，而不是旁路操作 runtime；格式错误的内建命令会在 CLI 本地直接报 usage，而不会误作为普通 prompt 送给模型
+- `apps/agent-server` 现在也提供可复用的 lib façade，而不只是二进制入口：嵌入方可直接调用 `bootstrap_state_with_options(ServerBootstrapOptions)` 拿到带 `AppState` / `SessionManagerHandle` / SSE 广播的完整 control-plane，不必再手写 `SessionManagerConfig` 或复制 bootstrap 装配逻辑
 - 启动时从 `.aia/providers.json`、`.aia/session.jsonl`、`.aia/store.sqlite3` 恢复本地状态
 - 通过后台 runtime worker 独占 `AgentRuntime`、provider registry 与 session 落盘状态
 - HTTP 路由已按 `provider`、`session`、`trace`、`turn` 领域模块拆分，共享错误响应、session 解析与 JSON helper 收口到 `routes::common`，避免 app 壳控制面继续堆在单个超大入口文件里
 - `routes/provider` 现在也已比照 `routes/channel` 收口为目录模块：根 `mod.rs` 只保留 façade 导出，`dto.rs` 承接 HTTP DTO；真正持有依赖与行为的是在 bootstrap 阶段装配进 `AppState` 的 `ProviderRouteService`，其 handler 入口以关联函数形式暴露给 Axum，避免每次请求再临时构造借用上下文；provider 路由局部所需的纯映射/纯投影 helper 直接内聚在 `handlers.rs`，既避免无状态 helper 过度对象化，也避免为几段小型纯函数继续制造碎片化子文件
 - `session_manager` 已进一步按职责拆成子模块：命令发送 handle、共享 slot/command 类型、query/cancel 读取、current-turn 流式投影、tool trace 持久化、provider 注册表同步、turn worker/SSE 投影与测试辅助分别独立；根模块本身也已收口为 `SessionManagerLoop` 与 `SessionSlotFactory` 这类显式职责对象，provider/query/turn/tool-trace 都由各自服务对象承接，避免 provider 重绑与 turn 执行细节长期滞留在 façade 根模块
+- `SessionManagerConfig` 现在直接承接共享 `SystemPromptConfig` 与 `RuntimeHooks`：server 默认 system prompt 仍由 app 壳补上 aia 专属 persona 与 context contract，但覆写、附加约束和 runtime hook 注册都不再写死在 `session_manager` 内部；正常嵌入场景应优先走更高层的 `ServerBootstrapOptions`，只有 app 壳内部装配才直接接触 `SessionManagerConfig`
 - `model` 也已按职责拆成子模块：bootstrap mock、provider→model 构建工厂、带 trace 的完成链路 runner、trace 记录器与测试分别独立；根模块仅保留 `ServerModel` / `ProviderLaunchChoice` / `ServerModelError` 等稳定类型、`LanguageModel` 适配与 façade 入口，避免 provider 构建与 trace 执行细节长期滞留在根模块
 - `bootstrap` 也已从“大一统启动函数”收口为薄 façade：根模块只保留 `ServerInitError`、用户代理 helper 与 `bootstrap_state()` 入口；真实启动主线由 `bootstrap/startup.rs` 中的 `ServerBootstrap` 对象承接，并通过显式阶段方法串起路径发现、持久化加载、默认 session 补种、snapshot 构建、`AppState` 装配与 channel runtime 激活，避免 app 壳继续在单函数里混合环境发现、持久化写入与长生命周期运行时启动
 - `runtime_worker` 已按职责拆成子模块：共享类型、tape 快照重建/legacy decode helper 与测试分别独立，主文件只保留稳定 re-export 入口

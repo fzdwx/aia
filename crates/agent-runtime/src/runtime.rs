@@ -3,6 +3,7 @@ mod error;
 mod events;
 mod finalize;
 mod helpers;
+mod hooks;
 mod request;
 mod tape_tools;
 #[cfg(test)]
@@ -20,7 +21,7 @@ use agent_core::{
 };
 use session_tape::{Handoff, SessionTape, SessionTapeError, TapeEntry};
 
-use crate::{RuntimeEvent, RuntimeSubscriberId, TurnControl};
+use crate::{RuntimeEvent, RuntimeHooks, RuntimeSubscriberId, TurnControl};
 
 pub use self::error::RuntimeError;
 
@@ -48,6 +49,8 @@ pub struct AgentRuntime<M, T> {
     prompt_cache: Option<PromptCacheConfig>,
     request_timeout: Option<RequestTimeoutConfig>,
     last_input_tokens: Option<u64>,
+    hooks: RuntimeHooks,
+    agent_started: bool,
 }
 
 impl<M, T> AgentRuntime<M, T>
@@ -89,11 +92,18 @@ where
             prompt_cache: None,
             request_timeout: None,
             last_input_tokens,
+            hooks: RuntimeHooks::default(),
+            agent_started: false,
         }
     }
 
     pub fn with_instructions(mut self, instructions: impl Into<String>) -> Self {
         self.instructions = Some(instructions.into());
+        self
+    }
+
+    pub fn with_hooks(mut self, hooks: RuntimeHooks) -> Self {
+        self.hooks = hooks;
         self
     }
 
@@ -139,6 +149,10 @@ where
         self.prompt_cache = prompt_cache;
     }
 
+    pub fn set_hooks(&mut self, hooks: RuntimeHooks) {
+        self.hooks = hooks;
+    }
+
     pub fn with_request_timeout(mut self, timeout: RequestTimeoutConfig) -> Self {
         self.request_timeout = Some(timeout);
         self
@@ -172,6 +186,7 @@ where
     }
 
     pub async fn auto_compress_now(&mut self) -> Result<bool, RuntimeError> {
+        self.ensure_agent_started()?;
         let before_anchor_count = self.tape.anchors().len();
         let compression_id = helpers::next_compression_id();
         self.compress_context(Some(&compression_id), 0).await?;

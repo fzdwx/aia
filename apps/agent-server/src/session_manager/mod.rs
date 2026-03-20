@@ -1,5 +1,6 @@
 mod current_turn;
 mod handle;
+mod prompt;
 mod provider_sync;
 mod query_ops;
 #[cfg(test)]
@@ -32,6 +33,7 @@ use current_turn::{
     update_current_turn_from_stream, update_current_turn_status,
 };
 pub use handle::SessionManagerHandle;
+use prompt::build_session_system_prompt;
 use provider_sync::{ProviderSyncService, ReturnedRuntimeSync};
 pub(crate) use query_ops::SessionQueryService;
 use turn_execution::{RuntimeEventProjector, TurnExecutionService, collect_runtime_events};
@@ -339,13 +341,8 @@ impl<'a> SessionSlotFactory<'a> {
         let workspace_root = self.config.workspace_root.clone();
         let request_timeout = runtime_request_timeout();
         let mut runtime = AgentRuntime::with_tape(model, build_tool_registry(), identity, tape)
-            .with_instructions(format!(
-                "你是 aia 的助手。给出清晰、结构化的答案。\n\n{}",
-                agent_prompts::context_contract(
-                    agent_prompts::AGENT_HANDOFF_THRESHOLD,
-                    agent_prompts::AUTO_COMPRESSION_THRESHOLD,
-                ),
-            ))
+            .with_instructions(build_session_system_prompt(&self.config.system_prompt))
+            .with_hooks(self.config.runtime_hooks.clone())
             .with_session_id(session_id.to_string())
             .with_user_agent(self.config.user_agent.clone())
             .with_workspace_root(workspace_root)

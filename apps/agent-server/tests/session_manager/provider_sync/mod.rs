@@ -50,6 +50,8 @@ fn sample_config(root: &std::path::Path, registry: ProviderRegistry) -> SessionM
         provider_info_snapshot: Arc::new(RwLock::new(provider_info)),
         workspace_root: root.to_path_buf(),
         user_agent: "test-agent".into(),
+        system_prompt: agent_prompts::SystemPromptConfig::default(),
+        runtime_hooks: agent_runtime::RuntimeHooks::default(),
     }
 }
 
