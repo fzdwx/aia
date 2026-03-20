@@ -1,5 +1,29 @@
 # 演进日志
 
+## 2026-03-20 Session 84
+
+**Diagnosis**：上一轮虽然已经把独立 `/api/traces/summary` 控制面删掉，但 `apps/web` 的 `trace-store` 里仍保留着 `traceSummary` 本地状态。仓库内已经没有任何组件读取这份 store 字段，实际只剩刷新链路自己赋值、测试初始化和断言，属于 overview/workspace 切分后遗留的前端冗余状态。
+**Decision**：不改 `/api/traces/overview` 的响应体，也不改 `TraceSummary` 共享类型，避免把清理扩成协议变更；只删除 `trace-store` 内部未使用的 `traceSummary` 状态与测试断言，让 workspace store 只保留当前 UI 真正消费的 loop 列表、分页与选择态。
+**Changes**：
+- `apps/web/src/stores/{trace-store.ts,trace-store.test.ts}`：移除未使用的 `traceSummary` store 字段、inflight overview 缓存字段和对应测试断言。
+- `docs/evolution-log.md`：补记本轮 trace store 冗余状态清理。
+**Verification**：`just web-typecheck`、`just web-test` 通过。
+**Commit**：未提交。
+**Next direction**：若继续压缩 trace 前端状态，下一步优先检查 `TracePanel` / `TraceSidebar` 是否还存在可共用的 loop group 派生逻辑，而不是继续保留 store 内部不用的派生缓存。
+
+## 2026-03-20 Session 83
+
+**Diagnosis**：`Trace` overview 在 Session 82 已切到 `/api/traces/dashboard`，workspace 列表也已稳定走 `/api/traces/overview`，但仓库里仍残留前端未使用的 `fetchTraceSummary()` 与单独暴露的 `/api/traces/summary` 路由。这条 summary 读路径已经不在当前 Web 主链上，只会继续维持一套重复控制面和对应测试样板。
+**Decision**：不动 `agent-store` 内部的 summary 快照能力，也不改 `overview`/`dashboard` 响应里的 summary 字段；只把当前无调用的独立 summary API 从 `apps/agent-server` 表面移除，并顺手删掉前端未使用 helper 与只为该路由存在的 async store helper，避免把“内部汇总能力”和“额外公开路由”继续绑定在一起。
+**Changes**：
+- `apps/web/src/lib/api.ts`：删除未使用的 `fetchTraceSummary()`，保留 `fetchTraceOverview()` 与 `fetchTraceDashboard()` 作为当前 trace 主路径。
+- `apps/agent-server/src/routes/trace/{mod.rs,handlers.rs,tests.rs}`：移除 `/api/traces/summary` 路由、handler 与对应路由回归测试。
+- `crates/agent-store/src/trace/{store.rs,tests.rs}`：移除只服务旧 summary 路由的 async summary helper，并把相关测试改成通过 `overview_by_request_kind_async(...)` 继续验证 summary 快照语义。
+- `docs/{status.md,evolution-log.md}`：同步记录 trace 读控制面已收敛到 `/api/traces`、`/api/traces/{id}`、`/api/traces/overview` 与 `/api/traces/dashboard`。
+**Verification**：`cargo fmt --all`、`cargo test -p agent-store`、`cargo test -p agent-server`、`just web-typecheck`、`just web-test` 通过。
+**Commit**：未提交。
+**Next direction**：若继续压缩 trace 控制面，下一步优先检查 `apps/web` / `agent-server` 是否还保留只服务旧 trace 交互模型的 presentation helper 或 DTO 映射，而不是重新引入新的平行读接口。
+
 ## 2026-03-20 Session 82
 
 **Diagnosis**：虽然 `Trace` 页面已经拆出 `Overview` 子工作台，但现有前端 still 只是在浏览器里并发拉三份 `/api/traces/summary`，只能展示累计请求/延迟/缓存复用，既支撑不了目标图里的成本趋势、行变更和活跃热力图，也无法把 “session 维度” 真正贯到 trace 诊断面。
