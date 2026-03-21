@@ -3,11 +3,12 @@
 ## 2026-03-21 Session 102
 
 **Diagnosis**：用户反馈 `GET /api/session/settings` 返回 `tape load failed: 磁带 session 追加记录 id 不连续：期待 1402，收到 1401`，并补充“是另一个 session 在运行的时候”。排查后确认不是当前磁带文件长期损坏，而是 `apps/agent-server` 在“某个 session 正在运行、其 runtime 已 `take()` 出去”的窗口里，若同时对该 session 走 `/api/session/settings` 更新 provider binding，`provider_sync` 会回退到从 `.jsonl` 重新加载磁带并整文件 `save_jsonl(...)`。这条整文件重写与运行中 runtime 的 `with_tape_entry_listener -> append_jsonl_entry(...)` 并发发生时，会把旧快照覆盖到正在追加的文件上，进而制造重复/回退 entry id，后续任何 settings 读取都会因为连续性校验失败而报错。
-**Decision**：不再让“运行中的 session 设置更新”触发磁带文件重载/重写，而是给 `SessionSlot` 增加内存态 `provider_binding` 快照。`get_session_settings` 对 running session 优先直接返回这份内存 binding；`update_session_provider_binding` 在 runtime 不可用但 slot 仍处于 `Running` 时，只更新 `provider_binding + pending_provider_binding`，把真正的磁带写回推迟到 runtime return 阶段统一执行。
+**Decision**：既然产品约束已经明确“在运行状态的 session 不允许修改 session 的模型设置”，那就不再继续为运行中 settings update 保留 deferred/pending 语义，而是直接把约束收口到前后端两层：后端对 running session 的 `/api/session/settings` 更新统一返回 `400`，前端在 `chatState === active` 时直接禁用模型与思考等级 selector。保留 `SessionSlot.provider_binding` 只服务运行中 settings 读取，不再让 update path 与磁带文件发生并发交互。
 **Changes**：
 - `apps/agent-server/src/session_manager/{types.rs,mod.rs}`：`SessionSlot` 新增 `provider_binding` 快照；建 slot 与 runtime return 时同步维护；`get_session_settings(...)` 对 running session 改为直接返回内存 binding，不再回读 `.jsonl`。
-- `apps/agent-server/src/session_manager/provider_sync.rs`：运行中 session 且 `runtime` 已取走时，更新 settings 不再 `load_jsonl_or_default + save_jsonl`，只更新 `provider_binding/pending_provider_binding` 并返回对应 provider info，避免和 turn 追加写并发打架。
-- `apps/agent-server/tests/session_manager/{mod.rs,provider_sync/mod.rs}`：新增“running session 保留内存 provider binding”“running session settings update 不重写 session file”回归测试。
+- `apps/agent-server/src/session_manager/provider_sync.rs`：running session 更新 settings 现在直接返回 `bad_request("cannot update session settings while a turn is running")`，不再尝试 deferred update，更不会触发 `.jsonl` 重写。
+- `apps/web/src/components/{model-selector.tsx,chat-input.tsx}`：聊天 active 时模型 selector 与思考等级 selector 一起禁用，避免前端继续发起会被后端拒绝的设置更新。
+- `apps/agent-server/tests/session_manager/{mod.rs,provider_sync/mod.rs}`：新增“running session 保留内存 provider binding”回归，并把 running session settings update 回归改为“明确被拒绝”。
 **Commit**：`c7670c5 fix(server): avoid tape rewrite during session updates`。
 
 ## 2026-03-21 Session 101

@@ -62,7 +62,7 @@ export function ChatInput() {
 
   const canSend = value.trim().length > 0 && !disabled
   const reasoningValue = sessionSettings?.reasoning_effort ?? "medium"
-  const settingsBusy = sessionSettingsHydrating || sessionSettingsUpdating
+  const settingsBusy = sessionSettingsHydrating || sessionSettingsUpdating || disabled
 
   function handleSend() {
     if (!canSend) return

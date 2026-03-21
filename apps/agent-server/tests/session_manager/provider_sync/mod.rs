@@ -186,8 +186,8 @@ fn session_binding_preserves_reasoning_effort_override() {
 }
 
 #[test]
-fn running_session_settings_update_does_not_rewrite_session_file() {
-    let root = temp_root("session-binding-running-no-rewrite");
+fn running_session_settings_update_is_rejected() {
+    let root = temp_root("session-binding-running-rejected");
     let mut config = sample_config(&root, sample_registry());
     let mut slots = HashMap::new();
     let mut slot =
@@ -208,12 +208,14 @@ fn running_session_settings_update_does_not_rewrite_session_file() {
         reasoning_effort: Some("high".into()),
     };
 
-    service
-        .update_session_provider_binding("session-1", binding.clone())
-        .expect("session settings update should succeed");
+    let error = service
+        .update_session_provider_binding("session-1", binding)
+        .expect_err("running session settings update should be rejected");
 
-    assert_eq!(slots["session-1"].provider_binding, binding.clone());
-    assert_eq!(slots["session-1"].pending_provider_binding, Some(binding));
+    assert_eq!(error.status, axum::http::StatusCode::BAD_REQUEST);
+    assert!(error
+        .message
+        .contains("cannot update session settings while a turn is running"));
     assert_eq!(std::fs::read_to_string(&session_path).unwrap_or_default(), original_contents);
 
     let _ = std::fs::remove_dir_all(root);

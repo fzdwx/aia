@@ -232,6 +232,12 @@ impl<'a> ProviderSyncService<'a> {
             RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
         })?;
 
+        if slot.status == super::SlotStatus::Running {
+            return Err(RuntimeWorkerError::bad_request(
+                "cannot update session settings while a turn is running",
+            ));
+        }
+
         slot.provider_binding = binding.clone();
 
         match &mut slot.runtime {

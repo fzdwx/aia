@@ -16,6 +16,7 @@ import { useSessionSettingsStore } from "@/stores/session-settings-store"
 export function ModelSelector() {
   const providerList = useChatStore((s) => s.providerList)
   const refreshProviders = useChatStore((s) => s.refreshProviders)
+  const chatState = useChatStore((s) => s.chatState)
   const sessionSettings = useSessionSettingsStore((s) => s.sessionSettings)
   const hydrating = useSessionSettingsStore((s) => s.hydrating)
   const updating = useSessionSettingsStore((s) => s.updating)
@@ -34,7 +35,7 @@ export function ModelSelector() {
   return (
     <div className="min-w-0">
       <Select
-        disabled={hydrating || updating}
+        disabled={hydrating || updating || chatState === "active"}
         value={
           activeProviderName && activeModelId
             ? `${activeProviderName}::${activeModelId}`
