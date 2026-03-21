@@ -120,7 +120,6 @@ where
                             assistant_entry_id,
                             tool_call_entry_id,
                             call,
-                            &mut buffers.seen_tool_calls,
                             &mut buffers.source_entry_ids,
                             abort_signal.clone(),
                         );
@@ -297,7 +296,6 @@ where
                         assistant_entry_id,
                         tool_call_entry_id,
                         &call,
-                        &mut buffers.seen_tool_calls,
                         &mut buffers.source_entry_ids,
                         abort_signal.clone(),
                     ),

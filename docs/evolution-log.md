@@ -1,5 +1,17 @@
 # 演进日志
 
+## 2026-03-21 Session 97
+
+**Diagnosis**：`agent-runtime` 里仍保留了一层“相同工具调用检测 / 自动跳过”机制：运行时会基于 `tool_name + arguments` 记录 `seen_tool_calls`，并在后续相同调用出现时写回一条“重复工具调用已跳过”的工具结果。这会把 runtime 自己的去重策略混进模型-工具对话语义里，也和当前用户要求直接冲突。
+**Decision**：直接删除 runtime 侧这层“相同工具调用检测”能力，而不是继续调整提示词或改文案。保留现有的单轮工具调用上限、stop reason 校验、并行/串行执行策略与取消语义，让是否再次调用同一工具完全回到模型与显式上限控制。
+**Changes**：
+- `crates/agent-runtime/src/runtime/{helpers.rs,turn/types.rs,turn/segments.rs,tool_calls/{types.rs,execute.rs}}`：删除 `seen_tool_calls`、`PreviousToolCall`、工具调用签名与结果记忆逻辑，工具调用提交路径不再生成“重复工具调用已跳过”分支。
+- `crates/agent-runtime/tests/runtime/mod.rs`：删除只覆盖重复工具调用跳过语义的 `DuplicateToolLoopModel` 测试支撑代码。
+- `docs/status.md`、`docs/evolution-log.md`：同步更新运行时现状，移除“重复工具调用防重”的项目状态描述。
+**Verification**：待本轮执行 `cargo fmt --all`、`cargo test -p agent-runtime`、`cargo check -p agent-runtime` 后补充。
+**Commit**：未提交。
+**Next direction**：如果后续还要继续收口工具调用策略，优先评估是否需要把“工具循环预算 / 上限”表达得更显式，而不是重新引入 runtime 私有的隐式去重判断。
+
 ## 2026-03-21 Session 96
 
 **Diagnosis**：虽然前几轮已经把 `openai-adapter` 的流式请求驱动、SSE transcript 解析与协议 payload 分层收口，但 Responses / Chat Completions 两条协议内部仍各自维护一套很相似的 tool-call 流式累积状态：都需要追踪 invocation id、工具名、参数 delta、是否已发出 `tool_call_detected`，只是事件来源字段不同。继续各写一份不仅让实现样板重复，也会让兼容细节（例如 Responses 的 `call_id`、Chat Completions 重复 name delta）更容易漂移。

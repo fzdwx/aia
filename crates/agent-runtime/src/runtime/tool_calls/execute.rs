@@ -10,7 +10,7 @@ use crate::{ToolInvocationLifecycle, ToolTraceContext};
 
 use super::super::{
     AgentRuntime, RuntimeError,
-    helpers::{build_tool_trace_context, now_timestamp_ms, tool_call_signature},
+    helpers::{build_tool_trace_context, now_timestamp_ms},
     tape_tools,
 };
 use super::types::{ExecuteToolCallContext, FailedToolCallContext, PreparedToolCallOutcome};
@@ -136,7 +136,6 @@ where
         prepared: PreparedToolCallOutcome,
         on_delta: &mut (dyn FnMut(StreamEvent) + Send),
     ) -> Result<ToolInvocationLifecycle, RuntimeError> {
-        let call_signature = tool_call_signature(context.call);
         match prepared {
             PreparedToolCallOutcome::Completed {
                 started_at_ms,
@@ -149,7 +148,6 @@ where
                 tool_trace_context,
                 result,
                 failed,
-                &call_signature,
                 on_delta,
             ),
             PreparedToolCallOutcome::Failed {
@@ -163,7 +161,6 @@ where
                 tool_trace_context,
                 event_name,
                 runtime_error,
-                &call_signature,
                 on_delta,
             ),
         }
@@ -200,17 +197,14 @@ where
         tool_trace_context: Option<ToolTraceContext>,
         result: ToolResult,
         failed: bool,
-        call_signature: &str,
         on_delta: &mut (dyn FnMut(StreamEvent) + Send),
     ) -> Result<ToolInvocationLifecycle, RuntimeError> {
-        let lifecycle = self.record_completed_tool_call(
+        self.record_completed_tool_call(
             context.lifecycle_context(started_at_ms, tool_trace_context),
             result,
             failed,
             on_delta,
-        )?;
-        context.remember_outcome(call_signature, &lifecycle.outcome);
-        Ok(lifecycle)
+        )
     }
 
     fn record_failed_tool_call_for_context(
@@ -220,18 +214,15 @@ where
         tool_trace_context: Option<ToolTraceContext>,
         event_name: &'static str,
         runtime_error: RuntimeError,
-        call_signature: &str,
         on_delta: &mut (dyn FnMut(StreamEvent) + Send),
     ) -> Result<ToolInvocationLifecycle, RuntimeError> {
-        let lifecycle = self.record_failed_tool_call(
+        self.record_failed_tool_call(
             FailedToolCallContext {
                 lifecycle: context.lifecycle_context(started_at_ms, tool_trace_context),
                 event_name,
             },
             runtime_error,
             on_delta,
-        )?;
-        context.remember_outcome(call_signature, &lifecycle.outcome);
-        Ok(lifecycle)
+        )
     }
 }

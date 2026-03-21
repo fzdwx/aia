@@ -1,10 +1,6 @@
-use std::collections::BTreeMap;
-
 use agent_core::{CompletionUsage, StreamEvent};
 
 use crate::{ToolInvocationLifecycle, TurnBlock};
-
-use super::super::helpers::PreviousToolCall;
 
 pub(super) struct TurnBuffers {
     pub(super) source_entry_ids: Vec<u64>,
@@ -14,7 +10,6 @@ pub(super) struct TurnBuffers {
     pub(super) blocks: Vec<TurnBlock>,
     pub(super) last_assistant_text: Option<String>,
     pub(super) streamed_assistant_text: String,
-    pub(super) seen_tool_calls: BTreeMap<String, PreviousToolCall>,
 }
 
 impl TurnBuffers {
@@ -27,7 +22,6 @@ impl TurnBuffers {
             blocks: Vec::new(),
             last_assistant_text: None,
             streamed_assistant_text: String::new(),
-            seen_tool_calls: BTreeMap::new(),
         }
     }
 

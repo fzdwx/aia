@@ -247,16 +247,6 @@ impl LanguageModel for StreamingCancelledModel {
     }
 }
 
-struct DuplicateToolLoopModel {
-    seen_requests: Mutex<Vec<CompletionRequest>>,
-}
-
-impl DuplicateToolLoopModel {
-    fn new() -> Self {
-        Self { seen_requests: Mutex::new(Vec::new()) }
-    }
-}
-
 struct ManyToolRoundsModel {
     seen_requests: Mutex<Vec<CompletionRequest>>,
 }
@@ -293,53 +283,6 @@ impl LanguageModel for ManyToolRoundsModel {
         Ok(Completion {
             segments: vec![CompletionSegment::ToolUse(
                 ToolCall::new("search").with_argument("query", format!("step-{step}")),
-            )],
-            stop_reason: CompletionStopReason::ToolUse,
-            usage: None,
-            response_body: None,
-            http_status_code: None,
-        })
-    }
-}
-
-#[async_trait]
-impl LanguageModel for DuplicateToolLoopModel {
-    type Error = CoreError;
-
-    async fn complete_streaming(
-        &self,
-        request: CompletionRequest,
-        _abort: &AbortSignal,
-        _sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
-    ) -> Result<Completion, Self::Error> {
-        mutex_lock(&self.seen_requests).push(request.clone());
-        let saw_duplicate_skip = request.conversation.iter().any(|item| {
-            item.as_tool_result()
-                .is_some_and(|result| result.content.contains("重复工具调用已跳过"))
-        });
-        if saw_duplicate_skip {
-            return Ok(Completion::text("已停止重复调用并给出最终回答"));
-        }
-
-        let saw_initial_tool_result = request.conversation.iter().any(|item| {
-            item.as_tool_result().is_some_and(|result| result.content.contains("未实现"))
-        });
-
-        if saw_initial_tool_result {
-            return Ok(Completion {
-                segments: vec![CompletionSegment::ToolUse(
-                    ToolCall::new("search").with_argument("query", "date"),
-                )],
-                stop_reason: CompletionStopReason::ToolUse,
-                usage: None,
-                response_body: None,
-                http_status_code: None,
-            });
-        }
-
-        Ok(Completion {
-            segments: vec![CompletionSegment::ToolUse(
-                ToolCall::new("search").with_argument("query", "date"),
             )],
             stop_reason: CompletionStopReason::ToolUse,
             usage: None,
@@ -1328,8 +1271,8 @@ fn 上下文接近窗口上限时会自动收紧输出预算() {
 
 #[test]
 fn 可通过_builder_限制单轮最大工具调用次数() {
-    let identity = ModelIdentity::new("local", "duplicate", ModelDisposition::Balanced);
-    let model = DuplicateToolLoopModel::new();
+    let identity = ModelIdentity::new("local", "many-steps", ModelDisposition::Balanced);
+    let model = ManyToolRoundsModel::new();
     let mut runtime = AgentRuntime::new(model, StubTools, identity).with_max_tool_calls_per_turn(1);
 
     let error = run_turn(&mut runtime, "今天星期几").expect_err("超过工具调用上限应失败");

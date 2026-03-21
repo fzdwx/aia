@@ -6,7 +6,7 @@ use std::{
 use agent_core::{LlmTraceRequestContext, Message, Role, ToolCall};
 use session_tape::Anchor;
 
-use crate::{ToolInvocationOutcome, ToolTraceContext};
+use crate::ToolTraceContext;
 
 pub(super) fn build_tool_source_entry_ids(
     assistant_entry_id: Option<u64>,
@@ -20,18 +20,6 @@ pub(super) fn build_tool_source_entry_ids(
     ids.push(tool_call_entry_id);
     ids.push(tool_result_entry_id);
     ids
-}
-
-pub(super) fn tool_call_signature(call: &ToolCall) -> String {
-    format!("{}:{}", call.tool_name, call.arguments)
-}
-
-fn summarize_for_duplicate_message(content: &str) -> String {
-    let mut preview = content.chars().take(160).collect::<String>();
-    if content.chars().count() > 160 {
-        preview.push('…');
-    }
-    preview.replace('\n', " ")
 }
 
 pub(super) fn duration_since_unix_epoch(now: SystemTime) -> Duration {
@@ -104,22 +92,5 @@ pub(super) fn build_tool_trace_context(
         operation_name: "execute_tool".to_string(),
         parent_request_kind: parent.request_kind.clone(),
         parent_step_index: parent.step_index,
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct PreviousToolCall {
-    pub(super) summary: String,
-}
-
-impl PreviousToolCall {
-    pub(super) fn from_outcome(outcome: &ToolInvocationOutcome) -> Self {
-        let summary = match outcome {
-            ToolInvocationOutcome::Succeeded { result } => {
-                summarize_for_duplicate_message(&result.content)
-            }
-            ToolInvocationOutcome::Failed { message } => summarize_for_duplicate_message(message),
-        };
-        Self { summary }
     }
 }

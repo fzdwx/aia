@@ -1,10 +1,6 @@
-use std::collections::BTreeMap;
-
 use agent_core::{AbortSignal, LlmTraceRequestContext, StreamEvent, ToolCall, ToolResult};
 
-use crate::{ToolInvocationOutcome, ToolTraceContext};
-
-use super::super::helpers::PreviousToolCall;
+use crate::ToolTraceContext;
 
 pub(in super::super) struct ExecuteToolCallContext<'a> {
     pub(super) turn_id: &'a str,
@@ -12,7 +8,6 @@ pub(in super::super) struct ExecuteToolCallContext<'a> {
     pub(super) assistant_entry_id: Option<u64>,
     pub(super) tool_call_entry_id: u64,
     pub(super) call: &'a ToolCall,
-    pub(super) seen_tool_calls: &'a mut BTreeMap<String, PreviousToolCall>,
     pub(super) source_entry_ids: &'a mut Vec<u64>,
     pub(super) abort_signal: AbortSignal,
 }
@@ -54,7 +49,6 @@ impl ExecuteToolCallContext<'_> {
         assistant_entry_id: Option<u64>,
         tool_call_entry_id: u64,
         call: &'a ToolCall,
-        seen_tool_calls: &'a mut BTreeMap<String, PreviousToolCall>,
         source_entry_ids: &'a mut Vec<u64>,
         abort_signal: AbortSignal,
     ) -> ExecuteToolCallContext<'a> {
@@ -64,7 +58,6 @@ impl ExecuteToolCallContext<'_> {
             assistant_entry_id,
             tool_call_entry_id,
             call,
-            seen_tool_calls,
             source_entry_ids,
             abort_signal,
         }
@@ -92,14 +85,5 @@ impl ExecuteToolCallContext<'_> {
             tool_name: self.call.tool_name.clone(),
             arguments: self.call.arguments.clone(),
         }
-    }
-
-    pub(super) fn remember_outcome(
-        &mut self,
-        call_signature: &str,
-        outcome: &ToolInvocationOutcome,
-    ) {
-        self.seen_tool_calls
-            .insert(call_signature.to_string(), PreviousToolCall::from_outcome(outcome));
     }
 }
