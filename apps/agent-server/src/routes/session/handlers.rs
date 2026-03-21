@@ -7,6 +7,7 @@ use axum::{
 use provider_registry::ProviderKind;
 use session_tape::SessionProviderBinding;
 
+use crate::reasoning::ReasoningEffort;
 use crate::state::SharedState;
 
 use super::{
@@ -113,12 +114,24 @@ pub(crate) async fn update_session_settings(
             );
         };
 
-        if !profile.has_model(&model) {
+        let Some(selected_model) = profile.models.iter().find(|candidate| candidate.id == model)
+        else {
             return json_response(
                 StatusCode::BAD_REQUEST,
                 serde_json::json!({ "error": format!("模型不存在：{model}") }),
             );
-        }
+        };
+
+        let reasoning_effort =
+            match ReasoningEffort::parse_optional(body.reasoning_effort.as_deref()) {
+                Ok(reasoning_effort) => reasoning_effort,
+                Err(error) => {
+                    return json_response(
+                        StatusCode::BAD_REQUEST,
+                        serde_json::json!({ "error": error }),
+                    );
+                }
+            };
 
         let protocol = match profile.kind {
             ProviderKind::OpenAiResponses => "openai-responses",
@@ -131,7 +144,8 @@ pub(crate) async fn update_session_settings(
             model: model.clone(),
             base_url: profile.base_url.clone(),
             protocol,
-            reasoning_effort: body.reasoning_effort,
+            reasoning_effort: ReasoningEffort::serialize_optional(reasoning_effort)
+                .filter(|_| selected_model.supports_reasoning),
         }
     };
 

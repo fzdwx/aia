@@ -80,7 +80,7 @@ fn server_model_marks_cancelled_openai_errors_as_cancelled() {
     };
 
     let (_, model) = build_model_from_selection(
-        ProviderLaunchChoice::OpenAi { profile, reasoning_effort: None },
+        ProviderLaunchChoice::OpenAi { model: "gpt-5.4".into(), profile, reasoning_effort: None },
         None,
     )
     .expect("model should build");
@@ -154,7 +154,7 @@ fn responses_model_call_writes_llm_trace_record() {
     };
 
     let (identity, model) = build_model_from_selection(
-        ProviderLaunchChoice::OpenAi { profile, reasoning_effort: None },
+        ProviderLaunchChoice::OpenAi { model: "gpt-5.4".into(), profile, reasoning_effort: None },
         Some(store.clone()),
     )
     .expect("model should build");
@@ -212,6 +212,107 @@ fn responses_model_call_writes_llm_trace_record() {
 }
 
 #[test]
+fn build_model_from_selection_drops_reasoning_for_unsupported_model() {
+    let profile = ProviderProfile {
+        name: "rayin".to_string(),
+        kind: ProviderKind::OpenAiResponses,
+        base_url: "https://example.com".to_string(),
+        api_key: "test-key".to_string(),
+        models: vec![ModelConfig {
+            id: "gpt-5.4".to_string(),
+            display_name: None,
+            limit: Some(ModelLimit { context: Some(200_000), output: Some(8_192) }),
+            default_temperature: None,
+            supports_reasoning: false,
+        }],
+    };
+
+    let (identity, _) = build_model_from_selection(
+        ProviderLaunchChoice::OpenAi {
+            model: "gpt-5.4".into(),
+            profile,
+            reasoning_effort: Some("high".into()),
+        },
+        None,
+    )
+    .expect("model should build");
+
+    assert_eq!(identity.reasoning_effort, None);
+}
+
+#[test]
+fn build_model_from_selection_drops_invalid_reasoning_literal() {
+    let profile = ProviderProfile {
+        name: "rayin".to_string(),
+        kind: ProviderKind::OpenAiResponses,
+        base_url: "https://example.com".to_string(),
+        api_key: "test-key".to_string(),
+        models: vec![ModelConfig {
+            id: "gpt-5.4".to_string(),
+            display_name: None,
+            limit: Some(ModelLimit { context: Some(200_000), output: Some(8_192) }),
+            default_temperature: None,
+            supports_reasoning: true,
+        }],
+    };
+
+    let (identity, _) = build_model_from_selection(
+        ProviderLaunchChoice::OpenAi {
+            model: "gpt-5.4".into(),
+            profile,
+            reasoning_effort: Some("turbo".into()),
+        },
+        None,
+    )
+    .expect("model should build");
+
+    assert_eq!(identity.reasoning_effort, None);
+}
+
+#[test]
+fn build_model_from_selection_uses_selected_model_instead_of_provider_default() {
+    let profile = ProviderProfile {
+        name: "rayin".to_string(),
+        kind: ProviderKind::OpenAiResponses,
+        base_url: "https://example.com".to_string(),
+        api_key: "test-key".to_string(),
+        models: vec![
+            ModelConfig {
+                id: "gpt-5.4".to_string(),
+                display_name: None,
+                limit: Some(ModelLimit { context: Some(200_000), output: Some(8_192) }),
+                default_temperature: None,
+                supports_reasoning: false,
+            },
+            ModelConfig {
+                id: "gpt-5-mini".to_string(),
+                display_name: None,
+                limit: Some(ModelLimit { context: Some(100_000), output: Some(4_096) }),
+                default_temperature: None,
+                supports_reasoning: true,
+            },
+        ],
+    };
+
+    let (identity, _) = build_model_from_selection(
+        ProviderLaunchChoice::OpenAi {
+            profile,
+            model: "gpt-5-mini".into(),
+            reasoning_effort: Some("high".into()),
+        },
+        None,
+    )
+    .expect("model should build");
+
+    assert_eq!(identity.name, "gpt-5-mini");
+    assert_eq!(
+        identity.limit,
+        Some(agent_core::ModelLimit { context: Some(100_000), output: Some(4_096) })
+    );
+    assert_eq!(identity.reasoning_effort, Some("high".into()));
+}
+
+#[test]
 fn responses_http_502_writes_failed_trace_record() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
     let address = listener.local_addr().expect("address should resolve");
@@ -246,7 +347,7 @@ fn responses_http_502_writes_failed_trace_record() {
     };
 
     let (_identity, model) = build_model_from_selection(
-        ProviderLaunchChoice::OpenAi { profile, reasoning_effort: None },
+        ProviderLaunchChoice::OpenAi { model: "gpt-5.4".into(), profile, reasoning_effort: None },
         Some(store.clone()),
     )
     .expect("model should build");

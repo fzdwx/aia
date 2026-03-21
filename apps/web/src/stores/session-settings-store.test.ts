@@ -23,6 +23,13 @@ const providerList: ProviderListItem[] = [
         supports_reasoning: true,
       },
       {
+        id: "gpt-5-mini",
+        display_name: "GPT-5 Mini",
+        limit: null,
+        default_temperature: null,
+        supports_reasoning: true,
+      },
+      {
         id: "gpt-4.1-mini",
         display_name: "GPT-4.1 Mini",
         limit: null,
@@ -136,6 +143,54 @@ describe("session settings store", () => {
       reasoning_effort: null,
     })
     expect(useChatStore.getState().sessions[0]?.model).toBe("gpt-4.1-mini")
+  })
+
+  test("switchModel preserves current session reasoning when moving between supported models without explicit override", async () => {
+    const calls: Array<{ url: string; body?: string }> = []
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit
+    ) => {
+      const url = typeof input === "string" ? input : input.toString()
+      calls.push({ url, body: init?.body as string | undefined })
+      return new Response(
+        JSON.stringify({
+          name: "openai",
+          model: "gpt-5-mini",
+          connected: true,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    }) as FetchMock
+
+    useSessionSettingsStore.setState({
+      activeSessionId: "session-1",
+      sessionSettings: {
+        provider: "openai",
+        model: "gpt-5",
+        protocol: "openai-responses",
+        reasoning_effort: "high",
+      },
+      hydrating: false,
+    })
+
+    await useSessionSettingsStore
+      .getState()
+      .switchModel(providerList, "openai", "gpt-5-mini")
+
+    expect(calls[0]?.url).toBe("/api/session/settings")
+    expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({
+      session_id: "session-1",
+      provider: "openai",
+      model: "gpt-5-mini",
+      reasoning_effort: "high",
+    })
+    expect(useSessionSettingsStore.getState().sessionSettings).toEqual({
+      provider: "openai",
+      model: "gpt-5-mini",
+      protocol: "openai-responses",
+      reasoning_effort: "high",
+    })
   })
 
   test("hydrateForSession surfaces loading failure", async () => {

@@ -115,7 +115,7 @@ export const useSessionSettingsStore = create<SessionSettingsStore>(
       }
 
       const nextReasoningEffort = model.supports_reasoning
-        ? (reasoningEffort ?? model.reasoning_effort ?? null)
+        ? (reasoningEffort ?? get().sessionSettings?.reasoning_effort ?? null)
         : null
 
       set({ updating: true, error: null })

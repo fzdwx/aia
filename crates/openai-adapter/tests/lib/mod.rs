@@ -989,6 +989,24 @@ fn 聊天补全请求体会映射_output_limit() {
 }
 
 #[test]
+fn 聊天补全请求体会映射_reasoning_effort() {
+    let model = OpenAiChatCompletionsModel::new(OpenAiChatCompletionsConfig::new(
+        "http://127.0.0.1:1",
+        "test-key",
+        "minum-security-llm",
+    ))
+    .expect("模型创建成功");
+
+    let mut request = sample_request();
+    request.model.name = "minum-security-llm".into();
+    request.model.reasoning_effort = Some("high".into());
+    let body = model.build_request_body(&request);
+
+    assert_eq!(body["reasoning_effort"], json!("high"));
+    assert!(body.get("reasoning").is_none() || body["reasoning"].is_null());
+}
+
+#[test]
 fn 聊天补全请求体会映射_prompt_cache() {
     let model = OpenAiChatCompletionsModel::new(OpenAiChatCompletionsConfig::new(
         "http://127.0.0.1:1",

@@ -427,6 +427,7 @@ fn choose_provider_for_tape(
                 }) {
                     return ProviderLaunchChoice::OpenAi {
                         profile: profile.clone(),
+                        model,
                         reasoning_effort,
                     };
                 }
@@ -437,7 +438,11 @@ fn choose_provider_for_tape(
     registry
         .active_provider()
         .cloned()
-        .map(|profile| ProviderLaunchChoice::OpenAi { profile, reasoning_effort: None })
+        .map(|profile| ProviderLaunchChoice::OpenAi {
+            model: profile.default_model_id().unwrap_or("").to_string(),
+            profile,
+            reasoning_effort: None,
+        })
         .unwrap_or(ProviderLaunchChoice::Bootstrap)
 }
 
@@ -451,7 +456,11 @@ fn prepare_runtime_sync(
     let selection = registry
         .active_provider()
         .cloned()
-        .map(|profile| ProviderLaunchChoice::OpenAi { profile, reasoning_effort: None })
+        .map(|profile| ProviderLaunchChoice::OpenAi {
+            model: profile.default_model_id().unwrap_or("").to_string(),
+            profile,
+            reasoning_effort: None,
+        })
         .unwrap_or(ProviderLaunchChoice::Bootstrap);
 
     let (identity, model) = build_model_from_selection(selection, trace_store).map_err(
@@ -477,10 +486,10 @@ fn prompt_cache_for_selection(
     selection: &ProviderLaunchChoice,
     session_id: &str,
 ) -> Option<PromptCacheConfig> {
-    let ProviderLaunchChoice::OpenAi { profile, .. } = selection else {
+    let ProviderLaunchChoice::OpenAi { profile, model, .. } = selection else {
         return None;
     };
-    let model = profile.default_model_config()?;
+    let model = profile.models.iter().find(|candidate| candidate.id == *model)?;
     Some(PromptCacheConfig {
         key: Some(aia_config::build_prompt_cache_key(&profile.name, &model.id, session_id)),
         retention: Some(RuntimePromptCacheRetention::OneDay),

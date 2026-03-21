@@ -4,6 +4,7 @@ pub mod state;
 
 mod channel_host;
 mod model;
+mod reasoning;
 mod routes;
 mod runtime_worker;
 mod self_chat;

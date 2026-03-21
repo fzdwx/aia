@@ -192,7 +192,11 @@ impl ServerBootstrap {
             .registry
             .active_provider()
             .cloned()
-            .map(|profile| ProviderLaunchChoice::OpenAi { profile, reasoning_effort: None })
+            .map(|profile| ProviderLaunchChoice::OpenAi {
+                model: profile.default_model_id().unwrap_or("").to_string(),
+                profile,
+                reasoning_effort: None,
+            })
             .unwrap_or(ProviderLaunchChoice::Bootstrap);
         let identity = model_identity_from_selection(&selection);
 

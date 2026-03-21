@@ -106,7 +106,7 @@ export async function updateSessionSettings(body: {
   session_id?: string
   provider: string
   model: string
-  reasoning_effort?: string | null
+  reasoning_effort?: ThinkingLevel | null
 }): Promise<ProviderInfo> {
   const res = await fetch("/api/session/settings", {
     method: "PUT",
@@ -309,3 +309,4 @@ export function connectEvents(onEvent: (event: SseEvent) => void): () => void {
 
   return () => es.close()
 }
+import type { ThinkingLevel } from "@/lib/types"

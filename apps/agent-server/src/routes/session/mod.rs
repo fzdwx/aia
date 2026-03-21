@@ -5,6 +5,7 @@ use axum::{
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::reasoning::ReasoningEffort;
 use crate::state::SharedState;
 use session_tape::SessionProviderBinding;
 
@@ -59,7 +60,12 @@ impl SessionSettingsResponse {
             },
             SessionProviderBinding::Provider {
                 name, model, protocol, reasoning_effort, ..
-            } => Self { provider: name, model, protocol, reasoning_effort },
+            } => Self {
+                provider: name,
+                model,
+                protocol,
+                reasoning_effort: ReasoningEffort::normalize(reasoning_effort),
+            },
         }
     }
 }
