@@ -12,9 +12,40 @@ import {
   SessionHydratingIndicator,
   StatusIndicator,
 } from "@/features/chat/message-sections"
+import {
+  HISTORY_LOAD_TRIGGER_PX,
+  shouldShowHistoryHint,
+} from "@/components/chat-messages-helpers"
 import { useChatStore } from "@/stores/chat-store"
 
-const HISTORY_LOAD_TRIGGER_PX = 80
+function usePrefersReducedMotion() {
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
+
+  useEffect(() => {
+    if (
+      typeof window === "undefined" ||
+      typeof window.matchMedia !== "function"
+    ) {
+      return
+    }
+
+    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)")
+    const updatePreference = () => {
+      setPrefersReducedMotion(mediaQuery.matches)
+    }
+
+    updatePreference()
+    mediaQuery.addEventListener?.("change", updatePreference)
+    mediaQuery.addListener?.(updatePreference)
+
+    return () => {
+      mediaQuery.removeEventListener?.("change", updatePreference)
+      mediaQuery.removeListener?.(updatePreference)
+    }
+  }, [])
+
+  return prefersReducedMotion
+}
 
 export function ChatMessages() {
   const turns = useChatStore((s) => s.turns)
@@ -26,8 +57,9 @@ export function ChatMessages() {
   const error = useChatStore((s) => s.error)
   const lastCompression = useChatStore((s) => s.lastCompression)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
+  const prefersReducedMotion = usePrefersReducedMotion()
   const containerRef = useRef<HTMLDivElement>(null)
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const bottomAnchorRef = useRef<HTMLDivElement>(null)
   const historyTriggerRef = useRef<HTMLDivElement>(null)
   const previousSessionIdRef = useRef<string | null>(null)
   const previousTurnCountRef = useRef(0)
@@ -39,12 +71,11 @@ export function ChatMessages() {
   const historyLoadingMoreRef = useRef(historyLoadingMore)
   const sessionHydratingRef = useRef(sessionHydrating)
   const [scrollTop, setScrollTop] = useState(0)
-  const [, setContainerHeight] = useState(0)
 
   const visibleTurns = turns
   const topSpacerHeight = 0
   const bottomSpacerHeight = 0
-  const showHistoryHint = historyLoadingMore || scrollTop < 160
+  const showHistoryHint = shouldShowHistoryHint(historyLoadingMore, scrollTop)
 
   const handleLoadOlderTurns = useCallback(async () => {
     if (
@@ -93,13 +124,18 @@ export function ChatMessages() {
         container.scrollHeight - container.scrollTop - container.clientHeight
       shouldStickToBottomRef.current = distanceFromBottom < 120
       setScrollTop(container.scrollTop)
+
+      if (typeof IntersectionObserver === "undefined") {
+        if (container.scrollTop <= HISTORY_LOAD_TRIGGER_PX) {
+          void handleLoadOlderTurns()
+        }
+      }
     }
 
     const resizeObserver = new ResizeObserver(() => {
-      setContainerHeight(container.clientHeight)
+      handleScroll()
     })
 
-    setContainerHeight(container.clientHeight)
     handleScroll()
     container.addEventListener("scroll", handleScroll)
     resizeObserver.observe(container)
@@ -107,7 +143,7 @@ export function ChatMessages() {
       container.removeEventListener("scroll", handleScroll)
       resizeObserver.disconnect()
     }
-  }, [activeSessionId])
+  }, [activeSessionId, handleLoadOlderTurns])
 
   useEffect(() => {
     const container = containerRef.current
@@ -196,7 +232,7 @@ export function ChatMessages() {
         ? "auto"
         : "smooth"
 
-    bottomRef.current?.scrollIntoView({ behavior })
+    bottomAnchorRef.current?.scrollIntoView({ behavior })
 
     previousSessionIdRef.current = activeSessionId
     previousTurnCountRef.current = turns.length
@@ -222,9 +258,18 @@ export function ChatMessages() {
   }
 
   return (
-    <div ref={containerRef} className="relative flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-[720px] px-6 py-8">
-        {sessionHydrating && <SessionHydratingIndicator />}
+    <div
+      ref={containerRef}
+      className="relative flex-1 overflow-y-auto"
+      role="log"
+      aria-live="polite"
+      aria-relevant="additions text"
+      aria-busy={sessionHydrating}
+    >
+      <div className="mx-auto max-w-[720px] px-4 py-6 sm:px-6 sm:py-8">
+        {sessionHydrating && (
+          <SessionHydratingIndicator reducedMotion={prefersReducedMotion} />
+        )}
         {historyHasMore && (
           <>
             <div
@@ -235,12 +280,17 @@ export function ChatMessages() {
             <div
               className={
                 showHistoryHint
-                  ? "pointer-events-none sticky top-0 z-10 -mx-6 mb-4 flex justify-center bg-gradient-to-b from-background via-background/95 to-transparent px-6 pt-2 pb-3 opacity-100 transition-opacity duration-150"
-                  : "pointer-events-none sticky top-0 z-10 -mx-6 mb-4 flex justify-center bg-gradient-to-b from-background via-background/95 to-transparent px-6 pt-2 pb-3 opacity-0 transition-opacity duration-150"
+                  ? "pointer-events-none sticky top-0 z-10 -mx-4 mb-4 flex justify-center bg-gradient-to-b from-background via-background/94 to-transparent px-4 pt-2 pb-3 opacity-100 transition-opacity duration-150 sm:-mx-6 sm:px-6"
+                  : "pointer-events-none sticky top-0 z-10 -mx-4 mb-4 flex justify-center bg-gradient-to-b from-background via-background/94 to-transparent px-4 pt-2 pb-3 opacity-0 transition-opacity duration-150 sm:-mx-6 sm:px-6"
               }
               aria-hidden={!showHistoryHint}
             >
-              <div className="rounded-full border border-border/30 bg-background/70 px-2.5 py-1 text-[11px] text-muted-foreground/85 shadow-sm backdrop-blur-sm">
+              <div
+                className="max-w-full rounded-full border border-border/35 bg-background/88 px-3 py-1 text-center text-xs text-muted-foreground/80 shadow-none"
+                role={historyLoadingMore ? "status" : undefined}
+                aria-live={historyLoadingMore ? "polite" : undefined}
+                aria-atomic={historyLoadingMore ? "true" : undefined}
+              >
                 {historyLoadingMore
                   ? "Loading older messages…"
                   : "Scroll up for older messages"}
@@ -254,7 +304,6 @@ export function ChatMessages() {
               ? "opacity-80 transition-opacity duration-150 ease-out"
               : "opacity-100 transition-opacity duration-150 ease-out"
           }
-          aria-busy={sessionHydrating}
         >
           {topSpacerHeight > 0 && <div style={{ height: topSpacerHeight }} />}
           {visibleTurns.map((turn) => (
@@ -268,16 +317,16 @@ export function ChatMessages() {
           )}
           {streamingTurn && <MemoizedStreamingView streaming={streamingTurn} />}
           {error && (
-            <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-[13px] text-destructive">
+            <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs leading-relaxed font-medium text-destructive">
               {error}
             </div>
           )}
+          <div ref={bottomAnchorRef} aria-hidden="true" />
         </div>
-        <div ref={bottomRef} />
       </div>
       {streamingTurn && (
         <div className="sticky bottom-0 z-10 bg-gradient-to-t from-background via-background to-transparent pt-6 pb-4">
-          <div className="mx-auto max-w-[720px] px-6">
+          <div className="mx-auto max-w-[720px] px-4 sm:px-6">
             <StatusIndicator status={streamingTurn.status} />
           </div>
         </div>

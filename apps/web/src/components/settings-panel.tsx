@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react"
+import { useEffect, useId, useMemo, useState, type FormEvent } from "react"
 import { ArrowLeft, Plus, Search, Trash2, X } from "lucide-react"
 
 import { ChannelsPanel } from "@/components/channels-panel"
@@ -62,6 +62,15 @@ export function SettingsPanel() {
   const [models, setModels] = useState<ModelFormRow[]>([emptyModelRow()])
   const [itemQuery, setItemQuery] = useState("")
   const [submitting, setSubmitting] = useState(false)
+  const settingsScopeId = useId()
+
+  const searchInputId = `${settingsScopeId}-search`
+  const providerNameInputId = `${settingsScopeId}-provider-name`
+  const providerProtocolInputId = `${settingsScopeId}-provider-protocol`
+  const providerProtocolLabelId = `${providerProtocolInputId}-label`
+  const providerApiKeyInputId = `${settingsScopeId}-provider-api-key`
+  const providerApiKeyHintId = `${providerApiKeyInputId}-hint`
+  const providerBaseUrlInputId = `${settingsScopeId}-provider-base-url`
 
   useEffect(() => {
     if (!selectedProvider) {
@@ -185,23 +194,31 @@ export function SettingsPanel() {
   const isProvidersSection = settingsSection === "providers"
   const normalizedItemQuery = itemQuery.trim().toLowerCase()
 
-  const filteredProviders = normalizedItemQuery
-    ? providerList.filter((providerItem) => {
-        return (
-          providerItem.name.toLowerCase().includes(normalizedItemQuery) ||
-          providerItem.kind.toLowerCase().includes(normalizedItemQuery)
-        )
-      })
-    : providerList
+  const filteredProviders = useMemo(
+    () =>
+      normalizedItemQuery
+        ? providerList.filter((providerItem) => {
+            return (
+              providerItem.name.toLowerCase().includes(normalizedItemQuery) ||
+              providerItem.kind.toLowerCase().includes(normalizedItemQuery)
+            )
+          })
+        : providerList,
+    [normalizedItemQuery, providerList]
+  )
 
-  const filteredChannels = normalizedItemQuery
-    ? supportedChannels.filter((channel) => {
-        return (
-          channel.label.toLowerCase().includes(normalizedItemQuery) ||
-          channel.transport.toLowerCase().includes(normalizedItemQuery)
-        )
-      })
-    : supportedChannels
+  const filteredChannels = useMemo(
+    () =>
+      normalizedItemQuery
+        ? supportedChannels.filter((channel) => {
+            return (
+              channel.label.toLowerCase().includes(normalizedItemQuery) ||
+              channel.transport.toLowerCase().includes(normalizedItemQuery)
+            )
+          })
+        : supportedChannels,
+    [normalizedItemQuery, supportedChannels]
+  )
 
   const settingsDescription = isProvidersSection
     ? "Manage provider registry entries, endpoints, and model catalogs from the shared workspace."
@@ -214,7 +231,8 @@ export function SettingsPanel() {
           <button
             type="button"
             onClick={() => setView("chat")}
-            className="mt-0.5 flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+            className="mt-0.5 flex size-9 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+            aria-label="Back to chat"
           >
             <ArrowLeft className="size-3.5" />
           </button>
@@ -233,8 +251,12 @@ export function SettingsPanel() {
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <div className="relative min-w-0 sm:w-[260px]">
+            <label htmlFor={searchInputId} className="sr-only">
+              {isProvidersSection ? "Search providers" : "Search channels"}
+            </label>
             <Search className="pointer-events-none absolute top-1/2 left-3 size-3 -translate-y-1/2 text-muted-foreground/70" />
             <Input
+              id={searchInputId}
               value={itemQuery}
               onChange={(event) => setItemQuery(event.target.value)}
               placeholder={
@@ -242,7 +264,7 @@ export function SettingsPanel() {
                   ? "Search providers..."
                   : "Search channels..."
               }
-              className="h-8 pl-8 text-[12px]"
+              className="h-10 pl-9 text-[13px]"
             />
           </div>
 
@@ -251,6 +273,7 @@ export function SettingsPanel() {
               type="button"
               size="sm"
               onClick={() => selectProviderName(NEW_PROVIDER_SETTINGS_KEY)}
+              className="h-10 px-3"
             >
               <Plus className="size-3.5" />
               Add Provider
@@ -299,11 +322,12 @@ export function SettingsPanel() {
                               selectProviderName(providerItem.name)
                             }
                             className={cn(
-                              "flex w-full items-start gap-2 rounded-lg border px-2.5 py-2 text-left transition-colors",
+                              "flex min-h-12 w-full items-start gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors",
                               isActive
                                 ? "border-border/55 bg-accent/45 text-foreground"
                                 : "border-transparent text-muted-foreground hover:border-border/30 hover:bg-accent/20 hover:text-foreground"
                             )}
+                            aria-pressed={isActive}
                           >
                             <span className="min-w-0 flex-1">
                               <span className="block truncate text-[12px] font-medium">
@@ -317,7 +341,7 @@ export function SettingsPanel() {
                               className={cn(
                                 "mt-1 size-2 rounded-full",
                                 providerItem.active
-                                  ? "bg-blue-400"
+                                  ? "bg-[var(--trace-accent-strong)]"
                                   : "bg-muted-foreground/30"
                               )}
                             />
@@ -345,11 +369,12 @@ export function SettingsPanel() {
                           type="button"
                           onClick={() => selectTransport(channel.transport)}
                           className={cn(
-                            "flex w-full items-start gap-2 rounded-lg border px-2.5 py-2 text-left transition-colors",
+                            "flex min-h-12 w-full items-start gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors",
                             isActive
                               ? "border-border/55 bg-accent/45 text-foreground"
                               : "border-transparent text-muted-foreground hover:border-border/30 hover:bg-accent/20 hover:text-foreground"
                           )}
+                          aria-pressed={isActive}
                         >
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-[12px] font-medium">
@@ -363,7 +388,7 @@ export function SettingsPanel() {
                             className={cn(
                               "mt-1 size-2 rounded-full",
                               isActive
-                                ? "bg-blue-400"
+                                ? "bg-[var(--trace-accent-strong)]"
                                 : "bg-muted-foreground/30"
                             )}
                           />
@@ -403,7 +428,7 @@ export function SettingsPanel() {
                           variant="ghost"
                           size="sm"
                           onClick={() => void handleDeleteProvider()}
-                          className="shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          className="h-10 shrink-0 px-3 text-destructive hover:bg-destructive/10 hover:text-destructive"
                         >
                           <Trash2 className="size-3.5" />
                           Delete
@@ -416,22 +441,36 @@ export function SettingsPanel() {
                     <form onSubmit={handleSubmit} className="space-y-3">
                       <div className="grid gap-2 sm:grid-cols-2">
                         <div className="space-y-1.5">
-                          <label className="workspace-form-label">Name</label>
+                          <label
+                            htmlFor={providerNameInputId}
+                            className="workspace-form-label"
+                          >
+                            Name
+                          </label>
                           <Input
+                            id={providerNameInputId}
                             value={name}
                             onChange={(event) => setName(event.target.value)}
                             placeholder="e.g. openai-main"
-                            className="h-8 text-[12px]"
+                            className="h-10 text-[13px]"
                             disabled={selectedProvider != null}
                           />
                         </div>
 
                         <div className="space-y-1.5">
-                          <label className="workspace-form-label">
+                          <label
+                            id={providerProtocolLabelId}
+                            htmlFor={providerProtocolInputId}
+                            className="workspace-form-label"
+                          >
                             Protocol
                           </label>
                           <Select value={kind} onValueChange={handleKindChange}>
-                            <SelectTrigger className="h-8 w-full text-[12px]">
+                            <SelectTrigger
+                              id={providerProtocolInputId}
+                              aria-labelledby={providerProtocolLabelId}
+                              className="h-10 w-full text-[13px]"
+                            >
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -447,27 +486,45 @@ export function SettingsPanel() {
                       </div>
 
                       <div className="space-y-1.5">
-                        <label className="workspace-form-label">
+                        <label
+                          htmlFor={providerApiKeyInputId}
+                          className="workspace-form-label"
+                        >
                           API key
-                          {selectedProvider
-                            ? " (leave blank to keep existing)"
-                            : ""}
                         </label>
+                        {selectedProvider ? (
+                          <p
+                            id={providerApiKeyHintId}
+                            className="workspace-form-note"
+                          >
+                            Leave blank to keep the existing key.
+                          </p>
+                        ) : null}
                         <Input
+                          id={providerApiKeyInputId}
                           type="text"
                           value={apiKey}
                           onChange={(event) => setApiKey(event.target.value)}
                           placeholder="sk-..."
-                          className="h-8 text-[12px]"
+                          aria-describedby={
+                            selectedProvider ? providerApiKeyHintId : undefined
+                          }
+                          className="h-10 text-[13px]"
                         />
                       </div>
 
                       <div className="space-y-1.5">
-                        <label className="workspace-form-label">Base URL</label>
+                        <label
+                          htmlFor={providerBaseUrlInputId}
+                          className="workspace-form-label"
+                        >
+                          Base URL
+                        </label>
                         <Input
+                          id={providerBaseUrlInputId}
                           value={baseUrl}
                           onChange={(event) => setBaseUrl(event.target.value)}
-                          className="h-8 text-[12px]"
+                          className="h-10 text-[13px]"
                         />
                       </div>
 
@@ -482,6 +539,7 @@ export function SettingsPanel() {
                             onClick={() =>
                               setModels((prev) => [emptyModelRow(), ...prev])
                             }
+                            className="h-10 px-3"
                           >
                             <Plus className="size-3.5" />
                             Add Model
@@ -506,7 +564,7 @@ export function SettingsPanel() {
                                     size="icon-sm"
                                     onClick={() => removeModelRow(index)}
                                     aria-label={`Remove model ${index + 1}`}
-                                    className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                                    className="size-9 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                                   >
                                     <X className="size-3.5" />
                                   </Button>
@@ -515,10 +573,14 @@ export function SettingsPanel() {
 
                               <div className="mt-2 grid gap-2 md:grid-cols-2">
                                 <div className="space-y-1.5">
-                                  <label className="workspace-form-label">
+                                  <label
+                                    htmlFor={`${settingsScopeId}-model-id-${index}`}
+                                    className="workspace-form-label"
+                                  >
                                     Model ID
                                   </label>
                                   <Input
+                                    id={`${settingsScopeId}-model-id-${index}`}
                                     value={row.id}
                                     onChange={(event) =>
                                       updateModelRow(index, {
@@ -526,15 +588,19 @@ export function SettingsPanel() {
                                       })
                                     }
                                     placeholder="e.g. gpt-5.4"
-                                    className="h-8 text-[12px]"
+                                    className="h-10 text-[13px]"
                                   />
                                 </div>
 
                                 <div className="space-y-1.5">
-                                  <label className="workspace-form-label">
+                                  <label
+                                    htmlFor={`${settingsScopeId}-model-display-name-${index}`}
+                                    className="workspace-form-label"
+                                  >
                                     Display name
                                   </label>
                                   <Input
+                                    id={`${settingsScopeId}-model-display-name-${index}`}
                                     value={row.display_name}
                                     onChange={(event) =>
                                       updateModelRow(index, {
@@ -542,15 +608,19 @@ export function SettingsPanel() {
                                       })
                                     }
                                     placeholder="Optional label shown in the UI"
-                                    className="h-8 text-[12px]"
+                                    className="h-10 text-[13px]"
                                   />
                                 </div>
 
                                 <div className="space-y-1.5">
-                                  <label className="workspace-form-label">
+                                  <label
+                                    htmlFor={`${settingsScopeId}-model-context-limit-${index}`}
+                                    className="workspace-form-label"
+                                  >
                                     Context limit
                                   </label>
                                   <Input
+                                    id={`${settingsScopeId}-model-context-limit-${index}`}
                                     value={row.limit_context}
                                     onChange={(event) =>
                                       updateModelRow(index, {
@@ -558,16 +628,20 @@ export function SettingsPanel() {
                                       })
                                     }
                                     placeholder="Context limit"
-                                    className="h-8 text-[12px]"
+                                    className="h-10 text-[13px]"
                                     inputMode="numeric"
                                   />
                                 </div>
 
                                 <div className="space-y-1.5">
-                                  <label className="workspace-form-label">
+                                  <label
+                                    htmlFor={`${settingsScopeId}-model-output-limit-${index}`}
+                                    className="workspace-form-label"
+                                  >
                                     Output limit
                                   </label>
                                   <Input
+                                    id={`${settingsScopeId}-model-output-limit-${index}`}
                                     value={row.limit_output}
                                     onChange={(event) =>
                                       updateModelRow(index, {
@@ -575,7 +649,7 @@ export function SettingsPanel() {
                                       })
                                     }
                                     placeholder="Output limit"
-                                    className="h-8 text-[12px]"
+                                    className="h-10 text-[13px]"
                                     inputMode="numeric"
                                   />
                                 </div>
@@ -590,6 +664,7 @@ export function SettingsPanel() {
                                         supports_reasoning: checked,
                                       })
                                     }
+                                    size="default"
                                   />
                                   <span>
                                     Reasoning support
@@ -614,7 +689,7 @@ export function SettingsPanel() {
                             !hasValidModel ||
                             (!selectedProvider && !apiKey.trim())
                           }
-                          className="min-w-[190px]"
+                          className="min-h-10 min-w-[190px]"
                         >
                           <Plus className="size-3.5" />
                           {selectedProvider

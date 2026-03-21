@@ -1,7 +1,8 @@
-import { AlertTriangle, CheckCircle2, Loader2 } from "lucide-react"
-import type { ReactNode } from "react"
+import { AlertTriangle, Check, CheckCircle2, Copy, Loader2 } from "lucide-react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
   Card,
   CardContent,
@@ -44,6 +45,8 @@ type PromptEntry = {
   content: string
 }
 
+const COPY_RESET_DELAY_MS = 1200
+
 function asNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null
 }
@@ -74,6 +77,26 @@ function formatPrimitive(value: unknown) {
     return value.length === 0 ? "-" : `${value.length} items`
   if (typeof value === "object") return JSON.stringify(value)
   return String(value)
+}
+
+async function copyText(value: string): Promise<boolean> {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(value)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  return false
+}
+
+function payloadCopyText(value: unknown) {
+  if (typeof value === "string") {
+    return value
+  }
+  return formatJson(value)
 }
 
 function truncate(text: string, max: number) {
@@ -280,7 +303,7 @@ function SectionPanel({
   className,
 }: {
   title: string
-  description: string
+  description?: string
   meta?: ReactNode
   children: ReactNode
   className?: string
@@ -295,7 +318,9 @@ function SectionPanel({
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/40 px-4 py-3">
         <div className="space-y-1">
           <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-          <p className="text-[12px] text-muted-foreground">{description}</p>
+          {description ? (
+            <p className="text-[12px] text-muted-foreground">{description}</p>
+          ) : null}
         </div>
         {meta ? <div className="flex flex-wrap gap-1.5">{meta}</div> : null}
       </div>
@@ -386,7 +411,7 @@ function SystemPromptSection({ prompts }: { prompts: PromptEntry[] }) {
     <SectionPanel
       title="System prompts"
       description="Instruction text and system-role messages"
-      className="border-sky-500/20 bg-sky-500/[0.04]"
+      className="trace-accent-surface"
       meta={
         <>
           <Badge variant="outline" className="text-[11px]">
@@ -407,7 +432,7 @@ function SystemPromptSection({ prompts }: { prompts: PromptEntry[] }) {
           {prompts.map((prompt, index) => (
             <div
               key={`${prompt.source}-${index}`}
-              className="rounded-xl border border-sky-500/20 bg-background/70 p-3"
+              className="trace-accent-surface rounded-xl p-3"
             >
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 <Badge variant="outline" className="text-[11px]">
@@ -419,7 +444,7 @@ function SystemPromptSection({ prompts }: { prompts: PromptEntry[] }) {
               </div>
               <TextBlock
                 value={prompt.content}
-                className="max-h-[320px] bg-sky-500/[0.04]"
+                className="trace-accent-fill max-h-[320px]"
               />
             </div>
           ))}
@@ -437,7 +462,7 @@ function ToolListSection({ tools }: { tools: unknown[] }) {
   return (
     <SectionPanel
       title="Tool definitions"
-      description="Schemas exposed to the provider, including required parameters and per-tool descriptions."
+      description="Schemas sent upstream."
       meta={
         <>
           <Badge variant="outline" className="text-[11px]">
@@ -530,90 +555,122 @@ function MessageListSection({
         </span>
       }
     >
-      {items.length === 0 ? (
-        <p className="text-[13px] text-muted-foreground">No items.</p>
-      ) : (
-        <div className="space-y-2">
-          {items.map((item, index) => {
-            const record = asRecord(item)
-            if (!record) {
-              return (
-                <div
-                  key={index}
-                  className="rounded-xl border border-border/50 bg-background/70 px-4 py-3 text-[12px] text-muted-foreground"
-                >
-                  {typeof item === "string"
-                    ? truncate(item, 180)
-                    : `Item ${index + 1}`}
-                </div>
-              )
-            }
-
-            const kind = normalizeMessageKind(record)
-            const preview = extractContent(record)
-            const toolName =
-              asString(record.name) ?? asString(asRecord(record.function)?.name)
-            const displayToolName = toolName
-              ? getToolDisplayName(toolName)
-              : null
-            const toolCalls = asArray(record.tool_calls)
-            const callId =
-              asString(record.call_id) ?? asString(record.tool_call_id)
-            const detailText = [
-              displayToolName ? `tool ${displayToolName}` : null,
-              !displayToolName && callId ? `call ${callId}` : null,
-              toolCalls.length > 0
-                ? `${toolCalls.length} tool call${toolCalls.length === 1 ? "" : "s"}`
-                : null,
-            ]
-              .filter((part): part is string => Boolean(part))
-              .join(" · ")
-
-            return (
-              <Collapsible
-                key={`${kind}-${index}`}
-                defaultOpen={kind === "system"}
-                className={cn(
-                  "rounded-xl border bg-background/80",
-                  messageToneClasses(kind)
-                )}
-              >
-                <CollapsibleTrigger className="flex w-full flex-wrap items-start justify-between gap-3 px-3 py-2.5 text-left">
-                  <div className="min-w-0 space-y-1.5">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-[10px] text-muted-foreground">
-                        #{index + 1}
-                      </span>
-                      <Badge
-                        variant={roleBadgeVariant(kind)}
-                        className="h-4 px-1.5 text-[10px]"
-                      >
-                        {kind}
-                      </Badge>
-                    </div>
-                    <p className="text-[12px] leading-5 text-foreground/85">
-                      {preview
-                        ? truncate(preview, 220)
-                        : "No preview available."}
-                    </p>
-                    {detailText ? (
-                      <p className="text-[11px] text-muted-foreground/80">
-                        {detailText}
-                      </p>
-                    ) : null}
-                  </div>
-                </CollapsibleTrigger>
-                <CollapsibleContent className="border-t border-border/30 px-3 py-3">
-                  <pre className="max-h-[360px] overflow-auto rounded-lg bg-muted/35 p-3 text-[12px] leading-6 whitespace-pre-wrap text-foreground">
-                    {formatJson(record)}
-                  </pre>
-                </CollapsibleContent>
-              </Collapsible>
-            )
-          })}
-        </div>
-      )}
+      <MessageTimelineList items={items} />
     </SectionPanel>
+  )
+}
+
+function MessageTimelineList({
+  items,
+  compact = false,
+  defaultOpenSystem = true,
+}: {
+  items: unknown[]
+  compact?: boolean
+  defaultOpenSystem?: boolean
+}) {
+  const counts = summarizeMessageKinds(items)
+  const countSummary = counts.map(([kind, count]) => `${kind} ${count}`)
+
+  if (items.length === 0) {
+    return <p className="text-[13px] text-muted-foreground">No items.</p>
+  }
+
+  return (
+    <div className="space-y-2">
+      {compact && countSummary.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+          {countSummary.map((item) => (
+            <Badge key={item} variant="outline" className="text-[10px]">
+              {item}
+            </Badge>
+          ))}
+        </div>
+      ) : null}
+
+      <div
+        className={cn(
+          compact &&
+            "relative space-y-2 pl-4 before:absolute before:top-2 before:bottom-2 before:left-[7px] before:w-px before:bg-border/30",
+          !compact && "space-y-2"
+        )}
+      >
+        {items.map((item, index) => {
+          const record = asRecord(item)
+          const kind = record ? normalizeMessageKind(record) : "unknown"
+          const preview = record
+            ? extractContent(record)
+            : typeof item === "string"
+              ? item
+              : ""
+          const toolName =
+            asString(record?.name) ?? asString(asRecord(record?.function)?.name)
+          const displayToolName = toolName ? getToolDisplayName(toolName) : null
+          const toolCalls = asArray(record?.tool_calls)
+          const callId =
+            asString(record?.call_id) ?? asString(record?.tool_call_id)
+          const detailText = [
+            displayToolName ? `tool ${displayToolName}` : null,
+            !displayToolName && callId ? `call ${callId}` : null,
+            toolCalls.length > 0
+              ? `${toolCalls.length} tool call${toolCalls.length === 1 ? "" : "s"}`
+              : null,
+          ]
+            .filter((part): part is string => Boolean(part))
+            .join(" · ")
+
+          return (
+            <Collapsible
+              key={`${kind}-${index}`}
+              defaultOpen={defaultOpenSystem && kind === "system" && !compact}
+              className={cn(
+                "rounded-xl border bg-background/80",
+                compact &&
+                  "relative before:absolute before:top-3.5 before:-left-[12px] before:size-1.5 before:rounded-full before:bg-foreground/35",
+                messageToneClasses(kind)
+              )}
+            >
+              <CollapsibleTrigger className="flex w-full flex-wrap items-start justify-between gap-3 px-3 py-2.5 text-left">
+                <div className="min-w-0 space-y-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[10px] text-muted-foreground">
+                      #{index + 1}
+                    </span>
+                    <Badge
+                      variant={roleBadgeVariant(kind)}
+                      className="h-4 px-1.5 text-[10px]"
+                    >
+                      {kind}
+                    </Badge>
+                  </div>
+                  <p className="text-[12px] leading-5 text-foreground/85">
+                    {preview
+                      ? truncate(preview, compact ? 260 : 220)
+                      : "No preview available."}
+                  </p>
+                  {detailText ? (
+                    <p className="text-[11px] text-muted-foreground/80">
+                      {detailText}
+                    </p>
+                  ) : null}
+                </div>
+                <span className="text-[10px] text-muted-foreground">raw</span>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="border-t border-border/30 px-3 py-3">
+                <pre
+                  className={cn(
+                    "overflow-auto rounded-lg bg-muted/35 p-3 text-[12px] leading-6 whitespace-pre-wrap text-foreground",
+                    compact ? "max-h-[420px]" : "max-h-[360px]"
+                  )}
+                >
+                  {formatJson(record ?? item)}
+                </pre>
+              </CollapsibleContent>
+            </Collapsible>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
@@ -736,7 +793,7 @@ function ResponsesMessagesPanel({ request }: { request: JsonRecord | null }) {
     <MessageListSection
       items={input}
       title="Input timeline"
-      description="Every input item sent to the Responses API, including messages, function calls, and function outputs."
+      description="Ordered provider input items."
     />
   )
 }
@@ -777,8 +834,7 @@ function ChatCompletionsRequestContextCard({
           <div className="space-y-1">
             <CardTitle className="text-sm">Provider request</CardTitle>
             <CardDescription>
-              Chat Completions payload reorganized around system messages,
-              conversation order, and tool definitions.
+              Request summary and prompt context.
             </CardDescription>
           </div>
           <Badge variant="outline" className="text-[11px]">
@@ -837,7 +893,7 @@ function ChatCompletionsMessagesPanel({
     <MessageListSection
       items={messages}
       title="Conversation messages"
-      description="Ordered chat messages as sent upstream, including assistant tool call envelopes and tool-role outputs."
+      description="Ordered messages sent upstream."
     />
   )
 }
@@ -866,7 +922,7 @@ function ProviderRequestContextCard({
       <CardHeader>
         <CardTitle className="text-sm">Provider request</CardTitle>
         <CardDescription>
-          No specialized parser is defined for this protocol yet.
+          No protocol-specific parser available.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -897,7 +953,7 @@ function ProviderRequestMessagesPanel({
       <CardHeader>
         <CardTitle className="text-sm">Messages</CardTitle>
         <CardDescription>
-          No structured message extraction is defined for this protocol yet.
+          No structured message extraction available.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -923,6 +979,198 @@ function ProviderRequestToolsPanel({
   }
 
   return null
+}
+
+type PayloadTabKey = "request" | "messages" | "response" | "raw"
+
+type PayloadTab = {
+  key: PayloadTabKey
+  label: string
+  value: unknown
+  kind: "json" | "text"
+  badge?: string
+  meta?: string
+}
+
+function resolveMessagePayload(trace: TraceRecord) {
+  const request = asRecord(trace.provider_request)
+  if (!request) return []
+
+  if (trace.protocol === "openai-responses") {
+    return asArray(request.input)
+  }
+
+  if (trace.protocol === "openai-chat-completions") {
+    return asArray(request.messages)
+  }
+
+  const messages = asArray(request.messages)
+  if (messages.length > 0) {
+    return messages
+  }
+
+  return asArray(request.input)
+}
+
+function buildPayloadTabs(trace: TraceRecord): PayloadTab[] {
+  const messagePayload = resolveMessagePayload(trace)
+  const responseBody = trace.response_body
+  const responseTab: PayloadTab = responseBody
+    ? {
+        key: "response",
+        label: "Response",
+        value: responseBody,
+        kind: "text",
+        badge: "raw",
+        meta: `${responseBody.length} chars`,
+      }
+    : {
+        key: "response",
+        label: "Response",
+        value: trace.response_summary,
+        kind: "json",
+        badge: "summary",
+        meta: "response_summary",
+      }
+
+  return [
+    {
+      key: "request",
+      label: "Request",
+      value: trace.provider_request,
+      kind: "json",
+      badge: trace.protocol,
+      meta: "provider_request",
+    },
+    {
+      key: "messages",
+      label: "Messages",
+      value: messagePayload,
+      kind: "json",
+      badge: String(messagePayload.length),
+      meta:
+        trace.protocol === "openai-responses"
+          ? "input[]"
+          : trace.protocol === "openai-chat-completions"
+            ? "messages[]"
+            : "message payload",
+    },
+    responseTab,
+    {
+      key: "raw",
+      label: "Raw",
+      value: {
+        request_summary: trace.request_summary,
+        response_summary: trace.response_summary,
+        response_body: trace.response_body,
+      },
+      kind: "json",
+      meta: "summary bundle",
+    },
+  ]
+}
+
+function PayloadWorkbench({
+  tabs,
+  activeTab,
+  onTabChange,
+  copied,
+  onCopyActive,
+}: {
+  tabs: PayloadTab[]
+  activeTab: PayloadTabKey
+  onTabChange: (tab: PayloadTabKey) => void
+  copied: boolean
+  onCopyActive: () => void
+}) {
+  const active = tabs.find((tab) => tab.key === activeTab) ?? tabs[0]
+
+  if (!active) {
+    return (
+      <section className="rounded-xl border border-border/50 bg-background/85 p-4">
+        <p className="text-[12px] text-muted-foreground">
+          No payload available.
+        </p>
+      </section>
+    )
+  }
+
+  return (
+    <section className="overflow-hidden rounded-xl border border-border/50 bg-background/85">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/40 px-3 py-2.5">
+        <div className="flex items-center gap-1">
+          {tabs.map((tab) => {
+            const activeTone = tab.key === activeTab
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => onTabChange(tab.key)}
+                aria-pressed={activeTone}
+                className={cn(
+                  "inline-flex min-h-8 items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-medium transition-colors",
+                  activeTone
+                    ? "border-foreground/20 bg-foreground text-background"
+                    : "border-border/45 bg-background text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <span>{tab.label}</span>
+                {tab.badge ? (
+                  <span
+                    className={cn(
+                      "rounded-sm px-1 py-0.5 text-[10px]",
+                      activeTone
+                        ? "bg-background/20 text-background"
+                        : "bg-muted/45 text-muted-foreground"
+                    )}
+                  >
+                    {tab.badge}
+                  </span>
+                ) : null}
+              </button>
+            )
+          })}
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={onCopyActive}
+          className="h-8 px-2.5 text-[11px]"
+        >
+          {copied ? (
+            <Check className="size-3.5" />
+          ) : (
+            <Copy className="size-3.5" />
+          )}
+          {copied ? "Copied" : "Copy"}
+        </Button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border/30 bg-muted/[0.09] px-3 py-1.5 text-[11px] text-muted-foreground">
+        <span className="font-medium text-foreground">{active.label}</span>
+        {active.meta ? <span>{active.meta}</span> : null}
+      </div>
+
+      <div className="p-3">
+        {active.key === "messages" ? (
+          <MessageTimelineList
+            items={asArray(active.value)}
+            compact
+            defaultOpenSystem={false}
+          />
+        ) : active.kind === "text" ? (
+          <pre className="max-h-[min(70vh,740px)] overflow-auto rounded-lg border border-border/40 bg-background px-3 py-3 text-[12px] leading-5 whitespace-pre-wrap text-foreground">
+            {payloadCopyText(active.value)}
+          </pre>
+        ) : (
+          <pre className="max-h-[min(70vh,740px)] overflow-auto rounded-lg border border-border/40 bg-background px-3 py-3 text-[12px] leading-5 text-foreground">
+            {formatJson(active.value)}
+          </pre>
+        )}
+      </div>
+    </section>
+  )
 }
 
 function SummaryBadge({ label, value }: { label: string; value: string }) {
@@ -952,10 +1200,7 @@ function TraceSummaryBar({ trace }: { trace: TraceRecord }) {
         <div className="flex flex-wrap items-center gap-2">
           <CardTitle className="text-sm">Trace overview</CardTitle>
         </div>
-        <CardDescription>
-          Key execution metrics first. Technical identifiers are moved under
-          Details.
-        </CardDescription>
+        <CardDescription>Execution summary.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap gap-1.5">
@@ -1028,10 +1273,7 @@ function ResultSection({ trace }: { trace: TraceRecord }) {
     <Card size="sm">
       <CardHeader>
         <CardTitle className="text-sm">Result</CardTitle>
-        <CardDescription>
-          Final outcome details only. Success shows extracted assistant output;
-          failure shows the captured error path.
-        </CardDescription>
+        <CardDescription>Outcome and failure details.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {failed ? (
@@ -1058,9 +1300,9 @@ function ResultSection({ trace }: { trace: TraceRecord }) {
             ) : null}
           </div>
         ) : (
-          <div className="rounded-xl border border-emerald-500/20 bg-background/80 p-4">
+          <div className="trace-accent-surface rounded-xl p-4">
             <div className="mb-2 flex items-center gap-2 text-sm font-medium text-foreground">
-              <CheckCircle2 className="size-4 text-emerald-600" />
+              <CheckCircle2 className="size-4 text-[var(--trace-accent-strong)]" />
               Assistant text
             </div>
             <TextBlock value={assistantText} className="max-h-[280px]" />
@@ -1070,7 +1312,7 @@ function ResultSection({ trace }: { trace: TraceRecord }) {
         {thinkingText && (
           <SectionPanel
             title="Completion metadata"
-            description="Only the remaining result details that are not already in the top summary."
+            description="Additional completion details."
           >
             <TextBlock value={thinkingText} className="max-h-[220px]" />
           </SectionPanel>
@@ -1084,21 +1326,13 @@ function RawPayloadsCard({ trace }: { trace: TraceRecord }) {
   return (
     <Card size="sm">
       <CardHeader>
-        <CardTitle className="text-sm">Raw payloads</CardTitle>
-        <CardDescription>
-          Fallback inspection only. Open these when the structured sections are
-          not enough.
-        </CardDescription>
+        <CardTitle className="text-sm">Payload snapshots</CardTitle>
+        <CardDescription>Raw request/response blocks.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         <RawJsonSection
           title="Provider request"
           value={trace.provider_request}
-        />
-        <RawJsonSection title="Request summary" value={trace.request_summary} />
-        <RawJsonSection
-          title="Response summary"
-          value={trace.response_summary}
         />
         {trace.response_body ? (
           <Collapsible className="rounded-lg border border-border/50 bg-muted/15 px-3 py-2">
@@ -1114,6 +1348,11 @@ function RawPayloadsCard({ trace }: { trace: TraceRecord }) {
             </CollapsibleContent>
           </Collapsible>
         ) : null}
+        <RawJsonSection title="Request summary" value={trace.request_summary} />
+        <RawJsonSection
+          title="Response summary"
+          value={trace.response_summary}
+        />
       </CardContent>
     </Card>
   )
@@ -1130,24 +1369,142 @@ export function TraceDetailModal({
   loading: boolean
   onOpenChange: (open: boolean) => void
 }) {
+  const payloadTabs = useMemo(
+    () => (trace ? buildPayloadTabs(trace) : []),
+    [trace]
+  )
+  const [activePayloadTab, setActivePayloadTab] =
+    useState<PayloadTabKey>("request")
+  const [copiedAction, setCopiedAction] = useState<
+    "active" | "request" | "response" | null
+  >(null)
+  const copyTimerRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    setActivePayloadTab("request")
+  }, [trace?.id])
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current)
+      }
+    }
+  }, [])
+
+  const activePayload =
+    payloadTabs.find((tab) => tab.key === activePayloadTab) ?? payloadTabs[0]
+  const requestPayload = payloadTabs.find((tab) => tab.key === "request")
+  const responsePayload = payloadTabs.find((tab) => tab.key === "response")
+
+  const handleCopyPayload = async (
+    value: unknown,
+    action: "active" | "request" | "response"
+  ) => {
+    const success = await copyText(payloadCopyText(value))
+    if (!success) return
+
+    if (copyTimerRef.current !== null) {
+      window.clearTimeout(copyTimerRef.current)
+    }
+
+    setCopiedAction(action)
+    copyTimerRef.current = window.setTimeout(() => {
+      setCopiedAction(null)
+      copyTimerRef.current = null
+    }, COPY_RESET_DELAY_MS)
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogPortal>
         <DialogBackdrop />
         <DialogPopup className="w-[min(1280px,calc(100vw-2rem))] max-w-[1280px]">
           <DialogHeader>
-            <div className="min-w-0 space-y-1">
-              <DialogTitle>
-                {trace
-                  ? `${trace.model} · step ${trace.step_index}`
-                  : "Trace detail"}
+            <div className="min-w-0 space-y-2">
+              <DialogTitle className="text-[15px]">
+                {trace ? `${trace.model} · payload workbench` : "Trace detail"}
               </DialogTitle>
-              <DialogDescription>
-                Diagnostic view focused on prompt context, message ordering,
-                tool definitions, and execution outcome.
+              <DialogDescription className="mt-0 text-[12px]">
+                Payload-first diagnostics.
               </DialogDescription>
+              {trace ? (
+                <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                  <Badge variant="outline" className="text-[10px]">
+                    {trace.protocol}
+                  </Badge>
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "text-[10px]",
+                      trace.status === "failed"
+                        ? "border-destructive/40 text-destructive"
+                        : "border-[var(--trace-accent-strong)]/40 text-[var(--trace-accent-strong)]"
+                    )}
+                  >
+                    {trace.status}
+                  </Badge>
+                  <Badge variant="outline" className="text-[10px]">
+                    step {trace.step_index}
+                  </Badge>
+                  <span className="text-muted-foreground">
+                    {trace.provider}
+                  </span>
+                  <span className="text-muted-foreground">·</span>
+                  <span className="text-muted-foreground">
+                    {formatDateTime(trace.started_at_ms)}
+                  </span>
+                  <span className="text-muted-foreground">·</span>
+                  <span className="text-muted-foreground tabular-nums">
+                    {trace.duration_ms != null
+                      ? `${trace.duration_ms} ms`
+                      : "—"}
+                  </span>
+                </div>
+              ) : null}
             </div>
-            <DialogClose />
+
+            <div className="flex items-center gap-1.5">
+              {trace ? (
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 px-2.5 text-[11px]"
+                    onClick={() => {
+                      if (!requestPayload) return
+                      void handleCopyPayload(requestPayload.value, "request")
+                    }}
+                  >
+                    {copiedAction === "request" ? (
+                      <Check className="size-3.5" />
+                    ) : (
+                      <Copy className="size-3.5" />
+                    )}
+                    {copiedAction === "request" ? "Copied" : "Request"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 px-2.5 text-[11px]"
+                    onClick={() => {
+                      if (!responsePayload) return
+                      void handleCopyPayload(responsePayload.value, "response")
+                    }}
+                  >
+                    {copiedAction === "response" ? (
+                      <Check className="size-3.5" />
+                    ) : (
+                      <Copy className="size-3.5" />
+                    )}
+                    {copiedAction === "response" ? "Copied" : "Response"}
+                  </Button>
+                </>
+              ) : null}
+              <DialogClose />
+            </div>
           </DialogHeader>
           <DialogBody>
             <ScrollArea className="h-[min(82vh,920px)] pr-4">
@@ -1165,30 +1522,47 @@ export function TraceDetailModal({
               ) : null}
 
               {trace ? (
-                <div className="space-y-5 pb-1">
-                  <div className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
-                    <div className="space-y-5">
-                      <TraceSummaryBar trace={trace} />
+                <div className="space-y-4 pb-1">
+                  <TraceSummaryBar trace={trace} />
+
+                  <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(330px,0.65fr)]">
+                    <PayloadWorkbench
+                      tabs={payloadTabs}
+                      activeTab={activePayloadTab}
+                      onTabChange={setActivePayloadTab}
+                      copied={copiedAction === "active"}
+                      onCopyActive={() => {
+                        if (!activePayload) return
+                        void handleCopyPayload(activePayload.value, "active")
+                      }}
+                    />
+
+                    <div className="space-y-4">
                       <ProviderRequestContextCard
                         protocol={trace.protocol}
                         request={trace.provider_request}
                         summary={trace.request_summary}
                       />
-                      <ProviderRequestToolsPanel
-                        protocol={trace.protocol}
-                        request={trace.provider_request}
-                      />
                       <ResultSection trace={trace} />
-                      <RawPayloadsCard trace={trace} />
                     </div>
+                  </div>
 
-                    <div className="space-y-5">
+                  <div className="grid gap-4 xl:grid-cols-2">
+                    <div className="space-y-4">
                       <ProviderRequestMessagesPanel
                         protocol={trace.protocol}
                         request={trace.provider_request}
                       />
                     </div>
+                    <div className="space-y-4">
+                      <ProviderRequestToolsPanel
+                        protocol={trace.protocol}
+                        request={trace.provider_request}
+                      />
+                    </div>
                   </div>
+
+                  <RawPayloadsCard trace={trace} />
                 </div>
               ) : null}
             </ScrollArea>

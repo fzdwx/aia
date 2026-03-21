@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react"
 import {
   ArrowLeft,
   Bot,
@@ -52,13 +52,16 @@ const TRACE_OVERVIEW_RANGE_OPTIONS: Array<{
   { value: "month", label: "Month" },
 ]
 
-const traceOverviewDateFormatter = new Intl.DateTimeFormat("zh-CN", {
-  hour12: false,
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit",
-})
+function formatOverviewRangeLabel(range: TraceDashboardRange) {
+  switch (range) {
+    case "today":
+      return "today"
+    case "week":
+      return "the last 7 days"
+    case "month":
+      return "the last 30 days"
+  }
+}
 
 function formatDateTime(value: number) {
   return new Date(value).toLocaleString("zh-CN", {
@@ -73,11 +76,6 @@ function formatDateTime(value: number) {
 
 function formatCount(value: number | null | undefined) {
   return value != null ? value.toLocaleString("en-US") : "-"
-}
-
-function formatOverviewActivityAt(value: number | null | undefined) {
-  if (value == null) return "-"
-  return traceOverviewDateFormatter.format(new Date(value))
 }
 
 function truncate(text: string, max: number) {
@@ -413,9 +411,9 @@ function buildTimelineTreeRows(group: TraceLoopGroup): TimelineTreeRow[] {
 function nodeTone(node: LoopTimelineNode) {
   if (node.kind === "agent_root") {
     return {
-      frame: "border-sky-500/20 bg-sky-500/[0.04]",
-      dot: "border-sky-500/35 bg-sky-500/20 text-sky-100",
-      bar: "border-sky-500/35 bg-sky-500/18",
+      frame: "trace-tone-agent-frame",
+      dot: "trace-tone-agent-dot",
+      badge: "trace-tone-agent-badge",
     }
   }
 
@@ -424,12 +422,12 @@ function nodeTone(node: LoopTimelineNode) {
       ? {
           frame: "border-destructive/25 bg-destructive/[0.04]",
           dot: "border-destructive/30 bg-destructive/15 text-destructive",
-          bar: "border-destructive/30 bg-destructive/20",
+          badge: "border-destructive/30 bg-destructive/[0.08] text-destructive",
         }
       : {
-          frame: "border-amber-500/20 bg-amber-500/[0.04]",
-          dot: "border-amber-500/30 bg-amber-500/15 text-amber-100",
-          bar: "border-amber-500/30 bg-amber-500/20",
+          frame: "trace-tone-tool-frame",
+          dot: "trace-tone-tool-dot",
+          badge: "trace-tone-tool-badge",
         }
   }
 
@@ -437,12 +435,12 @@ function nodeTone(node: LoopTimelineNode) {
     ? {
         frame: "border-destructive/25 bg-destructive/[0.04]",
         dot: "border-destructive/30 bg-destructive/15 text-destructive",
-        bar: "border-destructive/30 bg-destructive/20",
+        badge: "border-destructive/30 bg-destructive/[0.08] text-destructive",
       }
     : {
         frame: "border-border/40 bg-background/80",
         dot: "border-border/45 bg-muted/35 text-foreground/80",
-        bar: "border-border/40 bg-foreground/[0.08]",
+        badge: "border-border/25 bg-muted/50 text-muted-foreground",
       }
 }
 
@@ -582,19 +580,29 @@ function Section({
 }
 
 function TabButton({
+  id,
+  panelId,
   active,
   children,
   onClick,
 }: {
+  id: string
+  panelId: string
   active: boolean
   children: ReactNode
   onClick: () => void
 }) {
   return (
     <button
+      id={id}
+      type="button"
+      role="tab"
+      aria-selected={active}
+      aria-controls={panelId}
+      tabIndex={active ? 0 : -1}
       onClick={onClick}
       className={cn(
-        "border-b-2 px-0 pb-2 text-[12px] font-medium transition-colors",
+        "min-h-10 border-b-2 px-1 pb-2 text-[12px] font-medium transition-colors",
         active
           ? "border-foreground text-foreground"
           : "border-transparent text-muted-foreground hover:text-foreground"
@@ -905,9 +913,14 @@ function WaterfallRow({
 
   return (
     <button
+      type="button"
       onClick={onSelect}
+      aria-pressed={selected}
+      aria-label={`${nodeKindLabel(node)} ${nodeTitle(node)} · ${nodeSubtitle(
+        node
+      )}`}
       className={cn(
-        "w-full border-b border-border/15 px-3 py-2.5 text-left transition-colors last:border-b-0",
+        "w-full border-b border-border/15 px-3 py-3 text-left transition-colors last:border-b-0",
         selected ? "bg-accent/45" : "bg-transparent hover:bg-accent/20"
       )}
     >
@@ -968,11 +981,7 @@ function WaterfallRow({
             <span
               className={cn(
                 "rounded-sm border px-1.5 py-0.5 text-[10px] font-medium uppercase",
-                node.kind === "agent_root"
-                  ? "border-sky-500/25 bg-sky-500/[0.06] text-sky-500"
-                  : node.kind === "tool_span"
-                    ? "border-amber-500/25 bg-amber-500/[0.08] text-amber-500"
-                    : "border-border/25 bg-muted/50 text-muted-foreground"
+                tone.badge
               )}
             >
               {nodeKindLabel(node)}
@@ -1030,7 +1039,7 @@ function LoopInspector({
           <FieldBlock label="Assistant reply">
             <TextBlock
               value={group.assistantMessage}
-              className="border-sky-500/20 bg-sky-500/[0.05]"
+              className="trace-accent-surface"
             />
           </FieldBlock>
         </Section>
@@ -1095,9 +1104,12 @@ function LlmInspector({
   loading: boolean
   onOpenPayload: () => void
 }) {
-  const systemPrompts = collectSystemPrompts(trace)
-  const toolNames = collectToolNames(trace)
-  const assistantPreview = collectAssistantPreview(trace)
+  const systemPrompts = useMemo(() => collectSystemPrompts(trace), [trace])
+  const toolNames = useMemo(() => collectToolNames(trace), [trace])
+  const assistantPreview = useMemo(
+    () => collectAssistantPreview(trace),
+    [trace]
+  )
 
   if (tab === "content") {
     return (
@@ -1130,7 +1142,7 @@ function LlmInspector({
                     <TextBlock
                       key={`${index}-${prompt.slice(0, 24)}`}
                       value={prompt}
-                      className="border-sky-500/15 bg-sky-500/[0.04]"
+                      className="trace-accent-surface"
                     />
                   ))}
                 </div>
@@ -1360,13 +1372,14 @@ export function TracePanel() {
   const refreshTraces = useTraceStore((state) => state.refreshTraces)
   const selectTrace = useTraceStore((state) => state.selectTrace)
   const selectNode = useTraceStore((state) => state.selectNode)
-  const overviewDashboard = useTraceOverviewStore((state) => state.dashboard)
   const overviewRange = useTraceOverviewStore((state) => state.range)
+  const overviewDashboard = useTraceOverviewStore((state) => state.dashboard)
   const refreshOverview = useTraceOverviewStore((state) => state.refresh)
   const setOverviewRange = useTraceOverviewStore((state) => state.setRange)
 
   const [payloadOpen, setPayloadOpen] = useState(false)
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("content")
+  const inspectorId = useId()
 
   const loopGroups = useMemo(
     () => buildTraceLoopGroups(traces, turns),
@@ -1416,104 +1429,111 @@ export function TracePanel() {
     selectTrace(activeNode.trace.id).catch(() => {})
   }, [activeNode, selectTrace, selectedTraceId, traceSurface])
 
-  const inspectedTrace =
-    activeNode?.kind === "agent_root"
-      ? null
-      : (selectedLoop?.trace_details.find(
-          (trace) => trace.id === activeNode?.trace.id
-        ) ??
-        (selectedTrace?.id === activeNode?.trace.id ? selectedTrace : null))
+  const inspectedTrace = useMemo(
+    () =>
+      activeNode?.kind === "agent_root"
+        ? null
+        : (selectedLoop?.trace_details.find(
+            (trace) => trace.id === activeNode?.trace.id
+          ) ??
+          (selectedTrace?.id === activeNode?.trace.id ? selectedTrace : null)),
+    [activeNode, selectedLoop?.trace_details, selectedTrace]
+  )
 
   const traceDescription =
-    traceSurface === "overview"
-      ? null
-      : traceView === "compression"
-        ? "Review compression runs, loop timing, and payload details without mixing them into the main conversation trace stream."
-        : "Inspect conversation loops, waterfall timing, and span payloads from the current workspace."
+    traceView === "compression"
+      ? "Review compression runs, loop timing, and payload details without mixing them into the main conversation trace stream."
+      : "Inspect conversation loops, waterfall timing, and span payloads from the current workspace."
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/30 px-4 py-2.5">
-        <div className="flex min-w-0 flex-1 items-start gap-3">
-          <button
-            onClick={() => setView("chat")}
-            className="mt-0.5 flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-            aria-label="Back to chat"
-          >
-            <ArrowLeft className="size-3.5" />
-          </button>
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-sm font-semibold tracking-tight">Trace</h1>
-              <Badge variant="secondary" className="text-[10px]">
-                {traceSurface === "overview" ? "overview" : traceView}
-              </Badge>
+      <div className="border-b border-border/30 px-3.5 py-1.5">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="flex min-w-0 flex-1 items-start gap-2.5">
+            <button
+              type="button"
+              onClick={() => setView("chat")}
+              className="mt-0.5 flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+              aria-label="Back to chat"
+            >
+              <ArrowLeft className="size-3" />
+            </button>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <h1 className="text-sm font-semibold tracking-tight">Trace</h1>
+                <Badge variant="secondary" className="text-[10px]">
+                  {traceSurface === "overview" ? "overview" : traceView}
+                </Badge>
+              </div>
+              {traceSurface === "overview" ? (
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+                  <span className="tracking-[0.15em] uppercase">Overview</span>
+                  <span className="rounded-full border border-border/16 bg-background/60 px-2 py-0.5">
+                    {formatOverviewRangeLabel(overviewRange)}
+                  </span>
+                  <span>
+                    {formatCount(
+                      overviewDashboard?.overall_summary.unique_models
+                    )}{" "}
+                    models
+                  </span>
+                  <span>·</span>
+                  <span>
+                    {formatCount(
+                      overviewDashboard?.overall_summary.total_tool_spans
+                    )}{" "}
+                    tool spans
+                  </span>
+                </div>
+              ) : traceDescription ? (
+                <p className="mt-0.5 text-[12px] leading-4 text-muted-foreground">
+                  {traceDescription}
+                </p>
+              ) : null}
             </div>
-            {traceDescription ? (
-              <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
-                {traceDescription}
-              </p>
-            ) : null}
+          </div>
+
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
             {traceSurface === "overview" ? (
-              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                <span>
-                  Last trace{" "}
-                  {formatOverviewActivityAt(
-                    overviewDashboard?.overall_summary
-                      .latest_request_started_at_ms
-                  )}
-                </span>
-                <span>
-                  P95{" "}
-                  {overviewDashboard?.overall_summary.p95_duration_ms != null
-                    ? `${overviewDashboard.overall_summary.p95_duration_ms} ms`
-                    : "-"}
-                </span>
-                <span>
-                  {formatCount(
-                    overviewDashboard?.overall_summary.total_tool_spans ?? 0
-                  )}{" "}
-                  tool spans
-                </span>
+              <div
+                role="group"
+                aria-label="Trace overview range"
+                className="inline-flex rounded-full border border-border/40 bg-background/85 p-0.5"
+              >
+                {TRACE_OVERVIEW_RANGE_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() =>
+                      void setOverviewRange(option.value).catch(() => {})
+                    }
+                    aria-pressed={option.value === overviewRange}
+                    className={cn(
+                      "min-h-9 rounded-full px-2.5 py-1 text-[12px] transition-colors",
+                      option.value === overviewRange
+                        ? "bg-foreground text-background"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                ))}
               </div>
             ) : null}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                traceSurface === "overview"
+                  ? refreshOverview().catch(() => {})
+                  : refreshTraces({ page: tracePage, view: traceView })
+              }
+              className="h-9 px-2.5"
+            >
+              <RefreshCw className="size-3" />
+              Refresh
+            </Button>
           </div>
-        </div>
-
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-          {traceSurface === "overview" ? (
-            <div className="inline-flex rounded-full border border-border/40 bg-background/85 p-1">
-              {TRACE_OVERVIEW_RANGE_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() =>
-                    void setOverviewRange(option.value).catch(() => {})
-                  }
-                  className={cn(
-                    "rounded-full px-3 py-1.5 text-[12px] transition-colors",
-                    option.value === overviewRange
-                      ? "bg-foreground text-background"
-                      : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          ) : null}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              traceSurface === "overview"
-                ? refreshOverview().catch(() => {})
-                : refreshTraces({ page: tracePage, view: traceView })
-            }
-          >
-            <RefreshCw className="size-3.5" />
-            Refresh
-          </Button>
         </div>
       </div>
 
@@ -1599,11 +1619,7 @@ export function TracePanel() {
                             <span
                               className={cn(
                                 "inline-flex items-center rounded-sm border px-1.5 py-0.5 text-[10px] font-medium uppercase",
-                                activeNode.kind === "agent_root"
-                                  ? "border-sky-500/25 bg-sky-500/[0.06] text-sky-500"
-                                  : activeNode.kind === "tool_span"
-                                    ? "border-amber-500/25 bg-amber-500/[0.08] text-amber-500"
-                                    : "border-border/25 bg-muted/50 text-muted-foreground"
+                                nodeTone(activeNode).badge
                               )}
                             >
                               {nodeKindLabel(activeNode)}
@@ -1631,20 +1647,30 @@ export function TracePanel() {
                       )}
                     </div>
 
-                    <div className="flex items-center gap-5 px-4">
+                    <div
+                      role="tablist"
+                      aria-label="Trace inspector sections"
+                      className="flex items-center gap-5 px-4"
+                    >
                       <TabButton
+                        id={`${inspectorId}-overview-tab`}
+                        panelId={`${inspectorId}-panel`}
                         active={inspectorTab === "overview"}
                         onClick={() => setInspectorTab("overview")}
                       >
                         Attributes
                       </TabButton>
                       <TabButton
+                        id={`${inspectorId}-content-tab`}
+                        panelId={`${inspectorId}-panel`}
                         active={inspectorTab === "content"}
                         onClick={() => setInspectorTab("content")}
                       >
                         Input/output
                       </TabButton>
                       <TabButton
+                        id={`${inspectorId}-events-tab`}
+                        panelId={`${inspectorId}-panel`}
                         active={inspectorTab === "events"}
                         onClick={() => setInspectorTab("events")}
                       >
@@ -1653,7 +1679,12 @@ export function TracePanel() {
                     </div>
                   </div>
 
-                  <div className="min-h-0 flex-1 overflow-y-auto bg-muted/[0.04] p-4">
+                  <div
+                    id={`${inspectorId}-panel`}
+                    role="tabpanel"
+                    aria-labelledby={`${inspectorId}-${inspectorTab}-tab`}
+                    className="min-h-0 flex-1 overflow-y-auto bg-muted/[0.04] p-4"
+                  >
                     {activeGroup && activeNode ? (
                       activeNode.kind === "agent_root" ? (
                         <LoopInspector group={activeGroup} tab={inspectorTab} />

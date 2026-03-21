@@ -1,8 +1,15 @@
 import { renderToStaticMarkup } from "react-dom/server"
+import { readFileSync } from "node:fs"
 import { describe, expect, test } from "vite-plus/test"
 
 import { MarkdownRenderer } from "@/components/markdown-content-rich"
 import { ThemeProvider } from "@/components/theme-provider"
+
+const WEB_INDEX_CSS = new URL("../index.css", import.meta.url)
+
+function loadMarkdownCss() {
+  return readFileSync(WEB_INDEX_CSS, "utf8").replace(/\s+/g, " ")
+}
 
 describe("MarkdownRenderer", () => {
   test("renders basic markdown structure", () => {
@@ -68,5 +75,25 @@ describe("MarkdownRenderer", () => {
     expect(html).toContain('href="https://example.com/docs"')
     expect(html).toContain('target="_blank"')
     expect(html).toContain('rel="noreferrer"')
+  })
+
+  test("keeps markdown typography contract for dense chat reading", () => {
+    const css = loadMarkdownCss()
+
+    expect(css).toContain(".markdown-content .heading-1")
+    expect(css).toContain(".markdown-content .heading-2")
+    expect(css).toContain(".markdown-content .heading-3")
+    expect(css).toContain("font-size: 1.125rem")
+    expect(css).toContain("font-size: 1rem")
+    expect(css).toContain("font-size: 0.9375rem")
+    expect(css).toContain(".markdown-content .list-node")
+    expect(css).toContain(".markdown-content .list-item")
+    expect(css).toContain(".markdown-content .chat-code-block-language")
+    expect(css).toContain("font-size: 0.75rem")
+    expect(css).toContain(".markdown-content .chat-code-block-copy")
+    expect(css).toContain("font-size: 0.75rem")
+    expect(css).toContain(".markdown-content .table-node th")
+    expect(css).toContain(".markdown-content .table-node td")
+    expect(css).toContain("font-size: 0.8125rem")
   })
 })

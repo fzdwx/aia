@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react"
+import { useEffect, useId, useMemo, useState, type FormEvent } from "react"
 import { ArrowLeft, Trash2 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -134,6 +134,7 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
 
   const [form, setForm] = useState<ChannelFormState>(emptyChannelForm(null))
   const [submitting, setSubmitting] = useState(false)
+  const panelScopeId = useId()
 
   useEffect(() => {
     void initializeChannels().catch(() => {})
@@ -278,7 +279,7 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
               type="button"
               variant="ghost"
               size="sm"
-              className="shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              className="h-10 shrink-0 px-3 text-destructive hover:bg-destructive/10 hover:text-destructive"
               onClick={() => void handleDelete()}
             >
               <Trash2 className="size-3.5" />
@@ -342,7 +343,7 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  className="h-10 shrink-0 px-3 text-destructive hover:bg-destructive/10 hover:text-destructive"
                   onClick={() => void handleDelete()}
                 >
                   <Trash2 className="size-3.5" />
@@ -371,18 +372,25 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
                       ? schema.description
                       : null
                   const value = form.config[key]
+                  const fieldId = `${panelScopeId}-${selectedDefinition.transport}-${key}`
+                  const descriptionId = description
+                    ? `${fieldId}-description`
+                    : undefined
 
                   if (kind === "boolean") {
                     return (
-                      <label
+                      <div
                         key={key}
                         className="workspace-panel-soft flex items-start justify-between gap-4 px-3 py-3 md:col-span-2"
                       >
                         <div className="pr-4">
                           <div className="flex flex-wrap items-center gap-2">
-                            <p className="text-sm font-medium text-foreground">
+                            <label
+                              htmlFor={fieldId}
+                              className="text-sm font-medium text-foreground"
+                            >
                               {label}
-                            </p>
+                            </label>
                             {selectedRequired.has(key) ? (
                               <Badge variant="outline" className="text-[10px]">
                                 required
@@ -390,28 +398,37 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
                             ) : null}
                           </div>
                           {description ? (
-                            <p className="mt-2 text-[12px] leading-6 text-muted-foreground">
+                            <p
+                              id={descriptionId}
+                              className="mt-2 text-[12px] leading-6 text-muted-foreground"
+                            >
                               {description}
                             </p>
                           ) : null}
                         </div>
 
                         <Switch
+                          id={fieldId}
                           checked={value === true}
                           onCheckedChange={(checked: boolean) =>
                             updateConfigField(key, checked)
                           }
+                          aria-describedby={descriptionId}
+                          size="default"
                         />
-                      </label>
+                      </div>
                     )
                   }
 
                   return (
                     <div key={key} className="workspace-panel-soft px-3 py-3">
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-sm font-medium text-foreground">
+                        <label
+                          htmlFor={fieldId}
+                          className="text-sm font-medium text-foreground"
+                        >
                           {label}
-                        </p>
+                        </label>
                         {selectedRequired.has(key) ? (
                           <Badge variant="outline" className="text-[10px]">
                             required
@@ -425,12 +442,16 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
                       </div>
 
                       {description ? (
-                        <p className="mt-2 text-[12px] leading-6 text-muted-foreground">
+                        <p
+                          id={descriptionId}
+                          className="mt-2 text-[12px] leading-6 text-muted-foreground"
+                        >
                           {description}
                         </p>
                       ) : null}
 
                       <Input
+                        id={fieldId}
                         type={
                           kind === "secret"
                             ? "password"
@@ -447,7 +468,8 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
                             ? schema.default
                             : undefined
                         }
-                        className="mt-3 h-9 text-[13px]"
+                        aria-describedby={descriptionId}
+                        className="mt-3 h-10 text-[13px]"
                       />
                     </div>
                   )
@@ -467,28 +489,39 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
                 : "rounded-2xl border border-border/30 bg-card/70 p-5 shadow-[var(--workspace-shadow)]"
             }
           >
-            <label className="workspace-panel-soft flex items-start justify-between gap-4 px-3 py-3">
+            <div className="workspace-panel-soft flex items-start justify-between gap-4 px-3 py-3">
               <div className="pr-4">
-                <p className="text-sm font-medium text-foreground">Enabled</p>
-                <p className="mt-2 text-[12px] leading-6 text-muted-foreground">
+                <label
+                  htmlFor={`${panelScopeId}-channel-enabled`}
+                  className="text-sm font-medium text-foreground"
+                >
+                  Enabled
+                </label>
+                <p
+                  id={`${panelScopeId}-channel-enabled-description`}
+                  className="mt-2 text-[12px] leading-6 text-muted-foreground"
+                >
                   Turn this off to keep the profile stored without running its
                   transport worker.
                 </p>
               </div>
 
               <Switch
+                id={`${panelScopeId}-channel-enabled`}
                 checked={form.enabled}
                 onCheckedChange={(checked: boolean) =>
                   setForm((prev) => ({ ...prev, enabled: checked }))
                 }
+                aria-describedby={`${panelScopeId}-channel-enabled-description`}
+                size="default"
               />
-            </label>
+            </div>
 
             <div className="mt-4 flex flex-col-reverse gap-2.5 border-t border-border/20 pt-4 sm:flex-row sm:items-center sm:justify-between">
               <Button
                 type="submit"
                 disabled={submitting || !canSubmit}
-                className="sm:ml-auto sm:min-w-[180px]"
+                className="min-h-10 sm:ml-auto sm:min-w-[180px]"
               >
                 {configuredChannel
                   ? "Save Configuration"
