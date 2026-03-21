@@ -8,9 +8,9 @@ use crate::sse::TurnStatus;
 use agent_core::RequestTimeoutConfig;
 
 use super::{
-    CurrentTurnSnapshot, SessionManagerConfig, SessionQueryService, SessionSlot, SlotStatus,
-    collect_runtime_events, read_lock, spawn_session_manager, update_current_turn_status,
-    write_lock,
+    CurrentTurnSnapshot, SessionManagerConfig, SessionQueryService, SessionSlot,
+    SessionSlotFactory, SlotExecutionState, SlotStatus, collect_runtime_events, read_lock,
+    spawn_session_manager, update_current_turn_status, write_lock,
 };
 
 fn run_async<T>(future: impl Future<Output = T>) -> T {
@@ -38,6 +38,43 @@ fn temp_session_dir(name: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("aia-session-manager-{name}-{suffix}"))
 }
 
+fn sample_manager_config(root: &std::path::Path) -> SessionManagerConfig {
+    let sessions_dir = root.join("sessions");
+    std::fs::create_dir_all(&sessions_dir).expect("sessions dir should exist");
+    let store = Arc::new(
+        agent_store::AiaStore::new(root.join("store.sqlite3"))
+            .expect("sqlite store should initialize"),
+    );
+    let registry = provider_registry::ProviderRegistry::default();
+    let (broadcast_tx, _broadcast_rx) = tokio::sync::broadcast::channel(8);
+
+    SessionManagerConfig {
+        sessions_dir,
+        store,
+        registry: registry.clone(),
+        broadcast_tx,
+        provider_registry_snapshot: Arc::new(RwLock::new(registry)),
+        provider_info_snapshot: Arc::new(RwLock::new(super::ProviderInfoSnapshot {
+            name: "bootstrap".into(),
+            model: "bootstrap".into(),
+            connected: true,
+        })),
+        workspace_root: root.to_path_buf(),
+        user_agent: "test-agent".into(),
+        request_timeout: RequestTimeoutConfig {
+            read_timeout_ms: Some(aia_config::DEFAULT_SERVER_REQUEST_TIMEOUT_MS),
+        },
+        system_prompt: agent_prompts::SystemPromptConfig::default(),
+        runtime_hooks: agent_runtime::RuntimeHooks::default(),
+    }
+}
+
+fn build_idle_slot(name: &str) -> SessionSlot {
+    let root = temp_session_dir(name);
+    let config = sample_manager_config(&root);
+    SessionSlotFactory::new(&config).create("session-1").expect("session slot should build")
+}
+
 #[test]
 fn recovered_read_lock_returns_inner_value_after_poison() {
     let lock = RwLock::new(vec![1, 2, 3]);
@@ -62,8 +99,6 @@ fn get_session_info_uses_cached_stats_when_turn_is_running() {
     slots.insert(
         "session-1".to_string(),
         SessionSlot {
-            runtime: None,
-            subscriber: 0,
             session_path: temp_session_path("context-stats-missing"),
             provider_binding: session_tape::SessionProviderBinding::Bootstrap,
             history: Arc::new(RwLock::new(Vec::new())),
@@ -77,9 +112,13 @@ fn get_session_info_uses_cached_stats_when_turn_is_running() {
                 output_limit: Some(256),
                 pressure_ratio: Some(42.0 / 1024.0),
             })),
-            running_turn: None,
-            pending_provider_binding: None,
-            status: SlotStatus::Running,
+            execution: SlotExecutionState::Running {
+                subscriber: 0,
+                running_turn: RunningTurnHandle {
+                    control: agent_runtime::TurnControl::new(agent_core::AbortSignal::new()),
+                },
+                pending_provider_binding: None,
+            },
         },
     );
 
@@ -101,8 +140,6 @@ fn running_session_slot_keeps_in_memory_provider_binding() {
     slots.insert(
         "session-1".to_string(),
         SessionSlot {
-            runtime: None,
-            subscriber: 0,
             session_path: temp_session_path("running-session-settings"),
             provider_binding: session_tape::SessionProviderBinding::Provider {
                 name: "primary".into(),
@@ -122,15 +159,19 @@ fn running_session_slot_keeps_in_memory_provider_binding() {
                 output_limit: None,
                 pressure_ratio: None,
             })),
-            running_turn: None,
-            pending_provider_binding: None,
-            status: SlotStatus::Running,
+            execution: SlotExecutionState::Running {
+                subscriber: 0,
+                running_turn: RunningTurnHandle {
+                    control: agent_runtime::TurnControl::new(agent_core::AbortSignal::new()),
+                },
+                pending_provider_binding: None,
+            },
         },
     );
 
     let slot = slots.get("session-1").expect("session slot should exist");
-    assert!(slot.runtime.is_none());
-    assert_eq!(slot.status, SlotStatus::Running);
+    assert!(slot.runtime().is_none());
+    assert_eq!(slot.status(), SlotStatus::Running);
     assert!(matches!(
         &slot.provider_binding,
         session_tape::SessionProviderBinding::Provider {
@@ -140,6 +181,42 @@ fn running_session_slot_keeps_in_memory_provider_binding() {
             ..
         } if name == "primary" && model == "model-primary" && effort == "high"
     ));
+}
+
+#[test]
+fn session_slot_begin_turn_transitions_to_running_state() {
+    let mut slot = build_idle_slot("slot-begin-turn");
+
+    let (_runtime, _subscriber, running_turn) =
+        slot.begin_turn().expect("idle slot should start turn");
+
+    assert_eq!(slot.status(), SlotStatus::Running);
+    assert!(slot.runtime().is_none());
+    assert!(slot.running_turn().is_some());
+    assert!(!running_turn.control.abort_signal().is_aborted());
+}
+
+#[test]
+fn session_slot_finish_turn_restores_idle_state_and_clears_pending_binding() {
+    let mut slot = build_idle_slot("slot-finish-turn");
+    let (runtime, subscriber, _running_turn) =
+        slot.begin_turn().expect("idle slot should start turn");
+
+    slot.replace_pending_provider_binding(Some(session_tape::SessionProviderBinding::Provider {
+        name: "primary".into(),
+        model: "model-primary".into(),
+        base_url: "https://primary.example.com".into(),
+        protocol: "openai-responses".into(),
+        reasoning_effort: None,
+    }))
+    .expect("running slot should accept pending binding");
+
+    slot.finish_turn(runtime, subscriber).expect("running slot should finish turn");
+
+    assert_eq!(slot.status(), SlotStatus::Idle);
+    assert!(slot.runtime().is_some());
+    assert!(slot.running_turn().is_none());
+    assert!(slot.pending_provider_binding().is_none());
 }
 
 #[test]
@@ -195,8 +272,6 @@ fn handle_cancel_turn_marks_running_snapshot_as_cancelled() {
     slots.insert(
         "session-1".to_string(),
         SessionSlot {
-            runtime: None,
-            subscriber: 0,
             session_path: std::path::PathBuf::new(),
             provider_binding: session_tape::SessionProviderBinding::Bootstrap,
             history: Arc::new(RwLock::new(Vec::new())),
@@ -210,9 +285,11 @@ fn handle_cancel_turn_marks_running_snapshot_as_cancelled() {
                 output_limit: None,
                 pressure_ratio: None,
             })),
-            running_turn: Some(handle),
-            pending_provider_binding: None,
-            status: SlotStatus::Running,
+            execution: SlotExecutionState::Running {
+                subscriber: 0,
+                running_turn: handle,
+                pending_provider_binding: None,
+            },
         },
     );
     let (broadcast_tx, _broadcast_rx) = tokio::sync::broadcast::channel(8);

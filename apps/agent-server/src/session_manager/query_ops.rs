@@ -22,11 +22,11 @@ impl<'a> SessionQueryService<'a> {
             RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
         })?;
 
-        if slot.status != SlotStatus::Running {
+        if slot.status() != SlotStatus::Running {
             return Ok(false);
         }
 
-        let Some(running_turn) = slot.running_turn.as_ref() else {
+        let Some(running_turn) = slot.running_turn() else {
             return Err(RuntimeWorkerError::internal("running turn handle missing"));
         };
 
@@ -63,7 +63,7 @@ impl<'a> SessionQueryService<'a> {
             RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
         })?;
 
-        if let Some(runtime) = slot.runtime.as_ref() {
+        if let Some(runtime) = slot.runtime() {
             return Ok(runtime.context_stats());
         }
 

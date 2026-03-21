@@ -69,7 +69,7 @@ fn updating_non_active_provider_keeps_unbound_session_unmodified() {
 
     assert_eq!(
         slots["session-1"]
-            .runtime
+            .runtime()
             .as_ref()
             .expect("runtime should exist")
             .tape()
@@ -92,7 +92,7 @@ fn updating_non_active_provider_keeps_unbound_session_unmodified() {
 
     assert_eq!(
         slots["session-1"]
-            .runtime
+            .runtime()
             .as_ref()
             .expect("runtime should exist")
             .tape()
@@ -109,8 +109,8 @@ fn switching_provider_marks_running_session_for_return_sync() {
     let mut config = sample_config(&root, sample_registry());
     let mut slot =
         SessionSlotFactory::new(&config).create("session-1").expect("session slot should build");
-    let mut runtime = slot.runtime.take().expect("runtime should exist");
-    slot.status = super::super::SlotStatus::Running;
+    let (mut runtime, _subscriber, _running_turn) =
+        slot.begin_turn().expect("idle slot should start turn");
 
     let mut slots = HashMap::new();
     slots.insert("session-1".to_string(), slot);
@@ -120,7 +120,7 @@ fn switching_provider_marks_running_session_for_return_sync() {
         .switch_provider(SwitchProviderInput { name: "backup".into() })
         .expect("provider switch should succeed");
 
-    let pending_binding = slots["session-1"].pending_provider_binding.clone();
+    let pending_binding = slots["session-1"].pending_provider_binding().cloned();
     let session_path = slots["session-1"].session_path.clone();
     assert!(matches!(
         pending_binding,
@@ -167,7 +167,7 @@ fn session_binding_preserves_reasoning_effort_override() {
         .expect("session settings update should succeed");
 
     let binding = slots["session-1"]
-        .runtime
+        .runtime()
         .as_ref()
         .expect("runtime should exist")
         .tape()
@@ -193,8 +193,8 @@ fn running_session_settings_update_is_rejected() {
     let session_path = slot.session_path.clone();
     let original_contents = std::fs::read_to_string(&session_path).unwrap_or_default();
 
-    let _runtime = slot.runtime.take().expect("runtime should exist");
-    slot.status = super::super::SlotStatus::Running;
+    let (_runtime, _subscriber, _running_turn) =
+        slot.begin_turn().expect("idle slot should start turn");
     slots.insert("session-1".to_string(), slot);
 
     let mut service = ProviderSyncService::new(&mut slots, &mut config);

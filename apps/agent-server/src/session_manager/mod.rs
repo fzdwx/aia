@@ -37,6 +37,8 @@ use provider_sync::{ProviderSyncService, ReturnedRuntimeSync};
 pub(crate) use query_ops::SessionQueryService;
 use turn_execution::{RuntimeEventProjector, TurnExecutionService, collect_runtime_events};
 pub use types::SessionManagerConfig;
+#[cfg(test)]
+pub(crate) use types::SlotExecutionState;
 use types::{RuntimeReturn, SessionCommand, SessionId, SessionSlot, SlotStatus};
 
 #[cfg(test)]
@@ -56,6 +58,8 @@ pub fn spawn_session_manager(config: SessionManagerConfig) -> SessionManagerHand
     );
     SessionManagerHandle::new(command_tx)
 }
+
+const UNAVAILABLE_SESSION_MODEL: &str = "unavailable";
 
 struct SessionManagerLoop {
     slots: HashMap<SessionId, SessionSlot>,
@@ -102,6 +106,9 @@ impl SessionManagerLoop {
 
     async fn handle_command(&mut self, command: SessionCommand) {
         match command {
+            SessionCommand::ListSessions { reply } => {
+                let _ = reply.send(self.list_sessions().await);
+            }
             SessionCommand::CreateSession { title, reply } => {
                 let _ = reply.send(self.create_session(title).await);
             }
@@ -165,12 +172,14 @@ impl SessionManagerLoop {
 
     fn handle_runtime_return(&mut self, mut ret: RuntimeReturn) {
         if let Some(slot) = self.slots.get_mut(&ret.session_id) {
+            let session_path = slot.session_path.clone();
+            let pending_provider_binding = slot.take_pending_provider_binding();
             let sync = ReturnedRuntimeSync::new(
                 &ret.session_id,
-                &slot.session_path,
+                &session_path,
                 &self.config.registry,
                 self.config.store.clone(),
-                slot.pending_provider_binding.take(),
+                pending_provider_binding,
             );
             if let Err(error) = sync.apply(&mut ret.runtime) {
                 let _ = self.config.broadcast_tx.send(SsePayload::Error {
@@ -192,10 +201,14 @@ impl SessionManagerLoop {
                 .ok()
                 .and_then(|stats| stats.pressure_ratio)
                 .is_some_and(|ratio| ratio >= agent_prompts::AUTO_COMPRESSION_THRESHOLD);
-            slot.runtime = Some(ret.runtime);
-            slot.subscriber = ret.subscriber;
-            slot.running_turn = None;
-            slot.status = SlotStatus::Idle;
+            if let Err(error) = slot.finish_turn(ret.runtime, ret.subscriber) {
+                let _ = self.config.broadcast_tx.send(SsePayload::Error {
+                    session_id: ret.session_id.clone(),
+                    turn_id: None,
+                    message: error.message,
+                });
+                return;
+            }
 
             if should_auto_compress {
                 let (reply, _reply_rx) = tokio::sync::oneshot::channel();
@@ -231,9 +244,24 @@ impl SessionManagerLoop {
         Ok(record)
     }
 
+    async fn list_sessions(&mut self) -> Result<Vec<SessionRecord>, RuntimeWorkerError> {
+        let mut records = self.config.store.list_sessions_async().await.map_err(|error| {
+            RuntimeWorkerError::internal(format!("session list failed: {error}"))
+        })?;
+
+        for record in &mut records {
+            record.model = match self.slots.get(&record.id) {
+                Some(slot) => projected_session_model(&self.config.registry, slot)?,
+                None => UNAVAILABLE_SESSION_MODEL.to_string(),
+            };
+        }
+
+        Ok(records)
+    }
+
     async fn delete_session(&mut self, session_id: &str) -> Result<(), RuntimeWorkerError> {
         if let Some(slot) = self.slots.get(session_id)
-            && slot.status == SlotStatus::Running
+            && slot.status() == SlotStatus::Running
         {
             return Err(RuntimeWorkerError::bad_request(
                 "cannot delete a session while a turn is running",
@@ -277,7 +305,9 @@ impl SessionManagerLoop {
         let slot = self.slots.get_mut(session_id).ok_or_else(|| {
             RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
         })?;
-        let runtime = slot.runtime.as_mut().ok_or_else(|| {
+        let session_path = slot.session_path.clone();
+        let context_stats = slot.context_stats.clone();
+        let runtime = slot.runtime_mut().ok_or_else(|| {
             RuntimeWorkerError::bad_request("session is currently running a turn")
         })?;
 
@@ -291,10 +321,10 @@ impl SessionManagerLoop {
                 "owner": "user"
             }),
         );
-        runtime.tape().save_jsonl(&slot.session_path).map_err(|error| {
+        runtime.tape().save_jsonl(&session_path).map_err(|error| {
             RuntimeWorkerError::internal(format!("session save failed: {error}"))
         })?;
-        refresh_context_stats_snapshot(&slot.context_stats, runtime);
+        refresh_context_stats_snapshot(&context_stats, runtime);
         Ok(handoff.anchor.entry_id)
     }
 
@@ -305,20 +335,23 @@ impl SessionManagerLoop {
         let slot = self.slots.get_mut(session_id).ok_or_else(|| {
             RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
         })?;
-        let runtime = slot.runtime.as_mut().ok_or_else(|| {
+        let session_path = slot.session_path.clone();
+        let context_stats = slot.context_stats.clone();
+        let subscriber = slot.subscriber();
+        let runtime = slot.runtime_mut().ok_or_else(|| {
             RuntimeWorkerError::bad_request("session is currently running a turn")
         })?;
 
         let compressed = runtime.auto_compress_now().await.map_err(|error| {
             RuntimeWorkerError::internal(format!("auto compress failed: {error}"))
         })?;
-        runtime.tape().save_jsonl(&slot.session_path).map_err(|error| {
+        runtime.tape().save_jsonl(&session_path).map_err(|error| {
             RuntimeWorkerError::internal(format!("session save failed: {error}"))
         })?;
-        refresh_context_stats_snapshot(&slot.context_stats, runtime);
+        refresh_context_stats_snapshot(&context_stats, runtime);
 
         if compressed {
-            let events = collect_runtime_events(runtime, slot.subscriber)?;
+            let events = collect_runtime_events(runtime, subscriber)?;
             let _ =
                 RuntimeEventProjector::new(&self.config.broadcast_tx, session_id).project(events);
         }
@@ -334,7 +367,7 @@ impl SessionManagerLoop {
             RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
         })?;
 
-        if slot.runtime.is_some() || slot.status == SlotStatus::Running {
+        if slot.runtime().is_some() || slot.status() == SlotStatus::Running {
             return Ok(slot.provider_binding.clone());
         }
 
@@ -390,18 +423,15 @@ impl<'a> SessionSlotFactory<'a> {
         let snapshots = rebuild_session_snapshots_from_tape(runtime.tape());
         let context_stats = runtime.context_stats();
 
-        Ok(SessionSlot {
-            runtime: Some(runtime),
-            subscriber,
+        Ok(SessionSlot::idle(
             session_path,
             provider_binding,
-            history: Arc::new(RwLock::new(snapshots.history)),
-            current_turn: Arc::new(RwLock::new(snapshots.current_turn)),
-            context_stats: Arc::new(RwLock::new(context_stats)),
-            running_turn: None,
-            pending_provider_binding: None,
-            status: SlotStatus::Idle,
-        })
+            Arc::new(RwLock::new(snapshots.history)),
+            Arc::new(RwLock::new(snapshots.current_turn)),
+            Arc::new(RwLock::new(context_stats)),
+            runtime,
+            subscriber,
+        ))
     }
 }
 
@@ -444,6 +474,27 @@ fn choose_provider_for_tape(
             reasoning_effort: None,
         })
         .unwrap_or(ProviderLaunchChoice::Bootstrap)
+}
+
+fn projected_session_model(
+    registry: &ProviderRegistry,
+    slot: &SessionSlot,
+) -> Result<String, RuntimeWorkerError> {
+    if let Some(runtime) = slot.runtime() {
+        return Ok(runtime.model_identity().name.clone());
+    }
+
+    if slot.status() == SlotStatus::Running {
+        return Ok(match &slot.provider_binding {
+            SessionProviderBinding::Bootstrap => "bootstrap".into(),
+            SessionProviderBinding::Provider { model, .. } => model.clone(),
+        });
+    }
+
+    let tape = SessionTape::load_jsonl_or_default(&slot.session_path)
+        .map_err(|error| RuntimeWorkerError::internal(format!("tape load failed: {error}")))?;
+    let selection = choose_provider_for_tape(registry, &tape);
+    Ok(crate::model::model_identity_from_selection(&selection).name)
 }
 
 fn prepare_runtime_sync(

@@ -7,12 +7,12 @@ use tokio::sync::{broadcast, mpsc};
 
 use crate::{
     model::ServerModel,
-    runtime_worker::{CurrentTurnSnapshot, RunningTurnHandle, RuntimeWorkerError},
+    runtime_worker::{CurrentTurnSnapshot, RuntimeWorkerError},
     sse::{SsePayload, TurnStatus},
 };
 
 use super::{
-    CurrentStatusInner, RuntimeReturn, SessionId, SessionManagerConfig, SessionSlot, SlotStatus,
+    CurrentStatusInner, RuntimeReturn, SessionId, SessionManagerConfig, SessionSlot,
     ToolTraceRecorder, next_server_turn_id, now_timestamp_ms, update_current_turn_from_stream,
     update_current_turn_status, write_lock,
 };
@@ -41,21 +41,9 @@ impl<'a> TurnExecutionService<'a> {
             RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
         })?;
 
-        if slot.status == SlotStatus::Running {
-            return Err(RuntimeWorkerError::bad_request(
-                "a turn is already running in this session",
-            ));
-        }
-
-        let runtime = slot
-            .runtime
-            .take()
-            .ok_or_else(|| RuntimeWorkerError::internal("runtime not available"))?;
+        let (runtime, subscriber, running_turn) = slot.begin_turn()?;
         *write_lock(&slot.context_stats) = runtime.context_stats();
-        let subscriber = slot.subscriber;
-        let turn_control = runtime.turn_control();
-        slot.running_turn = Some(RunningTurnHandle { control: turn_control.clone() });
-        slot.status = SlotStatus::Running;
+        let turn_control = running_turn.control.clone();
 
         let _ = self.config.store.update_session_async(session_id.to_string(), None, None).await;
 

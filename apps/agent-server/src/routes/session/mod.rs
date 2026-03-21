@@ -71,6 +71,9 @@ impl SessionSettingsResponse {
 }
 
 mod handlers;
+#[cfg(test)]
+#[path = "../../../tests/routes/session/mod.rs"]
+mod tests;
 
 pub(crate) fn router() -> Router<SharedState> {
     Router::new()

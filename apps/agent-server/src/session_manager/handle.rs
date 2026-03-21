@@ -42,6 +42,10 @@ impl SessionManagerHandle {
         self.request(|reply| SessionCommand::CreateSession { title, reply }).await
     }
 
+    pub async fn list_sessions(&self) -> Result<Vec<SessionRecord>, RuntimeWorkerError> {
+        self.request(|reply| SessionCommand::ListSessions { reply }).await
+    }
+
     pub async fn delete_session(&self, session_id: String) -> Result<(), RuntimeWorkerError> {
         self.request(|reply| SessionCommand::DeleteSession { session_id, reply }).await
     }

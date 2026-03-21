@@ -20,12 +20,9 @@ use crate::routes::common::{
 };
 
 pub(crate) async fn list_sessions(State(state): State<SharedState>) -> JsonResponse {
-    match state.store.list_sessions_async().await {
+    match state.session_manager.list_sessions().await {
         Ok(sessions) => json_response(StatusCode::OK, sessions),
-        Err(error) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": error.to_string() })),
-        ),
+        Err(error) => (error.status, Json(serde_json::json!({ "error": error.message }))),
     }
 }
 
@@ -150,18 +147,14 @@ pub(crate) async fn update_session_settings(
     };
 
     match state.session_manager.update_session_settings(session_id.clone(), binding).await {
-        Ok(info) => {
-            let _ =
-                state.store.update_session_async(session_id, None, Some(info.model.clone())).await;
-            json_response(
-                StatusCode::OK,
-                serde_json::json!({
-                    "name": info.name,
-                    "model": info.model,
-                    "connected": info.connected,
-                }),
-            )
-        }
+        Ok(info) => json_response(
+            StatusCode::OK,
+            serde_json::json!({
+                "name": info.name,
+                "model": info.model,
+                "connected": info.connected,
+            }),
+        ),
         Err(error) => runtime_worker_error_response(error),
     }
 }

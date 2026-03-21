@@ -26,17 +26,170 @@ pub(crate) enum SlotStatus {
     Running,
 }
 
+pub(crate) enum SlotExecutionState {
+    Idle {
+        runtime: AgentRuntime<ServerModel, ToolRegistry>,
+        subscriber: RuntimeSubscriberId,
+    },
+    Running {
+        subscriber: RuntimeSubscriberId,
+        running_turn: RunningTurnHandle,
+        pending_provider_binding: Option<SessionProviderBinding>,
+    },
+    Transitioning,
+}
+
 pub(crate) struct SessionSlot {
-    pub(crate) runtime: Option<AgentRuntime<ServerModel, ToolRegistry>>,
-    pub(crate) subscriber: RuntimeSubscriberId,
     pub(crate) session_path: PathBuf,
     pub(crate) provider_binding: SessionProviderBinding,
     pub(crate) history: Arc<RwLock<Vec<TurnLifecycle>>>,
     pub(crate) current_turn: Arc<RwLock<Option<CurrentTurnSnapshot>>>,
     pub(crate) context_stats: Arc<RwLock<ContextStats>>,
-    pub(crate) running_turn: Option<RunningTurnHandle>,
-    pub(crate) pending_provider_binding: Option<SessionProviderBinding>,
-    pub(crate) status: SlotStatus,
+    pub(crate) execution: SlotExecutionState,
+}
+
+impl SessionSlot {
+    pub(crate) fn idle(
+        session_path: PathBuf,
+        provider_binding: SessionProviderBinding,
+        history: Arc<RwLock<Vec<TurnLifecycle>>>,
+        current_turn: Arc<RwLock<Option<CurrentTurnSnapshot>>>,
+        context_stats: Arc<RwLock<ContextStats>>,
+        runtime: AgentRuntime<ServerModel, ToolRegistry>,
+        subscriber: RuntimeSubscriberId,
+    ) -> Self {
+        Self {
+            session_path,
+            provider_binding,
+            history,
+            current_turn,
+            context_stats,
+            execution: SlotExecutionState::Idle { runtime, subscriber },
+        }
+    }
+
+    pub(crate) fn status(&self) -> SlotStatus {
+        match self.execution {
+            SlotExecutionState::Idle { .. } => SlotStatus::Idle,
+            SlotExecutionState::Running { .. } | SlotExecutionState::Transitioning => {
+                SlotStatus::Running
+            }
+        }
+    }
+
+    pub(crate) fn runtime(&self) -> Option<&AgentRuntime<ServerModel, ToolRegistry>> {
+        match &self.execution {
+            SlotExecutionState::Idle { runtime, .. } => Some(runtime),
+            SlotExecutionState::Running { .. } | SlotExecutionState::Transitioning => None,
+        }
+    }
+
+    pub(crate) fn runtime_mut(&mut self) -> Option<&mut AgentRuntime<ServerModel, ToolRegistry>> {
+        match &mut self.execution {
+            SlotExecutionState::Idle { runtime, .. } => Some(runtime),
+            SlotExecutionState::Running { .. } | SlotExecutionState::Transitioning => None,
+        }
+    }
+
+    pub(crate) fn subscriber(&self) -> RuntimeSubscriberId {
+        match &self.execution {
+            SlotExecutionState::Idle { subscriber, .. }
+            | SlotExecutionState::Running { subscriber, .. } => *subscriber,
+            SlotExecutionState::Transitioning => 0,
+        }
+    }
+
+    pub(crate) fn running_turn(&self) -> Option<&RunningTurnHandle> {
+        match &self.execution {
+            SlotExecutionState::Running { running_turn, .. } => Some(running_turn),
+            SlotExecutionState::Idle { .. } | SlotExecutionState::Transitioning => None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pending_provider_binding(&self) -> Option<&SessionProviderBinding> {
+        match &self.execution {
+            SlotExecutionState::Running { pending_provider_binding, .. } => {
+                pending_provider_binding.as_ref()
+            }
+            SlotExecutionState::Idle { .. } | SlotExecutionState::Transitioning => None,
+        }
+    }
+
+    pub(crate) fn take_pending_provider_binding(&mut self) -> Option<SessionProviderBinding> {
+        match &mut self.execution {
+            SlotExecutionState::Running { pending_provider_binding, .. } => {
+                pending_provider_binding.take()
+            }
+            SlotExecutionState::Idle { .. } | SlotExecutionState::Transitioning => None,
+        }
+    }
+
+    pub(crate) fn replace_pending_provider_binding(
+        &mut self,
+        binding: Option<SessionProviderBinding>,
+    ) -> Result<(), RuntimeWorkerError> {
+        match &mut self.execution {
+            SlotExecutionState::Running { pending_provider_binding, .. } => {
+                *pending_provider_binding = binding;
+                Ok(())
+            }
+            SlotExecutionState::Idle { .. } => {
+                Err(RuntimeWorkerError::bad_request("session is not currently running"))
+            }
+            SlotExecutionState::Transitioning => {
+                Err(RuntimeWorkerError::internal("session state transition in progress"))
+            }
+        }
+    }
+
+    pub(crate) fn begin_turn(
+        &mut self,
+    ) -> Result<
+        (AgentRuntime<ServerModel, ToolRegistry>, RuntimeSubscriberId, RunningTurnHandle),
+        RuntimeWorkerError,
+    > {
+        let state = std::mem::replace(&mut self.execution, SlotExecutionState::Transitioning);
+        match state {
+            SlotExecutionState::Idle { runtime, subscriber } => {
+                let running_turn = RunningTurnHandle { control: runtime.turn_control() };
+                self.execution = SlotExecutionState::Running {
+                    subscriber,
+                    running_turn: running_turn.clone(),
+                    pending_provider_binding: None,
+                };
+                Ok((runtime, subscriber, running_turn))
+            }
+            state @ SlotExecutionState::Running { .. } => {
+                self.execution = state;
+                Err(RuntimeWorkerError::bad_request("a turn is already running in this session"))
+            }
+            SlotExecutionState::Transitioning => {
+                Err(RuntimeWorkerError::internal("session state transition in progress"))
+            }
+        }
+    }
+
+    pub(crate) fn finish_turn(
+        &mut self,
+        runtime: AgentRuntime<ServerModel, ToolRegistry>,
+        subscriber: RuntimeSubscriberId,
+    ) -> Result<(), RuntimeWorkerError> {
+        let state = std::mem::replace(&mut self.execution, SlotExecutionState::Transitioning);
+        match state {
+            SlotExecutionState::Running { .. } => {
+                self.execution = SlotExecutionState::Idle { runtime, subscriber };
+                Ok(())
+            }
+            state @ SlotExecutionState::Idle { .. } => {
+                self.execution = state;
+                Err(RuntimeWorkerError::internal("session turn completed while idle"))
+            }
+            SlotExecutionState::Transitioning => {
+                Err(RuntimeWorkerError::internal("session state transition in progress"))
+            }
+        }
+    }
 }
 
 pub(crate) struct RuntimeReturn {
@@ -46,6 +199,9 @@ pub(crate) struct RuntimeReturn {
 }
 
 pub(crate) enum SessionCommand {
+    ListSessions {
+        reply: oneshot::Sender<Result<Vec<SessionRecord>, RuntimeWorkerError>>,
+    },
     CreateSession {
         title: Option<String>,
         reply: oneshot::Sender<Result<SessionRecord, RuntimeWorkerError>>,

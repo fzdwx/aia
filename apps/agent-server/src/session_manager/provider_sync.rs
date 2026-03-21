@@ -213,37 +213,38 @@ impl<'a> ProviderSyncService<'a> {
             RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
         })?;
 
-        if slot.status == super::SlotStatus::Running {
+        if slot.status() == super::SlotStatus::Running {
             return Err(RuntimeWorkerError::bad_request(
                 "cannot update session settings while a turn is running",
             ));
         }
 
         slot.provider_binding = binding.clone();
+        let session_path = slot.session_path.clone();
+        let context_stats = slot.context_stats.clone();
 
-        match &mut slot.runtime {
+        match slot.runtime_mut() {
             Some(runtime) => {
                 if runtime.tape().latest_provider_binding().as_ref() != Some(&binding) {
                     runtime.tape_mut().bind_provider(binding.clone());
-                    runtime.tape().save_jsonl(&slot.session_path).map_err(|error| {
+                    runtime.tape().save_jsonl(&session_path).map_err(|error| {
                         RuntimeWorkerError::internal(format!("session save failed: {error}"))
                     })?;
                 }
                 RuntimeSyncContext::new(
                     session_id,
-                    &slot.session_path,
+                    &session_path,
                     &self.config.registry,
                     self.config.store.clone(),
                     RuntimeSyncMode::RebindTo(binding),
                 )
                 .apply(runtime)?;
-                refresh_context_stats_snapshot(&slot.context_stats, runtime);
-                slot.pending_provider_binding = None;
+                refresh_context_stats_snapshot(&context_stats, runtime);
                 return Ok(ProviderInfoSnapshot::from_identity(runtime.model_identity()));
             }
             None => {
-                if slot.status == super::SlotStatus::Running {
-                    slot.pending_provider_binding = Some(binding);
+                if slot.status() == super::SlotStatus::Running {
+                    slot.replace_pending_provider_binding(Some(binding))?;
                     return Ok(match &slot.provider_binding {
                         SessionProviderBinding::Bootstrap => ProviderInfoSnapshot {
                             name: "bootstrap".into(),
@@ -270,7 +271,7 @@ impl<'a> ProviderSyncService<'a> {
                         RuntimeWorkerError::internal(format!("session save failed: {error}"))
                     })?;
                 }
-                slot.pending_provider_binding = Some(binding);
+                slot.replace_pending_provider_binding(Some(binding))?;
             }
         }
 
@@ -295,18 +296,19 @@ impl<'a> ProviderSyncService<'a> {
         })?;
 
         for (session_id, slot) in self.slots.iter_mut() {
-            match (&mut slot.runtime, &policy) {
+            let session_path = slot.session_path.clone();
+            let context_stats = slot.context_stats.clone();
+            match (slot.runtime_mut(), &policy) {
                 (Some(runtime), RegistrySyncPolicy::PreserveSessionBindings) => {
                     RuntimeSyncContext::new(
                         session_id,
-                        &slot.session_path,
+                        &session_path,
                         &candidate_registry,
                         self.config.store.clone(),
                         RuntimeSyncMode::PreserveSessionBinding,
                     )
                     .apply(runtime)?;
-                    refresh_context_stats_snapshot(&slot.context_stats, runtime);
-                    slot.pending_provider_binding = None;
+                    refresh_context_stats_snapshot(&context_stats, runtime);
                 }
                 (
                     Some(runtime),
@@ -322,14 +324,13 @@ impl<'a> ProviderSyncService<'a> {
                     };
                     RuntimeSyncContext::new(
                         session_id,
-                        &slot.session_path,
+                        &session_path,
                         &candidate_registry,
                         self.config.store.clone(),
                         mode,
                     )
                     .apply(runtime)?;
-                    refresh_context_stats_snapshot(&slot.context_stats, runtime);
-                    slot.pending_provider_binding = None;
+                    refresh_context_stats_snapshot(&context_stats, runtime);
                 }
                 (
                     None,
@@ -341,12 +342,13 @@ impl<'a> ProviderSyncService<'a> {
                     let tape = SessionTape::load_jsonl_or_default(&slot.session_path).map_err(
                         |error| RuntimeWorkerError::internal(format!("tape load failed: {error}")),
                     )?;
-                    slot.pending_provider_binding =
+                    slot.replace_pending_provider_binding(
                         if tape_follows_active_provider(&tape, previous_registry) {
                             Some(next_active_binding.clone())
                         } else {
                             None
-                        };
+                        },
+                    )?;
                 }
                 (None, RegistrySyncPolicy::PreserveSessionBindings) => {}
             }
