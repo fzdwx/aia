@@ -18,6 +18,8 @@ export function ModelSelector() {
   const providerList = useChatStore((s) => s.providerList)
   const refreshProviders = useChatStore((s) => s.refreshProviders)
   const sessionSettings = useSessionSettingsStore((s) => s.sessionSettings)
+  const hydrating = useSessionSettingsStore((s) => s.hydrating)
+  const updating = useSessionSettingsStore((s) => s.updating)
   const switchModel = useSessionSettingsStore((s) => s.switchModel)
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -26,7 +28,9 @@ export function ModelSelector() {
   const activeModelId = sessionSettings?.model
   const activeProvider = providerList.find((p) => p.name === activeProviderName)
   const activeModel = activeProvider?.models.find((m) => m.id === activeModelId)
-  const displayLabel = activeModel?.display_name ?? activeModelId ?? "no model"
+  const displayLabel = hydrating
+    ? "loading model..."
+    : activeModel?.display_name ?? activeModelId ?? "no model"
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -47,6 +51,7 @@ export function ModelSelector() {
       <Select
         open={open}
         onOpenChange={setOpen}
+        disabled={hydrating || updating}
         value={activeProviderName && activeModelId ? `${activeProviderName}::${activeModelId}` : null}
         onValueChange={(value) => {
           if (!value) return
@@ -59,11 +64,11 @@ export function ModelSelector() {
       >
         <SelectTrigger
           size="sm"
-          className="h-7 max-w-[220px] border-0 bg-transparent px-1.5 py-0 text-[11px] text-muted-foreground shadow-none hover:bg-accent/50 hover:text-foreground/80"
+          className="h-7 max-w-[220px] border-0 bg-transparent px-1.5 py-0 text-[11px] text-muted-foreground shadow-none hover:bg-accent/50 hover:text-foreground/80 disabled:opacity-50"
         >
           <SelectValue>{displayLabel}</SelectValue>
         </SelectTrigger>
-        <SelectContent align="start" className="min-w-[220px]">
+        <SelectContent align="start" alignItemWithTrigger={false} className="min-w-[220px]">
           {providerList.map((provider) => (
             <SelectGroup key={provider.name}>
               <SelectLabel className="px-2.5 pt-2 pb-1 text-[10px] font-semibold tracking-wider text-muted-foreground/50 uppercase">

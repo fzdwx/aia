@@ -1,5 +1,17 @@
 # 演进日志
 
+## 2026-03-21 Session 100
+
+**Diagnosis**：上一轮已经把 session 级模型/思考等级拆到独立 `session-settings-store`，但输入区控件仍然隐式依赖异步 hydrate 何时完成：切换 session 时模型/思考等级可能短暂显示旧值，settings 请求失败也没有显式 UI 反馈。这正好对应上一轮“下一步优先考虑把 current model / session setting loading/disabled 态显式投影到输入区”的方向。
+**Decision**：不再把 loading/error 继续藏在 store 内部，而是把 session settings 的 `hydrating`、`updating`、`error` 明确投影到输入区控件：模型选择器与思考等级选择器在 hydrate/update 期间进入 disabled/loading 态；settings 读取或更新失败时，输入区顶部直接显示错误文案。顺手把上一轮尚未提交的两个 `Select` 弹层空白修复一起并入，统一使用 `alignItemWithTrigger={false}`。
+**Changes**：
+- `apps/web/src/stores/session-settings-store.ts`、`apps/web/src/stores/session-settings-store.test.ts`：新增 `updating` / `error` 状态；hydrate 与 update 失败会保留明确错误消息；补充失败态回归测试。
+- `apps/web/src/components/{chat-input.tsx,model-selector.tsx}`：输入区顶部控件显式读取 session settings 的 loading/disabled/error 状态；思考等级选择器在忙碌时显示 `Thinking: Loading...`；模型选择器同样在 hydrate/update 期间 disabled；两个 `SelectContent` 都显式设置 `alignItemWithTrigger={false}`，避免首次展开出现大块空白。
+- `docs/{status.md,evolution-log.md}`：同步记录输入区 session settings loading/error 收口。
+**Verification**：`just web-typecheck`、`just web-test`。
+**Commit**：`45e38e8 feat(web): surface session settings state in composer`。
+**Next direction**：如果继续打磨输入区体验，下一步优先考虑把 session settings 的 optimistic update / rollback 语义也做得更明确，避免网络慢时仍只能完全阻塞控件交互。
+
 ## 2026-03-21 Session 99
 
 **Diagnosis**：上一轮虽然已经把模型与思考等级改成 session 级设置，但实现仍把这块状态直接塞在 `chat-store` 里，导致聊天流式状态、历史分页、SSE 恢复、session 设置更新都混在同一 store。与此同时，输入框里的思考等级控件还没有按模型能力 gating，等级集合也没对齐用户指定的 `minimal|low|medium|high|xhigh`，样式还是原生 `select`，和现有模型选择器不一致。

@@ -47,10 +47,14 @@ export function ChatInput() {
   const providerList = useChatStore((s) => s.providerList)
   const refreshProviders = useChatStore((s) => s.refreshProviders)
   const sessionSettings = useSessionSettingsStore((s) => s.sessionSettings)
+  const sessionSettingsHydrating = useSessionSettingsStore((s) => s.hydrating)
+  const sessionSettingsUpdating = useSessionSettingsStore((s) => s.updating)
+  const sessionSettingsError = useSessionSettingsStore((s) => s.error)
   const supportsReasoning = useSessionSettingsStore((s) =>
     s.supportsReasoning(providerList)
   )
   const setReasoningEffort = useSessionSettingsStore((s) => s.setReasoningEffort)
+  const switchModel = useSessionSettingsStore((s) => s.switchModel)
   const disabled = chatState === "active"
 
   const [value, setValue] = useState("")
@@ -58,6 +62,7 @@ export function ChatInput() {
 
   const canSend = value.trim().length > 0 && !disabled
   const reasoningValue = sessionSettings?.reasoning_effort ?? "medium"
+  const settingsBusy = sessionSettingsHydrating || sessionSettingsUpdating
 
   function handleSend() {
     if (!canSend) return
@@ -83,6 +88,7 @@ export function ChatInput() {
           {supportsReasoning && (
             <Select
               value={reasoningValue}
+              disabled={settingsBusy}
               onValueChange={(next) => {
                 if (!next) return
                 void setReasoningEffort(providerList, next as ThinkingLevel)
@@ -94,11 +100,15 @@ export function ChatInput() {
             >
               <SelectTrigger
                 size="sm"
-                className="h-7 border-0 bg-transparent px-1.5 py-0 text-[11px] text-muted-foreground shadow-none hover:bg-accent/50 hover:text-foreground/80"
+                className="h-7 border-0 bg-transparent px-1.5 py-0 text-[11px] text-muted-foreground shadow-none hover:bg-accent/50 hover:text-foreground/80 disabled:opacity-50"
               >
-                <SelectValue>{`Thinking: ${THINKING_OPTIONS.find((item) => item.value === reasoningValue)?.label ?? "Medium"}`}</SelectValue>
+                <SelectValue>
+                  {settingsBusy
+                    ? "Thinking: Loading..."
+                    : `Thinking: ${THINKING_OPTIONS.find((item) => item.value === reasoningValue)?.label ?? "Medium"}`}
+                </SelectValue>
               </SelectTrigger>
-              <SelectContent align="start">
+              <SelectContent align="start" alignItemWithTrigger={false}>
                 {THINKING_OPTIONS.map((option) => (
                   <SelectItem key={option.value} value={option.value}>
                     {option.label}
@@ -108,6 +118,11 @@ export function ChatInput() {
             </Select>
           )}
         </div>
+        {sessionSettingsError && (
+          <div className="mb-2 text-[11px] text-destructive/80">
+            {sessionSettingsError}
+          </div>
+        )}
         <div className="flex items-end gap-3 rounded-xl border border-border/50 bg-card px-4 py-3">
           <textarea
             ref={textareaRef}

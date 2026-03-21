@@ -114,4 +114,45 @@ describe("session settings store", () => {
       reasoning_effort: null,
     })
   })
+
+  test("hydrateForSession surfaces loading failure", async () => {
+    globalThis.fetch = (async () =>
+      new Response(null, { status: 500 })) as FetchMock
+
+    await useSessionSettingsStore.getState().hydrateForSession("session-1")
+
+    expect(useSessionSettingsStore.getState().hydrating).toBe(false)
+    expect(useSessionSettingsStore.getState().error).toContain(
+      "GET /api/session/settings failed"
+    )
+  })
+
+  test("switchModel resets updating flag after request failure", async () => {
+    globalThis.fetch = (async () =>
+      new Response(null, { status: 500 })) as FetchMock
+
+    useSessionSettingsStore.setState({
+      activeSessionId: "session-1",
+      sessionSettings: {
+        provider: "openai",
+        model: "gpt-5",
+        protocol: "openai-responses",
+        reasoning_effort: "high",
+      },
+      hydrating: false,
+      updating: false,
+      error: null,
+    })
+
+    await expect(
+      useSessionSettingsStore
+        .getState()
+        .switchModel(providerList, "openai", "gpt-5", "xhigh")
+    ).rejects.toThrow()
+
+    expect(useSessionSettingsStore.getState().updating).toBe(false)
+    expect(useSessionSettingsStore.getState().error).toContain(
+      "PUT /api/session/settings failed"
+    )
+  })
 })

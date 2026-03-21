@@ -28,6 +28,8 @@ type SessionSettingsStore = {
   activeSessionId: string | null
   sessionSettings: SessionSettings | null
   hydrating: boolean
+  updating: boolean
+  error: string | null
   setActiveSessionId: (sessionId: string | null) => void
   hydrateForSession: (sessionId: string) => Promise<void>
   clear: () => void
@@ -53,22 +55,35 @@ export const useSessionSettingsStore = create<SessionSettingsStore>((set, get) =
   activeSessionId: null,
   sessionSettings: null,
   hydrating: false,
+  updating: false,
+  error: null,
 
   setActiveSessionId: (activeSessionId) => set({ activeSessionId }),
 
   hydrateForSession: async (sessionId: string) => {
-    set({ activeSessionId: sessionId, hydrating: true })
+    set({ activeSessionId: sessionId, hydrating: true, error: null })
     try {
       const sessionSettings = await fetchSessionSettings(sessionId)
       if (get().activeSessionId !== sessionId) return
       set({ sessionSettings, hydrating: false })
-    } catch {
+    } catch (error) {
       if (get().activeSessionId !== sessionId) return
-      set({ hydrating: false })
+      set({
+        hydrating: false,
+        error:
+          error instanceof Error ? error.message : "Failed to load session settings",
+      })
     }
   },
 
-  clear: () => set({ activeSessionId: null, sessionSettings: null, hydrating: false }),
+  clear: () =>
+    set({
+      activeSessionId: null,
+      sessionSettings: null,
+      hydrating: false,
+      updating: false,
+      error: null,
+    }),
 
   supportsReasoning: (providerList) => {
     const match = findProviderModel(providerList, get().sessionSettings)
@@ -94,23 +109,34 @@ export const useSessionSettingsStore = create<SessionSettingsStore>((set, get) =
       ? reasoningEffort ?? model.reasoning_effort ?? null
       : null
 
-    const info = await apiUpdateSessionSettings({
-      session_id: activeSessionId,
-      provider: providerName,
-      model: modelId,
-      reasoning_effort: nextReasoningEffort,
-    })
-
-    set({
-      sessionSettings: {
+    set({ updating: true, error: null })
+    try {
+      const info = await apiUpdateSessionSettings({
+        session_id: activeSessionId,
         provider: providerName,
         model: modelId,
-        protocol: provider.kind,
         reasoning_effort: nextReasoningEffort,
-      },
-    })
+      })
 
-    return info
+      set({
+        updating: false,
+        sessionSettings: {
+          provider: providerName,
+          model: modelId,
+          protocol: provider.kind,
+          reasoning_effort: nextReasoningEffort,
+        },
+      })
+
+      return info
+    } catch (error) {
+      set({
+        updating: false,
+        error:
+          error instanceof Error ? error.message : "Failed to update session settings",
+      })
+      throw error
+    }
   },
 
   setReasoningEffort: async (providerList, reasoningEffort) => {
