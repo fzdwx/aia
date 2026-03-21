@@ -9,6 +9,8 @@ pub enum SessionProviderBinding {
         base_url: String,
         #[serde(default = "default_provider_protocol")]
         protocol: String,
+        #[serde(default)]
+        reasoning_effort: Option<String>,
     },
 }
 

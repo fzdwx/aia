@@ -5,14 +5,15 @@ import { useChatStore } from "@/stores/chat-store"
 
 export function ModelSelector() {
   const providerList = useChatStore((s) => s.providerList)
+  const sessionSettings = useChatStore((s) => s.sessionSettings)
   const switchModel = useChatStore((s) => s.switchModel)
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
-  const activeProvider = providerList.find((p) => p.active)
-  const activeModelId = activeProvider?.active_model
+  const activeProviderName = sessionSettings?.provider
+  const activeModelId = sessionSettings?.model
+  const activeProvider = providerList.find((p) => p.name === activeProviderName)
 
-  // Display label: model display_name or model id
   const activeModel = activeProvider?.models.find((m) => m.id === activeModelId)
   const displayLabel = activeModel?.display_name ?? activeModelId ?? "no model"
 
@@ -47,19 +48,21 @@ export function ModelSelector() {
         <div className="absolute bottom-full left-0 z-50 mb-1 min-w-[220px] rounded-lg border border-border/50 bg-popover p-1 shadow-lg">
           {providerList.map((p) => (
             <div key={p.name}>
-              {/* Provider group header */}
               <div className="px-2.5 pt-2 pb-1 text-[10px] font-semibold tracking-wider text-muted-foreground/50 uppercase">
                 {p.name}
               </div>
-              {/* Models under this provider */}
               {p.models.map((m) => {
-                const isActive = p.active && m.id === activeModelId
+                const isActive = p.name === activeProviderName && m.id === activeModelId
+                const reasoningEffort =
+                  sessionSettings?.provider === p.name && sessionSettings?.model === m.id
+                    ? sessionSettings.reasoning_effort
+                    : m.reasoning_effort
                 return (
                   <button
                     key={`${p.name}-${m.id}`}
                     type="button"
                     onClick={() => {
-                      switchModel(p.name, m.id)
+                      switchModel(p.name, m.id, reasoningEffort ?? null)
                       setOpen(false)
                     }}
                     className={cn(

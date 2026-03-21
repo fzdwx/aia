@@ -19,16 +19,26 @@ function ContextPressure() {
   return <span className={cn("tabular-nums", color)}>{pct}%</span>
 }
 
+const REASONING_OPTIONS = [
+  { value: null, label: "Auto" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+] as const
+
 export function ChatInput() {
   const submitTurn = useChatStore((s) => s.submitTurn)
   const cancelTurn = useChatStore((s) => s.cancelTurn)
   const chatState = useChatStore((s) => s.chatState)
+  const sessionSettings = useChatStore((s) => s.sessionSettings)
+  const setReasoningEffort = useChatStore((s) => s.setReasoningEffort)
   const disabled = chatState === "active"
 
   const [value, setValue] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const canSend = value.trim().length > 0 && !disabled
+  const reasoningValue = sessionSettings?.reasoning_effort ?? ""
 
   function handleSend() {
     if (!canSend) return
@@ -46,11 +56,29 @@ export function ChatInput() {
 
   return (
     <div className="relative shrink-0 border-t border-border/30 px-4 pt-3 pb-4">
-      {/* Fade gradient above input */}
       <div className="pointer-events-none absolute -top-10 right-0 left-0 h-10 bg-gradient-to-t from-background to-transparent" />
 
       <div className="mx-auto max-w-[720px]">
-        <ModelSelector />
+        <div className="mb-1.5 flex items-center justify-between gap-3">
+          <ModelSelector />
+          <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+            <span>Thinking</span>
+            <select
+              value={reasoningValue}
+              onChange={(e) => {
+                const next = e.target.value || null
+                setReasoningEffort(next)
+              }}
+              className="rounded-md border border-border/50 bg-card px-2 py-1 text-[11px] text-foreground outline-none"
+            >
+              {REASONING_OPTIONS.map((option) => (
+                <option key={option.label} value={option.value ?? ""}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
         <div className="flex items-end gap-3 rounded-xl border border-border/50 bg-card px-4 py-3">
           <textarea
             ref={textareaRef}

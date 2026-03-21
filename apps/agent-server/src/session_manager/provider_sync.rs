@@ -223,6 +223,58 @@ impl<'a> ProviderSyncService<'a> {
         )
     }
 
+    pub(super) fn update_session_provider_binding(
+        &mut self,
+        session_id: &str,
+        binding: SessionProviderBinding,
+    ) -> Result<ProviderInfoSnapshot, RuntimeWorkerError> {
+        let slot = self.slots.get_mut(session_id).ok_or_else(|| {
+            RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
+        })?;
+
+        match &mut slot.runtime {
+            Some(runtime) => {
+                if runtime.tape().latest_provider_binding().as_ref() != Some(&binding) {
+                    runtime.tape_mut().bind_provider(binding.clone());
+                    runtime.tape().save_jsonl(&slot.session_path).map_err(|error| {
+                        RuntimeWorkerError::internal(format!("session save failed: {error}"))
+                    })?;
+                }
+                RuntimeSyncContext::new(
+                    session_id,
+                    &slot.session_path,
+                    &self.config.registry,
+                    self.config.store.clone(),
+                    RuntimeSyncMode::RebindTo(binding),
+                )
+                .apply(runtime)?;
+                refresh_context_stats_snapshot(&slot.context_stats, runtime);
+                slot.pending_provider_binding = None;
+                return Ok(ProviderInfoSnapshot::from_identity(runtime.model_identity()));
+            }
+            None => {
+                let mut tape = SessionTape::load_jsonl_or_default(&slot.session_path).map_err(
+                    |error| RuntimeWorkerError::internal(format!("tape load failed: {error}")),
+                )?;
+                if tape.latest_provider_binding().as_ref() != Some(&binding) {
+                    tape.bind_provider(binding.clone());
+                    tape.save_jsonl(&slot.session_path).map_err(|error| {
+                        RuntimeWorkerError::internal(format!("session save failed: {error}"))
+                    })?;
+                }
+                slot.pending_provider_binding = Some(binding);
+            }
+        }
+
+        let tape = SessionTape::load_jsonl_or_default(&slot.session_path).map_err(|error| {
+            RuntimeWorkerError::internal(format!("tape load failed: {error}"))
+        })?;
+        let selection = choose_provider_for_tape(&self.config.registry, &tape);
+        Ok(ProviderInfoSnapshot::from_identity(&crate::model::model_identity_from_selection(
+            &selection,
+        )))
+    }
+
     fn sync_registry(
         &mut self,
         candidate_registry: ProviderRegistry,
@@ -304,7 +356,7 @@ impl<'a> ProviderSyncService<'a> {
 fn tape_follows_active_provider(tape: &SessionTape, registry: &ProviderRegistry) -> bool {
     match (choose_provider_for_tape(registry, tape), registry.active_provider()) {
         (ProviderLaunchChoice::Bootstrap, None) => true,
-        (ProviderLaunchChoice::OpenAi(profile), Some(active)) => profile.name == active.name,
+        (ProviderLaunchChoice::OpenAi { profile, .. }, Some(active)) => profile.name == active.name,
         _ => false,
     }
 }

@@ -81,7 +81,10 @@ fn server_model_marks_cancelled_openai_errors_as_cancelled() {
         active_model: Some("gpt-5.4".to_string()),
     };
 
-    let (_, model) = build_model_from_selection(ProviderLaunchChoice::OpenAi(profile), None)
+    let (_, model) = build_model_from_selection(
+        ProviderLaunchChoice::OpenAi { profile, reasoning_effort: None },
+        None,
+    )
         .expect("model should build");
 
     let abort = AbortSignal::new();
@@ -154,9 +157,11 @@ fn responses_model_call_writes_llm_trace_record() {
         active_model: Some("gpt-5.4".to_string()),
     };
 
-    let (identity, model) =
-        build_model_from_selection(ProviderLaunchChoice::OpenAi(profile), Some(store.clone()))
-            .expect("model should build");
+    let (identity, model) = build_model_from_selection(
+        ProviderLaunchChoice::OpenAi { profile, reasoning_effort: None },
+        Some(store.clone()),
+    )
+    .expect("model should build");
 
     let completion = run_async(model.complete_streaming(
         CompletionRequest {
@@ -246,9 +251,11 @@ fn responses_http_502_writes_failed_trace_record() {
         active_model: Some("gpt-5.4".to_string()),
     };
 
-    let (_identity, model) =
-        build_model_from_selection(ProviderLaunchChoice::OpenAi(profile), Some(store.clone()))
-            .expect("model should build");
+    let (_identity, model) = build_model_from_selection(
+        ProviderLaunchChoice::OpenAi { profile, reasoning_effort: None },
+        Some(store.clone()),
+    )
+    .expect("model should build");
 
     let error = complete_model(
         &model,

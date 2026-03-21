@@ -6,6 +6,7 @@ import type {
   ModelConfig,
   ProviderInfo,
   ProviderListItem,
+  SessionSettings,
   SessionListItem,
   SseEvent,
   SupportedChannelDefinition,
@@ -89,6 +90,32 @@ export async function fetchCurrentTurn(
   if (!res.ok)
     throw new Error(`GET /api/session/current-turn failed: ${res.status}`)
   return (await res.json()) as Promise<CurrentTurnSnapshot | null>
+}
+
+export async function fetchSessionSettings(
+  sessionId?: string
+): Promise<SessionSettings> {
+  const params = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ""
+  const res = await fetch(`/api/session/settings${params}`)
+  if (!res.ok)
+    throw new Error(`GET /api/session/settings failed: ${res.status}`)
+  return (await res.json()) as Promise<SessionSettings>
+}
+
+export async function updateSessionSettings(body: {
+  session_id?: string
+  provider: string
+  model: string
+  reasoning_effort?: string | null
+}): Promise<ProviderInfo> {
+  const res = await fetch("/api/session/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok)
+    throw new Error(`PUT /api/session/settings failed: ${res.status}`)
+  return res.json() as Promise<ProviderInfo>
 }
 
 export async function submitTurn(

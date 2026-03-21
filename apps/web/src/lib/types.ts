@@ -250,6 +250,13 @@ export type ProviderListItem = {
   active: boolean
 }
 
+export type SessionSettings = {
+  provider: string
+  model: string
+  protocol: string
+  reasoning_effort: string | null
+}
+
 export type ChannelTransport = string
 
 export type SupportedChannelDefinition = {

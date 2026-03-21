@@ -12,6 +12,7 @@
 - 提供桌面应用支持
 - 支持 Windows、Linux、macOS
 - 当前以 `apps/web` + `apps/agent-server` 作为主交互承接形态
+- 前端输入框应支持设置思考等级，并且模型/思考等级设置默认按 session 维度保存，而不是做成跨会话全局开关
 - `apps/agent-server` 除 Web 后端模式外，也应支持少量直接 CLI 驱动入口；至少要能在不打开 Web 的情况下把内嵌 `docs/self.md` 作为 system prompt 注入同一 runtime 主链上的自我进化对话，并允许启动时附加用户想要优先处理的任务
 - 作为其他客户端可驱动的控制面时，server bootstrap 还应允许嵌入方覆写共享请求超时等应用级默认值，而不是把这类客户端约束硬编码在 app 壳内部
 - HTTP server 的监听地址应保持为 run 阶段的显式配置，而不是混进 bootstrap 状态装配；CLI 和嵌入方都应能覆写默认 bind 地址而不必自行重拼 listener

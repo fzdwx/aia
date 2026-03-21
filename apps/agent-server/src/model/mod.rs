@@ -22,7 +22,10 @@ use trace::ModelTraceRecorder;
 #[derive(Clone, Debug, PartialEq)]
 pub enum ProviderLaunchChoice {
     Bootstrap,
-    OpenAi(ProviderProfile),
+    OpenAi {
+        profile: ProviderProfile,
+        reasoning_effort: Option<String>,
+    },
 }
 
 pub struct ServerModel {
@@ -148,7 +151,9 @@ pub fn build_model_from_selection(
             ModelIdentity::new("local", "bootstrap", ModelDisposition::Balanced),
             ServerModel::new(ServerModelInner::Bootstrap(BootstrapModel), trace_store),
         )),
-        ProviderLaunchChoice::OpenAi(profile) => build_openai_model(profile, trace_store),
+        ProviderLaunchChoice::OpenAi { profile, reasoning_effort } => {
+            build_openai_model(profile, reasoning_effort, trace_store)
+        }
     }
 }
 
@@ -157,15 +162,18 @@ pub fn model_identity_from_selection(selection: &ProviderLaunchChoice) -> ModelI
         ProviderLaunchChoice::Bootstrap => {
             ModelIdentity::new("local", "bootstrap", ModelDisposition::Balanced)
         }
-        ProviderLaunchChoice::OpenAi(profile) => build_model_identity(profile),
+        ProviderLaunchChoice::OpenAi { profile, reasoning_effort } => {
+            build_model_identity(profile, reasoning_effort.clone())
+        }
     }
 }
 
 fn build_openai_model(
     profile: ProviderProfile,
+    reasoning_effort: Option<String>,
     trace_store: Option<Arc<AiaStore>>,
 ) -> Result<(ModelIdentity, ServerModel), ServerSetupError> {
-    let identity = build_model_identity(&profile);
+    let identity = build_model_identity(&profile, reasoning_effort);
     let model_id = identity.name.clone();
 
     match profile.kind {
@@ -188,13 +196,16 @@ fn build_openai_model(
     }
 }
 
-fn build_model_identity(profile: &ProviderProfile) -> ModelIdentity {
+fn build_model_identity(
+    profile: &ProviderProfile,
+    reasoning_effort: Option<String>,
+) -> ModelIdentity {
     let model_config = profile.active_model_config();
     let model_id = model_config
         .map(|model| model.id.clone())
         .or_else(|| profile.active_model.clone())
         .unwrap_or_default();
-    let reasoning_effort = model_config.and_then(|model| model.reasoning_effort.clone());
+    let reasoning_effort = reasoning_effort.or_else(|| model_config.and_then(|model| model.reasoning_effort.clone()));
     let limit = model_config.and_then(|model| {
         model
             .limit

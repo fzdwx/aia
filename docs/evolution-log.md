@@ -1,5 +1,18 @@
 # 演进日志
 
+## 2026-03-21 Session 98
+
+**Diagnosis**：当前 Web 聊天区的模型选择仍直接调用 `/api/providers/switch`，实质是在修改全局 active provider/model；与此同时，输入框还没有暴露思考等级控制。用户已经明确要求“前端输入框支持设置思考等级，然后模型设置是跟 session 挂钩的不是全局的”，而现有实现会让不同 session 互相污染模型设置，属于高杠杆的交互/可靠性问题。
+**Decision**：不再继续复用全局 provider switch 语义承载聊天区模型选择，而是新增 session 级 `/api/session/settings` 控制面，并把 provider/model/reasoning_effort 一起写进 session tape 的 `provider_binding` 事件。前端聊天输入区新增思考等级 selector，并让模型选择器和思考等级都绑定当前 session 设置；provider 全局 active 项继续只服务默认启动选择，不再作为聊天区会话内切换的真源。
+**Changes**：
+- `crates/session-tape/src/binding.rs`：扩展 `SessionProviderBinding::Provider`，显式承接 `reasoning_effort`，保证会话级模型设置仍遵守 append-only tape 语义。
+- `apps/agent-server/src/{model/mod.rs,session_manager/{mod.rs,handle.rs,types.rs,provider_sync.rs},routes/session/{mod.rs,handlers.rs},bootstrap/mod.rs}`：新增 `/api/session/settings` 读写接口，session manager 可读取/更新某个 session 的 provider binding，并在运行中即时重绑 runtime；`ProviderLaunchChoice` 现显式携带 session 级 reasoning override。
+- `apps/web/src/{lib/types.ts,lib/api.ts,stores/chat-store.ts,stores/chat-store.test.ts,components/{chat-input.tsx,model-selector.tsx}}`：新增 `SessionSettings` 前端类型与 API；聊天 store 在切换 session 时拉取 settings，模型切换改走 session settings 更新；输入框新增思考等级下拉，模型选择器改为显示/更新当前 session 的模型。
+- `docs/{status.md,architecture.md,requirements.md,evolution-log.md}`：同步记录“模型/思考等级现为 session 级设置”的当前行为与边界。
+**Verification**：`cargo test -p agent-server`、`just web-typecheck`、`just web-test`。
+**Commit**：`d4fcee6 feat(session): scope model settings to session`。
+**Next direction**：如果继续沿 session 驱动面收口，下一步优先评估是否要把 session 标题之外的更多会话元信息也统一归到显式 session settings/profile 控制面，而不是继续把零散设置分散在不同 endpoint 和 store 字段里。
+
 ## 2026-03-21 Session 97
 
 **Diagnosis**：`agent-runtime` 里仍保留了一层“相同工具调用检测 / 自动跳过”机制：运行时会基于 `tool_name + arguments` 记录 `seen_tool_calls`，并在后续相同调用出现时写回一条“重复工具调用已跳过”的工具结果。这会把 runtime 自己的去重策略混进模型-工具对话语义里，也和当前用户要求直接冲突。

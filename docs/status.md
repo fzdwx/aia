@@ -11,6 +11,7 @@
 - 最新后端进展：`agent-store` 已承接 channel 映射/幂等表与配置档案持久化，`apps/agent-server` 已补齐 `/api/channels` 控制面，并把飞书 channel 从过渡 webhook 入口收口为正式长连接 worker。当前长连接会按 profile 启停与重连，收到事件后先快速确认，再异步走既有 `session_manager.submit_turn(...)` 主链与飞书回复链路。
 - 最新驱动接口收口：`agent-prompts` 现已补上共享 `SystemPromptConfig + build_system_prompt(...)` 组合入口，`agent-runtime` 新增 `RuntimeHooks`，把 `before_agent_start`、`input`、`before_provider_request`、`tool_call`、`tool_result`、`turn_start/turn_end` 这组真正会影响外部客户端驱动面的生命周期钩子收口为稳定接口；`apps/agent-server` 的 `SessionManagerConfig` 也已直接承接这两类共享配置，让 session manager 不再把 system prompt 写死在 app 壳内部。
 - 最新 bootstrap 收口：`apps/agent-server` 现已补成 `lib + bin` 双入口，外部嵌入方不再需要手写 `SessionManagerConfig` 或复制启动装配，而是可以直接走 `bootstrap_state_with_options(ServerBootstrapOptions)` 把 `registry_path/workspace_root/user_agent/request_timeout/system_prompt/runtime_hooks` 一次性注入到共享 control-plane façade；与此同时，HTTP 监听地址也已从 bootstrap 状态装配中分离为独立 `ServerRunOptions`，嵌入方或 CLI 可在 `run_server_with_options(...)` / `--bind <addr>` 阶段覆写，而不必回退到更低层自己手拼 listener。
+- 最新会话设置收口：Web 输入框现已支持直接设置当前 session 的思考等级（`Auto/Low/Medium/High`），而模型选择也已从“切全局 active provider/model”改为写入当前 session 的 provider binding。`apps/agent-server` 新增 `/api/session/settings` 读写接口，并把 `reasoning_effort` 和 provider/model 一起落到 session tape 的 `provider_binding` 事件中；因此不同 session 现在可拥有各自独立的模型与思考等级，不再互相污染。
 - 最新 channel 持久化收口：`channel-registry` crate 已从工作区移除；`ChannelProfile` 现统一由 `channel-bridge::ChannelProfileRegistry` 作为 store façade 管理，`apps/agent-server` 启动时直接从 `agent-store` 的 `channel_profiles` 表加载。`/api/channels` 的增删改也已先写 SQLite 再更新内存快照，避免 store 失败后 runtime 继续拿到脏 profile 状态。
 - 最新后端架构收口：`apps/agent-server/src/routes/channel` 等资源路由已统一采用目录模块；局部请求/响应类型直接并回各自 `mod.rs`，配置脱敏/合并、持久化回滚事务与 handler/tests 继续留在同级子模块，避免继续为只服务单一路由的 DTO 额外挂一个薄文件。
 - 最新宿主桥接收口：`apps/agent-server/src/channel_host` 也已从单文件拆成目录模块；当前由 façade `mod.rs` 暴露稳定装配接口，宿主 trait 实现、SSE→channel 事件映射与运行态装配分别下沉，继续把 `agent-server` 保持在“桥接壳层”而非巨石入口。
@@ -196,6 +197,7 @@
 - 完成 `read` 工具元信息文案纠偏：聊天内工具时间线里，`read` 的 meta 改为显示真实 1-based 行号范围（如 `L121-160`），不再把 `offset` 和 `lines_read` 误显示成含糊区间
 - 完成 Web Markdown renderer 替换：共享 `MarkdownContent` 现改用 `markstream-react`，聊天正文与推理内容不再依赖 `streamdown`；样式入口已同步改为 `markstream-react/index.css` 并补了基础渲染回归测试
 - 完成 Web Markdown 主题与样式收口：共享 Markdown renderer 现在会感知当前 `resolvedTheme` 并把 `isDark` 透传给 `markstream-react`；同时代码块/表格默认边框、阴影与 hover 操作区已重新压到当前聊天 UI 语义，并补了暗色主题回归测试
+- 完成 session 级模型设置：`apps/web` 的模型选择器与输入框思考等级现在都绑定当前 session；`apps/agent-server` 通过 `/api/session/settings` 持久化每个 session 的 provider/model/reasoning_effort，切换 session 时会恢复对应设置
 
 ## 正在进行
 

@@ -8,6 +8,7 @@ use crate::runtime_worker::{
     CreateProviderInput, CurrentTurnSnapshot, ProviderInfoSnapshot, RuntimeWorkerError,
     SwitchProviderInput, UpdateProviderInput,
 };
+use session_tape::SessionProviderBinding;
 
 use super::types::SessionCommand;
 
@@ -93,6 +94,26 @@ impl SessionManagerHandle {
         session_id: String,
     ) -> Result<bool, RuntimeWorkerError> {
         self.request(|reply| SessionCommand::AutoCompressSession { session_id, reply }).await
+    }
+
+    pub async fn get_session_settings(
+        &self,
+        session_id: String,
+    ) -> Result<SessionProviderBinding, RuntimeWorkerError> {
+        self.request(|reply| SessionCommand::GetSessionSettings { session_id, reply }).await
+    }
+
+    pub async fn update_session_settings(
+        &self,
+        session_id: String,
+        provider_binding: SessionProviderBinding,
+    ) -> Result<ProviderInfoSnapshot, RuntimeWorkerError> {
+        self.request(|reply| SessionCommand::UpdateSessionSettings {
+            session_id,
+            provider_binding,
+            reply,
+        })
+        .await
     }
 
     pub async fn create_provider(

@@ -135,6 +135,14 @@ impl SessionManagerLoop {
             SessionCommand::AutoCompressSession { session_id, reply } => {
                 let _ = reply.send(self.auto_compress_session(&session_id).await);
             }
+            SessionCommand::GetSessionSettings { session_id, reply } => {
+                let _ = reply.send(self.get_session_settings(&session_id));
+            }
+            SessionCommand::UpdateSessionSettings { session_id, provider_binding, reply } => {
+                let mut provider_sync = ProviderSyncService::new(&mut self.slots, &mut self.config);
+                let result = provider_sync.update_session_provider_binding(&session_id, provider_binding);
+                let _ = reply.send(result);
+            }
             SessionCommand::CreateProvider { input, reply } => {
                 let mut provider_sync = ProviderSyncService::new(&mut self.slots, &mut self.config);
                 let _ = reply.send(provider_sync.create_provider(input));
@@ -311,6 +319,26 @@ impl SessionManagerLoop {
 
         Ok(compressed)
     }
+
+    fn get_session_settings(
+        &mut self,
+        session_id: &str,
+    ) -> Result<SessionProviderBinding, RuntimeWorkerError> {
+        let slot = self.slots.get(session_id).ok_or_else(|| {
+            RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
+        })?;
+
+        if let Some(runtime) = slot.runtime.as_ref() {
+            return Ok(runtime
+                .tape()
+                .latest_provider_binding()
+                .unwrap_or(SessionProviderBinding::Bootstrap));
+        }
+
+        let tape = SessionTape::load_jsonl_or_default(&slot.session_path)
+            .map_err(|error| RuntimeWorkerError::internal(format!("tape load failed: {error}")))?;
+        Ok(tape.latest_provider_binding().unwrap_or(SessionProviderBinding::Bootstrap))
+    }
 }
 
 struct SessionSlotFactory<'a> {
@@ -378,14 +406,23 @@ fn choose_provider_for_tape(
     if let Some(binding) = tape.latest_provider_binding() {
         match binding {
             SessionProviderBinding::Bootstrap => return ProviderLaunchChoice::Bootstrap,
-            SessionProviderBinding::Provider { name, model, base_url, protocol } => {
+            SessionProviderBinding::Provider {
+                name,
+                model,
+                base_url,
+                protocol,
+                reasoning_effort,
+            } => {
                 if let Some(profile) = registry.providers().iter().find(|provider| {
                     provider.name == name
                         && provider.has_model(&model)
                         && provider.base_url == base_url
                         && provider.kind.protocol_name() == protocol.as_str()
                 }) {
-                    return ProviderLaunchChoice::OpenAi(profile.clone());
+                    return ProviderLaunchChoice::OpenAi {
+                        profile: profile.clone(),
+                        reasoning_effort,
+                    };
                 }
             }
         }
@@ -394,7 +431,10 @@ fn choose_provider_for_tape(
     registry
         .active_provider()
         .cloned()
-        .map(ProviderLaunchChoice::OpenAi)
+        .map(|profile| ProviderLaunchChoice::OpenAi {
+            profile,
+            reasoning_effort: None,
+        })
         .unwrap_or(ProviderLaunchChoice::Bootstrap)
 }
 
@@ -408,7 +448,10 @@ fn prepare_runtime_sync(
     let selection = registry
         .active_provider()
         .cloned()
-        .map(ProviderLaunchChoice::OpenAi)
+        .map(|profile| ProviderLaunchChoice::OpenAi {
+            profile,
+            reasoning_effort: None,
+        })
         .unwrap_or(ProviderLaunchChoice::Bootstrap);
 
     let (identity, model) = build_model_from_selection(selection, trace_store).map_err(
@@ -421,6 +464,7 @@ fn prepare_runtime_sync(
             model: profile.active_model_id().unwrap_or("").to_string(),
             base_url: profile.base_url.clone(),
             protocol: profile.kind.protocol_name().to_string(),
+            reasoning_effort: profile.active_model_config().and_then(|model| model.reasoning_effort.clone()),
         },
         None => SessionProviderBinding::Bootstrap,
     };
@@ -433,7 +477,7 @@ fn prompt_cache_for_selection(
     selection: &ProviderLaunchChoice,
     session_id: &str,
 ) -> Option<PromptCacheConfig> {
-    let ProviderLaunchChoice::OpenAi(profile) = selection else {
+    let ProviderLaunchChoice::OpenAi { profile, .. } = selection else {
         return None;
     };
     let model = profile.active_model_config()?;

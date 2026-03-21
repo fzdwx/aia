@@ -4,10 +4,15 @@ use axum::{
     http::StatusCode,
     response::IntoResponse,
 };
+use provider_registry::ProviderKind;
+use session_tape::SessionProviderBinding;
 
 use crate::state::SharedState;
 
-use super::{AutoCompressRequest, CreateSessionRequest, HandoffRequest, SessionQuery};
+use super::{
+    AutoCompressRequest, CreateSessionRequest, HandoffRequest, SessionQuery,
+    SessionSettingsResponse, UpdateSessionSettingsRequest,
+};
 use crate::routes::common::{
     JsonResponse, json_response, require_session_id, resolve_session_id,
     runtime_worker_error_response, session_resolution_error_response,
@@ -54,6 +59,93 @@ pub(crate) async fn get_session_info(
 
     match state.session_manager.get_session_info(session_id).await {
         Ok(stats) => json_response(StatusCode::OK, stats),
+        Err(error) => runtime_worker_error_response(error),
+    }
+}
+
+pub(crate) async fn get_session_settings(
+    State(state): State<SharedState>,
+    Query(query): Query<SessionQuery>,
+) -> impl IntoResponse {
+    let session_id = match require_session_id(state.as_ref(), query.session_id).await {
+        Ok(session_id) => session_id,
+        Err(response) => return response,
+    };
+
+    match state.session_manager.get_session_settings(session_id).await {
+        Ok(settings) => json_response(StatusCode::OK, SessionSettingsResponse::from_binding(settings)),
+        Err(error) => runtime_worker_error_response(error),
+    }
+}
+
+pub(crate) async fn update_session_settings(
+    State(state): State<SharedState>,
+    Json(body): Json<UpdateSessionSettingsRequest>,
+) -> impl IntoResponse {
+    let session_id = match require_session_id(state.as_ref(), body.session_id).await {
+        Ok(session_id) => session_id,
+        Err(response) => return response,
+    };
+
+    let Some(provider) = body.provider else {
+        return json_response(
+            StatusCode::BAD_REQUEST,
+            serde_json::json!({ "error": "provider is required" }),
+        );
+    };
+    let Some(model) = body.model else {
+        return json_response(
+            StatusCode::BAD_REQUEST,
+            serde_json::json!({ "error": "model is required" }),
+        );
+    };
+
+    let binding = {
+        let registry = crate::session_manager::read_lock(&state.provider_registry_snapshot);
+        let Some(profile) = registry.providers().iter().find(|candidate| candidate.name == provider) else {
+            return json_response(
+                StatusCode::NOT_FOUND,
+                serde_json::json!({ "error": format!("provider 不存在：{provider}") }),
+            );
+        };
+
+        if !profile.has_model(&model) {
+            return json_response(
+                StatusCode::BAD_REQUEST,
+                serde_json::json!({ "error": format!("模型不存在：{model}") }),
+            );
+        }
+
+        let protocol = match profile.kind {
+            ProviderKind::OpenAiResponses => "openai-responses",
+            ProviderKind::OpenAiChatCompletions => "openai-chat-completions",
+        }
+        .to_string();
+
+        SessionProviderBinding::Provider {
+            name: profile.name.clone(),
+            model: model.clone(),
+            base_url: profile.base_url.clone(),
+            protocol,
+            reasoning_effort: body.reasoning_effort,
+        }
+    };
+
+    match state.session_manager.update_session_settings(session_id.clone(), binding).await {
+        Ok(info) => {
+            let _ = state
+                .store
+                .update_session_async(session_id, None, Some(info.model.clone()))
+                .await;
+            json_response(
+                StatusCode::OK,
+                serde_json::json!({
+                    "name": info.name,
+                    "model": info.model,
+                    "connected": info.connected,
+                }),
+            )
+        }
         Err(error) => runtime_worker_error_response(error),
     }
 }

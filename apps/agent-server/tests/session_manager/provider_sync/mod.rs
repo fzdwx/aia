@@ -144,3 +144,43 @@ fn switching_provider_marks_running_session_for_return_sync() {
 
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn session_binding_preserves_reasoning_effort_override() {
+    let root = temp_root("session-binding-reasoning");
+    let mut config = sample_config(&root, sample_registry());
+    let mut slots = HashMap::new();
+    let slot =
+        SessionSlotFactory::new(&config).create("session-1").expect("session slot should build");
+    slots.insert("session-1".to_string(), slot);
+
+    let mut service = ProviderSyncService::new(&mut slots, &mut config);
+    service
+        .update_session_provider_binding(
+            "session-1",
+            SessionProviderBinding::Provider {
+                name: "primary".into(),
+                model: "model-primary".into(),
+                base_url: "https://primary.example.com".into(),
+                protocol: "openai-responses".into(),
+                reasoning_effort: Some("high".into()),
+            },
+        )
+        .expect("session settings update should succeed");
+
+    let binding = slots["session-1"]
+        .runtime
+        .as_ref()
+        .expect("runtime should exist")
+        .tape()
+        .latest_provider_binding();
+    assert!(matches!(
+        binding,
+        Some(SessionProviderBinding::Provider {
+            reasoning_effort: Some(ref effort),
+            ..
+        }) if effort == "high"
+    ));
+
+    let _ = std::fs::remove_dir_all(root);
+}

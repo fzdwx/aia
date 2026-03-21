@@ -213,6 +213,7 @@ README 里真正难的是这些能力：
 - 通过全局 SSE（`EventSource` → `GET /api/events`）消费结构化事件流
 - 消息提交通过 `POST /api/turn` fire-and-forget，响应通过 SSE 返回
 - 以前端全局 store 管理 SSE 连接、流式状态累积与 provider / session 状态刷新
+- 聊天输入区的模型选择与思考等级当前都按 session 维度保存：前端通过 `/api/session/settings` 读取/更新当前 session 的 provider/model/reasoning_effort，而不是直接覆写全局 active provider
 - session 切换采用按 session 的本地 snapshot 缓存：切换时先显示已有快照并后台水合 history/current turn，减少消息区清空造成的闪烁与布局跳动
 - 聊天消息区已做首轮渲染减载：turn 视图按引用 memo，长历史启用轻量窗口化渲染，并按 session 维持独立滚动位置，避免分页加载或切换会话时频繁强制跳到底部
 - 聊天消息区窗口化已进一步升级为动态高度测量版；session 切换时明确回到底部看最新消息，而同一 session 内的历史分页仍保持当前阅读位置稳定
@@ -235,6 +236,7 @@ README 里真正难的是这些能力：
 - 启动时从 `.aia/providers.json`、`.aia/session.jsonl`、`.aia/store.sqlite3` 恢复本地状态
 - 通过后台 runtime worker 独占 `AgentRuntime`、provider registry 与 session 落盘状态
 - HTTP 路由已按 `provider`、`session`、`trace`、`turn` 领域模块拆分，共享错误响应、session 解析与 JSON helper 收口到 `routes::common`，避免 app 壳控制面继续堆在单个超大入口文件里
+- session 控制面现已额外暴露 `/api/session/settings`：当前 session 的 provider/model/reasoning_effort 以 append-only 的 `provider_binding` 事件写入 session tape，运行态切换与会话恢复都复用同一份绑定事实，而不是把“当前模型设置”留在全局 registry 活动项上
 - `routes/provider` 现在也已比照 `routes/channel` 收口为目录模块：根 `mod.rs` 只保留 façade 导出，`dto.rs` 承接 HTTP DTO；真正持有依赖与行为的是在 bootstrap 阶段装配进 `AppState` 的 `ProviderRouteService`，其 handler 入口以关联函数形式暴露给 Axum，避免每次请求再临时构造借用上下文；provider 路由局部所需的纯映射/纯投影 helper 直接内聚在 `handlers.rs`，既避免无状态 helper 过度对象化，也避免为几段小型纯函数继续制造碎片化子文件
 - `session_manager` 已进一步按职责拆成子模块：命令发送 handle、共享 slot/command 类型、query/cancel 读取、current-turn 流式投影、tool trace 持久化、provider 注册表同步、turn worker/SSE 投影与测试辅助分别独立；根模块本身也已收口为 `SessionManagerLoop` 与 `SessionSlotFactory` 这类显式职责对象，provider/query/turn/tool-trace 都由各自服务对象承接，避免 provider 重绑与 turn 执行细节长期滞留在 façade 根模块
 - `SessionManagerConfig` 现在直接承接共享 `SystemPromptConfig` 与 `RuntimeHooks`：server 默认 system prompt 仍由 app 壳补上 aia 专属 persona 与 context contract，但覆写、附加约束和 runtime hook 注册都不再写死在 `session_manager` 内部；正常嵌入场景应优先走更高层的 `ServerBootstrapOptions`，只有 app 壳内部装配才直接接触 `SessionManagerConfig`

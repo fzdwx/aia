@@ -84,6 +84,15 @@ pub(crate) enum SessionCommand {
         session_id: SessionId,
         reply: oneshot::Sender<Result<bool, RuntimeWorkerError>>,
     },
+    GetSessionSettings {
+        session_id: SessionId,
+        reply: oneshot::Sender<Result<SessionProviderBinding, RuntimeWorkerError>>,
+    },
+    UpdateSessionSettings {
+        session_id: SessionId,
+        provider_binding: SessionProviderBinding,
+        reply: oneshot::Sender<Result<ProviderInfoSnapshot, RuntimeWorkerError>>,
+    },
     CreateProvider {
         input: CreateProviderInput,
         reply: oneshot::Sender<Result<(), RuntimeWorkerError>>,
