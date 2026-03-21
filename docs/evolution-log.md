@@ -1,5 +1,18 @@
 # 演进日志
 
+## 2026-03-21 Session 96
+
+**Diagnosis**：虽然前几轮已经把 `openai-adapter` 的流式请求驱动、SSE transcript 解析与协议 payload 分层收口，但 Responses / Chat Completions 两条协议内部仍各自维护一套很相似的 tool-call 流式累积状态：都需要追踪 invocation id、工具名、参数 delta、是否已发出 `tool_call_detected`，只是事件来源字段不同。继续各写一份不仅让实现样板重复，也会让兼容细节（例如 Responses 的 `call_id`、Chat Completions 重复 name delta）更容易漂移。
+**Decision**：不再把工具流式累积细节留在两个协议子模块各自手写，而是新增一个最小共享 `StreamingToolCallAccumulator`，只承接真正共通的状态与 helper：invocation id、tool name、arguments delta、detected 去重，以及最终参数解析；协议模块仍保留各自事件识别逻辑与最终 completion 组装。顺手补一条 Responses 对 `response.output_item.added.item.call_id` 的兼容，以及一条 Chat Completions “重复 name delta 只检测一次”的回归测试。
+**Changes**：
+- `crates/openai-adapter/src/{mapping.rs,lib.rs}`：新增共享 `StreamingToolCallAccumulator` 并导出给协议子模块复用。
+- `crates/openai-adapter/src/{responses/streaming.rs,chat_completions/streaming.rs}`：改用共享累积 helper，删除两边各自重复的 tool-call 状态结构；Responses 兼容 `call_id`，Chat Completions 用共享去重状态避免同一工具重复发送 name delta 时重复发 `ToolCallDetected`。
+- `crates/openai-adapter/tests/lib/mod.rs`：新增 Responses `call_id` 兼容回归，以及 Chat Completions 重复 `name` delta 不重复 detected 的回归测试。
+- `docs/status.md`、`docs/evolution-log.md`：同步记录本轮收口结果与后续关注点回到 server/store shared projection 与 runtime ownership 路径。
+**Verification**：`cargo fmt --all`、`cargo test -p openai-adapter`、`cargo check -p openai-adapter`。
+**Commit**：未提交。
+**Next direction**：如果继续沿“减少协议特有重复样板”的方向推进，下一步优先回到 `agent-store` / `apps/agent-server` 之间还能继续下沉的共享查询/投影逻辑，或继续压缩 `session_manager` 的 runtime ownership / return-path 主线，而不是把 `openai-adapter` 的协议子模块再抽成过度泛化的大一统状态机。
+
 ## 2026-03-21 Session 95
 
 **Diagnosis**：上一轮已经把 `request_timeout` 提升到了 `ServerBootstrapOptions`，但真正启动 HTTP server 的监听地址仍被 `run_server(...)` 硬编码在 `DEFAULT_SERVER_BIND_ADDR`。这意味着嵌入方若想复用 `agent-server` 的 router/state，却按自己的宿主环境选择监听地址，仍得绕回更低层自己拼 listener；同时 CLI 也缺少一个显式的 `--bind` 覆写入口。
