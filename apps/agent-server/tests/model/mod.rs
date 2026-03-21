@@ -77,7 +77,6 @@ fn server_model_marks_cancelled_openai_errors_as_cancelled() {
             default_temperature: None,
             supports_reasoning: false,
         }],
-        active_model: Some("gpt-5.4".to_string()),
     };
 
     let (_, model) = build_model_from_selection(
@@ -152,7 +151,6 @@ fn responses_model_call_writes_llm_trace_record() {
             default_temperature: None,
             supports_reasoning: false,
         }],
-        active_model: Some("gpt-5.4".to_string()),
     };
 
     let (identity, model) = build_model_from_selection(
@@ -245,7 +243,6 @@ fn responses_http_502_writes_failed_trace_record() {
             default_temperature: None,
             supports_reasoning: false,
         }],
-        active_model: Some("gpt-5.4".to_string()),
     };
 
     let (_identity, model) = build_model_from_selection(

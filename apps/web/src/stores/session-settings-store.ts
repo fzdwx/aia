@@ -52,116 +52,126 @@ type SessionSettingsStore = {
   ) => SessionListItem[]
 }
 
-export const useSessionSettingsStore = create<SessionSettingsStore>((set, get) => ({
-  activeSessionId: null,
-  sessionSettings: null,
-  hydrating: false,
-  updating: false,
-  error: null,
+export const useSessionSettingsStore = create<SessionSettingsStore>(
+  (set, get) => ({
+    activeSessionId: null,
+    sessionSettings: null,
+    hydrating: false,
+    updating: false,
+    error: null,
 
-  setActiveSessionId: (activeSessionId) => set({ activeSessionId }),
+    setActiveSessionId: (activeSessionId) => set({ activeSessionId }),
 
-  hydrateForSession: async (sessionId: string) => {
-    set({ activeSessionId: sessionId, hydrating: true, error: null })
-    try {
-      const sessionSettings = await fetchSessionSettings(sessionId)
-      if (get().activeSessionId !== sessionId) return
-      set({ sessionSettings, hydrating: false })
-    } catch (error) {
-      if (get().activeSessionId !== sessionId) return
+    hydrateForSession: async (sessionId: string) => {
+      set({ activeSessionId: sessionId, hydrating: true, error: null })
+      try {
+        const sessionSettings = await fetchSessionSettings(sessionId)
+        if (get().activeSessionId !== sessionId) return
+        set({ sessionSettings, hydrating: false })
+      } catch (error) {
+        if (get().activeSessionId !== sessionId) return
+        set({
+          hydrating: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to load session settings",
+        })
+      }
+    },
+
+    clear: () =>
       set({
+        activeSessionId: null,
+        sessionSettings: null,
         hydrating: false,
-        error:
-          error instanceof Error ? error.message : "Failed to load session settings",
-      })
-    }
-  },
-
-  clear: () =>
-    set({
-      activeSessionId: null,
-      sessionSettings: null,
-      hydrating: false,
-      updating: false,
-      error: null,
-    }),
-
-  supportsReasoning: (providerList) => {
-    const match = findProviderModel(providerList, get().sessionSettings)
-    return match?.model.supports_reasoning === true
-  },
-
-  switchModel: async (providerList, providerName, modelId, reasoningEffort) => {
-    const activeSessionId = get().activeSessionId
-    if (!activeSessionId) {
-      throw new Error("no active session")
-    }
-
-    const provider = providerList.find((item) => item.name === providerName)
-    if (!provider) {
-      throw new Error(`provider not found: ${providerName}`)
-    }
-    const model = provider.models.find((item) => item.id === modelId)
-    if (!model) {
-      throw new Error(`model not found: ${modelId}`)
-    }
-
-    const nextReasoningEffort = model.supports_reasoning
-      ? reasoningEffort ?? model.reasoning_effort ?? null
-      : null
-
-    set({ updating: true, error: null })
-    try {
-      const info = await apiUpdateSessionSettings({
-        session_id: activeSessionId,
-        provider: providerName,
-        model: modelId,
-        reasoning_effort: nextReasoningEffort,
-      })
-
-      set({
         updating: false,
-        sessionSettings: {
+        error: null,
+      }),
+
+    supportsReasoning: (providerList) => {
+      const match = findProviderModel(providerList, get().sessionSettings)
+      return match?.model.supports_reasoning === true
+    },
+
+    switchModel: async (
+      providerList,
+      providerName,
+      modelId,
+      reasoningEffort
+    ) => {
+      const activeSessionId = get().activeSessionId
+      if (!activeSessionId) {
+        throw new Error("no active session")
+      }
+
+      const provider = providerList.find((item) => item.name === providerName)
+      if (!provider) {
+        throw new Error(`provider not found: ${providerName}`)
+      }
+      const model = provider.models.find((item) => item.id === modelId)
+      if (!model) {
+        throw new Error(`model not found: ${modelId}`)
+      }
+
+      const nextReasoningEffort = model.supports_reasoning
+        ? (reasoningEffort ?? model.reasoning_effort ?? null)
+        : null
+
+      set({ updating: true, error: null })
+      try {
+        const info = await apiUpdateSessionSettings({
+          session_id: activeSessionId,
           provider: providerName,
           model: modelId,
-          protocol: provider.kind,
           reasoning_effort: nextReasoningEffort,
-        },
-      })
+        })
 
-      useChatStore.setState((state) => ({
-        provider: info,
-        sessions: get().syncSessionListModel(
-          state.sessions,
-          activeSessionId,
-          modelId
-        ),
-      }))
+        set({
+          updating: false,
+          sessionSettings: {
+            provider: providerName,
+            model: modelId,
+            protocol: provider.kind,
+            reasoning_effort: nextReasoningEffort,
+          },
+        })
 
-      return info
-    } catch (error) {
-      set({
-        updating: false,
-        error:
-          error instanceof Error ? error.message : "Failed to update session settings",
-      })
-      throw error
-    }
-  },
+        useChatStore.setState((state) => ({
+          sessions: get().syncSessionListModel(
+            state.sessions,
+            activeSessionId,
+            modelId
+          ),
+        }))
 
-  setReasoningEffort: async (providerList, reasoningEffort) => {
-    const sessionSettings = get().sessionSettings
-    if (!sessionSettings) return null
-    return get().switchModel(
-      providerList,
-      sessionSettings.provider,
-      sessionSettings.model,
-      reasoningEffort
-    )
-  },
+        return info
+      } catch (error) {
+        set({
+          updating: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to update session settings",
+        })
+        throw error
+      }
+    },
 
-  syncSessionListModel: (sessions, sessionId, modelId) =>
-    sessions.map((session) =>
-      session.id === sessionId ? { ...session, model: modelId } : session
-    ),
-}))
+    setReasoningEffort: async (providerList, reasoningEffort) => {
+      const sessionSettings = get().sessionSettings
+      if (!sessionSettings) return null
+      return get().switchModel(
+        providerList,
+        sessionSettings.provider,
+        sessionSettings.model,
+        reasoningEffort
+      )
+    },
+
+    syncSessionListModel: (sessions, sessionId, modelId) =>
+      sessions.map((session) =>
+        session.id === sessionId ? { ...session, model: modelId } : session
+      ),
+  })
+)

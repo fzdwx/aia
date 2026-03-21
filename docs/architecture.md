@@ -133,11 +133,11 @@ README 里真正难的是这些能力：
 负责本地 provider 管理：
 
 - 保存 provider 档案
-- 一个 provider 下可维护多个 `ModelConfig`，并记住 `active_model`
+- 一个 provider 下可维护多个 `ModelConfig`，默认模型始终取当前列表首项；持久化层按创建时间倒序恢复该列表
 - 保存 provider 所属协议类型（Responses / OpenAI 兼容 Chat Completions）
 - 记录当前活动 provider
 - 从磁盘载入与写回 `.aia/providers.json`
-- 兼容旧单模型落盘格式，并在载入 / 写入时把活动模型归一到有效 `ModelConfig`
+- 兼容旧单模型落盘格式
 - 兼容历史遗留 `.aia/sessions/providers.json` 回退读取
 - 保持 provider 持久化逻辑不泄漏进应用壳层
 

@@ -19,7 +19,6 @@ pub(crate) struct ProviderListItem {
     pub name: String,
     pub kind: String,
     pub models: Vec<ModelConfigDto>,
-    pub active_model: Option<String>,
     pub base_url: String,
     pub active: bool,
 }
@@ -81,7 +80,6 @@ pub(crate) struct CreateProviderRequest {
     pub name: String,
     pub kind: String,
     pub models: Vec<ModelConfigDto>,
-    pub active_model: Option<String>,
     pub api_key: String,
     pub base_url: String,
 }
@@ -90,7 +88,6 @@ pub(crate) struct CreateProviderRequest {
 pub(crate) struct UpdateProviderRequest {
     pub kind: Option<String>,
     pub models: Option<Vec<ModelConfigDto>>,
-    pub active_model: Option<String>,
     pub api_key: Option<String>,
     pub base_url: Option<String>,
 }
@@ -98,7 +95,6 @@ pub(crate) struct UpdateProviderRequest {
 #[derive(Deserialize)]
 pub(crate) struct SwitchProviderRequest {
     pub name: String,
-    pub model_id: Option<String>,
 }
 
 mod handlers;
@@ -108,7 +104,7 @@ mod tests;
 
 pub(crate) fn router() -> Router<SharedState> {
     Router::new()
-        .route("/api/providers", get(handlers::get_providers).post(handlers::create_provider))
+        .route("/api/providers", post(handlers::create_provider))
         .route("/api/providers/list", get(handlers::list_providers))
         .route(
             "/api/providers/{name}",

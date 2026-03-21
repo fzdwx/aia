@@ -84,7 +84,6 @@ fn updating_non_active_provider_keeps_unbound_session_unmodified() {
             UpdateProviderInput {
                 kind: None,
                 models: None,
-                active_model: None,
                 api_key: Some("backup-key-updated".into()),
                 base_url: None,
             },
@@ -118,7 +117,7 @@ fn switching_provider_marks_running_session_for_return_sync() {
 
     let mut service = ProviderSyncService::new(&mut slots, &mut config);
     service
-        .switch_provider(SwitchProviderInput { name: "backup".into(), model_id: None })
+        .switch_provider(SwitchProviderInput { name: "backup".into() })
         .expect("provider switch should succeed");
 
     let pending_binding = slots["session-1"].pending_provider_binding.clone();

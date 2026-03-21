@@ -7,7 +7,6 @@ import { useChatStore } from "@/stores/chat-store"
 import { useChannelsStore } from "@/stores/channels-store"
 
 export function Sidebar() {
-  const provider = useChatStore((s) => s.provider)
   const view = useChatStore((s) => s.view)
   const setView = useChatStore((s) => s.setView)
   const settingsSection = useChatStore((s) => s.settingsSection)
@@ -134,30 +133,6 @@ export function Sidebar() {
             })}
           </div>
         </>
-      )}
-
-      <Separator className="opacity-30" />
-
-      {/* Provider info */}
-      {provider && (
-        <div className="px-4 py-3">
-          <div className="rounded-lg border border-border/30 bg-muted/30 px-3 py-2.5">
-            <div className="flex items-center gap-2">
-              <span
-                className={cn(
-                  "size-1.5 rounded-full",
-                  provider.connected ? "bg-green-500" : "bg-destructive"
-                )}
-              />
-              <span className="text-[12px] font-medium text-foreground/80">
-                {provider.name}
-              </span>
-            </div>
-            <p className="mt-1 pl-3.5 text-[11px] text-muted-foreground">
-              {provider.model}
-            </p>
-          </div>
-        </div>
       )}
 
       <Separator className="opacity-30" />

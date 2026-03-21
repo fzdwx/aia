@@ -24,7 +24,6 @@ const initialState = {
   historyLoadingMore: false,
   streamingTurn: null,
   chatState: "idle" as const,
-  provider: null,
   providerList: [],
   error: null,
   view: "chat" as const,

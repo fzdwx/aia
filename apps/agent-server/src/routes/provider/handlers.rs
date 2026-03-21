@@ -19,11 +19,6 @@ use crate::routes::common::{
     JsonResponse, error_response, json_response, ok_response, runtime_worker_error_response,
 };
 
-pub(crate) async fn get_providers(State(state): State<SharedState>) -> Json<ProviderInfo> {
-    let snapshot = read_lock(&state.provider_info_snapshot);
-    Json(provider_info_from_snapshot(&snapshot))
-}
-
 pub(crate) async fn list_providers(
     State(state): State<SharedState>,
 ) -> Json<Vec<ProviderListItem>> {
@@ -42,7 +37,7 @@ pub(crate) async fn create_provider(
     State(state): State<SharedState>,
     Json(body): Json<CreateProviderRequest>,
 ) -> impl IntoResponse {
-    let CreateProviderRequest { name, kind, models, active_model, api_key, base_url } = body;
+    let CreateProviderRequest { name, kind, models, api_key, base_url } = body;
     let kind = match parse_provider_kind(&kind) {
         Ok(kind) => kind,
         Err(response) => return response,
@@ -54,7 +49,6 @@ pub(crate) async fn create_provider(
             name,
             kind,
             models: models_from_dtos(models),
-            active_model,
             api_key,
             base_url,
         })
@@ -70,7 +64,7 @@ pub(crate) async fn update_provider(
     Path(name): Path<String>,
     Json(body): Json<UpdateProviderRequest>,
 ) -> impl IntoResponse {
-    let UpdateProviderRequest { kind, models, active_model, api_key, base_url } = body;
+    let UpdateProviderRequest { kind, models, api_key, base_url } = body;
     let kind = match kind.as_deref().map(parse_provider_kind).transpose() {
         Ok(kind) => kind,
         Err(response) => return response,
@@ -80,13 +74,7 @@ pub(crate) async fn update_provider(
         .session_manager
         .update_provider(
             name,
-            UpdateProviderInput {
-                kind,
-                models: models.map(models_from_dtos),
-                active_model,
-                api_key,
-                base_url,
-            },
+            UpdateProviderInput { kind, models: models.map(models_from_dtos), api_key, base_url },
         )
         .await
     {
@@ -109,11 +97,7 @@ pub(crate) async fn switch_provider(
     State(state): State<SharedState>,
     Json(body): Json<SwitchProviderRequest>,
 ) -> impl IntoResponse {
-    match state
-        .session_manager
-        .switch_provider(SwitchProviderInput { name: body.name, model_id: body.model_id })
-        .await
-    {
+    match state.session_manager.switch_provider(SwitchProviderInput { name: body.name }).await {
         Ok(info) => json_response(StatusCode::OK, provider_info_from_snapshot(&info)),
         Err(error) => runtime_worker_error_response(error),
     }
@@ -149,7 +133,6 @@ pub(super) fn provider_list_item(
         name: provider.name.clone(),
         kind: provider.kind.protocol_name().to_string(),
         models: provider.models.iter().map(ModelConfigDto::from).collect(),
-        active_model: provider.active_model.clone(),
         base_url: provider.base_url.clone(),
         active: active_name == Some(provider.name.as_str()),
     }

@@ -14,7 +14,6 @@ const providerList: ProviderListItem[] = [
     kind: "openai-responses",
     base_url: "https://api.openai.com",
     active: true,
-    active_model: "gpt-5",
     models: [
       {
         id: "gpt-5",
@@ -22,7 +21,6 @@ const providerList: ProviderListItem[] = [
         limit: null,
         default_temperature: null,
         supports_reasoning: true,
-        reasoning_effort: "medium",
       },
       {
         id: "gpt-4.1-mini",
@@ -30,7 +28,6 @@ const providerList: ProviderListItem[] = [
         limit: null,
         default_temperature: null,
         supports_reasoning: false,
-        reasoning_effort: null,
       },
     ],
   },
@@ -55,7 +52,6 @@ describe("session settings store", () => {
           model: "gpt-5",
         },
       ],
-      provider: null,
     })
   })
 
@@ -75,7 +71,9 @@ describe("session settings store", () => {
       hydrating: false,
     })
 
-    expect(useSessionSettingsStore.getState().supportsReasoning(providerList)).toBe(true)
+    expect(
+      useSessionSettingsStore.getState().supportsReasoning(providerList)
+    ).toBe(true)
 
     useSessionSettingsStore.setState({
       sessionSettings: {
@@ -86,16 +84,25 @@ describe("session settings store", () => {
       },
     })
 
-    expect(useSessionSettingsStore.getState().supportsReasoning(providerList)).toBe(false)
+    expect(
+      useSessionSettingsStore.getState().supportsReasoning(providerList)
+    ).toBe(false)
   })
 
   test("switchModel updates session-scoped settings and clears reasoning for unsupported models", async () => {
     const calls: Array<{ url: string; body?: string }> = []
-    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit
+    ) => {
       const url = typeof input === "string" ? input : input.toString()
       calls.push({ url, body: init?.body as string | undefined })
       return new Response(
-        JSON.stringify({ name: "openai", model: "gpt-4.1-mini", connected: true }),
+        JSON.stringify({
+          name: "openai",
+          model: "gpt-4.1-mini",
+          connected: true,
+        }),
         { status: 200, headers: { "Content-Type": "application/json" } }
       )
     }) as FetchMock
@@ -127,11 +134,6 @@ describe("session settings store", () => {
       model: "gpt-4.1-mini",
       protocol: "openai-responses",
       reasoning_effort: null,
-    })
-    expect(useChatStore.getState().provider).toEqual({
-      name: "openai",
-      model: "gpt-4.1-mini",
-      connected: true,
     })
     expect(useChatStore.getState().sessions[0]?.model).toBe("gpt-4.1-mini")
   })

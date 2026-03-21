@@ -173,7 +173,7 @@ impl ServerBootstrap {
         let model_name = resources
             .registry
             .active_provider()
-            .and_then(|provider| provider.active_model.clone())
+            .and_then(|provider| provider.default_model_id().map(str::to_string))
             .unwrap_or_default();
         let record = SessionRecord::new(
             session_id,

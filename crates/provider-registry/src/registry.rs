@@ -13,8 +13,7 @@ pub struct ProviderRegistry {
 }
 
 impl ProviderRegistry {
-    pub fn upsert(&mut self, mut provider: ProviderProfile) {
-        provider.normalize_active_model();
+    pub fn upsert(&mut self, provider: ProviderProfile) {
         if let Some(existing) =
             self.providers.iter_mut().find(|existing| existing.name == provider.name)
         {

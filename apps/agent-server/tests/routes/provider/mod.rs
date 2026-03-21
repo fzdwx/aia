@@ -65,7 +65,6 @@ fn provider_list_item_marks_active_provider() {
             default_temperature: Some(0.2),
             supports_reasoning: true,
         }],
-        active_model: Some("gpt-5.4".into()),
     };
 
     let item = provider_list_item(&profile, Some("rayin"));

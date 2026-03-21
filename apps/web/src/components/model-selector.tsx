@@ -28,7 +28,7 @@ export function ModelSelector() {
   const activeModel = activeProvider?.models.find((m) => m.id === activeModelId)
   const displayLabel = hydrating
     ? "loading model..."
-    : activeModel?.display_name ?? activeModelId ?? "no model"
+    : (activeModel?.display_name ?? activeModelId ?? "no model")
 
   if (providerList.length === 0) return null
 
@@ -56,7 +56,11 @@ export function ModelSelector() {
         >
           <SelectValue>{displayLabel}</SelectValue>
         </SelectTrigger>
-        <SelectContent align="start" alignItemWithTrigger={false} className="min-w-[220px]">
+        <SelectContent
+          align="start"
+          alignItemWithTrigger={false}
+          className="min-w-[220px]"
+        >
           {providerList.map((provider) => (
             <SelectGroup key={provider.name}>
               <SelectLabel className="px-2.5 pt-2 pb-1 text-[10px] font-semibold tracking-wider text-muted-foreground/50 uppercase">
@@ -64,7 +68,8 @@ export function ModelSelector() {
               </SelectLabel>
               {provider.models.map((model) => {
                 const isActive =
-                  provider.name === activeProviderName && model.id === activeModelId
+                  provider.name === activeProviderName &&
+                  model.id === activeModelId
                 return (
                   <SelectItem
                     key={`${provider.name}-${model.id}`}

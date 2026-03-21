@@ -133,8 +133,6 @@ impl<'a> ProviderSyncService<'a> {
         &mut self,
         input: CreateProviderInput,
     ) -> Result<(), RuntimeWorkerError> {
-        let active_model =
-            input.active_model.or_else(|| input.models.first().map(|m| m.id.clone()));
         let mut candidate_registry = self.config.registry.clone();
         candidate_registry.upsert(provider_registry::ProviderProfile {
             name: input.name,
@@ -142,7 +140,6 @@ impl<'a> ProviderSyncService<'a> {
             base_url: input.base_url,
             api_key: input.api_key,
             models: input.models,
-            active_model,
         });
         self.sync_registry(candidate_registry, RegistrySyncPolicy::PreserveSessionBindings)
             .map(|_| ())
@@ -168,7 +165,6 @@ impl<'a> ProviderSyncService<'a> {
             base_url: input.base_url.unwrap_or(profile.base_url),
             api_key: input.api_key.unwrap_or(profile.api_key),
             models: input.models.unwrap_or(profile.models),
-            active_model: input.active_model.or(profile.active_model),
         };
 
         let mut candidate_registry = self.config.registry.clone();
@@ -190,27 +186,12 @@ impl<'a> ProviderSyncService<'a> {
         &mut self,
         input: SwitchProviderInput,
     ) -> Result<ProviderInfoSnapshot, RuntimeWorkerError> {
-        let mut profile = self
-            .config
-            .registry
-            .providers()
-            .iter()
-            .find(|provider| provider.name == input.name)
-            .cloned()
-            .ok_or_else(|| {
-                RuntimeWorkerError::not_found(format!("provider 不存在：{}", input.name))
-            })?;
-
-        if let Some(model_id) = &input.model_id {
-            if !profile.has_model(model_id) {
-                return Err(RuntimeWorkerError::bad_request(format!("模型不存在：{model_id}")));
-            }
-            profile.active_model = Some(model_id.to_string());
+        if !self.config.registry.providers().iter().any(|provider| provider.name == input.name) {
+            return Err(RuntimeWorkerError::not_found(format!("provider 不存在：{}", input.name)));
         }
 
         let previous_registry = self.config.registry.clone();
         let mut candidate_registry = previous_registry.clone();
-        candidate_registry.upsert(profile);
         candidate_registry
             .set_active(&input.name)
             .map_err(|error| RuntimeWorkerError::bad_request(error.to_string()))?;

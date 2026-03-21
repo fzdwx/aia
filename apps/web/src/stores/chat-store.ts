@@ -2,7 +2,6 @@ import { create } from "zustand"
 import {
   fetchCurrentTurn,
   fetchHistory,
-  fetchProviders,
   fetchSessionInfo,
   fetchSessions as apiFetchSessions,
   createSession as apiCreateSession,
@@ -26,7 +25,6 @@ import type {
   ContextCompressionNotice,
   CurrentTurnSnapshot,
   ModelConfig,
-  ProviderInfo,
   ProviderListItem,
   SessionListItem,
   SseEvent,
@@ -231,7 +229,6 @@ type ChatStore = {
   historyLoadingMore: boolean
   streamingTurn: StreamingTurn | null
   chatState: ChatState
-  provider: ProviderInfo | null
   providerList: ProviderListItem[]
   selectedProviderName: string | null
   settingsSection: SettingsSection
@@ -241,7 +238,6 @@ type ChatStore = {
   lastCompression: ContextCompressionNotice | null
   _pendingPrompt: string | null
   _sessionSnapshots: Record<string, SessionSnapshot>
-  _refreshProviderInfo: () => Promise<void>
   initialize: () => void
   handleSseEvent: (event: SseEvent) => void
   submitTurn: (prompt: string) => void
@@ -254,7 +250,6 @@ type ChatStore = {
     name: string
     kind: string
     models: ModelConfig[]
-    active_model?: string
     api_key: string
     base_url: string
   }) => Promise<void>
@@ -263,7 +258,6 @@ type ChatStore = {
     body: {
       kind?: string
       models?: ModelConfig[]
-      active_model?: string
       api_key?: string
       base_url?: string
     }
@@ -494,7 +488,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
     historyLoadingMore: false,
     streamingTurn: null,
     chatState: "idle",
-    provider: null,
     providerList: [],
     selectedProviderName: null,
     settingsSection: "providers",
@@ -505,16 +498,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     _pendingPrompt: null,
     _sessionSnapshots: {},
 
-    _refreshProviderInfo: async () => {
-      const provider = await fetchProviders()
-      set({ provider })
-    },
-
     initialize: () => {
-      get()
-        ._refreshProviderInfo()
-        .catch(() => {})
-
       apiFetchSessions()
         .then((sessions) => {
           const activeId = sessions[0]?.id ?? null
@@ -1192,11 +1176,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     refreshProviders: () => {
-      Promise.all([apiListProviders(), fetchProviders()])
-        .then(([providerList, provider]) =>
+      apiListProviders()
+        .then((providerList) =>
           set((state) => ({
             providerList,
-            provider,
             selectedProviderName: resolveSelectedProviderName(
               providerList,
               state.selectedProviderName

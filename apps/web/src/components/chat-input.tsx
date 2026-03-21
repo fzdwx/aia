@@ -9,6 +9,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  getThinkingLevelLabel,
+  THINKING_OPTIONS,
+} from "@/components/chat-input-thinking"
 import type { ThinkingLevel } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat-store"
@@ -29,32 +33,6 @@ function ContextPressure() {
   return <span className={cn("tabular-nums", color)}>{pct}%</span>
 }
 
-const THINKING_OPTIONS: Array<{
-  value: ThinkingLevel
-  label: string
-}> = [
-  { value: "minimal", label: "Minimal" },
-  { value: "low", label: "Low" },
-  { value: "medium", label: "Medium" },
-  { value: "high", label: "High" },
-  { value: "xhigh", label: "XHigh" },
-]
-
-export function getThinkingLevelLabel(params: {
-  reasoningValue: ThinkingLevel
-  sessionSettingsHydrating: boolean
-  sessionSettingsUpdating: boolean
-}) {
-  const { reasoningValue, sessionSettingsHydrating, sessionSettingsUpdating } =
-    params
-
-  if (sessionSettingsHydrating || sessionSettingsUpdating) {
-    return "Thinking: Loading..."
-  }
-
-  return `Thinking: ${THINKING_OPTIONS.find((item) => item.value === reasoningValue)?.label ?? "Medium"}`
-}
-
 export function ChatInput() {
   const submitTurn = useChatStore((s) => s.submitTurn)
   const cancelTurn = useChatStore((s) => s.cancelTurn)
@@ -68,8 +46,9 @@ export function ChatInput() {
   const supportsReasoning = useSessionSettingsStore((s) =>
     s.supportsReasoning(providerList)
   )
-  const setReasoningEffort = useSessionSettingsStore((s) => s.setReasoningEffort)
-  const switchModel = useSessionSettingsStore((s) => s.switchModel)
+  const setReasoningEffort = useSessionSettingsStore(
+    (s) => s.setReasoningEffort
+  )
   const disabled = chatState === "active"
 
   const [value, setValue] = useState("")

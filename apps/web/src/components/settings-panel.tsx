@@ -1,13 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react"
-import {
-  ArrowLeft,
-  Plus,
-  Search,
-  Settings2,
-  Trash2,
-  Waypoints,
-  X,
-} from "lucide-react"
+import { ArrowLeft, Plus, Search, Trash2, X } from "lucide-react"
 
 import { ChannelsPanel } from "@/components/channels-panel"
 import { Badge } from "@/components/ui/badge"
@@ -32,7 +24,6 @@ type ModelFormRow = {
   limit_context: string
   limit_output: string
   supports_reasoning: boolean
-  reasoning_effort: string
 }
 
 function emptyModelRow(): ModelFormRow {
@@ -42,7 +33,6 @@ function emptyModelRow(): ModelFormRow {
     limit_context: "",
     limit_output: "",
     supports_reasoning: false,
-    reasoning_effort: "medium",
   }
 }
 
@@ -94,7 +84,6 @@ export function SettingsPanel() {
         limit_context: model.limit?.context?.toString() ?? "",
         limit_output: model.limit?.output?.toString() ?? "",
         supports_reasoning: model.supports_reasoning,
-        reasoning_effort: model.reasoning_effort ?? "medium",
       }))
     )
   }, [selectedProvider])
@@ -134,9 +123,6 @@ export function SettingsPanel() {
         },
         default_temperature: null,
         supports_reasoning: model.supports_reasoning,
-        reasoning_effort: model.supports_reasoning
-          ? model.reasoning_effort
-          : null,
       }))
   }
 
@@ -144,12 +130,6 @@ export function SettingsPanel() {
 
   function handleKindChange(value: string | null) {
     if (value) setKind(value)
-  }
-
-  function handleReasoningEffortChange(index: number, value: string | null) {
-    if (value) {
-      updateModelRow(index, { reasoning_effort: value })
-    }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -165,7 +145,6 @@ export function SettingsPanel() {
         const body: Record<string, unknown> = {
           kind,
           models: builtModels,
-          active_model: builtModels[0]?.id,
           base_url: baseUrl.trim(),
         }
 
@@ -183,7 +162,6 @@ export function SettingsPanel() {
         name: providerName,
         kind,
         models: builtModels,
-        active_model: builtModels[0]?.id,
         api_key: apiKey.trim(),
         base_url: baseUrl.trim(),
       })
@@ -242,9 +220,7 @@ export function SettingsPanel() {
           </button>
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-sm font-semibold tracking-tight">
-                Settings
-              </h1>
+              <h1 className="text-sm font-semibold tracking-tight">Settings</h1>
               <Badge variant="secondary" className="text-[10px]">
                 {isProvidersSection ? "providers" : "channels"}
               </Badge>
@@ -618,34 +594,11 @@ export function SettingsPanel() {
                                   <span>
                                     Reasoning support
                                     <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                                      Only expose reasoning effort controls for
-                                      models that explicitly support them.
+                                      Indicates whether this model supports
+                                      session-level thinking controls.
                                     </span>
                                   </span>
                                 </label>
-
-                                {row.supports_reasoning ? (
-                                  <Select
-                                    value={row.reasoning_effort}
-                                    onValueChange={(value) =>
-                                      handleReasoningEffortChange(index, value)
-                                    }
-                                  >
-                                    <SelectTrigger
-                                      className="h-8 w-full text-[12px] sm:w-[160px]"
-                                      size="sm"
-                                    >
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="low">Low</SelectItem>
-                                      <SelectItem value="medium">
-                                        Medium
-                                      </SelectItem>
-                                      <SelectItem value="high">High</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                ) : null}
                               </div>
                             </div>
                           ))}

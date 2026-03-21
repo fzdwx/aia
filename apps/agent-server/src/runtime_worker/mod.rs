@@ -91,7 +91,6 @@ pub struct CreateProviderInput {
     pub name: String,
     pub kind: ProviderKind,
     pub models: Vec<ModelConfig>,
-    pub active_model: Option<String>,
     pub api_key: String,
     pub base_url: String,
 }
@@ -100,7 +99,6 @@ pub struct CreateProviderInput {
 pub struct UpdateProviderInput {
     pub kind: Option<ProviderKind>,
     pub models: Option<Vec<ModelConfig>>,
-    pub active_model: Option<String>,
     pub api_key: Option<String>,
     pub base_url: Option<String>,
 }
@@ -108,7 +106,6 @@ pub struct UpdateProviderInput {
 #[derive(Clone)]
 pub struct SwitchProviderInput {
     pub name: String,
-    pub model_id: Option<String>,
 }
 
 #[derive(Clone)]

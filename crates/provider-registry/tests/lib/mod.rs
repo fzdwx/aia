@@ -27,7 +27,7 @@ fn 同名_provider_会被更新而不是重复追加() {
 
     assert_eq!(registry.providers().len(), 1);
     assert_eq!(registry.providers()[0].base_url, "https://example.com/v1");
-    assert_eq!(registry.providers()[0].active_model_id(), Some("gpt-4.1"));
+    assert_eq!(registry.providers()[0].default_model_id(), Some("gpt-4.1"));
     assert!(registry.providers()[0].has_model("gpt-4.1"));
 }
 
@@ -52,7 +52,7 @@ fn 可构造_openai_兼容聊天补全_provider() {
     assert_eq!(provider.kind, ProviderKind::OpenAiChatCompletions);
     assert_eq!(provider.name, "compat");
     assert_eq!(provider.base_url, "http://127.0.0.1:8000/v1");
-    assert_eq!(provider.active_model_id(), Some("minum-security-llm"));
+    assert_eq!(provider.default_model_id(), Some("minum-security-llm"));
 }
 
 #[test]
@@ -73,7 +73,7 @@ fn 可兼容旧版单_model_格式() {
 
     assert_eq!(registry.providers().len(), 1);
     assert!(registry.providers()[0].has_model("gpt-4.1-mini"));
-    assert_eq!(registry.providers()[0].active_model_id(), Some("gpt-4.1-mini"));
+    assert_eq!(registry.providers()[0].default_model_id(), Some("gpt-4.1-mini"));
 }
 
 #[test]
@@ -99,21 +99,6 @@ fn 删除活动_provider_后会回退到下一个() {
 }
 
 #[test]
-fn 无效_active_model_会在写入时回退到首个模型() {
-    let mut registry = ProviderRegistry::default();
-    registry.upsert(ProviderProfile {
-        name: "main".into(),
-        kind: ProviderKind::OpenAiResponses,
-        base_url: "https://api.openai.com/v1".into(),
-        api_key: "secret".into(),
-        models: vec![crate::ModelConfig::new("gpt-4.1-mini")],
-        active_model: Some("missing".into()),
-    });
-
-    assert_eq!(registry.providers()[0].active_model_id(), Some("gpt-4.1-mini"));
-}
-
-#[test]
 fn 模型_limit_仍保留在领域模型里() {
     let mut registry = ProviderRegistry::default();
     registry.upsert(ProviderProfile {
@@ -128,7 +113,6 @@ fn 模型_limit_仍保留在领域模型里() {
             default_temperature: Some(0.2),
             supports_reasoning: true,
         }],
-        active_model: Some("gpt-4.1".into()),
     });
 
     assert_eq!(

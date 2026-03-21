@@ -50,7 +50,6 @@ pub struct ProviderProfile {
     pub base_url: String,
     pub api_key: String,
     pub models: Vec<ModelConfig>,
-    pub active_model: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -61,8 +60,6 @@ struct ProviderProfileWire {
     api_key: String,
     #[serde(default)]
     models: Vec<ModelConfig>,
-    #[serde(default)]
-    active_model: Option<String>,
     #[serde(default)]
     model: Option<String>,
 }
@@ -79,8 +76,6 @@ impl<'de> Deserialize<'de> for ProviderProfile {
         {
             models.push(ModelConfig::new(model));
         }
-        let active_model =
-            wire.active_model.or_else(|| models.first().map(|model| model.id.clone()));
 
         Ok(Self {
             name: wire.name,
@@ -88,7 +83,6 @@ impl<'de> Deserialize<'de> for ProviderProfile {
             base_url: wire.base_url,
             api_key: wire.api_key,
             models,
-            active_model,
         })
     }
 }
@@ -107,7 +101,6 @@ impl ProviderProfile {
             base_url: base_url.into(),
             api_key: api_key.into(),
             models: vec![ModelConfig::new(model.clone())],
-            active_model: Some(model),
         }
     }
 
@@ -124,7 +117,6 @@ impl ProviderProfile {
             base_url: base_url.into(),
             api_key: api_key.into(),
             models: vec![ModelConfig::new(model.clone())],
-            active_model: Some(model),
         }
     }
 
@@ -132,19 +124,11 @@ impl ProviderProfile {
         self.models.iter().any(|model| model.id == model_id)
     }
 
-    pub fn active_model_id(&self) -> Option<&str> {
-        self.active_model.as_deref().or_else(|| self.models.first().map(|model| model.id.as_str()))
+    pub fn default_model_id(&self) -> Option<&str> {
+        self.models.first().map(|model| model.id.as_str())
     }
 
-    pub fn active_model_config(&self) -> Option<&ModelConfig> {
-        let active_id = self.active_model_id()?;
-        self.models.iter().find(|model| model.id == active_id)
-    }
-
-    pub(crate) fn normalize_active_model(&mut self) {
-        if self.active_model.as_deref().is_some_and(|model_id| self.has_model(model_id)) {
-            return;
-        }
-        self.active_model = self.models.first().map(|model| model.id.clone());
+    pub fn default_model_config(&self) -> Option<&ModelConfig> {
+        self.models.first()
     }
 }

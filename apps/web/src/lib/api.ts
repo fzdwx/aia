@@ -143,12 +143,6 @@ export async function cancelTurn(sessionId?: string): Promise<boolean> {
 
 // ── Provider endpoints (unchanged) ─────────────────────────────
 
-export async function fetchProviders(): Promise<ProviderInfo> {
-  const res = await fetch("/api/providers")
-  if (!res.ok) throw new Error(`GET /api/providers failed: ${res.status}`)
-  return (await res.json()) as Promise<ProviderInfo>
-}
-
 export async function listProviders(): Promise<ProviderListItem[]> {
   const res = await fetch("/api/providers/list")
   if (!res.ok) throw new Error(`GET /api/providers/list failed: ${res.status}`)
@@ -208,7 +202,6 @@ export async function createProvider(body: {
   name: string
   kind: string
   models: ModelConfig[]
-  active_model?: string
   api_key: string
   base_url: string
 }): Promise<void> {
@@ -234,7 +227,6 @@ export async function updateProvider(
   body: {
     kind?: string
     models?: ModelConfig[]
-    active_model?: string
     api_key?: string
     base_url?: string
   }
@@ -276,14 +268,11 @@ export async function deleteChannel(id: string): Promise<void> {
     throw new Error(`DELETE /api/channels/${id} failed: ${res.status}`)
 }
 
-export async function switchProvider(
-  name: string,
-  modelId?: string
-): Promise<ProviderInfo> {
+export async function switchProvider(name: string): Promise<ProviderInfo> {
   const res = await fetch("/api/providers/switch", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, model_id: modelId }),
+    body: JSON.stringify({ name }),
   })
   if (!res.ok)
     throw new Error(`POST /api/providers/switch failed: ${res.status}`)

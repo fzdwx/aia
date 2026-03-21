@@ -229,12 +229,7 @@ export type StreamingTurn = {
 
 export type ChatState = "idle" | "active"
 
-export type ThinkingLevel =
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh"
+export type ThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh"
 
 export type ModelConfig = {
   id: string
@@ -245,14 +240,12 @@ export type ModelConfig = {
   } | null
   default_temperature: number | null
   supports_reasoning: boolean
-  reasoning_effort: ThinkingLevel | null
 }
 
 export type ProviderListItem = {
   name: string
   kind: string
   models: ModelConfig[]
-  active_model: string | null
   base_url: string
   active: boolean
 }

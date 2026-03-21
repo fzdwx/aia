@@ -461,7 +461,7 @@ fn prepare_runtime_sync(
     let binding = match registry.active_provider() {
         Some(profile) => SessionProviderBinding::Provider {
             name: profile.name.clone(),
-            model: profile.active_model_id().unwrap_or("").to_string(),
+            model: profile.default_model_id().unwrap_or("").to_string(),
             base_url: profile.base_url.clone(),
             protocol: profile.kind.protocol_name().to_string(),
             reasoning_effort: None,
@@ -480,7 +480,7 @@ fn prompt_cache_for_selection(
     let ProviderLaunchChoice::OpenAi { profile, .. } = selection else {
         return None;
     };
-    let model = profile.active_model_config()?;
+    let model = profile.default_model_config()?;
     Some(PromptCacheConfig {
         key: Some(aia_config::build_prompt_cache_key(&profile.name, &model.id, session_id)),
         retention: Some(RuntimePromptCacheRetention::OneDay),

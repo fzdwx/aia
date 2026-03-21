@@ -197,10 +197,10 @@ fn build_model_identity(
     profile: &ProviderProfile,
     reasoning_effort: Option<String>,
 ) -> ModelIdentity {
-    let model_config = profile.active_model_config();
+    let model_config = profile.default_model_config();
     let model_id = model_config
         .map(|model| model.id.clone())
-        .or_else(|| profile.active_model.clone())
+        .or_else(|| profile.default_model_id().map(str::to_string))
         .unwrap_or_default();
     let limit = model_config.and_then(|model| {
         model

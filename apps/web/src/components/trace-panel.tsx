@@ -23,7 +23,6 @@ import {
   asRecord,
   asString,
   extractTraceText,
-  type JsonRecord,
 } from "@/lib/trace-inspection"
 import type { TraceEvent, TraceRecord } from "@/lib/types"
 import {
