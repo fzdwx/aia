@@ -818,6 +818,63 @@ fn responses_流式工具调用会继承_response_id() {
 }
 
 #[test]
+fn responses_流式工具调用支持_call_id_字段() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("监听成功");
+    let address = listener.local_addr().expect("读取地址成功");
+
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("接受连接成功");
+        let mut buffer = [0_u8; 4096];
+        let _ = stream.read(&mut buffer).expect("读取请求成功");
+
+        let sse_body = [
+            r#"data: {"type":"response.output_item.added","item":{"type":"function_call","call_id":"call_from_call_id","name":"search_code"}}"#,
+            r#"data: {"type":"response.function_call_arguments.delta","delta":"{\"query\":\"agent-runtime\"}"}"#,
+            r#"data: {"type":"response.function_call_arguments.done"}"#,
+            r#"data: [DONE]"#,
+        ]
+        .join("\n\n");
+
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n{sse_body}\n\n"
+        );
+        stream.write_all(response.as_bytes()).expect("写回响应成功");
+    });
+
+    let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
+        format!("http://{address}"),
+        "test-key",
+        "gpt-4.1-mini",
+    ))
+    .expect("模型创建成功");
+
+    let mut deltas = Vec::new();
+    let completion =
+        run_async(model.complete_streaming(sample_request(), &AbortSignal::new(), &mut |event| {
+            deltas.push(event);
+        }))
+        .expect("流式调用成功");
+
+    handle.join().expect("服务线程退出");
+    assert!(completion.segments.iter().any(|segment| matches!(
+        segment,
+        CompletionSegment::ToolUse(ToolCall { tool_name, invocation_id, .. })
+            if tool_name == "search_code" && invocation_id == "call_from_call_id"
+    )));
+    assert_eq!(
+        deltas,
+        vec![
+            StreamEvent::ToolCallDetected {
+                invocation_id: "call_from_call_id".into(),
+                tool_name: "search_code".into(),
+                arguments: json!({"query":"agent-runtime"}),
+            },
+            StreamEvent::Done,
+        ]
+    );
+}
+
+#[test]
 fn 未知_reasoning_事件不会被当成思考内容() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("监听成功");
     let address = listener.local_addr().expect("读取地址成功");
@@ -1169,6 +1226,67 @@ fn 聊天补全流式调用可逐段收到文本与工具() {
             StreamEvent::ThinkingDelta { text: "先分析".into() },
             StreamEvent::TextDelta { text: "答".into() },
             StreamEvent::TextDelta { text: "案".into() },
+            StreamEvent::ToolCallDetected {
+                invocation_id: "call_1".into(),
+                tool_name: "search_code".into(),
+                arguments: Value::default(),
+            },
+            StreamEvent::Done,
+        ]
+    );
+}
+
+#[test]
+fn 聊天补全流式工具调用重复发送名称时只检测一次() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("监听成功");
+    let address = listener.local_addr().expect("读取地址成功");
+
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("接受连接成功");
+        let mut buffer = [0_u8; 4096];
+        let _ = stream.read(&mut buffer).expect("读取请求成功");
+
+        let sse_body = [
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"search_code","arguments":"{\"query\":\"agent"}}]}}]}"#,
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"search_code","arguments":"-runtime\"}"}}]}}]}"#,
+            r#"data: [DONE]"#,
+        ]
+        .join("\n\n");
+
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n{sse_body}\n\n"
+        );
+        stream.write_all(response.as_bytes()).expect("写回响应成功");
+    });
+
+    let model = OpenAiChatCompletionsModel::new(OpenAiChatCompletionsConfig::new(
+        format!("http://{address}"),
+        "test-key",
+        "minum-security-llm",
+    ))
+    .expect("模型创建成功");
+
+    let mut request = sample_request();
+    request.model.name = "minum-security-llm".into();
+    let mut deltas = Vec::new();
+    let completion =
+        run_async(
+            model.complete_streaming(request, &AbortSignal::new(), &mut |event| deltas.push(event)),
+        )
+        .expect("流式调用成功");
+
+    handle.join().expect("服务线程退出");
+    assert_eq!(completion.stop_reason, CompletionStopReason::ToolUse);
+    assert!(completion.segments.iter().any(|segment| matches!(
+        segment,
+        CompletionSegment::ToolUse(ToolCall { tool_name, invocation_id, arguments, .. })
+            if tool_name == "search_code"
+                && invocation_id == "call_1"
+                && arguments == &json!({"query":"agent-runtime"})
+    )));
+    assert_eq!(
+        deltas,
+        vec![
             StreamEvent::ToolCallDetected {
                 invocation_id: "call_1".into(),
                 tool_name: "search_code".into(),
