@@ -103,7 +103,6 @@ struct ServerBootstrap {
 }
 
 struct BootstrapPaths {
-    registry_path: PathBuf,
     store_path: PathBuf,
     sessions_dir: PathBuf,
     workspace_root: PathBuf,
@@ -137,12 +136,14 @@ impl ServerBootstrap {
     }
 
     async fn load_resources(&self) -> Result<BootstrapResources, ServerInitError> {
-        let registry = ProviderRegistry::load_or_default(&self.paths.registry_path)
-            .map_err(|error| ServerInitError::new("provider 注册表加载", error.to_string()))?;
         let store = Arc::new(
             AiaStore::new(&self.paths.store_path)
                 .map_err(|error| ServerInitError::new("数据库初始化", error.to_string()))?,
         );
+        let registry = store
+            .load_provider_registry_async()
+            .await
+            .map_err(|error| ServerInitError::new("provider 注册表加载", error.to_string()))?;
         let channel_profile_registry = ChannelProfileRegistry::load_from_store(&store)
             .await
             .map_err(|error| ServerInitError::new("channel 档案注册表加载", error.to_string()))?;
@@ -191,10 +192,7 @@ impl ServerBootstrap {
             .registry
             .active_provider()
             .cloned()
-            .map(|profile| ProviderLaunchChoice::OpenAi {
-                profile,
-                reasoning_effort: None,
-            })
+            .map(|profile| ProviderLaunchChoice::OpenAi { profile, reasoning_effort: None })
             .unwrap_or(ProviderLaunchChoice::Bootstrap);
         let identity = model_identity_from_selection(&selection);
 
@@ -223,7 +221,6 @@ impl ServerBootstrap {
             sessions_dir: self.paths.sessions_dir.clone(),
             store: resources.store.clone(),
             registry: resources.registry,
-            provider_registry_path: self.paths.registry_path.clone(),
             broadcast_tx: snapshots.broadcast_tx.clone(),
             provider_registry_snapshot: snapshots.provider_registry_snapshot.clone(),
             provider_info_snapshot: snapshots.provider_info_snapshot.clone(),
@@ -281,7 +278,7 @@ impl BootstrapPaths {
                 .map_err(|error| ServerInitError::new("workspace 根目录获取", error.to_string()))?,
         };
 
-        Ok(Self { registry_path, store_path, sessions_dir, workspace_root })
+        Ok(Self { store_path, sessions_dir, workspace_root })
     }
 }
 

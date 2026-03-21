@@ -45,7 +45,6 @@ fn sample_config(root: &std::path::Path, registry: ProviderRegistry) -> SessionM
         sessions_dir: root.join("sessions"),
         store,
         registry: registry.clone(),
-        provider_registry_path: root.join("providers.json"),
         broadcast_tx: tokio::sync::broadcast::channel(8).0,
         provider_registry_snapshot: Arc::new(RwLock::new(registry)),
         provider_info_snapshot: Arc::new(RwLock::new(provider_info)),
@@ -213,9 +212,7 @@ fn running_session_settings_update_is_rejected() {
         .expect_err("running session settings update should be rejected");
 
     assert_eq!(error.status, axum::http::StatusCode::BAD_REQUEST);
-    assert!(error
-        .message
-        .contains("cannot update session settings while a turn is running"));
+    assert!(error.message.contains("cannot update session settings while a turn is running"));
     assert_eq!(std::fs::read_to_string(&session_path).unwrap_or_default(), original_contents);
 
     let _ = std::fs::remove_dir_all(root);

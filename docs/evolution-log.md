@@ -1,5 +1,17 @@
 # 演进日志
 
+## 2026-03-21 Session 103
+
+**Diagnosis**：当前 provider 注册表仍单独落在 `.aia/providers.json`，而 channel profile、session 元信息与 trace 已经统一进入 `.aia/store.sqlite3`。这让 `apps/agent-server` bootstrap 与 provider CRUD 继续维持一条额外的文件持久化路径，也让 provider 状态成为当前控制面里少数还没纳入同一 SQLite 事务边界的配置面。用户这轮又明确说明“不需要兼容旧的”，因此继续保留 `providers.json` 与 legacy fallback 的收益已经低于其复杂度成本。
+**Decision**：直接把 provider 注册表收口到 `agent-store`：新增单行 `provider_registry` 表承接 `ProviderRegistry` JSON 快照；`apps/agent-server` 启动时从 SQLite 读取 provider 状态，provider create/update/delete/switch 也统一先写 store 再更新 runtime 与 snapshot。不再保留对旧 `providers.json` 的兼容读路径，也不再让 `SessionManagerConfig` 持有 `provider_registry_path`。
+**Changes**：
+- `crates/agent-store/src/{lib.rs,provider.rs}`、`crates/agent-store/tests/provider/mod.rs`：新增 `provider_registry` 表和同步/异步读写 API，补齐 SQLite round-trip 测试。
+- `apps/agent-server/src/{bootstrap/mod.rs,session_manager/types.rs,session_manager/provider_sync.rs}`：bootstrap 改为从 `AiaStore` 加载 provider 注册表；provider 同步链路改为写 SQLite；删除 `SessionManagerConfig.provider_registry_path`。
+- `apps/agent-server/tests/session_manager/{mod.rs,provider_sync/mod.rs}`、`docs/{status.md,architecture.md,requirements.md,evolution-log.md}`：更新测试构造与文档叙述，统一到“provider 注册表进入 SQLite”的真实状态。
+**Verification**：`cargo test -p agent-store -p agent-server`；`cargo check`。
+**Commit**：未提交。
+**Next direction**：如果继续沿控制面持久化收口，下一步优先评估 provider/profile/session 这些配置面里是否还有适合继续事务化的跨表更新路径，而不是再保留额外的文件状态旁路。
+
 ## 2026-03-21 Session 102
 
 **Diagnosis**：用户反馈 `GET /api/session/settings` 返回 `tape load failed: 磁带 session 追加记录 id 不连续：期待 1402，收到 1401`，并补充“是另一个 session 在运行的时候”。排查后确认不是当前磁带文件长期损坏，而是 `apps/agent-server` 在“某个 session 正在运行、其 runtime 已 `take()` 出去”的窗口里，若同时对该 session 走 `/api/session/settings` 更新 provider binding，`provider_sync` 会回退到从 `.jsonl` 重新加载磁带并整文件 `save_jsonl(...)`。这条整文件重写与运行中 runtime 的 `with_tape_entry_listener -> append_jsonl_entry(...)` 并发发生时，会把旧快照覆盖到正在追加的文件上，进而制造重复/回退 entry id，后续任何 settings 读取都会因为连续性校验失败而报错。

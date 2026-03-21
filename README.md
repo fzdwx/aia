@@ -29,7 +29,7 @@ this repository currently runs as a library-first rust workspace with a web-firs
 - `crates/agent-runtime`: runtime orchestration for models, tools, sessions, compression, cancellation, and event flow
 - `crates/channel-bridge`: shared channel models, configured profile persistence facade, adapter catalog, session-binding, and turn-preparation abstractions for multi-channel ingress
 - `crates/channel-feishu`: Feishu-specific websocket protocol, reply orchestration, and channel adapter implementation
-- `crates/provider-registry`: local provider profiles, active selection, and persistence
+- `crates/provider-registry`: local provider profiles, active selection, and serialization model
 - `crates/openai-adapter`: real model adapter layer covering both Responses-style and OpenAI-compatible Chat Completions HTTP interfaces
 - `crates/agent-store`: local SQLite-backed session + trace persistence
 - `apps/agent-server`: axum HTTP+SSE server bridging the shared runtime to clients and hosting only thin channel host registration/adaptation
@@ -39,7 +39,7 @@ this repository currently runs as a library-first rust workspace with a web-firs
 
 ## current behavior
 
-- provider state persists under `.aia/providers.json`
+- provider state persists under `.aia/store.sqlite3`
 - channel profile state persists under `.aia/store.sqlite3`
 - session replay data appends to `.aia/session.jsonl`
 - local SQLite state persists under `.aia/store.sqlite3`

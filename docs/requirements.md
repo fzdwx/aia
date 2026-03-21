@@ -48,7 +48,7 @@
 - `aia-config` 已承担跨 crate 复用的应用级路径、默认值、稳定标识与构造 helper
 - `channel-bridge` 已承担外部 channel 共享模型、已配置渠道档案的 store façade、session 绑定恢复、turn 预压缩、消息回执幂等 helper，以及基于 adapter trait 的通用 runtime supervisor
 - `channel-feishu` 已承担飞书 channel 的平台协议、长连接与回复控制实现，不再由 `apps/agent-server` 持有这部分细节
-- `provider-registry` 已承担本地 provider 管理与持久化
+- `provider-registry` 已承担本地 provider 管理模型；provider 注册表快照现由 `agent-store` 持久化
 - 首个真实模型适配库 `openai-adapter` 已建立，并已同时覆盖 Responses 与 OpenAI 兼容 Chat Completions 两条协议链路
 - `openai-adapter` 当前已改为原生 async `reqwest`：单次请求与流式 SSE 不再依赖 blocking client
 - OpenAI 请求当前已自动启用 prompt caching：server 会为同一 session 生成稳定 `prompt_cache_key`，并固定使用 `24h` retention
@@ -62,7 +62,7 @@
 - `session-tape` TapeEntry 已改为扁平 `{id, kind, payload, meta, date}` 模型，对齐 republic 数据模型
 - 旧格式 JSONL 可兼容载入并自动转换为新扁平格式
 - `.aia/session.jsonl` 当前统一以扁平 `TapeEntry` JSONL 形式 append-only 落盘
-- provider 本地资料当前落盘在 `.aia/providers.json`
+- provider 本地资料当前落盘在 `.aia/store.sqlite3`
 - channel 本地资料当前落盘在 `.aia/store.sqlite3`
 - channel 配置模型必须保持“通用 profile 元数据 + raw config payload”的结构；具体配置结构、校验与字段 schema 由各 channel adapter 定义，并由 `channel-bridge` 暴露统一 profile façade，而不是保留独立 registry crate
 - 本地 SQLite 状态当前落盘在 `.aia/store.sqlite3`

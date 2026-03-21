@@ -80,6 +80,7 @@ dependencies = [
 name = "agent-store"
 version = "0.1.0"
 dependencies = [
+ "provider-registry",
  "rusqlite",
  "serde",
  "serde_json",

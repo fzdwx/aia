@@ -117,7 +117,6 @@ pub struct SessionManagerConfig {
     pub sessions_dir: PathBuf,
     pub store: Arc<AiaStore>,
     pub registry: ProviderRegistry,
-    pub provider_registry_path: PathBuf,
     pub broadcast_tx: broadcast::Sender<SsePayload>,
     pub provider_registry_snapshot: Arc<RwLock<ProviderRegistry>>,
     pub provider_info_snapshot: Arc<RwLock<ProviderInfoSnapshot>>,

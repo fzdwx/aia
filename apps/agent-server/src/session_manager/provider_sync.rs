@@ -279,9 +279,10 @@ impl<'a> ProviderSyncService<'a> {
                     });
                 }
 
-                let mut tape = SessionTape::load_jsonl_or_default(&slot.session_path).map_err(
-                    |error| RuntimeWorkerError::internal(format!("tape load failed: {error}")),
-                )?;
+                let mut tape =
+                    SessionTape::load_jsonl_or_default(&slot.session_path).map_err(|error| {
+                        RuntimeWorkerError::internal(format!("tape load failed: {error}"))
+                    })?;
                 if tape.latest_provider_binding().as_ref() != Some(&binding) {
                     tape.bind_provider(binding.clone());
                     tape.save_jsonl(&slot.session_path).map_err(|error| {
@@ -292,9 +293,8 @@ impl<'a> ProviderSyncService<'a> {
             }
         }
 
-        let tape = SessionTape::load_jsonl_or_default(&slot.session_path).map_err(|error| {
-            RuntimeWorkerError::internal(format!("tape load failed: {error}"))
-        })?;
+        let tape = SessionTape::load_jsonl_or_default(&slot.session_path)
+            .map_err(|error| RuntimeWorkerError::internal(format!("tape load failed: {error}")))?;
         let selection = choose_provider_for_tape(&self.config.registry, &tape);
         Ok(ProviderInfoSnapshot::from_identity(&crate::model::model_identity_from_selection(
             &selection,
@@ -309,7 +309,7 @@ impl<'a> ProviderSyncService<'a> {
         let (info, _, _, _) =
             prepare_runtime_sync(&candidate_registry, Some(self.config.store.clone()))?;
 
-        candidate_registry.save(&self.config.provider_registry_path).map_err(|error| {
+        self.config.store.save_provider_registry(&candidate_registry).map_err(|error| {
             RuntimeWorkerError::internal(format!("provider registry save failed: {error}"))
         })?;
 

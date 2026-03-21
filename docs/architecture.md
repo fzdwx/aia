@@ -25,7 +25,7 @@ README 里真正难的是这些能力：
 - `agent-runtime`：运行时编排与最小 turn 执行
 - `channel-bridge`：外部 channel 共享模型、已配置渠道档案存储 façade、adapter catalog、session 绑定、预压缩与幂等 helper
 - `channel-feishu`：飞书 channel 的协议实现、回复控制与 adapter
-- `provider-registry`：provider 资料、活动项与本地持久化
+- `provider-registry`：provider 资料、活动项与序列化模型
 - `openai-adapter`：首个真实模型适配层，负责把统一请求映射到 Responses 风格接口，并已切到原生 async `reqwest` 主链
 - `agent-store`：本地 SQLite session / trace 存储与查询
 - `apps/agent-server`：最小应用壳，负责把共享运行时桥接到 HTTP + SSE，并承接外部 channel 的薄长连接 ingress bridge；其高层 bootstrap façade 现允许嵌入方统一注入 `registry_path`、`workspace_root`、`user_agent`、`request_timeout`、`system_prompt` 与 `runtime_hooks`，而进程级 HTTP 监听地址则单独经由 `run_server_with_options(ServerRunOptions)` 配置，避免把运行状态装配与 listener 绑定混成一层
@@ -193,6 +193,7 @@ README 里真正难的是这些能力：
 负责本地 SQLite 存储：
 
 - 持久化 session 列表与基础 session 元信息
+- 持久化 provider 注册表快照
 - 持久化本地 trace/span 记录、聚合统计与查询结果
 - trace store 内部已按 schema 初始化、store 查询/写入实现、row 映射与测试拆分子模块，避免 SQL、JSON 解码与提取 helper 继续堆在单个超大文件里
 - 统一封装 `Mutex<Connection>` 访问，poisoned mutex 场景下可恢复 guard 继续服务

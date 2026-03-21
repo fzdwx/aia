@@ -1,4 +1,5 @@
 mod channel;
+mod provider;
 mod session;
 mod trace;
 
@@ -10,6 +11,7 @@ use rusqlite::Connection;
 pub use channel::{
     ChannelMessageReceipt, ChannelSessionBinding, ExternalConversationKey, StoredChannelProfile,
 };
+pub use provider::StoredProviderRegistry;
 pub use session::{SessionRecord, generate_session_id, iso8601_now};
 pub use trace::{
     LlmTraceDashboard, LlmTraceDashboardActivityPoint, LlmTraceDashboardRange,
@@ -63,6 +65,7 @@ impl AiaStore {
         let conn = Connection::open(path).map_err(AiaStoreError::from)?;
         let store = Self { conn: Mutex::new(conn) };
         store.init_channel_schema()?;
+        store.init_provider_schema()?;
         store.init_trace_schema()?;
         store.init_session_schema()?;
         Ok(store)
@@ -72,6 +75,7 @@ impl AiaStore {
         let conn = Connection::open_in_memory().map_err(AiaStoreError::from)?;
         let store = Self { conn: Mutex::new(conn) };
         store.init_channel_schema()?;
+        store.init_provider_schema()?;
         store.init_trace_schema()?;
         store.init_session_schema()?;
         Ok(store)
