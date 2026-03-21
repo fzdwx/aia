@@ -454,12 +454,12 @@ function DetailList({
       {items.map((item) => (
         <div
           key={item.label}
-          className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1 px-2.5 py-2"
+          className="flex flex-wrap items-start justify-between gap-x-2 gap-y-0.5 px-2 py-1.5"
         >
           <dt className="text-[10px] font-medium tracking-[0.12em] text-muted-foreground uppercase">
             {item.label}
           </dt>
-          <dd className="min-w-0 text-right text-[12px] leading-5 text-foreground">
+          <dd className="min-w-0 text-right text-[11px] leading-4 text-foreground">
             {item.value}
           </dd>
         </div>
@@ -478,7 +478,7 @@ function Section({
   children: ReactNode
 }) {
   return (
-    <section className="space-y-2.5 rounded-xl border border-border/35 bg-background/70 p-2.5">
+    <section className="space-y-2 rounded-xl border border-border/35 bg-background/70 p-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
           {title}
@@ -503,7 +503,7 @@ function TabButton({
     <button
       onClick={onClick}
       className={cn(
-        "rounded-md px-2 py-1 text-[11px] font-medium tracking-[0.08em] uppercase transition-all active:scale-[0.96]",
+        "rounded-md px-2 py-0.5 text-[10px] font-medium tracking-[0.08em] uppercase transition-all active:scale-[0.96]",
         active
           ? "bg-foreground text-background"
           : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
@@ -545,7 +545,7 @@ function TextBlock({
   return (
     <pre
       className={cn(
-        "overflow-x-auto rounded-lg border border-border/25 bg-muted/20 px-2.5 py-2 text-[12px] leading-5 whitespace-pre-wrap text-foreground",
+        "overflow-x-auto rounded-lg border border-border/25 bg-muted/20 px-2 py-1.5 text-[11px] leading-4 whitespace-pre-wrap text-foreground",
         className
       )}
     >
@@ -685,32 +685,32 @@ function EventTimeline({
   }
 
   return (
-    <div className="relative space-y-1.5 pl-5 before:absolute before:top-2 before:bottom-2 before:left-[7px] before:w-px before:bg-border/25">
+    <div className="relative space-y-1 pl-4 before:absolute before:top-2 before:bottom-2 before:left-[7px] before:w-px before:bg-border/25">
       {events.map((event) => (
         <Collapsible
           key={event.key}
           className="relative rounded-lg border border-border/35 bg-background/80 before:absolute before:top-3 before:-left-[12px] before:size-1.5 before:rounded-full before:bg-foreground/35"
         >
-          <CollapsibleTrigger className="flex w-full items-start justify-between gap-3 px-2.5 py-2 text-left">
+          <CollapsibleTrigger className="flex w-full items-start justify-between gap-3 px-2 py-1.5 text-left">
             <div className="min-w-0 space-y-0.5">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[12px] font-medium text-foreground">
+                <span className="text-[11px] font-medium text-foreground">
                   {event.name}
                 </span>
-                <span className="text-[11px] text-muted-foreground">
+                <span className="text-[10px] text-muted-foreground">
                   {formatDateTime(event.at_ms)}
                 </span>
               </div>
               {event.summary ? (
-                <p className="text-[12px] leading-5 text-muted-foreground">
+                <p className="text-[11px] leading-4 text-muted-foreground">
                   {event.summary}
                 </p>
               ) : null}
             </div>
           </CollapsibleTrigger>
           {event.attributes && Object.keys(event.attributes).length > 0 ? (
-            <CollapsibleContent className="border-t border-border/25 px-2.5 py-2">
-              <pre className="overflow-x-auto rounded-md bg-muted/25 p-3 text-[11px] leading-5 text-foreground">
+            <CollapsibleContent className="border-t border-border/25 px-2 py-1.5">
+              <pre className="overflow-x-auto rounded-md bg-muted/25 p-2 text-[11px] leading-5 text-foreground">
                 {JSON.stringify(event.attributes, null, 2)}
               </pre>
             </CollapsibleContent>
@@ -723,12 +723,12 @@ function EventTimeline({
 
 function TraceActiveStrip({ group }: { group: TraceLoopGroup }) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-t-2 border-border/40 border-t-foreground/8 bg-card">
-      <div className="px-3 py-3">
+    <div className="overflow-hidden rounded-xl border border-t-2 border-border/40 border-t-foreground/8 bg-card">
+      <div className="px-2.5 py-2.5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="max-w-[760px] truncate text-[18px] font-semibold tracking-tight text-foreground">
+              <span className="max-w-[760px] truncate text-[16px] font-semibold tracking-tight text-foreground">
                 {formatTraceLoopHeadline(group, {
                   compressionLabel: "Context compression log",
                   maxLength: 180,
@@ -744,7 +744,7 @@ function TraceActiveStrip({ group }: { group: TraceLoopGroup }) {
                 {compactId(group.key, 12, 8)}
               </span>
             </div>
-            <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
               <span>turn {group.turnId}</span>
               <span className="text-border">/</span>
               <span>run {compactId(group.runId, 8, 6)}</span>
@@ -780,7 +780,7 @@ function WaterfallScale({ group }: { group: TraceLoopGroup }) {
   )
 
   return (
-    <div className="grid grid-cols-[minmax(180px,240px)_minmax(0,1fr)_72px] items-end gap-3 px-1 pb-2">
+    <div className="grid grid-cols-[minmax(180px,240px)_minmax(0,1fr)_72px] items-end gap-2 px-0.5 pb-1.5">
       <div className="text-[10px] tracking-[0.12em] text-muted-foreground uppercase">
         span
       </div>
@@ -841,28 +841,28 @@ function WaterfallRow({
     <button
       onClick={onSelect}
       className={cn(
-        "w-full rounded-xl border px-2.5 py-2 text-left transition-all active:scale-[0.99]",
+        "w-full rounded-lg border px-2 py-1.5 text-left transition-all active:scale-[0.99]",
         selected ? "border-foreground/20 bg-accent/35" : tone.frame
       )}
     >
-      <div className="grid grid-cols-[minmax(180px,240px)_minmax(0,1fr)_72px] items-center gap-3">
+      <div className="grid grid-cols-[minmax(180px,240px)_minmax(0,1fr)_72px] items-center gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span
               className={cn(
-                "flex size-5 shrink-0 items-center justify-center rounded-full border",
+                "flex size-4 shrink-0 items-center justify-center rounded-full border",
                 tone.dot
               )}
             >
               {node.kind === "agent_root" ? (
-                <Waypoints className="size-3" />
+                <Waypoints className="size-2.5" />
               ) : node.kind === "llm_span" ? (
-                <Bot className="size-3" />
+                <Bot className="size-2.5" />
               ) : (
-                <Wrench className="size-3" />
+                <Wrench className="size-2.5" />
               )}
             </span>
-            <span className="truncate text-[12px] font-medium text-foreground">
+            <span className="truncate text-[11px] font-medium text-foreground">
               {nodeTitle(node)}
             </span>
             {node.kind !== "agent_root" &&
@@ -876,17 +876,17 @@ function WaterfallRow({
               <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
             ) : null}
           </div>
-          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 pl-7 text-[11px] text-muted-foreground">
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 pl-7 text-[10px] text-muted-foreground">
             <span>{nodeSubtitle(node)}</span>
             <span>{relativeOffsetLabel(node, group)}</span>
           </div>
         </div>
 
-        <div className="relative h-8 overflow-hidden rounded-md border border-border/20 bg-background/35">
+        <div className="relative h-7 overflow-hidden rounded-md border border-border/20 bg-background/35">
           <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-border/30" />
           <div
             className={cn(
-              "absolute top-[9px] h-[14px] rounded-sm border",
+              "absolute top-[8px] h-[14px] rounded-sm border",
               tone.bar
             )}
             style={{
@@ -899,7 +899,7 @@ function WaterfallRow({
         </div>
 
         <div className="text-right">
-          <div className="font-mono text-[11px] text-foreground">
+          <div className="font-mono text-[10px] text-foreground">
             {formatTraceDuration(node.durationMs)}
           </div>
           <div className="mt-0.5 text-[10px] text-muted-foreground">
@@ -1352,7 +1352,7 @@ export function TracePanel() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="flex items-center justify-between gap-3 border-b border-border/30 px-5 py-3.5">
+      <div className="flex items-center justify-between gap-2 border-b border-border/30 px-4 py-2.5">
         <div className="flex items-start gap-3">
           <button
             onClick={() => setView("chat")}
@@ -1362,7 +1362,7 @@ export function TracePanel() {
           </button>
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-base font-semibold tracking-tight">Trace</h1>
+              <h1 className="text-sm font-semibold tracking-tight">Trace</h1>
               <Badge variant="secondary" className="text-[10px]">
                 {traceSurface === "overview" ? "overview" : traceView}
               </Badge>
@@ -1392,10 +1392,10 @@ export function TracePanel() {
       {traceSurface === "overview" ? (
         <TraceOverviewPanel />
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-5 py-4">
-          <div className="mx-auto flex min-h-0 w-full max-w-[1440px] flex-1 flex-col gap-3">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-3">
+          <div className="mx-auto flex min-h-0 w-full max-w-[1440px] flex-1 flex-col gap-2">
             {traceError ? (
-              <div className="shrink-0 rounded-2xl border border-destructive/25 bg-destructive/[0.05] px-4 py-3 text-[12px] text-destructive">
+              <div className="shrink-0 rounded-xl border border-destructive/25 bg-destructive/[0.05] px-4 py-3 text-[12px] text-destructive">
                 {traceError}
               </div>
             ) : null}
@@ -1423,9 +1423,9 @@ export function TracePanel() {
             ) : null}
 
             {visibleLoopGroups.length > 0 ? (
-              <div className="grid min-h-0 flex-1 overflow-hidden rounded-2xl border border-border/30 bg-card/70 shadow-[var(--workspace-shadow)] xl:grid-cols-[minmax(0,1.18fr)_360px]">
+              <div className="grid min-h-0 flex-1 overflow-hidden rounded-xl border border-border/30 bg-card/70 shadow-[var(--workspace-shadow)] xl:grid-cols-[minmax(0,1.18fr)_360px]">
                 <div className="flex min-h-0 flex-col overflow-hidden">
-                  <div className="shrink-0 border-b border-border/25 px-3 py-2.5">
+                  <div className="shrink-0 border-b border-border/25 px-2.5 py-2">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
                         Waterfall
@@ -1438,11 +1438,11 @@ export function TracePanel() {
                     </div>
                   </div>
 
-                  <div className="min-h-0 flex-1 overflow-y-auto p-3">
+                  <div className="min-h-0 flex-1 overflow-y-auto p-2.5">
                     {activeGroup ? (
-                      <div className="space-y-2">
+                      <div className="space-y-1.5">
                         <WaterfallScale group={activeGroup} />
-                        <div className="space-y-1.5">
+                        <div className="space-y-1">
                           {activeGroup.timeline.map((node) => (
                             <WaterfallRow
                               key={node.id}
@@ -1464,7 +1464,7 @@ export function TracePanel() {
                 </div>
 
                 <div className="flex min-h-0 flex-col overflow-hidden border-l border-border/25">
-                  <div className="shrink-0 border-b border-border/25 px-3 py-2.5">
+                  <div className="shrink-0 border-b border-border/25 px-2.5 py-2">
                     <div className="flex items-center justify-between gap-2">
                       <div>
                         <p className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
@@ -1476,7 +1476,7 @@ export function TracePanel() {
                           </p>
                         ) : null}
                       </div>
-                      <div className="rounded-lg border border-border/35 bg-muted/20 p-1">
+                      <div className="rounded-lg border border-border/35 bg-muted/20 p-0.5">
                         <div className="flex items-center gap-1">
                           <TabButton
                             active={inspectorTab === "content"}
@@ -1501,7 +1501,7 @@ export function TracePanel() {
                     </div>
                   </div>
 
-                  <div className="min-h-0 flex-1 overflow-y-auto p-3">
+                  <div className="min-h-0 flex-1 overflow-y-auto p-2.5">
                     {activeGroup && activeNode ? (
                       activeNode.kind === "agent_root" ? (
                         <LoopInspector group={activeGroup} tab={inspectorTab} />

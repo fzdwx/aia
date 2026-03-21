@@ -58,11 +58,7 @@ impl SessionSettingsResponse {
                 reasoning_effort: None,
             },
             SessionProviderBinding::Provider {
-                name,
-                model,
-                protocol,
-                reasoning_effort,
-                ..
+                name, model, protocol, reasoning_effort, ..
             } => Self { provider: name, model, protocol, reasoning_effort },
         }
     }

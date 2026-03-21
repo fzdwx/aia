@@ -300,7 +300,7 @@ export function SettingsPanel() {
                 </div>
               </div>
 
-              <div className="min-h-0 flex-1 overflow-y-auto p-3">
+              <div className="min-h-0 flex-1 overflow-y-auto p-2.5">
                 <div className="space-y-1">
                   {isProvidersSection ? (
                     filteredProviders.length === 0 ? (
@@ -323,17 +323,17 @@ export function SettingsPanel() {
                               selectProviderName(providerItem.name)
                             }
                             className={cn(
-                              "flex w-full items-start gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors",
+                              "flex w-full items-start gap-2 rounded-lg border px-2.5 py-2 text-left transition-colors",
                               isActive
                                 ? "border-border/55 bg-accent/45 text-foreground"
                                 : "border-transparent text-muted-foreground hover:border-border/30 hover:bg-accent/20 hover:text-foreground"
                             )}
                           >
                             <span className="min-w-0 flex-1">
-                              <span className="block truncate text-[13px] font-medium">
+                              <span className="block truncate text-[12px] font-medium">
                                 {providerItem.name}
                               </span>
-                              <span className="mt-1 block truncate text-[11px] text-muted-foreground/80">
+                              <span className="mt-0.5 block truncate text-[10px] text-muted-foreground/80">
                                 {providerItem.kind}
                               </span>
                             </span>
@@ -369,17 +369,17 @@ export function SettingsPanel() {
                           type="button"
                           onClick={() => selectTransport(channel.transport)}
                           className={cn(
-                            "flex w-full items-start gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors",
+                            "flex w-full items-start gap-2 rounded-lg border px-2.5 py-2 text-left transition-colors",
                             isActive
                               ? "border-border/55 bg-accent/45 text-foreground"
                               : "border-transparent text-muted-foreground hover:border-border/30 hover:bg-accent/20 hover:text-foreground"
                           )}
                         >
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-[13px] font-medium">
+                            <span className="block truncate text-[12px] font-medium">
                               {channel.label}
                             </span>
-                            <span className="mt-1 block truncate text-[11px] text-muted-foreground/80">
+                            <span className="mt-0.5 block truncate text-[10px] text-muted-foreground/80">
                               {channel.transport}
                             </span>
                           </span>
@@ -402,11 +402,11 @@ export function SettingsPanel() {
             <div className="flex min-h-0 flex-col overflow-hidden border-l border-border/25">
               {isProvidersSection ? (
                 <>
-                  <div className="shrink-0 border-b border-border/25 px-4 py-3">
+                  <div className="shrink-0 border-b border-border/25 px-3 py-2">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <h2 className="truncate text-[15px] font-semibold">
+                          <h2 className="truncate text-[14px] font-semibold">
                             {selectedProvider
                               ? selectedProvider.name
                               : "New Provider"}
@@ -436,16 +436,16 @@ export function SettingsPanel() {
                     </div>
                   </div>
 
-                  <div className="min-h-0 flex-1 overflow-y-auto p-4">
-                    <form onSubmit={handleSubmit} className="space-y-4">
-                      <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="min-h-0 flex-1 overflow-y-auto p-3">
+                    <form onSubmit={handleSubmit} className="space-y-3">
+                      <div className="grid gap-2 sm:grid-cols-2">
                         <div className="space-y-1.5">
                           <label className="workspace-form-label">Name</label>
                           <Input
                             value={name}
                             onChange={(event) => setName(event.target.value)}
                             placeholder="e.g. openai-main"
-                            className="h-9 text-[13px]"
+                            className="h-8 text-[12px]"
                             disabled={selectedProvider != null}
                           />
                         </div>
@@ -455,7 +455,7 @@ export function SettingsPanel() {
                             Protocol
                           </label>
                           <Select value={kind} onValueChange={handleKindChange}>
-                            <SelectTrigger className="h-9 w-full text-[13px]">
+                            <SelectTrigger className="h-8 w-full text-[12px]">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -482,7 +482,7 @@ export function SettingsPanel() {
                           value={apiKey}
                           onChange={(event) => setApiKey(event.target.value)}
                           placeholder="sk-..."
-                          className="h-9 text-[13px]"
+                          className="h-8 text-[12px]"
                         />
                       </div>
 
@@ -491,11 +491,11 @@ export function SettingsPanel() {
                         <Input
                           value={baseUrl}
                           onChange={(event) => setBaseUrl(event.target.value)}
-                          className="h-9 text-[13px]"
+                          className="h-8 text-[12px]"
                         />
                       </div>
 
-                      <div className="space-y-2.5 border-t border-border/20 pt-4">
+                      <div className="space-y-2 border-t border-border/20 pt-3">
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <p className="workspace-form-label">Models</p>
 
@@ -512,13 +512,13 @@ export function SettingsPanel() {
                           </Button>
                         </div>
 
-                        <div className="space-y-2.5">
+                        <div className="space-y-2">
                           {models.map((row, index) => (
                             <div
                               key={`${row.id}:${index}`}
-                              className="workspace-panel-soft px-3 py-3"
+                              className="workspace-panel-soft px-2.5 py-2.5"
                             >
-                              <div className="flex items-start justify-between gap-3">
+                              <div className="flex items-start justify-between gap-2">
                                 <p className="text-sm font-medium text-foreground">
                                   Model {index + 1}
                                 </p>
@@ -537,7 +537,7 @@ export function SettingsPanel() {
                                 ) : null}
                               </div>
 
-                              <div className="mt-3 grid gap-2.5 md:grid-cols-2">
+                              <div className="mt-2 grid gap-2 md:grid-cols-2">
                                 <div className="space-y-1.5">
                                   <label className="workspace-form-label">
                                     Model ID
@@ -550,7 +550,7 @@ export function SettingsPanel() {
                                       })
                                     }
                                     placeholder="e.g. gpt-5.4"
-                                    className="h-9 text-[13px]"
+                                    className="h-8 text-[12px]"
                                   />
                                 </div>
 
@@ -566,7 +566,7 @@ export function SettingsPanel() {
                                       })
                                     }
                                     placeholder="Optional label shown in the UI"
-                                    className="h-9 text-[13px]"
+                                    className="h-8 text-[12px]"
                                   />
                                 </div>
 
@@ -582,7 +582,7 @@ export function SettingsPanel() {
                                       })
                                     }
                                     placeholder="Context limit"
-                                    className="h-9 text-[13px]"
+                                    className="h-8 text-[12px]"
                                     inputMode="numeric"
                                   />
                                 </div>
@@ -599,14 +599,14 @@ export function SettingsPanel() {
                                       })
                                     }
                                     placeholder="Output limit"
-                                    className="h-9 text-[13px]"
+                                    className="h-8 text-[12px]"
                                     inputMode="numeric"
                                   />
                                 </div>
                               </div>
 
-                              <div className="mt-3 flex flex-col gap-3 rounded-xl border border-border/20 bg-background/55 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
-                                <label className="flex items-center gap-3 text-sm text-foreground">
+                              <div className="mt-2 flex flex-col gap-2 rounded-xl border border-border/20 bg-background/55 px-2.5 py-2 sm:flex-row sm:items-center sm:justify-between">
+                                <label className="flex items-center gap-2 text-sm text-foreground">
                                   <Switch
                                     checked={row.supports_reasoning}
                                     onCheckedChange={(checked: boolean) =>
@@ -617,7 +617,7 @@ export function SettingsPanel() {
                                   />
                                   <span>
                                     Reasoning support
-                                    <span className="mt-1 block text-[12px] text-muted-foreground">
+                                    <span className="mt-0.5 block text-[11px] text-muted-foreground">
                                       Only expose reasoning effort controls for
                                       models that explicitly support them.
                                     </span>
@@ -632,7 +632,7 @@ export function SettingsPanel() {
                                     }
                                   >
                                     <SelectTrigger
-                                      className="h-9 w-full text-[13px] sm:w-[160px]"
+                                      className="h-8 w-full text-[12px] sm:w-[160px]"
                                       size="sm"
                                     >
                                       <SelectValue />
@@ -652,7 +652,7 @@ export function SettingsPanel() {
                         </div>
                       </div>
 
-                      <div className="flex justify-end border-t border-border/20 pt-4">
+                      <div className="flex justify-end border-t border-border/20 pt-3">
                         <Button
                           type="submit"
                           disabled={
@@ -673,7 +673,7 @@ export function SettingsPanel() {
                   </div>
                 </>
               ) : (
-                <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                <div className="min-h-0 flex-1 overflow-y-auto p-3">
                   <ChannelsPanel embedded />
                 </div>
               )}

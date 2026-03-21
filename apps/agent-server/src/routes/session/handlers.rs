@@ -73,7 +73,9 @@ pub(crate) async fn get_session_settings(
     };
 
     match state.session_manager.get_session_settings(session_id).await {
-        Ok(settings) => json_response(StatusCode::OK, SessionSettingsResponse::from_binding(settings)),
+        Ok(settings) => {
+            json_response(StatusCode::OK, SessionSettingsResponse::from_binding(settings))
+        }
         Err(error) => runtime_worker_error_response(error),
     }
 }
@@ -102,7 +104,9 @@ pub(crate) async fn update_session_settings(
 
     let binding = {
         let registry = crate::session_manager::read_lock(&state.provider_registry_snapshot);
-        let Some(profile) = registry.providers().iter().find(|candidate| candidate.name == provider) else {
+        let Some(profile) =
+            registry.providers().iter().find(|candidate| candidate.name == provider)
+        else {
             return json_response(
                 StatusCode::NOT_FOUND,
                 serde_json::json!({ "error": format!("provider 不存在：{provider}") }),
@@ -133,10 +137,8 @@ pub(crate) async fn update_session_settings(
 
     match state.session_manager.update_session_settings(session_id.clone(), binding).await {
         Ok(info) => {
-            let _ = state
-                .store
-                .update_session_async(session_id, None, Some(info.model.clone()))
-                .await;
+            let _ =
+                state.store.update_session_async(session_id, None, Some(info.model.clone())).await;
             json_response(
                 StatusCode::OK,
                 serde_json::json!({

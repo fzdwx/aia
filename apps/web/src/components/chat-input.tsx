@@ -40,6 +40,21 @@ const THINKING_OPTIONS: Array<{
   { value: "xhigh", label: "XHigh" },
 ]
 
+export function getThinkingLevelLabel(params: {
+  reasoningValue: ThinkingLevel
+  sessionSettingsHydrating: boolean
+  sessionSettingsUpdating: boolean
+}) {
+  const { reasoningValue, sessionSettingsHydrating, sessionSettingsUpdating } =
+    params
+
+  if (sessionSettingsHydrating || sessionSettingsUpdating) {
+    return "Thinking: Loading..."
+  }
+
+  return `Thinking: ${THINKING_OPTIONS.find((item) => item.value === reasoningValue)?.label ?? "Medium"}`
+}
+
 export function ChatInput() {
   const submitTurn = useChatStore((s) => s.submitTurn)
   const cancelTurn = useChatStore((s) => s.cancelTurn)
@@ -62,7 +77,8 @@ export function ChatInput() {
 
   const canSend = value.trim().length > 0 && !disabled
   const reasoningValue = sessionSettings?.reasoning_effort ?? "medium"
-  const settingsBusy = sessionSettingsHydrating || sessionSettingsUpdating || disabled
+  const settingsLoading = sessionSettingsHydrating || sessionSettingsUpdating
+  const settingsBusy = settingsLoading || disabled
 
   function handleSend() {
     if (!canSend) return
@@ -103,9 +119,11 @@ export function ChatInput() {
                 className="h-7 border-0 bg-transparent px-1.5 py-0 text-[11px] text-muted-foreground shadow-none hover:bg-accent/50 hover:text-foreground/80 disabled:opacity-50"
               >
                 <SelectValue>
-                  {settingsBusy
-                    ? "Thinking: Loading..."
-                    : `Thinking: ${THINKING_OPTIONS.find((item) => item.value === reasoningValue)?.label ?? "Medium"}`}
+                  {getThinkingLevelLabel({
+                    reasoningValue,
+                    sessionSettingsHydrating,
+                    sessionSettingsUpdating,
+                  })}
                 </SelectValue>
               </SelectTrigger>
               <SelectContent align="start" alignItemWithTrigger={false}>
