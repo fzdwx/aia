@@ -1,19 +1,30 @@
 import { useEffect, useRef, useState } from "react"
-import { ChevronDown, Check } from "lucide-react"
+import { Check } from "lucide-react"
+
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat-store"
+import { useSessionSettingsStore } from "@/stores/session-settings-store"
 
 export function ModelSelector() {
   const providerList = useChatStore((s) => s.providerList)
-  const sessionSettings = useChatStore((s) => s.sessionSettings)
-  const switchModel = useChatStore((s) => s.switchModel)
+  const refreshProviders = useChatStore((s) => s.refreshProviders)
+  const sessionSettings = useSessionSettingsStore((s) => s.sessionSettings)
+  const switchModel = useSessionSettingsStore((s) => s.switchModel)
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
   const activeProviderName = sessionSettings?.provider
   const activeModelId = sessionSettings?.model
   const activeProvider = providerList.find((p) => p.name === activeProviderName)
-
   const activeModel = activeProvider?.models.find((m) => m.id === activeModelId)
   const displayLabel = activeModel?.display_name ?? activeModelId ?? "no model"
 
@@ -32,56 +43,55 @@ export function ModelSelector() {
   if (providerList.length === 0) return null
 
   return (
-    <div ref={ref} className="relative mb-1.5">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground/80"
+    <div ref={ref} className="min-w-0">
+      <Select
+        open={open}
+        onOpenChange={setOpen}
+        value={activeProviderName && activeModelId ? `${activeProviderName}::${activeModelId}` : null}
+        onValueChange={(value) => {
+          if (!value) return
+          const [providerName, modelId] = value.split("::")
+          if (!providerName || !modelId) return
+          void switchModel(providerList, providerName, modelId)
+            .then(() => refreshProviders())
+            .catch(() => {})
+        }}
       >
-        <span>{displayLabel}</span>
-        <ChevronDown
-          className={cn("size-3 transition-transform", open && "rotate-180")}
-        />
-      </button>
-
-      {open && (
-        <div className="absolute bottom-full left-0 z-50 mb-1 min-w-[220px] rounded-lg border border-border/50 bg-popover p-1 shadow-lg">
-          {providerList.map((p) => (
-            <div key={p.name}>
-              <div className="px-2.5 pt-2 pb-1 text-[10px] font-semibold tracking-wider text-muted-foreground/50 uppercase">
-                {p.name}
-              </div>
-              {p.models.map((m) => {
-                const isActive = p.name === activeProviderName && m.id === activeModelId
-                const reasoningEffort =
-                  sessionSettings?.provider === p.name && sessionSettings?.model === m.id
-                    ? sessionSettings.reasoning_effort
-                    : m.reasoning_effort
+        <SelectTrigger
+          size="sm"
+          className="h-7 max-w-[220px] border-0 bg-transparent px-1.5 py-0 text-[11px] text-muted-foreground shadow-none hover:bg-accent/50 hover:text-foreground/80"
+        >
+          <SelectValue>{displayLabel}</SelectValue>
+        </SelectTrigger>
+        <SelectContent align="start" className="min-w-[220px]">
+          {providerList.map((provider) => (
+            <SelectGroup key={provider.name}>
+              <SelectLabel className="px-2.5 pt-2 pb-1 text-[10px] font-semibold tracking-wider text-muted-foreground/50 uppercase">
+                {provider.name}
+              </SelectLabel>
+              {provider.models.map((model) => {
+                const isActive =
+                  provider.name === activeProviderName && model.id === activeModelId
                 return (
-                  <button
-                    key={`${p.name}-${m.id}`}
-                    type="button"
-                    onClick={() => {
-                      switchModel(p.name, m.id, reasoningEffort ?? null)
-                      setOpen(false)
-                    }}
+                  <SelectItem
+                    key={`${provider.name}-${model.id}`}
+                    value={`${provider.name}::${model.id}`}
                     className={cn(
-                      "flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-[12px] transition-colors hover:bg-accent/50",
-                      isActive && "text-foreground",
+                      "px-2.5 py-1.5 text-[12px]",
                       !isActive && "text-muted-foreground"
                     )}
                   >
-                    <span className="font-medium">
-                      {m.display_name ?? m.id}
+                    <span className="flex w-full items-center justify-between font-medium">
+                      <span>{model.display_name ?? model.id}</span>
+                      {isActive && <Check className="ml-2 size-3 shrink-0" />}
                     </span>
-                    {isActive && <Check className="ml-2 size-3 shrink-0" />}
-                  </button>
+                  </SelectItem>
                 )
               })}
-            </div>
+            </SelectGroup>
           ))}
-        </div>
-      )}
+        </SelectContent>
+      </Select>
     </div>
   )
 }

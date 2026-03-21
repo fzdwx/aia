@@ -3,7 +3,6 @@ import {
   fetchCurrentTurn,
   fetchHistory,
   fetchProviders,
-  fetchSessionSettings,
   fetchSessionInfo,
   fetchSessions as apiFetchSessions,
   createSession as apiCreateSession,
@@ -14,7 +13,6 @@ import {
   createProvider as apiCreateProvider,
   updateProvider as apiUpdateProvider,
   deleteProvider as apiDeleteProvider,
-  updateSessionSettings as apiUpdateSessionSettings,
 } from "@/lib/api"
 import {
   createIdleScheduler,
@@ -30,13 +28,13 @@ import type {
   ModelConfig,
   ProviderInfo,
   ProviderListItem,
-  SessionSettings,
   SessionListItem,
   SseEvent,
   StreamingTurn,
   TurnLifecycle,
   TurnStatus,
 } from "@/lib/types"
+import { useSessionSettingsStore } from "@/stores/session-settings-store"
 
 const SESSION_HISTORY_PAGE_SIZE = 5
 const INITIAL_SESSION_HISTORY_PAGE_SIZE = 1
@@ -214,7 +212,6 @@ type ChatStore = {
   chatState: ChatState
   provider: ProviderInfo | null
   providerList: ProviderListItem[]
-  sessionSettings: SessionSettings | null
   error: string | null
   view: AppView
   contextPressure: number | null
@@ -226,12 +223,6 @@ type ChatStore = {
   handleSseEvent: (event: SseEvent) => void
   submitTurn: (prompt: string) => void
   cancelTurn: () => Promise<void>
-  switchModel: (
-    providerName: string,
-    modelId?: string,
-    reasoningEffort?: string | null
-  ) => void
-  setReasoningEffort: (reasoningEffort: string | null) => void
   refreshProviders: () => void
   setView: (view: AppView) => void
   createProvider: (body: {
@@ -305,7 +296,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
     })
     const currentTurnPromise = fetchCurrentTurn(id)
     const sessionInfoPromise = fetchSessionInfo(id)
-    const sessionSettingsPromise = fetchSessionSettings(id)
 
     set((state) => ({
       activeSessionId: id,
@@ -336,13 +326,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
             ),
           }
         })
-      })
-      .catch(() => {})
-
-    sessionSettingsPromise
-      .then((sessionSettings) => {
-        if (loadId !== latestSessionLoadId) return
-        set({ sessionSettings })
       })
       .catch(() => {})
 
@@ -488,7 +471,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
     chatState: "idle",
     provider: null,
     providerList: [],
-    sessionSettings: null,
     error: null,
     view: "chat",
     contextPressure: null,
@@ -511,7 +493,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
           const activeId = sessions[0]?.id ?? null
           set({ sessions, activeSessionId: activeId })
           if (activeId) {
+            useSessionSettingsStore.getState().setActiveSessionId(activeId)
             void hydrateSession(activeId)
+            void useSessionSettingsStore.getState().hydrateForSession(activeId)
           }
         })
         .catch(() => {})
@@ -1060,14 +1044,17 @@ export const useChatStore = create<ChatStore>((set, get) => {
               ...applySessionSnapshot(nextSnapshot, nextActiveId != null),
               historyLoadingMore: false,
               _pendingPrompt: null,
-              sessionSettings: nextActiveId ? state.sessionSettings : null,
               _sessionSnapshots: nextSnapshots,
             }
           })
 
           cancelPendingHistoryHydration()
           if (wasActive && nextActiveId) {
+            useSessionSettingsStore.getState().setActiveSessionId(nextActiveId)
             void hydrateSession(nextActiveId)
+            void useSessionSettingsStore.getState().hydrateForSession(nextActiveId)
+          } else if (wasActive) {
+            useSessionSettingsStore.getState().clear()
           }
           break
         }
@@ -1175,50 +1162,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
       }
     },
 
-    switchModel: (
-      providerName: string,
-      modelId?: string,
-      reasoningEffort?: string | null
-    ) => {
-      const sessionId = get().activeSessionId
-      if (!sessionId || !modelId) return
-
-      apiUpdateSessionSettings({
-        session_id: sessionId,
-        provider: providerName,
-        model: modelId,
-        reasoning_effort: reasoningEffort,
-      })
-        .then((info) => {
-          set((state) => ({
-            provider: info,
-            sessionSettings: {
-              provider: providerName,
-              model: modelId,
-              protocol:
-                state.providerList.find((provider) => provider.name === providerName)?.kind ??
-                "openai-responses",
-              reasoning_effort: reasoningEffort ?? null,
-            },
-            sessions: state.sessions.map((session) =>
-              session.id === sessionId ? { ...session, model: modelId } : session
-            ),
-          }))
-          get().refreshProviders()
-        })
-        .catch((err: unknown) => {
-          set({
-            error: err instanceof Error ? err.message : "Switch failed",
-          })
-        })
-    },
-
-    setReasoningEffort: (reasoningEffort: string | null) => {
-      const settings = get().sessionSettings
-      if (!settings) return
-      get().switchModel(settings.provider, settings.model, reasoningEffort)
-    },
-
     refreshProviders: () => {
       Promise.all([apiListProviders(), fetchProviders()])
         .then(([providerList, provider]) => set({ providerList, provider }))
@@ -1270,7 +1213,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
         return
       }
       cancelPendingHistoryHydration()
+      useSessionSettingsStore.getState().setActiveSessionId(id)
       await hydrateSession(id)
+      await useSessionSettingsStore.getState().hydrateForSession(id)
     },
 
     loadOlderTurns: async () => {
@@ -1324,6 +1269,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         if (next) {
           await get().switchSession(next.id)
         } else {
+          useSessionSettingsStore.getState().clear()
           set({
             activeSessionId: null,
             sessionHydrating: false,
@@ -1335,7 +1281,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
             chatState: "idle",
             lastCompression: null,
             contextPressure: null,
-            sessionSettings: null,
           })
         }
       }

@@ -1,5 +1,19 @@
 # 演进日志
 
+## 2026-03-21 Session 99
+
+**Diagnosis**：上一轮虽然已经把模型与思考等级改成 session 级设置，但实现仍把这块状态直接塞在 `chat-store` 里，导致聊天流式状态、历史分页、SSE 恢复、session 设置更新都混在同一 store。与此同时，输入框里的思考等级控件还没有按模型能力 gating，等级集合也没对齐用户指定的 `minimal|low|medium|high|xhigh`，样式还是原生 `select`，和现有模型选择器不一致。
+**Decision**：继续沿“高杠杆、低风险”的前端收口推进：把 session 级模型/思考等级状态正式拆到独立 `session-settings-store`，让 `chat-store` 回到对话历史与流式主链；输入框顶部改为使用统一 `Select` 组件，把思考等级放到模型选择器旁边，且只在当前模型 `supports_reasoning` 时显示；思考等级类型正式收口为共享 `ThinkingLevel = minimal|low|medium|high|xhigh`。
+**Changes**：
+- `apps/web/src/stores/session-settings-store.ts`、`apps/web/src/stores/session-settings-store.test.ts`：新增独立 session settings store，承接 active session 的 settings hydrate、session-scoped model switch、reasoning level 更新，以及“当前模型是否支持 reasoning”的派生判断与测试。
+- `apps/web/src/stores/chat-store.ts`、`apps/web/src/stores/chat-store.test.ts`：移除 `sessionSettings` / `switchModel` / `setReasoningEffort` 等 session 设置逻辑，仅在 initialize / switchSession / deleteSession 等生命周期点驱动新的 session settings store。
+- `apps/web/src/lib/types.ts`：新增共享 `ThinkingLevel` 类型，并把 `ModelConfig.reasoning_effort`、`SessionSettings.reasoning_effort` 收口到该枚举。
+- `apps/web/src/components/{chat-input.tsx,model-selector.tsx}`：模型与思考等级控件统一改用现有 `Select` 组件；思考等级只在当前模型支持 reasoning 时显示，并与模型选择器并列展示。
+- `docs/{status.md,evolution-log.md}`：同步记录本轮前端 session 设置 store 收口与 reasoning gating 结果。
+**Verification**：`just web-typecheck`、`just web-test`。
+**Commit**：`df37c46 refactor(web): isolate session settings store`。
+**Next direction**：如果继续沿输入区稳定性收口，下一步优先考虑把当前模型标签、session setting loading/disabled 态也显式投影到输入区，而不是继续让组件隐式依赖多个 store 的默认值时序。
+
 ## 2026-03-21 Session 98
 
 **Diagnosis**：当前 Web 聊天区的模型选择仍直接调用 `/api/providers/switch`，实质是在修改全局 active provider/model；与此同时，输入框还没有暴露思考等级控制。用户已经明确要求“前端输入框支持设置思考等级，然后模型设置是跟 session 挂钩的不是全局的”，而现有实现会让不同 session 互相污染模型设置，属于高杠杆的交互/可靠性问题。

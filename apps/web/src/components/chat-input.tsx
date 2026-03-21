@@ -1,8 +1,18 @@
 import { useRef, useState } from "react"
 import { ArrowUp, Square } from "lucide-react"
-import { cn } from "@/lib/utils"
+
 import { ModelSelector } from "@/components/model-selector"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import type { ThinkingLevel } from "@/lib/types"
+import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat-store"
+import { useSessionSettingsStore } from "@/stores/session-settings-store"
 
 function ContextPressure() {
   const pressure = useChatStore((s) => s.contextPressure)
@@ -19,26 +29,35 @@ function ContextPressure() {
   return <span className={cn("tabular-nums", color)}>{pct}%</span>
 }
 
-const REASONING_OPTIONS = [
-  { value: null, label: "Auto" },
+const THINKING_OPTIONS: Array<{
+  value: ThinkingLevel
+  label: string
+}> = [
+  { value: "minimal", label: "Minimal" },
   { value: "low", label: "Low" },
   { value: "medium", label: "Medium" },
   { value: "high", label: "High" },
-] as const
+  { value: "xhigh", label: "XHigh" },
+]
 
 export function ChatInput() {
   const submitTurn = useChatStore((s) => s.submitTurn)
   const cancelTurn = useChatStore((s) => s.cancelTurn)
   const chatState = useChatStore((s) => s.chatState)
-  const sessionSettings = useChatStore((s) => s.sessionSettings)
-  const setReasoningEffort = useChatStore((s) => s.setReasoningEffort)
+  const providerList = useChatStore((s) => s.providerList)
+  const refreshProviders = useChatStore((s) => s.refreshProviders)
+  const sessionSettings = useSessionSettingsStore((s) => s.sessionSettings)
+  const supportsReasoning = useSessionSettingsStore((s) =>
+    s.supportsReasoning(providerList)
+  )
+  const setReasoningEffort = useSessionSettingsStore((s) => s.setReasoningEffort)
   const disabled = chatState === "active"
 
   const [value, setValue] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const canSend = value.trim().length > 0 && !disabled
-  const reasoningValue = sessionSettings?.reasoning_effort ?? ""
+  const reasoningValue = sessionSettings?.reasoning_effort ?? "medium"
 
   function handleSend() {
     if (!canSend) return
@@ -59,25 +78,35 @@ export function ChatInput() {
       <div className="pointer-events-none absolute -top-10 right-0 left-0 h-10 bg-gradient-to-t from-background to-transparent" />
 
       <div className="mx-auto max-w-[720px]">
-        <div className="mb-1.5 flex items-center justify-between gap-3">
+        <div className="mb-1.5 flex items-center justify-start gap-2">
           <ModelSelector />
-          <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
-            <span>Thinking</span>
-            <select
+          {supportsReasoning && (
+            <Select
               value={reasoningValue}
-              onChange={(e) => {
-                const next = e.target.value || null
-                setReasoningEffort(next)
+              onValueChange={(next) => {
+                if (!next) return
+                void setReasoningEffort(providerList, next as ThinkingLevel)
+                  .then((info) => {
+                    if (info) refreshProviders()
+                  })
+                  .catch(() => {})
               }}
-              className="rounded-md border border-border/50 bg-card px-2 py-1 text-[11px] text-foreground outline-none"
             >
-              {REASONING_OPTIONS.map((option) => (
-                <option key={option.label} value={option.value ?? ""}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
+              <SelectTrigger
+                size="sm"
+                className="h-7 border-0 bg-transparent px-1.5 py-0 text-[11px] text-muted-foreground shadow-none hover:bg-accent/50 hover:text-foreground/80"
+              >
+                <SelectValue>{`Thinking: ${THINKING_OPTIONS.find((item) => item.value === reasoningValue)?.label ?? "Medium"}`}</SelectValue>
+              </SelectTrigger>
+              <SelectContent align="start">
+                {THINKING_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
         <div className="flex items-end gap-3 rounded-xl border border-border/50 bg-card px-4 py-3">
           <textarea

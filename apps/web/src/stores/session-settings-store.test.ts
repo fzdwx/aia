@@ -1,0 +1,117 @@
+import { afterEach, beforeEach, describe, expect, test } from "vite-plus/test"
+
+import { useSessionSettingsStore } from "./session-settings-store"
+import type { ProviderListItem } from "@/lib/types"
+
+type FetchMock = typeof fetch
+
+const originalFetch = globalThis.fetch
+
+const providerList: ProviderListItem[] = [
+  {
+    name: "openai",
+    kind: "openai-responses",
+    base_url: "https://api.openai.com",
+    active: true,
+    active_model: "gpt-5",
+    models: [
+      {
+        id: "gpt-5",
+        display_name: "GPT-5",
+        limit: null,
+        default_temperature: null,
+        supports_reasoning: true,
+        reasoning_effort: "medium",
+      },
+      {
+        id: "gpt-4.1-mini",
+        display_name: "GPT-4.1 Mini",
+        limit: null,
+        default_temperature: null,
+        supports_reasoning: false,
+        reasoning_effort: null,
+      },
+    ],
+  },
+]
+
+describe("session settings store", () => {
+  beforeEach(() => {
+    useSessionSettingsStore.setState({
+      activeSessionId: null,
+      sessionSettings: null,
+      hydrating: false,
+    })
+  })
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  test("supportsReasoning reflects active session model capability", () => {
+    useSessionSettingsStore.setState({
+      activeSessionId: "session-1",
+      sessionSettings: {
+        provider: "openai",
+        model: "gpt-5",
+        protocol: "openai-responses",
+        reasoning_effort: "high",
+      },
+      hydrating: false,
+    })
+
+    expect(useSessionSettingsStore.getState().supportsReasoning(providerList)).toBe(true)
+
+    useSessionSettingsStore.setState({
+      sessionSettings: {
+        provider: "openai",
+        model: "gpt-4.1-mini",
+        protocol: "openai-responses",
+        reasoning_effort: null,
+      },
+    })
+
+    expect(useSessionSettingsStore.getState().supportsReasoning(providerList)).toBe(false)
+  })
+
+  test("switchModel updates session-scoped settings and clears reasoning for unsupported models", async () => {
+    const calls: Array<{ url: string; body?: string }> = []
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString()
+      calls.push({ url, body: init?.body as string | undefined })
+      return new Response(
+        JSON.stringify({ name: "openai", model: "gpt-4.1-mini", connected: true }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    }) as FetchMock
+
+    useSessionSettingsStore.setState({
+      activeSessionId: "session-1",
+      sessionSettings: {
+        provider: "openai",
+        model: "gpt-5",
+        protocol: "openai-responses",
+        reasoning_effort: "high",
+      },
+      hydrating: false,
+    })
+
+    await useSessionSettingsStore
+      .getState()
+      .switchModel(providerList, "openai", "gpt-4.1-mini", "xhigh")
+
+    expect(calls[0]?.url).toBe("/api/session/settings")
+    expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({
+      session_id: "session-1",
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      reasoning_effort: null,
+    })
+    expect(useSessionSettingsStore.getState().sessionSettings).toEqual({
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      protocol: "openai-responses",
+      reasoning_effort: null,
+    })
+  })
+})

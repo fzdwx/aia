@@ -229,6 +229,13 @@ export type StreamingTurn = {
 
 export type ChatState = "idle" | "active"
 
+export type ThinkingLevel =
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+
 export type ModelConfig = {
   id: string
   display_name: string | null
@@ -238,7 +245,7 @@ export type ModelConfig = {
   } | null
   default_temperature: number | null
   supports_reasoning: boolean
-  reasoning_effort: string | null
+  reasoning_effort: ThinkingLevel | null
 }
 
 export type ProviderListItem = {
@@ -254,7 +261,7 @@ export type SessionSettings = {
   provider: string
   model: string
   protocol: string
-  reasoning_effort: string | null
+  reasoning_effort: ThinkingLevel | null
 }
 
 export type ChannelTransport = string
