@@ -1,5 +1,15 @@
 # 演进日志
 
+## 2026-03-21 Session 102
+
+**Diagnosis**：用户反馈 `GET /api/session/settings` 返回 `tape load failed: 磁带 session 追加记录 id 不连续：期待 1402，收到 1401`，并补充“是另一个 session 在运行的时候”。排查后确认不是当前磁带文件长期损坏，而是 `apps/agent-server` 在“某个 session 正在运行、其 runtime 已 `take()` 出去”的窗口里，若同时对该 session 走 `/api/session/settings` 更新 provider binding，`provider_sync` 会回退到从 `.jsonl` 重新加载磁带并整文件 `save_jsonl(...)`。这条整文件重写与运行中 runtime 的 `with_tape_entry_listener -> append_jsonl_entry(...)` 并发发生时，会把旧快照覆盖到正在追加的文件上，进而制造重复/回退 entry id，后续任何 settings 读取都会因为连续性校验失败而报错。
+**Decision**：不再让“运行中的 session 设置更新”触发磁带文件重载/重写，而是给 `SessionSlot` 增加内存态 `provider_binding` 快照。`get_session_settings` 对 running session 优先直接返回这份内存 binding；`update_session_provider_binding` 在 runtime 不可用但 slot 仍处于 `Running` 时，只更新 `provider_binding + pending_provider_binding`，把真正的磁带写回推迟到 runtime return 阶段统一执行。
+**Changes**：
+- `apps/agent-server/src/session_manager/{types.rs,mod.rs}`：`SessionSlot` 新增 `provider_binding` 快照；建 slot 与 runtime return 时同步维护；`get_session_settings(...)` 对 running session 改为直接返回内存 binding，不再回读 `.jsonl`。
+- `apps/agent-server/src/session_manager/provider_sync.rs`：运行中 session 且 `runtime` 已取走时，更新 settings 不再 `load_jsonl_or_default + save_jsonl`，只更新 `provider_binding/pending_provider_binding` 并返回对应 provider info，避免和 turn 追加写并发打架。
+- `apps/agent-server/tests/session_manager/{mod.rs,provider_sync/mod.rs}`：新增“running session 保留内存 provider binding”“running session settings update 不重写 session file”回归测试。
+**Commit**：`43472cc fix(server): avoid tape rewrite during session updates`。
+
 ## 2026-03-21 Session 101
 
 **Diagnosis**：上一轮已经把 session 级模型切换收口到 `session-settings-store.switchModel(...)`，并补了 store 侧请求/状态同步测试，但用户继续反馈“现在只有改思考等级才调用接口”。继续排查后发现真正断在组件层：`ModelSelector` 额外用本地 `open` state + `document.mousedown` 手动做“外部点击关闭”，而 Base UI `SelectContent` 实际渲染在 portal 里。点击模型项时，这个外部点击监听会先把弹层关闭，导致 item click 还没完成就被打断，因此看起来只有思考等级 selector 会真的触发 `/api/session/settings`。

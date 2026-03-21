@@ -65,6 +65,7 @@ fn get_session_info_uses_cached_stats_when_turn_is_running() {
             runtime: None,
             subscriber: 0,
             session_path: temp_session_path("context-stats-missing"),
+            provider_binding: session_tape::SessionProviderBinding::Bootstrap,
             history: Arc::new(RwLock::new(Vec::new())),
             current_turn: Arc::new(RwLock::new(None)),
             context_stats: Arc::new(RwLock::new(agent_runtime::ContextStats {
@@ -92,6 +93,53 @@ fn get_session_info_uses_cached_stats_when_turn_is_running() {
     assert_eq!(stats.context_limit, Some(1024));
     assert_eq!(stats.output_limit, Some(256));
     assert_eq!(stats.pressure_ratio, Some(42.0 / 1024.0));
+}
+
+#[test]
+fn running_session_slot_keeps_in_memory_provider_binding() {
+    let mut slots = std::collections::HashMap::new();
+    slots.insert(
+        "session-1".to_string(),
+        SessionSlot {
+            runtime: None,
+            subscriber: 0,
+            session_path: temp_session_path("running-session-settings"),
+            provider_binding: session_tape::SessionProviderBinding::Provider {
+                name: "primary".into(),
+                model: "model-primary".into(),
+                base_url: "https://primary.example.com".into(),
+                protocol: "openai-responses".into(),
+                reasoning_effort: Some("high".into()),
+            },
+            history: Arc::new(RwLock::new(Vec::new())),
+            current_turn: Arc::new(RwLock::new(None)),
+            context_stats: Arc::new(RwLock::new(agent_runtime::ContextStats {
+                total_entries: 0,
+                anchor_count: 0,
+                entries_since_last_anchor: 0,
+                last_input_tokens: None,
+                context_limit: None,
+                output_limit: None,
+                pressure_ratio: None,
+            })),
+            running_turn: None,
+            pending_provider_binding: None,
+            status: SlotStatus::Running,
+        },
+    );
+
+    let slot = slots.get("session-1").expect("session slot should exist");
+    assert!(slot.runtime.is_none());
+    assert_eq!(slot.status, SlotStatus::Running);
+    assert!(matches!(
+        &slot.provider_binding,
+        session_tape::SessionProviderBinding::Provider {
+            name,
+            model,
+            reasoning_effort: Some(effort),
+            ..
+        } if name == "primary" && model == "model-primary" && effort == "high"
+    ));
 }
 
 #[test]
@@ -150,6 +198,7 @@ fn handle_cancel_turn_marks_running_snapshot_as_cancelled() {
             runtime: None,
             subscriber: 0,
             session_path: std::path::PathBuf::new(),
+            provider_binding: session_tape::SessionProviderBinding::Bootstrap,
             history: Arc::new(RwLock::new(Vec::new())),
             current_turn: current_turn.clone(),
             context_stats: Arc::new(RwLock::new(agent_runtime::ContextStats {

@@ -232,6 +232,8 @@ impl<'a> ProviderSyncService<'a> {
             RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
         })?;
 
+        slot.provider_binding = binding.clone();
+
         match &mut slot.runtime {
             Some(runtime) => {
                 if runtime.tape().latest_provider_binding().as_ref() != Some(&binding) {
@@ -253,6 +255,24 @@ impl<'a> ProviderSyncService<'a> {
                 return Ok(ProviderInfoSnapshot::from_identity(runtime.model_identity()));
             }
             None => {
+                if slot.status == super::SlotStatus::Running {
+                    slot.pending_provider_binding = Some(binding);
+                    return Ok(match &slot.provider_binding {
+                        SessionProviderBinding::Bootstrap => ProviderInfoSnapshot {
+                            name: "bootstrap".into(),
+                            model: "bootstrap".into(),
+                            connected: true,
+                        },
+                        SessionProviderBinding::Provider { name, model, .. } => {
+                            ProviderInfoSnapshot {
+                                name: name.clone(),
+                                model: model.clone(),
+                                connected: true,
+                            }
+                        }
+                    });
+                }
+
                 let mut tape = SessionTape::load_jsonl_or_default(&slot.session_path).map_err(
                     |error| RuntimeWorkerError::internal(format!("tape load failed: {error}")),
                 )?;

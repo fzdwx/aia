@@ -184,3 +184,37 @@ fn session_binding_preserves_reasoning_effort_override() {
 
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn running_session_settings_update_does_not_rewrite_session_file() {
+    let root = temp_root("session-binding-running-no-rewrite");
+    let mut config = sample_config(&root, sample_registry());
+    let mut slots = HashMap::new();
+    let mut slot =
+        SessionSlotFactory::new(&config).create("session-1").expect("session slot should build");
+    let session_path = slot.session_path.clone();
+    let original_contents = std::fs::read_to_string(&session_path).unwrap_or_default();
+
+    let _runtime = slot.runtime.take().expect("runtime should exist");
+    slot.status = super::super::SlotStatus::Running;
+    slots.insert("session-1".to_string(), slot);
+
+    let mut service = ProviderSyncService::new(&mut slots, &mut config);
+    let binding = SessionProviderBinding::Provider {
+        name: "primary".into(),
+        model: "model-primary".into(),
+        base_url: "https://primary.example.com".into(),
+        protocol: "openai-responses".into(),
+        reasoning_effort: Some("high".into()),
+    };
+
+    service
+        .update_session_provider_binding("session-1", binding.clone())
+        .expect("session settings update should succeed");
+
+    assert_eq!(slots["session-1"].provider_binding, binding.clone());
+    assert_eq!(slots["session-1"].pending_provider_binding, Some(binding));
+    assert_eq!(std::fs::read_to_string(&session_path).unwrap_or_default(), original_contents);
+
+    let _ = std::fs::remove_dir_all(root);
+}

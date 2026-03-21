@@ -180,6 +180,11 @@ impl SessionManagerLoop {
             }
 
             *write_lock(&slot.context_stats) = ret.runtime.context_stats();
+            slot.provider_binding = ret
+                .runtime
+                .tape()
+                .latest_provider_binding()
+                .unwrap_or(SessionProviderBinding::Bootstrap);
             let should_auto_compress = slot
                 .context_stats
                 .read()
@@ -328,11 +333,8 @@ impl SessionManagerLoop {
             RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
         })?;
 
-        if let Some(runtime) = slot.runtime.as_ref() {
-            return Ok(runtime
-                .tape()
-                .latest_provider_binding()
-                .unwrap_or(SessionProviderBinding::Bootstrap));
+        if slot.runtime.is_some() || slot.status == SlotStatus::Running {
+            return Ok(slot.provider_binding.clone());
         }
 
         let tape = SessionTape::load_jsonl_or_default(&slot.session_path)
@@ -354,6 +356,7 @@ impl<'a> SessionSlotFactory<'a> {
         let session_path = self.config.sessions_dir.join(format!("{session_id}.jsonl"));
         let tape = SessionTape::load_jsonl_or_default(&session_path)
             .map_err(|error| RuntimeWorkerError::internal(format!("tape load failed: {error}")))?;
+        let provider_binding = tape.latest_provider_binding().unwrap_or(SessionProviderBinding::Bootstrap);
 
         let selection = choose_provider_for_tape(&self.config.registry, &tape);
         let prompt_cache = prompt_cache_for_selection(&selection, session_id);
@@ -389,6 +392,7 @@ impl<'a> SessionSlotFactory<'a> {
             runtime: Some(runtime),
             subscriber,
             session_path,
+            provider_binding,
             history: Arc::new(RwLock::new(snapshots.history)),
             current_turn: Arc::new(RwLock::new(snapshots.current_turn)),
             context_stats: Arc::new(RwLock::new(context_stats)),

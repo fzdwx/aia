@@ -30,6 +30,7 @@ pub(crate) struct SessionSlot {
     pub(crate) runtime: Option<AgentRuntime<ServerModel, ToolRegistry>>,
     pub(crate) subscriber: RuntimeSubscriberId,
     pub(crate) session_path: PathBuf,
+    pub(crate) provider_binding: SessionProviderBinding,
     pub(crate) history: Arc<RwLock<Vec<TurnLifecycle>>>,
     pub(crate) current_turn: Arc<RwLock<Option<CurrentTurnSnapshot>>>,
     pub(crate) context_stats: Arc<RwLock<ContextStats>>,

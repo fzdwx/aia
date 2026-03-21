@@ -15,6 +15,7 @@
 - 最新前端 session 设置收口：`apps/web` 已把 session 级模型/思考等级状态从 `chat-store` 拆到独立 `session-settings-store`，聊天主 store 不再同时承载会话历史流和 session 设置控制面；输入框顶部当前也改为复用统一 `Select` 组件，把思考等级放到模型选择器旁边，并且只有当前模型 `supports_reasoning=true` 时才显示。思考等级枚举也已和产品约定对齐为 `minimal|low|medium|high|xhigh`。
 - 最新输入区稳定性收口：session 级模型/思考等级控件现在会显式区分 `hydrating`、`updating` 与 `error` 状态。切 session 或提交设置更新时，输入区顶部控件会进入 disabled/loading 态而不是短暂显示旧 session 的值；若 `/api/session/settings` 读取或更新失败，也会在输入区下方直接暴露错误文案，避免 silent flicker。
 - 最新模型切换修复：`ModelSelector` 不再手动接管 Base UI `Select` 的 `open` 生命周期，也不再用 `document.mousedown` 抢先关闭 portal 弹层；点击模型项时现在会稳定触发真正的 `PUT /api/session/settings`，不再出现“只有思考等级才会调用接口”的问题。
+- 最新 session settings 并发修复：当某个 session 的 turn 正在运行、runtime 已被 worker 临时取走时，对该 session 再读/写 `/api/session/settings` 不会回退去重载并整文件重写 `.jsonl`。`SessionSlot` 现额外保存内存态 `provider_binding` 快照，运行中只更新/读取这份快照，并把真正的磁带写回延后到 runtime return 阶段，避免与 turn 追加写并发造成 session tape entry id 回退或重复。
 - 最新 channel 持久化收口：`channel-registry` crate 已从工作区移除；`ChannelProfile` 现统一由 `channel-bridge::ChannelProfileRegistry` 作为 store façade 管理，`apps/agent-server` 启动时直接从 `agent-store` 的 `channel_profiles` 表加载。`/api/channels` 的增删改也已先写 SQLite 再更新内存快照，避免 store 失败后 runtime 继续拿到脏 profile 状态。
 - 最新后端架构收口：`apps/agent-server/src/routes/channel` 等资源路由已统一采用目录模块；局部请求/响应类型直接并回各自 `mod.rs`，配置脱敏/合并、持久化回滚事务与 handler/tests 继续留在同级子模块，避免继续为只服务单一路由的 DTO 额外挂一个薄文件。
 - 最新宿主桥接收口：`apps/agent-server/src/channel_host` 也已从单文件拆成目录模块；当前由 façade `mod.rs` 暴露稳定装配接口，宿主 trait 实现、SSE→channel 事件映射与运行态装配分别下沉，继续把 `agent-server` 保持在“桥接壳层”而非巨石入口。
