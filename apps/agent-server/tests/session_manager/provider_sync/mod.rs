@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use agent_core::RequestTimeoutConfig;
 use provider_registry::{ProviderProfile, ProviderRegistry};
 
 use super::{ProviderSyncService, ReturnedRuntimeSync};
@@ -50,6 +51,9 @@ fn sample_config(root: &std::path::Path, registry: ProviderRegistry) -> SessionM
         provider_info_snapshot: Arc::new(RwLock::new(provider_info)),
         workspace_root: root.to_path_buf(),
         user_agent: "test-agent".into(),
+        request_timeout: RequestTimeoutConfig {
+            read_timeout_ms: Some(aia_config::DEFAULT_SERVER_REQUEST_TIMEOUT_MS),
+        },
         system_prompt: agent_prompts::SystemPromptConfig::default(),
         runtime_hooks: agent_runtime::RuntimeHooks::default(),
     }

@@ -3,6 +3,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+use agent_core::RequestTimeoutConfig;
 use agent_prompts::SystemPromptConfig;
 use agent_runtime::RuntimeHooks;
 use agent_store::{AiaStore, SessionRecord, generate_session_id};
@@ -29,6 +30,7 @@ pub struct ServerBootstrapOptions {
     registry_path: Option<PathBuf>,
     workspace_root: Option<PathBuf>,
     user_agent: Option<String>,
+    request_timeout: Option<RequestTimeoutConfig>,
     system_prompt: SystemPromptConfig,
     runtime_hooks: RuntimeHooks,
 }
@@ -46,6 +48,11 @@ impl ServerBootstrapOptions {
 
     pub fn with_user_agent(mut self, user_agent: impl Into<String>) -> Self {
         self.user_agent = Some(user_agent.into());
+        self
+    }
+
+    pub fn with_request_timeout(mut self, request_timeout: RequestTimeoutConfig) -> Self {
+        self.request_timeout = Some(request_timeout);
         self
     }
 
@@ -219,6 +226,11 @@ impl ServerBootstrap {
             provider_info_snapshot: snapshots.provider_info_snapshot.clone(),
             workspace_root: self.paths.workspace_root.clone(),
             user_agent: self.options.user_agent.clone().unwrap_or_else(build_server_user_agent),
+            request_timeout: self.options.request_timeout.clone().unwrap_or_else(|| {
+                RequestTimeoutConfig {
+                    read_timeout_ms: Some(aia_config::DEFAULT_SERVER_REQUEST_TIMEOUT_MS),
+                }
+            }),
             system_prompt: self.options.system_prompt.clone(),
             runtime_hooks: self.options.runtime_hooks.clone(),
         });

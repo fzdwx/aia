@@ -2,6 +2,7 @@ use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use agent_core::RequestTimeoutConfig;
 use agent_prompts::SystemPromptConfig;
 use agent_runtime::RuntimeHooks;
 
@@ -83,6 +84,63 @@ fn bootstrap_state_with_options_applies_embedded_runtime_customization() {
     assert!(seen[0].1.contains("你是嵌入式客户端代理。"));
     assert!(seen[0].1.contains("嵌入方附加约束"));
     assert!(seen[0].1.contains("Context Contract"));
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn bootstrap_state_with_options_applies_custom_request_timeout() {
+    let root = temp_root("timeout");
+    std::fs::create_dir_all(&root).expect("temp root should exist");
+    let seen_timeouts = Arc::new(Mutex::new(Vec::<Option<u64>>::new()));
+
+    run_async(async {
+        let hooks = RuntimeHooks::default().on_before_provider_request({
+            let seen_timeouts = seen_timeouts.clone();
+            move |event| {
+                seen_timeouts.lock().expect("test mutex should lock").push(
+                    event.request.timeout.as_ref().and_then(|timeout| timeout.read_timeout_ms),
+                );
+                Ok(())
+            }
+        });
+
+        let state = bootstrap_state_with_options(
+            ServerBootstrapOptions::default()
+                .with_registry_path(root.join("providers.json"))
+                .with_workspace_root(root.clone())
+                .with_request_timeout(RequestTimeoutConfig { read_timeout_ms: Some(900_000) })
+                .with_runtime_hooks(hooks),
+        )
+        .await
+        .expect("bootstrap should succeed");
+
+        let session = state
+            .session_manager
+            .create_session(Some("Timeout override".into()))
+            .await
+            .expect("session should be created");
+        let _ = state
+            .session_manager
+            .submit_turn(session.id.clone(), "hello".into())
+            .await
+            .expect("turn should be accepted");
+
+        for _ in 0..200 {
+            let history = state
+                .session_manager
+                .get_history(session.id.clone())
+                .await
+                .expect("history should be readable");
+            if !history.is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+    });
+
+    let seen_timeouts = seen_timeouts.lock().expect("test mutex should lock");
+    assert_eq!(seen_timeouts.as_slice(), &[Some(900_000)]);
 
     let _ = std::fs::remove_dir_all(root);
 }

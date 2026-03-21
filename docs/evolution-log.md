@@ -1,5 +1,29 @@
 # 演进日志
 
+## 2026-03-21 Session 95
+
+**Diagnosis**：上一轮已经把 `request_timeout` 提升到了 `ServerBootstrapOptions`，但真正启动 HTTP server 的监听地址仍被 `run_server(...)` 硬编码在 `DEFAULT_SERVER_BIND_ADDR`。这意味着嵌入方若想复用 `agent-server` 的 router/state，却按自己的宿主环境选择监听地址，仍得绕回更低层自己拼 listener；同时 CLI 也缺少一个显式的 `--bind` 覆写入口。
+**Decision**：保持 bootstrap 与 run 两层职责分离：不把 bind 地址塞回 `AppState` 或 `SessionManagerConfig`，而是新增单独的 `ServerRunOptions` 供 `run_server_with_options(...)` 使用。这样 control-plane 状态装配仍走 `bootstrap_state_with_options(...)`，而进程级监听地址则保持在 run 阶段配置；CLI 侧同步补 `--bind <addr>`，但不扩成新的复杂参数系统。
+**Changes**：
+- `apps/agent-server/src/{server/mod.rs,lib.rs,main.rs,cli/mod.rs}`：新增 `ServerRunOptions` 与 `run_server_with_options(...)`，保留原 `run_server(...)` 作为默认包装；CLI 新增 `--bind <addr>`，主入口据此选择监听地址。
+- `apps/agent-server/tests/{cli/mod.rs,server/mod.rs}`：补 `--bind` 解析回归测试，以及 wildcard / specific host 的展示地址测试。
+- `docs/{status.md,architecture.md,requirements.md,evolution-log.md}`：同步记录 `agent-server` 现已把“高层 bootstrap 配置”和“server 监听地址配置”分开收口。
+**Verification**：待本轮执行 `cargo fmt --all`、`cargo test -p agent-server`、`cargo check --workspace` 后补充。
+**Commit**：未提交。
+**Next direction**：如果继续沿嵌入式 server façade 收口，下一步优先评估是否需要暴露“只返回 router、不直接 bind listener”的更细粒度入口，而不是继续把进程级运行参数塞回 bootstrap 状态装配面。
+
+## 2026-03-21 Session 94
+
+**Diagnosis**：仓库里虽然早已把 `DEFAULT_SERVER_REQUEST_TIMEOUT_MS` 收口到 `aia-config`，而且 session runtime 创建时也会带上默认读超时，但这条能力仍停留在 `apps/agent-server` 内部硬编码。对于通过 `bootstrap_state_with_options(ServerBootstrapOptions)` 嵌入 `agent-server` 的其他客户端来说，`user_agent/system_prompt/runtime_hooks` 已可覆写，唯独请求超时还不能走同一条高层注入面，和当前“server 作为可驱动 control-plane façade”方向不一致。
+**Decision**：不改 shared `CompletionRequest` / `RequestTimeoutConfig` 契约，也不改默认超时常量位置；只把 `request_timeout` 正式提升到 `ServerBootstrapOptions` 与 `SessionManagerConfig`，让 session manager 新建 runtime 时统一复用配置。这样默认值继续来自 `aia-config`，但嵌入方可以按客户端场景覆写，而不必再依赖 app 壳内硬编码。
+**Changes**：
+- `apps/agent-server/src/{bootstrap/mod.rs,session_manager/types.rs,session_manager/mod.rs}`：`ServerBootstrapOptions` 新增 `with_request_timeout(...)`，`SessionManagerConfig` 显式承接共享 `RequestTimeoutConfig`，runtime 初始化统一从 config 读取超时；原先只服务默认值的局部 helper 删除。
+- `apps/agent-server/tests/{bootstrap/mod.rs,session_manager/mod.rs,session_manager/provider_sync/mod.rs}`：补齐 bootstrap timeout 透传回归测试，并同步更新测试构造的 `SessionManagerConfig` 字段。
+- `docs/{status.md,architecture.md,requirements.md,evolution-log.md}`：同步记录 server bootstrap 现已允许嵌入方覆写共享请求超时。
+**Verification**：`cargo fmt --all`、`cargo test -p agent-server`、`cargo check --workspace`。
+**Commit**：未提交。
+**Next direction**：如果继续沿 control-plane façade 收口，下一步优先评估是否要把 bind/listener 或更多 app 级默认值也统一纳入高层 bootstrap options，而不是让嵌入方继续回落到更低层配置结构。
+
 ## 2026-03-21 Session 93
 
 **Diagnosis**：`agent-server self` 虽然已经把 `docs/self.md` 改成编译期内嵌，但实际运行时仍是先用默认 server system prompt 建 session，再把整份 `self.md` 塞进首条 user prompt。这会让 self 约束落点不对，也继续把“长期规则”和“本轮用户输入”混在一起。

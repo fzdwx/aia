@@ -5,6 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::runtime_worker::RunningTurnHandle;
 use crate::sse::TurnStatus;
+use agent_core::RequestTimeoutConfig;
 
 use super::{
     CurrentTurnSnapshot, SessionManagerConfig, SessionQueryService, SessionSlot, SlotStatus,
@@ -182,6 +183,9 @@ fn handle_cancel_turn_marks_running_snapshot_as_cancelled() {
         })),
         workspace_root: std::path::PathBuf::new(),
         user_agent: "test-agent".into(),
+        request_timeout: RequestTimeoutConfig {
+            read_timeout_ms: Some(aia_config::DEFAULT_SERVER_REQUEST_TIMEOUT_MS),
+        },
         system_prompt: agent_prompts::SystemPromptConfig::default(),
         runtime_hooks: agent_runtime::RuntimeHooks::default(),
     };
@@ -224,6 +228,9 @@ fn spawned_turn_worker_completes_bootstrap_turn() {
             })),
             workspace_root: temp_root.clone(),
             user_agent: "test-agent".into(),
+            request_timeout: RequestTimeoutConfig {
+                read_timeout_ms: Some(aia_config::DEFAULT_SERVER_REQUEST_TIMEOUT_MS),
+            },
             system_prompt: agent_prompts::SystemPromptConfig::default(),
             runtime_hooks: agent_runtime::RuntimeHooks::default(),
         });
@@ -307,6 +314,9 @@ fn spawned_turn_worker_applies_custom_system_prompt_and_runtime_hooks() {
             })),
             workspace_root: temp_root.clone(),
             user_agent: "test-agent".into(),
+            request_timeout: RequestTimeoutConfig {
+                read_timeout_ms: Some(aia_config::DEFAULT_SERVER_REQUEST_TIMEOUT_MS),
+            },
             system_prompt: agent_prompts::SystemPromptConfig::default()
                 .with_custom_prompt("你是测试客户端代理。")
                 .with_append_section("额外客户端约束"),

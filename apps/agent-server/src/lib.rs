@@ -15,7 +15,7 @@ pub use bootstrap::{
     build_server_user_agent,
 };
 pub use self_chat::{run_self_chat, self_chat_bootstrap_options};
-pub use server::run_server;
+pub use server::{ServerRunOptions, run_server, run_server_with_options};
 pub use session_manager::{ProviderInfoSnapshot, RuntimeWorkerError, SessionManagerHandle};
 pub use sse::{SsePayload, TurnStatus};
 pub use state::{AppState, SharedState, Snapshot};

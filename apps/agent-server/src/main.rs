@@ -1,6 +1,6 @@
 use agent_server::{
-    ServerInitError, bootstrap_state, bootstrap_state_with_options, run_self_chat, run_server,
-    self_chat_bootstrap_options,
+    ServerInitError, ServerRunOptions, bootstrap_state, bootstrap_state_with_options,
+    run_self_chat, run_server_with_options, self_chat_bootstrap_options,
 };
 
 use crate::cli::{CliCommand, cli_usage, parse_cli_command};
@@ -25,9 +25,12 @@ async fn main() {
 
 async fn run(command: CliCommand) -> Result<(), ServerInitError> {
     match command {
-        CliCommand::Serve => {
+        CliCommand::Serve { bind_addr } => {
             let state = bootstrap_state().await?;
-            run_server(state).await
+            let options = bind_addr.map_or_else(ServerRunOptions::default, |bind_addr| {
+                ServerRunOptions::default().with_bind_addr(bind_addr)
+            });
+            run_server_with_options(state, options).await
         }
         CliCommand::SelfChat { startup_task } => {
             let state = bootstrap_state_with_options(self_chat_bootstrap_options()).await?;

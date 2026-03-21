@@ -28,7 +28,7 @@ README 里真正难的是这些能力：
 - `provider-registry`：provider 资料、活动项与本地持久化
 - `openai-adapter`：首个真实模型适配层，负责把统一请求映射到 Responses 风格接口，并已切到原生 async `reqwest` 主链
 - `agent-store`：本地 SQLite session / trace 存储与查询
-- `apps/agent-server`：最小应用壳，负责把共享运行时桥接到 HTTP + SSE，并承接外部 channel 的薄长连接 ingress bridge
+- `apps/agent-server`：最小应用壳，负责把共享运行时桥接到 HTTP + SSE，并承接外部 channel 的薄长连接 ingress bridge；其高层 bootstrap façade 现允许嵌入方统一注入 `registry_path`、`workspace_root`、`user_agent`、`request_timeout`、`system_prompt` 与 `runtime_hooks`，而进程级 HTTP 监听地址则单独经由 `run_server_with_options(ServerRunOptions)` 配置，避免把运行状态装配与 listener 绑定混成一层
 - `apps/web`：主界面承接层，消费服务端事件流并负责交互展示
 
 ## 模块边界

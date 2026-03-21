@@ -15,7 +15,6 @@ use std::sync::{Arc, RwLock};
 
 use agent_core::{
     ModelIdentity, PromptCacheConfig, PromptCacheRetention as RuntimePromptCacheRetention,
-    RequestTimeoutConfig,
 };
 use agent_runtime::AgentRuntime;
 use agent_store::{AiaStore, SessionRecord, generate_session_id};
@@ -339,7 +338,6 @@ impl<'a> SessionSlotFactory<'a> {
 
         let session_append_path = session_path.clone();
         let workspace_root = self.config.workspace_root.clone();
-        let request_timeout = runtime_request_timeout();
         let mut runtime = AgentRuntime::with_tape(model, build_tool_registry(), identity, tape)
             .with_instructions(build_session_system_prompt(&self.config.system_prompt))
             .with_hooks(self.config.runtime_hooks.clone())
@@ -350,7 +348,7 @@ impl<'a> SessionSlotFactory<'a> {
                 SessionTape::append_jsonl_entry(&session_append_path, entry)
             })
             .with_max_tool_calls_per_turn(100000)
-            .with_request_timeout(request_timeout);
+            .with_request_timeout(self.config.request_timeout.clone());
         if let Some(prompt_cache) = prompt_cache {
             runtime = runtime.with_prompt_cache(prompt_cache);
         }
@@ -371,10 +369,6 @@ impl<'a> SessionSlotFactory<'a> {
             status: SlotStatus::Idle,
         })
     }
-}
-
-fn runtime_request_timeout() -> RequestTimeoutConfig {
-    RequestTimeoutConfig { read_timeout_ms: Some(aia_config::DEFAULT_SERVER_REQUEST_TIMEOUT_MS) }
 }
 
 fn choose_provider_for_tape(
