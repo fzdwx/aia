@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react"
 import {
   ArrowLeft,
   Bot,
+  ChevronDown,
   ExternalLink,
   Loader2,
   RefreshCw,
@@ -298,19 +299,11 @@ function loopWindowMs(group: TraceLoopGroup) {
   return Math.max(1, explicit ?? group.totalDurationMs ?? 1)
 }
 
-function nodeOffsetPercent(node: LoopTimelineNode, group: TraceLoopGroup) {
-  const window = loopWindowMs(group)
-  return Math.max(0, ((node.startedAtMs - group.startedAtMs) / window) * 100)
-}
-
-function nodeWidthPercent(node: LoopTimelineNode, group: TraceLoopGroup) {
-  const window = loopWindowMs(group)
-  const raw = ((Math.max(node.durationMs, 1) || 1) / window) * 100
-  return Math.max(2, Math.min(100, raw))
-}
-
-function relativeOffsetLabel(node: LoopTimelineNode, group: TraceLoopGroup) {
-  const delta = Math.max(0, node.startedAtMs - group.startedAtMs)
+function relativeOffsetLabel(
+  nodeStartedAtMs: number,
+  groupStartedAtMs: number
+) {
+  const delta = Math.max(0, nodeStartedAtMs - groupStartedAtMs)
   return `+${formatTraceDuration(delta)}`
 }
 
@@ -319,7 +312,7 @@ function nodeTitle(node: LoopTimelineNode) {
     case "agent_root":
       return "invoke_agent"
     case "llm_span":
-      return node.trace.model
+      return node.operationName
     case "tool_span":
       return getToolDisplayName(node.trace.model)
   }
@@ -331,13 +324,90 @@ function nodeSubtitle(node: LoopTimelineNode) {
       return "root span"
     case "llm_span":
       return node.trace.total_tokens != null && node.trace.total_tokens > 0
-        ? `${node.operationName} · ${formatCount(node.trace.total_tokens)} tok`
-        : node.operationName
+        ? `${node.trace.model} · ${formatCount(node.trace.total_tokens)} tok`
+        : node.trace.model
     case "tool_span":
       return node.trace.endpoint_path.startsWith("/tools/")
         ? node.operationName
-        : `${node.operationName} · ${node.trace.endpoint_path}`
+        : node.trace.endpoint_path
   }
+}
+
+function nodeKindLabel(node: LoopTimelineNode) {
+  switch (node.kind) {
+    case "agent_root":
+      return "Agent"
+    case "llm_span":
+      return "LLM"
+    case "tool_span":
+      return "Tool"
+  }
+}
+
+function nodeSpanId(node: LoopTimelineNode) {
+  return node.kind === "agent_root" ? node.id : node.trace.span_id
+}
+
+type TimelineTreeRow = {
+  node: LoopTimelineNode
+  depth: number
+  hasChildren: boolean
+}
+
+function buildTimelineTreeRows(group: TraceLoopGroup): TimelineTreeRow[] {
+  if (group.timeline.length === 0) return []
+
+  const spanIds = new Set(group.timeline.map((node) => nodeSpanId(node)))
+  const root = group.timeline[0]
+  const rootSpanId = nodeSpanId(root)
+  const childrenByParent = new Map<string | null, LoopTimelineNode[]>()
+
+  const pushChild = (parentId: string | null, node: LoopTimelineNode) => {
+    const current = childrenByParent.get(parentId) ?? []
+    current.push(node)
+    childrenByParent.set(parentId, current)
+  }
+
+  for (const node of group.timeline) {
+    if (node.kind === "agent_root") {
+      pushChild(null, node)
+      continue
+    }
+
+    const parentSpanId =
+      node.trace.parent_span_id && spanIds.has(node.trace.parent_span_id)
+        ? node.trace.parent_span_id
+        : rootSpanId
+    pushChild(parentSpanId, node)
+  }
+
+  for (const [, children] of childrenByParent) {
+    children.sort((left, right) => {
+      if (left.startedAtMs !== right.startedAtMs) {
+        return left.startedAtMs - right.startedAtMs
+      }
+      return left.id.localeCompare(right.id)
+    })
+  }
+
+  const rows: TimelineTreeRow[] = []
+  const visit = (node: LoopTimelineNode, depth: number) => {
+    const children = childrenByParent.get(nodeSpanId(node)) ?? []
+    rows.push({
+      node,
+      depth,
+      hasChildren: children.length > 0,
+    })
+    for (const child of children) {
+      visit(child, depth + 1)
+    }
+  }
+
+  for (const node of childrenByParent.get(null) ?? []) {
+    visit(node, 0)
+  }
+
+  return rows
 }
 
 function nodeTone(node: LoopTimelineNode) {
@@ -471,16 +541,16 @@ function DetailList({
   items: Array<{ label: string; value: ReactNode }>
 }) {
   return (
-    <dl className="divide-y divide-border/25 overflow-hidden rounded-lg border border-border/35 bg-background/70">
+    <dl className="divide-y divide-border/20 overflow-hidden rounded-xl border border-border/20 bg-background">
       {items.map((item) => (
         <div
           key={item.label}
-          className="flex flex-wrap items-start justify-between gap-x-2 gap-y-0.5 px-2 py-1.5"
+          className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1 px-3 py-2"
         >
-          <dt className="text-[10px] font-medium tracking-[0.12em] text-muted-foreground uppercase">
+          <dt className="text-[10px] font-medium text-muted-foreground uppercase">
             {item.label}
           </dt>
-          <dd className="min-w-0 text-right text-[11px] leading-4 text-foreground">
+          <dd className="max-w-[70%] min-w-0 text-right text-[12px] leading-5 text-foreground">
             {item.value}
           </dd>
         </div>
@@ -499,14 +569,14 @@ function Section({
   children: ReactNode
 }) {
   return (
-    <section className="space-y-2 rounded-xl border border-border/35 bg-background/70 p-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
+    <section className="overflow-hidden rounded-xl border border-border/20 bg-background/85">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/20 bg-muted/[0.12] px-3 py-2.5">
+        <h3 className="text-[11px] font-medium text-muted-foreground uppercase">
           {title}
         </h3>
         {action}
       </div>
-      {children}
+      <div className="space-y-3 p-3">{children}</div>
     </section>
   )
 }
@@ -524,10 +594,10 @@ function TabButton({
     <button
       onClick={onClick}
       className={cn(
-        "rounded-md px-2 py-0.5 text-[10px] font-medium tracking-[0.08em] uppercase transition-all active:scale-[0.96]",
+        "border-b-2 px-0 pb-2 text-[12px] font-medium transition-colors",
         active
-          ? "bg-foreground text-background"
-          : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+          ? "border-foreground text-foreground"
+          : "border-transparent text-muted-foreground hover:text-foreground"
       )}
     >
       {children}
@@ -544,7 +614,7 @@ function FieldBlock({
 }) {
   return (
     <div className="space-y-1.5">
-      <p className="text-[10px] font-medium tracking-[0.12em] text-muted-foreground uppercase">
+      <p className="text-[10px] font-medium text-muted-foreground uppercase">
         {label}
       </p>
       {children}
@@ -566,7 +636,7 @@ function TextBlock({
   return (
     <pre
       className={cn(
-        "overflow-x-auto rounded-lg border border-border/25 bg-muted/20 px-2 py-1.5 text-[11px] leading-4 whitespace-pre-wrap text-foreground",
+        "overflow-x-auto rounded-lg border border-border/20 bg-background px-3 py-2.5 text-[12px] leading-5 whitespace-pre-wrap text-foreground",
         className
       )}
     >
@@ -652,7 +722,7 @@ function ExpandableTextBlock({
     <div className="space-y-2">
       <pre
         className={cn(
-          "overflow-auto rounded-lg border border-border/25 bg-muted/20 px-2.5 py-2 text-[12px] leading-5 whitespace-pre-wrap text-foreground",
+          "overflow-auto rounded-lg border border-border/20 bg-background px-3 py-2.5 text-[12px] leading-5 whitespace-pre-wrap text-foreground",
           !open && needsCollapse && "max-h-48",
           tone === "danger" &&
             "border-destructive/20 bg-destructive/[0.04] text-destructive"
@@ -674,13 +744,15 @@ function ExpandableTextBlock({
 
 function RawJson({ title, value }: { title: string; value: unknown }) {
   return (
-    <Collapsible className="rounded-lg border border-border/35 bg-muted/[0.02]">
-      <CollapsibleTrigger className="flex w-full items-center justify-between px-2.5 py-2 text-left">
-        <span className="text-[12px] font-medium text-foreground">{title}</span>
+    <Collapsible className="overflow-hidden rounded-xl border border-border/20 bg-background">
+      <CollapsibleTrigger className="flex w-full items-center justify-between border-b border-border/20 bg-muted/[0.12] px-3 py-2.5 text-left">
+        <span className="text-[11px] font-medium text-muted-foreground uppercase">
+          {title}
+        </span>
         <span className="text-[11px] text-muted-foreground">JSON</span>
       </CollapsibleTrigger>
-      <CollapsibleContent className="border-t border-border/25 px-2.5 py-2">
-        <pre className="overflow-x-auto rounded-md bg-muted/25 p-3 text-[11px] leading-5 text-foreground">
+      <CollapsibleContent className="p-3">
+        <pre className="overflow-x-auto rounded-lg border border-border/20 bg-background px-3 py-2.5 text-[11px] leading-5 text-foreground">
           {JSON.stringify(value, null, 2)}
         </pre>
       </CollapsibleContent>
@@ -710,12 +782,12 @@ function EventTimeline({
       {events.map((event) => (
         <Collapsible
           key={event.key}
-          className="relative rounded-lg border border-border/35 bg-background/80 before:absolute before:top-3 before:-left-[12px] before:size-1.5 before:rounded-full before:bg-foreground/35"
+          className="relative rounded-xl border border-border/20 bg-background before:absolute before:top-3.5 before:-left-[12px] before:size-1.5 before:rounded-full before:bg-foreground/35"
         >
-          <CollapsibleTrigger className="flex w-full items-start justify-between gap-3 px-2 py-1.5 text-left">
+          <CollapsibleTrigger className="flex w-full items-start justify-between gap-3 px-3 py-2.5 text-left">
             <div className="min-w-0 space-y-0.5">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[11px] font-medium text-foreground">
+                <span className="text-[12px] font-medium text-foreground">
                   {event.name}
                 </span>
                 <span className="text-[10px] text-muted-foreground">
@@ -730,8 +802,8 @@ function EventTimeline({
             </div>
           </CollapsibleTrigger>
           {event.attributes && Object.keys(event.attributes).length > 0 ? (
-            <CollapsibleContent className="border-t border-border/25 px-2 py-1.5">
-              <pre className="overflow-x-auto rounded-md bg-muted/25 p-2 text-[11px] leading-5 text-foreground">
+            <CollapsibleContent className="border-t border-border/20 px-3 py-3">
+              <pre className="overflow-x-auto rounded-lg border border-border/20 bg-background px-3 py-2.5 text-[11px] leading-5 text-foreground">
                 {JSON.stringify(event.attributes, null, 2)}
               </pre>
             </CollapsibleContent>
@@ -742,149 +814,168 @@ function EventTimeline({
   )
 }
 
+function TraceSummaryMetric({
+  label,
+  value,
+}: {
+  label: string
+  value: ReactNode
+}) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[11px] font-medium text-muted-foreground">{label}</p>
+      <div className="mt-1 text-[14px] font-medium text-foreground tabular-nums">
+        {value}
+      </div>
+    </div>
+  )
+}
+
 function TraceActiveStrip({ group }: { group: TraceLoopGroup }) {
   return (
-    <div className="overflow-hidden rounded-xl border border-t-2 border-border/40 border-t-foreground/8 bg-card">
-      <div className="px-2.5 py-2.5">
+    <section className="overflow-hidden rounded-xl border border-border/25 bg-background/85">
+      <div className="border-b border-border/20 px-4 py-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="max-w-[760px] truncate text-[16px] font-semibold tracking-tight text-foreground">
-                {formatTraceLoopHeadline(group, {
-                  compressionLabel: "Context compression log",
-                  maxLength: 180,
-                })}
-              </span>
+              <h2 className="text-[24px] font-semibold text-foreground tabular-nums">
+                {formatDateTime(group.startedAtMs)}
+              </h2>
               <Badge
                 variant={loopBadgeVariant(group.finalStatus)}
                 className="text-[10px]"
               >
                 {group.finalStatus}
               </Badge>
-              <span className="rounded-md border border-border/35 bg-background/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
-                {compactId(group.key, 12, 8)}
-              </span>
             </div>
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-              <span>turn {group.turnId}</span>
-              <span className="text-border">/</span>
-              <span>run {compactId(group.runId, 8, 6)}</span>
-              <span className="text-border">/</span>
-              <span>{formatDateTime(group.startedAtMs)}</span>
-              <span className="text-border">/</span>
-              <span>{formatTraceDuration(loopWindowMs(group))}</span>
-              <span className="text-border">/</span>
-              <span>{group.stepCount} llm</span>
-              <span className="text-border">/</span>
-              <span>{group.toolCount} tool</span>
-              {group.failedToolCount > 0 ? (
-                <>
-                  <span className="text-border">/</span>
-                  <span className="text-amber-700 dark:text-amber-300">
-                    {group.failedToolCount} issue
-                  </span>
-                </>
-              ) : null}
-            </div>
+            <p className="mt-1 truncate text-[12px] text-muted-foreground">
+              {formatTraceLoopHeadline(group, {
+                compressionLabel: "Context compression log",
+                maxLength: 220,
+              })}
+            </p>
+          </div>
+          <div className="text-[11px] text-muted-foreground">
+            run {compactId(group.runId, 10, 8)}
           </div>
         </div>
       </div>
-    </div>
-  )
-}
-
-function WaterfallScale({ group }: { group: TraceLoopGroup }) {
-  const window = loopWindowMs(group)
-  const markers = [0, 25, 50, 75, 100]
-  const markerLabels = markers.map((marker) =>
-    formatTraceDuration(Math.round((window * marker) / 100))
-  )
-
-  return (
-    <div className="grid grid-cols-[minmax(180px,240px)_minmax(0,1fr)_72px] items-end gap-2 px-0.5 pb-1.5">
-      <div className="text-[10px] tracking-[0.12em] text-muted-foreground uppercase">
-        span
-      </div>
-      <div className="space-y-1">
-        <div className="flex items-center justify-between gap-2 px-0.5 font-mono text-[10px] text-muted-foreground/90">
-          {markerLabels.map((label, index) => (
-            <span
-              key={`${label}-${index}`}
-              className={cn(
-                "shrink-0",
-                index === 0 && "text-left",
-                index > 0 && index < markerLabels.length - 1 && "text-center",
-                index === markerLabels.length - 1 && "text-right"
-              )}
-            >
-              {label}
+      <div className="grid gap-4 px-4 py-3 sm:grid-cols-[minmax(0,1.8fr)_140px_100px_100px]">
+        <TraceSummaryMetric
+          label="Trace ID"
+          value={
+            <span className="font-mono text-[13px] text-foreground">
+              {compactId(group.key, 18, 12)}
             </span>
-          ))}
-        </div>
-        <div className="relative h-3 overflow-hidden rounded-md border border-border/20 bg-background/40">
-          <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-border/30" />
-          {markers.map((marker) => (
-            <div
-              key={marker}
-              className="absolute top-0 bottom-0"
-              style={{ left: `${marker}%` }}
-            >
-              <div className="absolute inset-y-0 w-px bg-border/25" />
-            </div>
-          ))}
-        </div>
+          }
+        />
+        <TraceSummaryMetric
+          label="Duration"
+          value={formatTraceDuration(loopWindowMs(group))}
+        />
+        <TraceSummaryMetric label="Spans" value={group.timeline.length} />
+        <TraceSummaryMetric
+          label="Issues"
+          value={group.failedToolCount > 0 ? group.failedToolCount : "-"}
+        />
       </div>
-      <div className="text-right text-[10px] tracking-[0.12em] text-muted-foreground uppercase">
-        dur
-      </div>
-    </div>
+    </section>
   )
 }
 
 function WaterfallRow({
-  group,
   node,
+  depth,
+  hasChildren,
+  groupStartedAtMs,
   selected,
   loading,
   onSelect,
 }: {
-  group: TraceLoopGroup
   node: LoopTimelineNode
+  depth: number
+  hasChildren: boolean
+  groupStartedAtMs: number
   selected: boolean
   loading: boolean
   onSelect: () => void
 }) {
   const tone = nodeTone(node)
-  const offset = nodeOffsetPercent(node, group)
-  const width = nodeWidthPercent(node, group)
+  const guideWidth = depth * 18 + 18
 
   return (
     <button
       onClick={onSelect}
       className={cn(
-        "w-full rounded-lg border px-2 py-1.5 text-left transition-all active:scale-[0.99]",
-        selected ? "border-foreground/20 bg-accent/35" : tone.frame
+        "w-full border-b border-border/15 px-3 py-2.5 text-left transition-colors last:border-b-0",
+        selected ? "bg-accent/45" : "bg-transparent hover:bg-accent/20"
       )}
     >
-      <div className="grid grid-cols-[minmax(180px,240px)_minmax(0,1fr)_72px] items-center gap-2">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
+      <div
+        className="relative flex items-start gap-3"
+        style={{ paddingLeft: `${depth * 18}px` }}
+      >
+        {depth > 0 ? (
+          <div
+            className="pointer-events-none absolute inset-y-[-10px] left-0"
+            style={{ width: `${guideWidth}px` }}
+          >
+            {Array.from({ length: depth }).map((_, index) => (
+              <span
+                key={index}
+                className="absolute top-0 bottom-0 w-px bg-border/30"
+                style={{ left: `${index * 18 + 8}px` }}
+              />
+            ))}
+            <span
+              className="absolute top-[18px] h-px w-3 bg-border/30"
+              style={{ left: `${(depth - 1) * 18 + 8}px` }}
+            />
+          </div>
+        ) : null}
+
+        <div className="mt-0.5 flex size-4 shrink-0 items-center justify-center text-muted-foreground">
+          {hasChildren ? (
+            <ChevronDown className="size-3" />
+          ) : (
+            <span className="size-1.5 rounded-full bg-border/70" />
+          )}
+        </div>
+
+        <span
+          className={cn(
+            "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border",
+            tone.dot
+          )}
+        >
+          {node.kind === "agent_root" ? (
+            <Waypoints className="size-3" />
+          ) : node.kind === "llm_span" ? (
+            <Bot className="size-3" />
+          ) : (
+            <Wrench className="size-3" />
+          )}
+        </span>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="truncate text-[13px] font-medium text-foreground">
+              {nodeTitle(node)}
+            </span>
+            <span className="text-[12px] text-muted-foreground tabular-nums">
+              {formatTraceDuration(node.durationMs)}
+            </span>
             <span
               className={cn(
-                "flex size-4 shrink-0 items-center justify-center rounded-full border",
-                tone.dot
+                "rounded-sm border px-1.5 py-0.5 text-[10px] font-medium uppercase",
+                node.kind === "agent_root"
+                  ? "border-sky-500/25 bg-sky-500/[0.06] text-sky-500"
+                  : node.kind === "tool_span"
+                    ? "border-amber-500/25 bg-amber-500/[0.08] text-amber-500"
+                    : "border-border/25 bg-muted/50 text-muted-foreground"
               )}
             >
-              {node.kind === "agent_root" ? (
-                <Waypoints className="size-2.5" />
-              ) : node.kind === "llm_span" ? (
-                <Bot className="size-2.5" />
-              ) : (
-                <Wrench className="size-2.5" />
-              )}
-            </span>
-            <span className="truncate text-[11px] font-medium text-foreground">
-              {nodeTitle(node)}
+              {nodeKindLabel(node)}
             </span>
             {node.kind !== "agent_root" &&
             "status" in node &&
@@ -897,33 +988,17 @@ function WaterfallRow({
               <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
             ) : null}
           </div>
-          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 pl-7 text-[10px] text-muted-foreground">
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
             <span>{nodeSubtitle(node)}</span>
-            <span>{relativeOffsetLabel(node, group)}</span>
+            <span>·</span>
+            <span className="tabular-nums">
+              {relativeOffsetLabel(node.startedAtMs, groupStartedAtMs)}
+            </span>
           </div>
         </div>
 
-        <div className="relative h-7 overflow-hidden rounded-md border border-border/20 bg-background/35">
-          <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-border/30" />
-          <div
-            className={cn(
-              "absolute top-[8px] h-[14px] rounded-sm border",
-              tone.bar
-            )}
-            style={{
-              left: `${offset}%`,
-              width: `${Math.min(100 - offset, width)}%`,
-            }}
-          >
-            <div className="absolute top-1/2 left-1 size-1 -translate-y-1/2 rounded-full bg-foreground/55" />
-          </div>
-        </div>
-
-        <div className="text-right">
-          <div className="font-mono text-[10px] text-foreground">
-            {formatTraceDuration(node.durationMs)}
-          </div>
-          <div className="mt-0.5 text-[10px] text-muted-foreground">
+        <div className="shrink-0 pt-0.5 text-right">
+          <div className="font-mono text-[11px] text-foreground">
             {node.kind === "llm_span"
               ? `${node.toolCount} tool`
               : node.kind === "tool_span"
@@ -945,25 +1020,27 @@ function LoopInspector({
 }) {
   if (tab === "content") {
     return (
-      <Section title="Conversation">
-        <div className="space-y-3">
+      <div className="space-y-3">
+        <Section title="Input">
           <FieldBlock label="User message">
             <TextBlock value={group.userMessage} className="bg-background/80" />
           </FieldBlock>
+        </Section>
+        <Section title="Output">
           <FieldBlock label="Assistant reply">
             <TextBlock
               value={group.assistantMessage}
               className="border-sky-500/20 bg-sky-500/[0.05]"
             />
           </FieldBlock>
-        </div>
-      </Section>
+        </Section>
+      </div>
     )
   }
 
   if (tab === "events") {
     return (
-      <Section title="Root events">
+      <Section title="Events">
         <EventTimeline
           events={buildRootEvents(group)}
           emptyLabel="No root events."
@@ -974,7 +1051,7 @@ function LoopInspector({
 
   return (
     <div className="space-y-3">
-      <Section title="Root span">
+      <Section title="Attributes">
         <DetailList
           items={[
             { label: "status", value: group.finalStatus },
@@ -990,23 +1067,15 @@ function LoopInspector({
         />
       </Section>
 
-      <Collapsible className="rounded-xl border border-border/35 bg-background/70">
-        <CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2.5 text-left">
-          <span className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
-            Trace fields
-          </span>
-          <span className="text-[11px] text-muted-foreground">IDs</span>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="border-t border-border/25 px-3 py-3">
-          <DetailList
-            items={[
-              { label: "trace id", value: group.key },
-              { label: "run id", value: group.runId },
-              { label: "root span", value: group.timeline[0]?.id ?? "-" },
-            ]}
-          />
-        </CollapsibleContent>
-      </Collapsible>
+      <Section title="Trace fields">
+        <DetailList
+          items={[
+            { label: "trace id", value: group.key },
+            { label: "run id", value: group.runId },
+            { label: "root span", value: group.timeline[0]?.id ?? "-" },
+          ]}
+        />
+      </Section>
     </div>
   )
 }
@@ -1034,7 +1103,7 @@ function LlmInspector({
     return (
       <div className="space-y-3">
         <Section
-          title="Prompt frame"
+          title="Input"
           action={
             <Button
               variant="outline"
@@ -1111,7 +1180,7 @@ function LlmInspector({
 
   if (tab === "events") {
     return (
-      <Section title="Span events">
+      <Section title="Events">
         <EventTimeline
           events={(trace?.events ?? []).map((event, index) => ({
             key: `${event.name}-${event.at_ms}-${index}`,
@@ -1128,7 +1197,7 @@ function LlmInspector({
 
   return (
     <div className="space-y-3">
-      <Section title="Span summary">
+      <Section title="Attributes">
         <DetailList
           items={[
             { label: "status", value: node.status },
@@ -1160,30 +1229,22 @@ function LlmInspector({
       </Section>
 
       {trace ? (
-        <Collapsible className="rounded-xl border border-border/35 bg-background/70">
-          <CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2.5 text-left">
-            <span className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
-              Trace fields
-            </span>
-            <span className="text-[11px] text-muted-foreground">Raw</span>
-          </CollapsibleTrigger>
-          <CollapsibleContent className="space-y-3 border-t border-border/25 px-3 py-3">
-            <DetailList
-              items={[
-                { label: "span name", value: node.name },
-                { label: "span kind", value: node.spanKind },
-                { label: "trace id", value: trace.trace_id },
-                { label: "span id", value: trace.span_id },
-                { label: "parent span", value: trace.parent_span_id ?? "-" },
-                { label: "server.address", value: trace.base_url },
-                { label: "http.route", value: trace.endpoint_path },
-              ]}
-            />
-            <RawJson title="request_summary" value={trace.request_summary} />
-            <RawJson title="response_summary" value={trace.response_summary} />
-            <RawJson title="otel_attributes" value={trace.otel_attributes} />
-          </CollapsibleContent>
-        </Collapsible>
+        <Section title="Trace fields">
+          <DetailList
+            items={[
+              { label: "span name", value: node.name },
+              { label: "span kind", value: node.spanKind },
+              { label: "trace id", value: trace.trace_id },
+              { label: "span id", value: trace.span_id },
+              { label: "parent span", value: trace.parent_span_id ?? "-" },
+              { label: "server.address", value: trace.base_url },
+              { label: "http.route", value: trace.endpoint_path },
+            ]}
+          />
+          <RawJson title="request_summary" value={trace.request_summary} />
+          <RawJson title="response_summary" value={trace.response_summary} />
+          <RawJson title="otel_attributes" value={trace.otel_attributes} />
+        </Section>
       ) : null}
     </div>
   )
@@ -1210,12 +1271,12 @@ function ToolInspector({
     return (
       <div className="space-y-3">
         {hasExtraArguments ? (
-          <Section title="Arguments">
+          <Section title="Input">
             <StructuredArguments value={argumentValue} />
           </Section>
         ) : null}
 
-        <Section title="Outcome">
+        <Section title="Output">
           <ExpandableTextBlock
             value={outcome}
             tone={node.status === "error" ? "danger" : "default"}
@@ -1227,7 +1288,7 @@ function ToolInspector({
 
   if (tab === "events") {
     return (
-      <Section title="Span events">
+      <Section title="Events">
         <EventTimeline
           events={
             trace?.events?.length
@@ -1248,7 +1309,7 @@ function ToolInspector({
 
   return (
     <div className="space-y-3">
-      <Section title="Span summary">
+      <Section title="Attributes">
         <DetailList
           items={[
             { label: "tool", value: toolName },
@@ -1261,30 +1322,22 @@ function ToolInspector({
       </Section>
 
       {trace ? (
-        <Collapsible className="rounded-xl border border-border/35 bg-background/70">
-          <CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2.5 text-left">
-            <span className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
-              Trace fields
-            </span>
-            <span className="text-[11px] text-muted-foreground">Raw</span>
-          </CollapsibleTrigger>
-          <CollapsibleContent className="space-y-3 border-t border-border/25 px-3 py-3">
-            <DetailList
-              items={[
-                { label: "span name", value: node.name },
-                { label: "span kind", value: node.spanKind },
-                { label: "trace id", value: trace.trace_id },
-                { label: "span id", value: trace.span_id },
-                { label: "parent span", value: trace.parent_span_id ?? "-" },
-                { label: "provider", value: trace.provider },
-                { label: "endpoint", value: trace.endpoint_path },
-              ]}
-            />
-            <RawJson title="request_summary" value={trace.request_summary} />
-            <RawJson title="response_summary" value={trace.response_summary} />
-            <RawJson title="otel_attributes" value={trace.otel_attributes} />
-          </CollapsibleContent>
-        </Collapsible>
+        <Section title="Trace fields">
+          <DetailList
+            items={[
+              { label: "span name", value: node.name },
+              { label: "span kind", value: node.spanKind },
+              { label: "trace id", value: trace.trace_id },
+              { label: "span id", value: trace.span_id },
+              { label: "parent span", value: trace.parent_span_id ?? "-" },
+              { label: "provider", value: trace.provider },
+              { label: "endpoint", value: trace.endpoint_path },
+            ]}
+          />
+          <RawJson title="request_summary" value={trace.request_summary} />
+          <RawJson title="response_summary" value={trace.response_summary} />
+          <RawJson title="otel_attributes" value={trace.otel_attributes} />
+        </Section>
       ) : null}
     </div>
   )
@@ -1346,6 +1399,10 @@ export function TracePanel() {
     () => findActiveNode(activeGroup, resolvedSelectedNodeId),
     [activeGroup, resolvedSelectedNodeId]
   )
+  const treeRows = useMemo(
+    () => (activeGroup ? buildTimelineTreeRows(activeGroup) : []),
+    [activeGroup]
+  )
 
   useEffect(() => {
     if (traceSurface !== "workspace") return
@@ -1381,6 +1438,7 @@ export function TracePanel() {
           <button
             onClick={() => setView("chat")}
             className="mt-0.5 flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+            aria-label="Back to chat"
           >
             <ArrowLeft className="size-3.5" />
           </button>
@@ -1493,85 +1551,109 @@ export function TracePanel() {
             ) : null}
 
             {visibleLoopGroups.length > 0 ? (
-              <div className="grid min-h-0 flex-1 overflow-hidden rounded-xl border border-border/30 bg-card/70 shadow-[var(--workspace-shadow)] xl:grid-cols-[minmax(0,1.18fr)_360px]">
+              <div className="grid min-h-0 flex-1 overflow-hidden rounded-xl border border-border/25 bg-background/80 xl:grid-cols-[minmax(0,1.02fr)_minmax(360px,0.98fr)]">
                 <div className="flex min-h-0 flex-col overflow-hidden">
-                  <div className="shrink-0 border-b border-border/25 px-2.5 py-2">
+                  <div className="shrink-0 border-b border-border/20 bg-muted/[0.08] px-3 py-2.5">
                     <div className="flex items-center justify-between gap-2">
-                      <p className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
+                      <p className="text-[11px] font-medium text-muted-foreground uppercase">
                         Waterfall
                       </p>
                       {activeGroup ? (
-                        <span className="font-mono text-[11px] text-muted-foreground">
-                          {formatTraceDuration(loopWindowMs(activeGroup))}
+                        <span className="text-[11px] text-muted-foreground">
+                          {treeRows.length} spans
                         </span>
                       ) : null}
                     </div>
                   </div>
 
-                  <div className="min-h-0 flex-1 overflow-y-auto p-2.5">
+                  <div className="min-h-0 flex-1 overflow-y-auto">
                     {activeGroup ? (
-                      <div className="space-y-1.5">
-                        <WaterfallScale group={activeGroup} />
-                        <div className="space-y-1">
-                          {activeGroup.timeline.map((node) => (
-                            <WaterfallRow
-                              key={node.id}
-                              group={activeGroup}
-                              node={node}
-                              selected={node.id === activeNode?.id}
-                              loading={
-                                node.kind !== "agent_root" &&
-                                selectedTraceId === node.trace.id &&
-                                traceLoading
-                              }
-                              onSelect={() => selectNode(node.id)}
-                            />
-                          ))}
-                        </div>
+                      <div>
+                        {treeRows.map(({ node, depth, hasChildren }) => (
+                          <WaterfallRow
+                            key={node.id}
+                            node={node}
+                            depth={depth}
+                            hasChildren={hasChildren}
+                            groupStartedAtMs={activeGroup.startedAtMs}
+                            selected={node.id === activeNode?.id}
+                            loading={
+                              node.kind !== "agent_root" &&
+                              selectedTraceId === node.trace.id &&
+                              traceLoading
+                            }
+                            onSelect={() => selectNode(node.id)}
+                          />
+                        ))}
                       </div>
                     ) : null}
                   </div>
                 </div>
 
-                <div className="flex min-h-0 flex-col overflow-hidden border-l border-border/25">
-                  <div className="shrink-0 border-b border-border/25 px-2.5 py-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <div>
-                        <p className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
-                          Inspector
-                        </p>
-                        {activeNode ? (
-                          <p className="mt-0.5 text-[11px] text-muted-foreground">
-                            {nodeTitle(activeNode)} · {activeNode.kind}
+                <div className="flex min-h-0 flex-col overflow-hidden border-l border-border/20 bg-background">
+                  <div className="shrink-0 border-b border-border/20">
+                    <div className="px-4 py-3">
+                      {activeNode ? (
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
+                            <span
+                              className={cn(
+                                "inline-flex items-center rounded-sm border px-1.5 py-0.5 text-[10px] font-medium uppercase",
+                                activeNode.kind === "agent_root"
+                                  ? "border-sky-500/25 bg-sky-500/[0.06] text-sky-500"
+                                  : activeNode.kind === "tool_span"
+                                    ? "border-amber-500/25 bg-amber-500/[0.08] text-amber-500"
+                                    : "border-border/25 bg-muted/50 text-muted-foreground"
+                              )}
+                            >
+                              {nodeKindLabel(activeNode)}
+                            </span>
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                            <h3 className="text-[18px] font-semibold text-foreground">
+                              {nodeTitle(activeNode)}
+                            </h3>
+                            <span className="text-[12px] text-muted-foreground tabular-nums">
+                              {formatTraceDuration(activeNode.durationMs)}
+                            </span>
+                            <span className="text-[12px] text-muted-foreground">
+                              {formatDateTime(activeNode.startedAtMs)}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-[12px] text-muted-foreground">
+                            {nodeSubtitle(activeNode)}
                           </p>
-                        ) : null}
-                      </div>
-                      <div className="rounded-lg border border-border/35 bg-muted/20 p-0.5">
-                        <div className="flex items-center gap-1">
-                          <TabButton
-                            active={inspectorTab === "content"}
-                            onClick={() => setInspectorTab("content")}
-                          >
-                            content
-                          </TabButton>
-                          <TabButton
-                            active={inspectorTab === "overview"}
-                            onClick={() => setInspectorTab("overview")}
-                          >
-                            overview
-                          </TabButton>
-                          <TabButton
-                            active={inspectorTab === "events"}
-                            onClick={() => setInspectorTab("events")}
-                          >
-                            events
-                          </TabButton>
                         </div>
-                      </div>
+                      ) : (
+                        <p className="text-[13px] text-muted-foreground">
+                          Select a span.
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-5 px-4">
+                      <TabButton
+                        active={inspectorTab === "overview"}
+                        onClick={() => setInspectorTab("overview")}
+                      >
+                        Attributes
+                      </TabButton>
+                      <TabButton
+                        active={inspectorTab === "content"}
+                        onClick={() => setInspectorTab("content")}
+                      >
+                        Input/output
+                      </TabButton>
+                      <TabButton
+                        active={inspectorTab === "events"}
+                        onClick={() => setInspectorTab("events")}
+                      >
+                        Events
+                      </TabButton>
                     </div>
                   </div>
 
-                  <div className="min-h-0 flex-1 overflow-y-auto p-2.5">
+                  <div className="min-h-0 flex-1 overflow-y-auto bg-muted/[0.04] p-4">
                     {activeGroup && activeNode ? (
                       activeNode.kind === "agent_root" ? (
                         <LoopInspector group={activeGroup} tab={inspectorTab} />
