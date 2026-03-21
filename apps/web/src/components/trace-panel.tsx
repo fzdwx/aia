@@ -957,7 +957,10 @@ function LoopInspector({
         <DetailList
           items={[
             { label: "status", value: group.finalStatus },
-            { label: "window", value: formatTraceDuration(loopWindowMs(group)) },
+            {
+              label: "window",
+              value: formatTraceDuration(loopWindowMs(group)),
+            },
             { label: "started", value: formatDateTime(group.startedAtMs) },
             { label: "turn", value: group.turnId },
             { label: "llm spans", value: String(group.stepCount) },
@@ -1340,6 +1343,13 @@ export function TracePanel() {
         ) ??
         (selectedTrace?.id === activeNode?.trace.id ? selectedTrace : null))
 
+  const traceDescription =
+    traceSurface === "overview"
+      ? "Inspect request volume, token usage, failures, and activity before drilling into individual spans."
+      : traceView === "compression"
+        ? "Review compression runs, loop timing, and payload details without mixing them into the main conversation trace stream."
+        : "Inspect conversation loops, waterfall timing, and span payloads from the current workspace."
+
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="flex items-center justify-between gap-3 border-b border-border/30 px-5 py-3.5">
@@ -1351,7 +1361,15 @@ export function TracePanel() {
             <ArrowLeft className="size-3.5" />
           </button>
           <div>
-            <h1 className="text-base font-semibold tracking-tight">trace</h1>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-base font-semibold tracking-tight">Trace</h1>
+              <Badge variant="secondary" className="text-[10px]">
+                {traceSurface === "overview" ? "overview" : traceView}
+              </Badge>
+            </div>
+            <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+              {traceDescription}
+            </p>
           </div>
         </div>
 
@@ -1377,13 +1395,13 @@ export function TracePanel() {
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-5 py-4">
           <div className="mx-auto flex min-h-0 w-full max-w-[1440px] flex-1 flex-col gap-3">
             {traceError ? (
-              <div className="shrink-0 rounded-lg border border-destructive/25 bg-destructive/[0.05] px-3 py-2.5 text-[12px] text-destructive">
+              <div className="shrink-0 rounded-2xl border border-destructive/25 bg-destructive/[0.05] px-4 py-3 text-[12px] text-destructive">
                 {traceError}
               </div>
             ) : null}
 
             {visibleLoopGroups.length === 0 && !traceLoading ? (
-              <div className="flex min-h-0 flex-1 flex-col items-center justify-center py-16 text-center">
+              <section className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-2xl border border-border/30 bg-card/70 px-6 py-16 text-center shadow-[var(--workspace-shadow)]">
                 <Waypoints className="size-10 text-muted-foreground/30" />
                 <p className="mt-4 text-sm font-medium text-foreground/70">
                   {traceView === "compression"
@@ -1395,7 +1413,7 @@ export function TracePanel() {
                     ? "Trigger context compression to inspect compression calls and summaries here."
                     : "Start a conversation to see agent loops and LLM spans here."}
                 </p>
-              </div>
+              </section>
             ) : null}
 
             {activeGroup ? (
@@ -1405,7 +1423,7 @@ export function TracePanel() {
             ) : null}
 
             {visibleLoopGroups.length > 0 ? (
-              <div className="grid min-h-0 flex-1 overflow-hidden rounded-xl border border-border/30 xl:grid-cols-[minmax(0,1.18fr)_360px]">
+              <div className="grid min-h-0 flex-1 overflow-hidden rounded-2xl border border-border/30 bg-card/70 shadow-[var(--workspace-shadow)] xl:grid-cols-[minmax(0,1.18fr)_360px]">
                 <div className="flex min-h-0 flex-col overflow-hidden">
                   <div className="shrink-0 border-b border-border/25 px-3 py-2.5">
                     <div className="flex items-center justify-between gap-2">

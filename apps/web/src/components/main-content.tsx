@@ -4,11 +4,6 @@ import { ChatMessages } from "@/components/chat-messages"
 import { ChatInput } from "@/components/chat-input"
 import { useChatStore } from "@/stores/chat-store"
 
-const ChannelsPanel = lazy(async () => {
-  const module = await import("@/components/channels-panel")
-  return { default: module.ChannelsPanel }
-})
-
 const SettingsPanel = lazy(async () => {
   const module = await import("@/components/settings-panel")
   return { default: module.SettingsPanel }
@@ -40,7 +35,7 @@ export function MainContent() {
     case "trace":
       return renderSecondaryPanel(<TracePanel />)
     case "channels":
-      return renderSecondaryPanel(<ChannelsPanel />)
+      return renderSecondaryPanel(<SettingsPanel />)
     default:
       return (
         <>

@@ -242,7 +242,10 @@ function TrendChartCard({ dashboard }: { dashboard: TraceDashboard }) {
           <div className="mt-3 space-y-1.5 text-[12px]">
             <div className="flex items-center justify-between gap-3">
               <span className="flex items-center gap-2 text-muted-foreground">
-                <span className="size-2 rounded-full bg-violet-500" />
+                <span
+                  className="size-2 rounded-full"
+                  style={{ backgroundColor: "var(--trace-chart-input)" }}
+                />
                 Input
               </span>
               <span className="font-medium text-foreground tabular-nums">
@@ -251,7 +254,10 @@ function TrendChartCard({ dashboard }: { dashboard: TraceDashboard }) {
             </div>
             <div className="flex items-center justify-between gap-3">
               <span className="flex items-center gap-2 text-muted-foreground">
-                <span className="size-2 rounded-full bg-emerald-500" />
+                <span
+                  className="size-2 rounded-full"
+                  style={{ backgroundColor: "var(--trace-chart-output)" }}
+                />
                 Output
               </span>
               <span className="font-medium text-foreground tabular-nums">
@@ -260,7 +266,10 @@ function TrendChartCard({ dashboard }: { dashboard: TraceDashboard }) {
             </div>
             <div className="flex items-center justify-between gap-3">
               <span className="flex items-center gap-2 text-muted-foreground">
-                <span className="size-2 rounded-full bg-cyan-500" />
+                <span
+                  className="size-2 rounded-full"
+                  style={{ backgroundColor: "var(--trace-chart-cache)" }}
+                />
                 Cache
               </span>
               <span className="font-medium text-foreground tabular-nums">
@@ -305,21 +314,21 @@ function TrendChartCard({ dashboard }: { dashboard: TraceDashboard }) {
           <path
             d={chart.inputLinePath}
             fill="none"
-            stroke="#7c3aed"
+            stroke="var(--trace-chart-input)"
             strokeWidth="2.5"
             strokeLinecap="round"
           />
           <path
             d={chart.outputLinePath}
             fill="none"
-            stroke="#22c55e"
+            stroke="var(--trace-chart-output)"
             strokeWidth="2"
             strokeLinecap="round"
           />
           <path
             d={chart.cacheLinePath}
             fill="none"
-            stroke="#06b6d4"
+            stroke="var(--trace-chart-cache)"
             strokeWidth="2"
             strokeLinecap="round"
           />
@@ -330,7 +339,7 @@ function TrendChartCard({ dashboard }: { dashboard: TraceDashboard }) {
                 cx={point.x}
                 cy={point.y}
                 r={index === resolvedIndex ? 4.5 : 2.5}
-                fill="#7c3aed"
+                fill="var(--trace-chart-input)"
               />
               <rect
                 x={point.x - 12}
@@ -346,8 +355,14 @@ function TrendChartCard({ dashboard }: { dashboard: TraceDashboard }) {
 
           <defs>
             <linearGradient id="trace-token-area" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="rgba(124,58,237,0.24)" />
-              <stop offset="100%" stopColor="rgba(124,58,237,0.02)" />
+              <stop
+                offset="0%"
+                stopColor="color-mix(in oklab, var(--trace-chart-input) 24%, transparent)"
+              />
+              <stop
+                offset="100%"
+                stopColor="color-mix(in oklab, var(--trace-chart-input) 2%, transparent)"
+              />
             </linearGradient>
           </defs>
         </svg>
@@ -355,15 +370,24 @@ function TrendChartCard({ dashboard }: { dashboard: TraceDashboard }) {
         <div className="mt-3 flex flex-wrap items-center gap-4 text-[12px] text-muted-foreground">
           <span className="font-medium text-foreground">Series</span>
           <span className="flex items-center gap-2">
-            <span className="size-2 rounded-full bg-violet-500" />
+            <span
+              className="size-2 rounded-full"
+              style={{ backgroundColor: "var(--trace-chart-input)" }}
+            />
             Input
           </span>
           <span className="flex items-center gap-2">
-            <span className="size-2 rounded-full bg-emerald-500" />
+            <span
+              className="size-2 rounded-full"
+              style={{ backgroundColor: "var(--trace-chart-output)" }}
+            />
             Output
           </span>
           <span className="flex items-center gap-2">
-            <span className="size-2 rounded-full bg-cyan-500" />
+            <span
+              className="size-2 rounded-full"
+              style={{ backgroundColor: "var(--trace-chart-cache)" }}
+            />
             Cache
           </span>
         </div>

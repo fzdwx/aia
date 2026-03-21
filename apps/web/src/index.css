@@ -56,6 +56,16 @@
   --sidebar: oklch(0.06 0 0);
   --code-block-language: oklch(0.66 0 0 / 72%);
   --code-block-language-hover: oklch(0.77 0 0 / 88%);
+  --workspace-surface: oklch(0.11 0 0 / 82%);
+  --workspace-surface-strong: oklch(0.13 0 0 / 90%);
+  --workspace-surface-soft: oklch(0.16 0 0 / 38%);
+  --workspace-accent: oklch(from var(--foreground) l c h / 0.05);
+  --workspace-grid: oklch(from var(--foreground) l c h / 0.06);
+  --workspace-shadow: 0 24px 56px -38px rgb(0 0 0 / 0.72);
+  --workspace-shadow-strong: 0 38px 86px -48px rgb(0 0 0 / 0.78);
+  --trace-chart-input: oklch(0.68 0.12 255);
+  --trace-chart-output: oklch(0.72 0.12 180);
+  --trace-chart-cache: oklch(0.68 0.07 225);
 }
 
 .light {
@@ -80,6 +90,16 @@
   --sidebar: oklch(0.97 0 0);
   --code-block-language: oklch(0.46 0 0 / 68%);
   --code-block-language-hover: oklch(0.31 0 0 / 84%);
+  --workspace-surface: oklch(1 0 0 / 84%);
+  --workspace-surface-strong: oklch(0.995 0 0 / 94%);
+  --workspace-surface-soft: oklch(0.95 0 0 / 78%);
+  --workspace-accent: oklch(from var(--foreground) l c h / 0.06);
+  --workspace-grid: oklch(from var(--foreground) l c h / 0.08);
+  --workspace-shadow: 0 26px 56px -42px rgb(15 23 42 / 0.2);
+  --workspace-shadow-strong: 0 34px 86px -52px rgb(15 23 42 / 0.2);
+  --trace-chart-input: oklch(0.58 0.15 255);
+  --trace-chart-output: oklch(0.56 0.12 180);
+  --trace-chart-cache: oklch(0.54 0.08 225);
 }
 
 * {
@@ -96,6 +116,121 @@ body {
   margin: 0;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+@layer components {
+  .workspace-stage {
+    position: relative;
+    isolation: isolate;
+    background:
+      radial-gradient(
+        circle at top left,
+        var(--workspace-accent),
+        transparent 26%
+      ),
+      radial-gradient(
+        circle at top right,
+        oklch(from var(--foreground) l c h / 0.05),
+        transparent 32%
+      ),
+      linear-gradient(
+        180deg,
+        oklch(from var(--background) calc(l + 0.015) c h),
+        var(--background)
+      );
+  }
+
+  .workspace-stage::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(
+        to right,
+        transparent,
+        var(--workspace-grid),
+        transparent
+      ),
+      linear-gradient(
+        to bottom,
+        transparent,
+        var(--workspace-grid),
+        transparent
+      );
+    background-size:
+      240px 100%,
+      100% 240px;
+    opacity: 0.55;
+    mask-image: radial-gradient(circle at center, black 38%, transparent 88%);
+  }
+
+  .workspace-shell {
+    position: relative;
+    z-index: 1;
+  }
+
+  .workspace-hero {
+    border: 1px solid oklch(from var(--border) l c h / 0.32);
+    border-radius: 2rem;
+    background:
+      linear-gradient(
+        135deg,
+        oklch(from var(--background) calc(l + 0.018) c h / 0.96),
+        var(--workspace-surface)
+      ),
+      linear-gradient(90deg, var(--workspace-accent), transparent 26%);
+    box-shadow: var(--workspace-shadow-strong);
+    backdrop-filter: blur(18px);
+  }
+
+  .workspace-panel {
+    border: 1px solid oklch(from var(--border) l c h / 0.28);
+    border-radius: 1.75rem;
+    background: var(--workspace-surface);
+    box-shadow: var(--workspace-shadow);
+    backdrop-filter: blur(14px);
+  }
+
+  .workspace-panel-soft {
+    border: 1px solid oklch(from var(--border) l c h / 0.22);
+    border-radius: 1.25rem;
+    background: var(--workspace-surface-soft);
+  }
+
+  .workspace-kicker {
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+  }
+
+  .workspace-display {
+    font-family: var(--font-serif);
+    line-height: 0.92;
+    letter-spacing: -0.05em;
+    text-wrap: balance;
+  }
+
+  .workspace-metric-value {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.04em;
+  }
+
+  .workspace-form-label {
+    font-size: 0.68rem;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+  }
+
+  .workspace-form-note {
+    font-size: 0.76rem;
+    line-height: 1.5;
+    color: var(--muted-foreground);
+  }
 }
 
 /* Subtle grain texture for depth */

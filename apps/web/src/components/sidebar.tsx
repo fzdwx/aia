@@ -1,5 +1,5 @@
 import { useEffect } from "react"
-import { PanelRightDashed, Plus, Settings, Waypoints, X } from "lucide-react"
+import { PanelRightDashed, Plus, Settings, X } from "lucide-react"
 import { Separator } from "@/components/ui/separator"
 import { TraceSidebar } from "@/components/trace-sidebar"
 import { cn } from "@/lib/utils"
@@ -10,6 +10,8 @@ export function Sidebar() {
   const provider = useChatStore((s) => s.provider)
   const view = useChatStore((s) => s.view)
   const setView = useChatStore((s) => s.setView)
+  const settingsSection = useChatStore((s) => s.settingsSection)
+  const setSettingsSection = useChatStore((s) => s.setSettingsSection)
   const sessions = useChatStore((s) => s.sessions)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const sessionHydrating = useChatStore((s) => s.sessionHydrating)
@@ -17,13 +19,9 @@ export function Sidebar() {
   const switchSession = useChatStore((s) => s.switchSession)
   const deleteSession = useChatStore((s) => s.deleteSession)
   const initializeChannels = useChannelsStore((s) => s.initialize)
-  const supportedChannels = useChannelsStore((s) => s.supportedChannels)
-  const selectedTransport = useChannelsStore((s) => s.selectedTransport)
-  const selectTransport = useChannelsStore((s) => s.selectTransport)
-  const channelsLoading = useChannelsStore((s) => s.loading)
 
   useEffect(() => {
-    if (view !== "channels") return
+    if (view !== "settings") return
     void initializeChannels().catch(() => {})
   }, [initializeChannels, view])
 
@@ -40,50 +38,43 @@ export function Sidebar() {
 
       {view === "trace" ? (
         <TraceSidebar />
-      ) : view === "channels" ? (
-        <>
-          <div className="px-2 pt-2">
-            <div className="rounded-lg border border-border/30 bg-muted/20 px-3 py-2.5">
-              <p className="text-[13px] font-medium text-foreground/80">
-                Channels
-              </p>
-            </div>
+      ) : view === "settings" ? (
+        <div className="flex-1 overflow-y-auto px-2 py-2">
+          <div className="px-2.5 pb-2">
+            <p className="text-[11px] font-medium tracking-[0.18em] text-muted-foreground/70 uppercase">
+              Settings
+            </p>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-2 pt-2 pb-2">
-            {channelsLoading && supportedChannels.length === 0 ? (
-              <p className="px-2.5 py-2 text-[12px] text-muted-foreground">
-                Loading channels...
-              </p>
-            ) : supportedChannels.length === 0 ? (
-              <p className="px-2.5 py-2 text-[12px] text-muted-foreground">
-                No supported channels available.
-              </p>
-            ) : (
-              supportedChannels.map((channel) => {
-                const isActive = channel.transport === selectedTransport
-
-                return (
-                  <button
-                    key={channel.transport}
-                    type="button"
-                    onClick={() => selectTransport(channel.transport)}
-                    className={cn(
-                      "mb-1 flex w-full items-center rounded-lg px-2.5 py-[8px] text-left text-[13px] transition-colors duration-150",
-                      isActive
-                        ? "bg-accent/50 text-foreground/80"
-                        : "text-muted-foreground hover:bg-accent/30 hover:text-foreground/80"
-                    )}
-                  >
-                    <span className="min-w-0 flex-1 truncate text-[12px]">
-                      {channel.label}
-                    </span>
-                  </button>
-                )
-              })
-            )}
+          <div className="space-y-1">
+            <button
+              type="button"
+              onClick={() => setSettingsSection("providers")}
+              className={cn(
+                "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] transition-colors duration-150",
+                settingsSection === "providers"
+                  ? "bg-accent/50 text-foreground/80"
+                  : "text-muted-foreground hover:bg-accent/30 hover:text-foreground/80"
+              )}
+            >
+              <Settings className="size-[14px] opacity-40" />
+              <span>Providers</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSettingsSection("channels")}
+              className={cn(
+                "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] transition-colors duration-150",
+                settingsSection === "channels"
+                  ? "bg-accent/50 text-foreground/80"
+                  : "text-muted-foreground hover:bg-accent/30 hover:text-foreground/80"
+              )}
+            >
+              <PanelRightDashed className="size-[14px] opacity-40" />
+              <span>Channels</span>
+            </button>
           </div>
-        </>
+        </div>
       ) : (
         <>
           <div className="px-2 pt-2">
@@ -184,19 +175,9 @@ export function Sidebar() {
           <span>Trace</span>
         </button>
         <button
-          onClick={() => setView(view === "channels" ? "chat" : "channels")}
-          className={cn(
-            "mb-1 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] text-muted-foreground transition-colors duration-150 hover:bg-accent/50 hover:text-foreground/80",
-            view === "channels" && "bg-accent/50 text-foreground/80"
-          )}
-        >
-          <Waypoints className="size-[14px] opacity-40" />
-          <span>Channels</span>
-        </button>
-        <button
           onClick={() => setView(view === "settings" ? "chat" : "settings")}
           className={cn(
-            "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] text-muted-foreground transition-colors duration-150 hover:bg-accent/50 hover:text-foreground/80",
+            "mb-1 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] text-muted-foreground transition-colors duration-150 hover:bg-accent/50 hover:text-foreground/80",
             view === "settings" && "bg-accent/50 text-foreground/80"
           )}
         >

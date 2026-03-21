@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react"
 import { ArrowLeft, Trash2 } from "lucide-react"
 
+import { Badge } from "@/components/ui/badge"
 import type {
   ChannelListItem,
   ChannelTransport,
@@ -9,7 +10,6 @@ import type {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import { useChannelsStore } from "@/stores/channels-store"
 import { useChatStore } from "@/stores/chat-store"
@@ -120,7 +120,7 @@ function configuredChannelsForTransport(
   return configuredChannels.filter((channel) => channel.transport === transport)
 }
 
-export function ChannelsPanel() {
+export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
   const setView = useChatStore((s) => s.setView)
   const initializeChannels = useChannelsStore((s) => s.initialize)
   const supportedChannels = useChannelsStore((s) => s.supportedChannels)
@@ -238,161 +238,244 @@ export function ChannelsPanel() {
       )
     })
 
-  return (
-    <ScrollArea className="min-h-0 flex-1">
-      <div className="mx-auto max-w-[920px] px-4 py-6 sm:px-6 sm:py-8">
-        <div className="mb-6 flex items-start gap-3">
-          <button
-            onClick={() => setView("chat")}
-            className="flex size-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-          >
-            <ArrowLeft className="size-4" />
-          </button>
-          <div>
-            <h1 className="text-lg font-semibold">Channels</h1>
-            <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
-              Select a supported channel type from the sidebar, then configure
-              its runtime settings here.
-            </p>
-          </div>
-        </div>
+  const content = (
+    <div
+      className={
+        embedded
+          ? "space-y-3"
+          : "mx-auto max-w-[920px] px-4 py-6 sm:px-6 sm:py-8"
+      }
+    >
+      {!embedded ? (
+        <div className="mb-6 flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <button
+              type="button"
+              onClick={() => setView("chat")}
+              className="flex size-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+            >
+              <ArrowLeft className="size-4" />
+            </button>
 
-        {!selectedDefinition ? (
-          <div className="px-1 py-8">
-            <p className="text-sm font-medium">
-              No supported channels available.
-            </p>
-            <p className="mt-2 text-[12px] leading-5 text-muted-foreground">
-              {channelsLoading
-                ? "Loading channel catalog..."
-                : (channelsError ??
-                  "The server did not return any supported channel type.")}
-            </p>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-lg font-semibold">Channels</h1>
+                {selectedDefinition ? (
+                  <Badge variant="secondary" className="text-[10px]">
+                    {selectedDefinition.transport}
+                  </Badge>
+                ) : null}
+              </div>
+              <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+                {selectedDefinition?.description ??
+                  "Select a transport from the sidebar, then manage the runtime profile for that channel on the right."}
+              </p>
+            </div>
           </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0">
-                <h2 className="text-base font-semibold">
-                  {selectedDefinition.label}
-                </h2>
+
+          {configuredChannel ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => void handleDelete()}
+            >
+              <Trash2 className="size-3.5" />
+              Delete
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {!selectedDefinition ? (
+        <section
+          className={
+            embedded
+              ? "rounded-xl border border-border/30 bg-card/70 px-4 py-4 shadow-[var(--workspace-shadow)]"
+              : "rounded-2xl border border-border/30 bg-card/70 px-5 py-6 shadow-[var(--workspace-shadow)]"
+          }
+        >
+          <p className="text-sm font-medium text-foreground">
+            No supported channels available.
+          </p>
+          <p className="mt-2 text-[12px] leading-6 text-muted-foreground">
+            {channelsLoading
+              ? "Loading channel catalog..."
+              : (channelsError ??
+                "The server did not return any supported channel type.")}
+          </p>
+        </section>
+      ) : (
+        <form
+          onSubmit={handleSubmit}
+          className={embedded ? "space-y-3" : "space-y-4"}
+        >
+          <section
+            className={
+              embedded
+                ? "rounded-xl border border-border/30 bg-card/70 p-4 shadow-[var(--workspace-shadow)]"
+                : "rounded-2xl border border-border/30 bg-card/70 p-5 shadow-[var(--workspace-shadow)]"
+            }
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-[15px] font-semibold">
+                    {selectedDefinition.label}
+                  </h2>
+                  <Badge variant="secondary" className="text-[10px]">
+                    {selectedDefinition.transport}
+                  </Badge>
+                  <Badge variant="outline" className="text-[10px]">
+                    {configuredChannel
+                      ? configuredChannel.enabled
+                        ? "Enabled"
+                        : "Disabled"
+                      : "Draft"}
+                  </Badge>
+                </div>
               </div>
 
-              {configuredChannel ? (
+              {embedded && configuredChannel ? (
                 <Button
+                  type="button"
                   variant="ghost"
                   size="sm"
-                  className="shrink-0 self-start text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  className="shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
                   onClick={() => void handleDelete()}
                 >
-                  <Trash2 className="mr-1.5 size-3.5" />
+                  <Trash2 className="size-3.5" />
                   Delete
                 </Button>
               ) : null}
             </div>
 
-            <Separator className="opacity-40" />
-
             {matchingChannels.length > 1 ? (
-              <section className="rounded-xl bg-amber-500/10 px-4 py-3 text-[12px] leading-5 text-amber-950 dark:text-amber-100">
+              <div className="mt-3 rounded-lg border border-border/30 bg-muted/35 px-3 py-2.5 text-[12px] leading-5 text-foreground/85">
                 Multiple saved profiles were found for this transport. This
                 panel is currently editing the first configured profile:
                 <span className="ml-1 font-medium">
                   {configuredChannel?.id}
                 </span>
-              </section>
+              </div>
             ) : null}
 
-            <section className="space-y-4">
-              {selectedProperties.length > 0 ? (
-                <div className="divide-y divide-border/30">
-                  {selectedProperties.map(([key, schema]) => {
-                    const kind = fieldKind(schema)
-                    const label = fieldLabel(key, schema)
-                    const description =
-                      typeof schema.description === "string"
-                        ? schema.description
-                        : null
-                    const value = form.config[key]
+            {selectedProperties.length > 0 ? (
+              <div className="mt-4 grid gap-2.5 md:grid-cols-2">
+                {selectedProperties.map(([key, schema]) => {
+                  const kind = fieldKind(schema)
+                  const label = fieldLabel(key, schema)
+                  const description =
+                    typeof schema.description === "string"
+                      ? schema.description
+                      : null
+                  const value = form.config[key]
 
-                    if (kind === "boolean") {
-                      return (
-                        <label
-                          key={key}
-                          className="flex items-center justify-between gap-3 py-3 text-[12px] text-foreground"
-                        >
-                          <div className="pr-4">
-                            <p className="font-medium">{label}</p>
-                            {description ? (
-                              <p className="mt-1 text-[11px] text-muted-foreground">
-                                {description}
-                              </p>
+                  if (kind === "boolean") {
+                    return (
+                      <label
+                        key={key}
+                        className="workspace-panel-soft flex items-start justify-between gap-4 px-3 py-3 md:col-span-2"
+                      >
+                        <div className="pr-4">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-sm font-medium text-foreground">
+                              {label}
+                            </p>
+                            {selectedRequired.has(key) ? (
+                              <Badge variant="outline" className="text-[10px]">
+                                required
+                              </Badge>
                             ) : null}
                           </div>
-                          <Switch
-                            checked={value === true}
-                            onCheckedChange={(checked: boolean) =>
-                              updateConfigField(key, checked)
-                            }
-                          />
-                        </label>
-                      )
-                    }
+                          {description ? (
+                            <p className="mt-2 text-[12px] leading-6 text-muted-foreground">
+                              {description}
+                            </p>
+                          ) : null}
+                        </div>
 
-                    return (
-                      <div key={key} className="py-3">
-                        <label className="mb-1.5 block text-[12px] text-muted-foreground">
-                          {label}
-                          {selectedRequired.has(key) ? " *" : ""}
-                          {configuredChannel && kind === "secret"
-                            ? " (leave blank to keep existing)"
-                            : ""}
-                        </label>
-                        <Input
-                          type={
-                            kind === "secret"
-                              ? "password"
-                              : kind === "url"
-                                ? "url"
-                                : "text"
+                        <Switch
+                          checked={value === true}
+                          onCheckedChange={(checked: boolean) =>
+                            updateConfigField(key, checked)
                           }
-                          value={typeof value === "string" ? value : ""}
-                          onChange={(event) =>
-                            updateConfigField(key, event.target.value)
-                          }
-                          placeholder={
-                            typeof schema.default === "string"
-                              ? schema.default
-                              : undefined
-                          }
-                          className="h-9 text-[13px]"
                         />
-                        {description ? (
-                          <p className="mt-1.5 text-[11px] leading-5 text-muted-foreground">
-                            {description}
-                          </p>
+                      </label>
+                    )
+                  }
+
+                  return (
+                    <div key={key} className="workspace-panel-soft px-3 py-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-medium text-foreground">
+                          {label}
+                        </p>
+                        {selectedRequired.has(key) ? (
+                          <Badge variant="outline" className="text-[10px]">
+                            required
+                          </Badge>
+                        ) : null}
+                        {configuredChannel && kind === "secret" ? (
+                          <Badge variant="outline" className="text-[10px]">
+                            keep on blank
+                          </Badge>
                         ) : null}
                       </div>
-                    )
-                  })}
-                </div>
-              ) : (
-                <p className="text-[12px] text-muted-foreground">
-                  This channel type does not expose configurable fields.
-                </p>
-              )}
-            </section>
 
-            <Separator className="opacity-40" />
+                      {description ? (
+                        <p className="mt-2 text-[12px] leading-6 text-muted-foreground">
+                          {description}
+                        </p>
+                      ) : null}
 
-            <label className="flex items-center justify-between gap-3 py-1 text-[12px] text-foreground">
-              <div className="min-w-0">
-                <p className="font-medium">Enabled</p>
-                <p className="mt-1 text-[11px] text-muted-foreground">
+                      <Input
+                        type={
+                          kind === "secret"
+                            ? "password"
+                            : kind === "url"
+                              ? "url"
+                              : "text"
+                        }
+                        value={typeof value === "string" ? value : ""}
+                        onChange={(event) =>
+                          updateConfigField(key, event.target.value)
+                        }
+                        placeholder={
+                          typeof schema.default === "string"
+                            ? schema.default
+                            : undefined
+                        }
+                        className="mt-3 h-9 text-[13px]"
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <p className="mt-3 text-[12px] leading-5 text-muted-foreground">
+                This channel type does not expose configurable fields.
+              </p>
+            )}
+          </section>
+
+          <section
+            className={
+              embedded
+                ? "rounded-xl border border-border/30 bg-card/70 p-4 shadow-[var(--workspace-shadow)]"
+                : "rounded-2xl border border-border/30 bg-card/70 p-5 shadow-[var(--workspace-shadow)]"
+            }
+          >
+            <label className="workspace-panel-soft flex items-start justify-between gap-4 px-3 py-3">
+              <div className="pr-4">
+                <p className="text-sm font-medium text-foreground">Enabled</p>
+                <p className="mt-2 text-[12px] leading-6 text-muted-foreground">
                   Turn this off to keep the profile stored without running its
                   transport worker.
                 </p>
               </div>
+
               <Switch
                 checked={form.enabled}
                 onCheckedChange={(checked: boolean) =>
@@ -401,27 +484,26 @@ export function ChannelsPanel() {
               />
             </label>
 
-            <Separator className="opacity-40" />
-
-            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-[11px] leading-5 text-muted-foreground">
-                {configuredChannel
-                  ? "Changes are saved back to the current transport profile."
-                  : "Saving creates a default profile for this transport type."}
-              </p>
+            <div className="mt-4 flex flex-col-reverse gap-2.5 border-t border-border/20 pt-4 sm:flex-row sm:items-center sm:justify-between">
               <Button
                 type="submit"
                 disabled={submitting || !canSubmit}
-                className="sm:min-w-[200px]"
+                className="sm:ml-auto sm:min-w-[180px]"
               >
                 {configuredChannel
                   ? "Save Configuration"
                   : "Create Configuration"}
               </Button>
             </div>
-          </form>
-        )}
-      </div>
-    </ScrollArea>
+          </section>
+        </form>
+      )}
+    </div>
   )
+
+  if (embedded) {
+    return content
+  }
+
+  return <ScrollArea className="min-h-0 flex-1">{content}</ScrollArea>
 }

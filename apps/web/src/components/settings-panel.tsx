@@ -1,12 +1,18 @@
-import { useState, type FormEvent } from "react"
-import { ArrowLeft, Pencil, Plus, Trash2, X } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
+import { useEffect, useState, type FormEvent } from "react"
+import {
+  ArrowLeft,
+  Plus,
+  Search,
+  Settings2,
+  Trash2,
+  Waypoints,
+  X,
+} from "lucide-react"
+
+import { ChannelsPanel } from "@/components/channels-panel"
 import { Badge } from "@/components/ui/badge"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Separator } from "@/components/ui/separator"
-import { Switch } from "@/components/ui/switch"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
@@ -14,9 +20,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { cn } from "@/lib/utils"
-import { useChatStore } from "@/stores/chat-store"
+import { Switch } from "@/components/ui/switch"
 import type { ModelConfig } from "@/lib/types"
+import { cn } from "@/lib/utils"
+import { useChannelsStore } from "@/stores/channels-store"
+import { NEW_PROVIDER_SETTINGS_KEY, useChatStore } from "@/stores/chat-store"
 
 type ModelFormRow = {
   id: string
@@ -41,57 +49,70 @@ function emptyModelRow(): ModelFormRow {
 export function SettingsPanel() {
   const providerList = useChatStore((s) => s.providerList)
   const setView = useChatStore((s) => s.setView)
+  const settingsSection = useChatStore((s) => s.settingsSection)
+  const selectedProviderName = useChatStore((s) => s.selectedProviderName)
+  const selectProviderName = useChatStore((s) => s.selectProviderName)
   const storeCreateProvider = useChatStore((s) => s.createProvider)
   const storeUpdateProvider = useChatStore((s) => s.updateProvider)
   const storeDeleteProvider = useChatStore((s) => s.deleteProvider)
+
+  const supportedChannels = useChannelsStore((s) => s.supportedChannels)
+  const selectedTransport = useChannelsStore((s) => s.selectedTransport)
+  const channelsLoading = useChannelsStore((s) => s.loading)
+  const selectTransport = useChannelsStore((s) => s.selectTransport)
+
+  const selectedProvider =
+    providerList.find((provider) => provider.name === selectedProviderName) ??
+    null
 
   const [name, setName] = useState("")
   const [kind, setKind] = useState("openai-responses")
   const [apiKey, setApiKey] = useState("")
   const [baseUrl, setBaseUrl] = useState("https://api.openai.com/v1")
   const [models, setModels] = useState<ModelFormRow[]>([emptyModelRow()])
+  const [itemQuery, setItemQuery] = useState("")
   const [submitting, setSubmitting] = useState(false)
-  const [editing, setEditing] = useState<string | null>(null)
-  const [formOpen, setFormOpen] = useState(providerList.length === 0)
 
-  function resetForm() {
-    setName("")
-    setKind("openai-responses")
-    setApiKey("")
-    setBaseUrl("https://api.openai.com/v1")
-    setModels([emptyModelRow()])
-    setEditing(null)
-  }
+  useEffect(() => {
+    if (!selectedProvider) {
+      setName("")
+      setKind("openai-responses")
+      setApiKey("")
+      setBaseUrl("https://api.openai.com/v1")
+      setModels([emptyModelRow()])
+      return
+    }
 
-  function startEdit(providerName: string) {
-    const p = providerList.find((x) => x.name === providerName)
-    if (!p) return
-    setName(p.name)
-    setKind(p.kind)
+    setName(selectedProvider.name)
+    setKind(selectedProvider.kind)
     setApiKey("")
-    setBaseUrl(p.base_url)
+    setBaseUrl(selectedProvider.base_url)
     setModels(
-      p.models.map((m) => ({
-        id: m.id,
-        display_name: m.display_name ?? "",
-        limit_context: m.limit?.context?.toString() ?? "",
-        limit_output: m.limit?.output?.toString() ?? "",
-        supports_reasoning: m.supports_reasoning,
-        reasoning_effort: m.reasoning_effort ?? "medium",
+      selectedProvider.models.map((model) => ({
+        id: model.id,
+        display_name: model.display_name ?? "",
+        limit_context: model.limit?.context?.toString() ?? "",
+        limit_output: model.limit?.output?.toString() ?? "",
+        supports_reasoning: model.supports_reasoning,
+        reasoning_effort: model.reasoning_effort ?? "medium",
       }))
     )
-    setEditing(providerName)
-    setFormOpen(true)
-  }
+  }, [selectedProvider])
+
+  useEffect(() => {
+    setItemQuery("")
+  }, [settingsSection])
 
   function updateModelRow(index: number, patch: Partial<ModelFormRow>) {
     setModels((prev) =>
-      prev.map((row, i) => (i === index ? { ...row, ...patch } : row))
+      prev.map((row, rowIndex) =>
+        rowIndex === index ? { ...row, ...patch } : row
+      )
     )
   }
 
   function removeModelRow(index: number) {
-    setModels((prev) => prev.filter((_, i) => i !== index))
+    setModels((prev) => prev.filter((_, rowIndex) => rowIndex !== index))
   }
 
   function buildModels(): ModelConfig[] {
@@ -103,21 +124,23 @@ export function SettingsPanel() {
     }
 
     return models
-      .filter((m) => m.id.trim())
-      .map((m) => ({
-        id: m.id.trim(),
-        display_name: m.display_name.trim() || null,
+      .filter((model) => model.id.trim())
+      .map((model) => ({
+        id: model.id.trim(),
+        display_name: model.display_name.trim() || null,
         limit: {
-          context: parseLimitValue(m.limit_context),
-          output: parseLimitValue(m.limit_output),
+          context: parseLimitValue(model.limit_context),
+          output: parseLimitValue(model.limit_output),
         },
         default_temperature: null,
-        supports_reasoning: m.supports_reasoning,
-        reasoning_effort: m.supports_reasoning ? m.reasoning_effort : null,
+        supports_reasoning: model.supports_reasoning,
+        reasoning_effort: model.supports_reasoning
+          ? model.reasoning_effort
+          : null,
       }))
   }
 
-  const hasValidModel = models.some((m) => m.id.trim())
+  const hasValidModel = models.some((model) => model.id.trim())
 
   function handleKindChange(value: string | null) {
     if (value) setKind(value)
@@ -129,361 +152,535 @@ export function SettingsPanel() {
     }
   }
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault()
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
     if (!hasValidModel) return
+
     setSubmitting(true)
+
     try {
-      if (editing) {
+      const builtModels = buildModels()
+
+      if (selectedProvider) {
         const body: Record<string, unknown> = {
           kind,
-          models: buildModels(),
-          active_model: buildModels()[0]?.id,
+          models: builtModels,
+          active_model: builtModels[0]?.id,
           base_url: baseUrl.trim(),
         }
+
         if (apiKey.trim()) body.api_key = apiKey.trim()
+
         await storeUpdateProvider(
-          editing,
+          selectedProvider.name,
           body as Parameters<typeof storeUpdateProvider>[1]
         )
-      } else {
-        await storeCreateProvider({
-          name: name.trim(),
-          kind,
-          models: buildModels(),
-          active_model: buildModels()[0]?.id,
-          api_key: apiKey.trim(),
-          base_url: baseUrl.trim(),
-        })
+        return
       }
-      resetForm()
-      setFormOpen(false)
+
+      const providerName = name.trim()
+      await storeCreateProvider({
+        name: providerName,
+        kind,
+        models: builtModels,
+        active_model: builtModels[0]?.id,
+        api_key: apiKey.trim(),
+        base_url: baseUrl.trim(),
+      })
+      selectProviderName(providerName)
     } finally {
       setSubmitting(false)
     }
   }
 
-  async function handleDelete(providerName: string) {
-    await storeDeleteProvider(providerName)
-    if (editing === providerName) {
-      resetForm()
+  async function handleDeleteProvider() {
+    if (!selectedProvider) return
+
+    const deletingLastProvider = providerList.length <= 1
+    await storeDeleteProvider(selectedProvider.name)
+
+    if (deletingLastProvider) {
+      selectProviderName(NEW_PROVIDER_SETTINGS_KEY)
     }
   }
 
+  const isProvidersSection = settingsSection === "providers"
+  const normalizedItemQuery = itemQuery.trim().toLowerCase()
+
+  const filteredProviders = normalizedItemQuery
+    ? providerList.filter((providerItem) => {
+        return (
+          providerItem.name.toLowerCase().includes(normalizedItemQuery) ||
+          providerItem.kind.toLowerCase().includes(normalizedItemQuery)
+        )
+      })
+    : providerList
+
+  const filteredChannels = normalizedItemQuery
+    ? supportedChannels.filter((channel) => {
+        return (
+          channel.label.toLowerCase().includes(normalizedItemQuery) ||
+          channel.transport.toLowerCase().includes(normalizedItemQuery)
+        )
+      })
+    : supportedChannels
+
+  const settingsDescription = isProvidersSection
+    ? "Manage provider registry entries, endpoints, and model catalogs from the shared workspace."
+    : "Manage channel transports and runtime profiles from the shared workspace."
+
   return (
-    <ScrollArea className="min-h-0 flex-1">
-      <div className="mx-auto max-w-[800px] px-6 py-8">
-        {/* Header */}
-        <div className="mb-8 flex items-center gap-3">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="flex items-center justify-between gap-2 border-b border-border/30 px-4 py-2.5">
+        <div className="flex items-start gap-3">
           <button
+            type="button"
             onClick={() => setView("chat")}
-            className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+            className="mt-0.5 flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
           >
-            <ArrowLeft className="size-4" />
+            <ArrowLeft className="size-3.5" />
           </button>
-          <h1 className="text-lg font-semibold">Settings</h1>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-sm font-semibold tracking-tight">
+                Settings
+              </h1>
+              <Badge variant="secondary" className="text-[10px]">
+                {isProvidersSection ? "providers" : "channels"}
+              </Badge>
+            </div>
+            <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+              {settingsDescription}
+            </p>
+          </div>
         </div>
 
-        {/* Provider list */}
-        <section className="mb-8">
-          <h2 className="mb-3 text-[13px] font-medium text-muted-foreground">
-            Providers
-          </h2>
-          {providerList.length === 0 ? (
-            <p className="text-[13px] text-muted-foreground/60">
-              No providers configured yet.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {providerList.map((p) => (
-                <Card
-                  key={p.name}
-                  className={cn(
-                    "flex items-center justify-between px-4 py-3",
-                    p.active && "border-foreground/20"
-                  )}
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[13px] font-medium">{p.name}</span>
-                      <Badge variant="secondary" className="text-[10px]">
-                        {p.kind}
-                      </Badge>
-                      {p.active && (
-                        <Badge variant="secondary" className="text-[10px]">
-                          active
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                      {p.base_url}
-                    </p>
-                    <div className="mt-1 flex flex-wrap gap-1.5">
-                      {p.models.map((m) => (
-                        <Badge
-                          key={m.id}
-                          variant="outline"
-                          className="text-[10px] font-normal"
-                        >
-                          {m.display_name ?? m.id}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="ml-3 flex shrink-0 gap-1">
-                    <button
-                      onClick={() => startEdit(p.name)}
-                      className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-                    >
-                      <Pencil className="size-3.5" />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(p.name)}
-                      className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                    >
-                      <Trash2 className="size-3.5" />
-                    </button>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          )}
-        </section>
-
-        <Separator className="mb-8 opacity-30" />
-
-        {/* Add / Edit provider form */}
-        <section>
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-[13px] font-medium text-muted-foreground">
-              {editing ? `Edit Provider — ${editing}` : "Add Provider"}
-            </h2>
-            {!formOpen && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  resetForm()
-                  setFormOpen(true)
-                }}
-              >
-                <Plus className="mr-1.5 size-3.5" />
-                Add
-              </Button>
-            )}
-            {formOpen && editing && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  resetForm()
-                  setFormOpen(false)
-                }}
-              >
-                Cancel
-              </Button>
-            )}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="relative min-w-0 sm:w-[260px]">
+            <Search className="pointer-events-none absolute top-1/2 left-3 size-3 -translate-y-1/2 text-muted-foreground/70" />
+            <Input
+              value={itemQuery}
+              onChange={(event) => setItemQuery(event.target.value)}
+              placeholder={
+                isProvidersSection
+                  ? "Search providers..."
+                  : "Search channels..."
+              }
+              className="h-8 pl-8 text-[12px]"
+            />
           </div>
 
-          {formOpen && (
-            <Card className="p-4">
-              <form onSubmit={handleSubmit} className="space-y-4">
-                {/* Name + Protocol row */}
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div>
-                    <label className="mb-1 block text-[12px] text-muted-foreground">
-                      Name
-                    </label>
-                    <Input
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      placeholder="e.g. openai-main"
-                      className="h-8 text-[13px]"
-                      disabled={!!editing}
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-[12px] text-muted-foreground">
-                      Protocol
-                    </label>
-                    <Select value={kind} onValueChange={handleKindChange}>
-                      <SelectTrigger className="h-8 w-full text-[13px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="openai-responses">
-                          OpenAI Responses
-                        </SelectItem>
-                        <SelectItem value="openai-chat-completions">
-                          OpenAI Chat Completions
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+          {isProvidersSection ? (
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => selectProviderName(NEW_PROVIDER_SETTINGS_KEY)}
+            >
+              <Plus className="size-3.5" />
+              Add Provider
+            </Button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-3">
+        <div className="mx-auto flex min-h-0 w-full max-w-[1440px] flex-1 flex-col gap-2">
+          <div className="grid min-h-0 flex-1 overflow-hidden rounded-xl border border-border/30 bg-card/70 shadow-[var(--workspace-shadow)] xl:grid-cols-[260px_minmax(0,1fr)]">
+            <div className="flex min-h-0 flex-col overflow-hidden">
+              <div className="shrink-0 border-b border-border/25 px-3 py-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
+                    {isProvidersSection ? "Provider List" : "Channel List"}
+                  </p>
+                  <span className="font-mono text-[11px] text-muted-foreground">
+                    {isProvidersSection
+                      ? filteredProviders.length
+                      : filteredChannels.length}
+                  </span>
                 </div>
+              </div>
 
-                {/* API Key */}
-                <div>
-                  <label className="mb-1 block text-[12px] text-muted-foreground">
-                    API Key{editing && " (leave blank to keep existing)"}
-                  </label>
-                  <Input
-                    type="text"
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder="sk-..."
-                    className="h-8 text-[13px]"
-                  />
-                </div>
+              <div className="min-h-0 flex-1 overflow-y-auto p-3">
+                <div className="space-y-1">
+                  {isProvidersSection ? (
+                    filteredProviders.length === 0 ? (
+                      <p className="px-3 py-4 text-[12px] text-muted-foreground">
+                        {providerList.length === 0 && !normalizedItemQuery
+                          ? "No providers configured yet."
+                          : "No matching providers."}
+                      </p>
+                    ) : (
+                      filteredProviders.map((providerItem) => {
+                        const isActive =
+                          providerItem.name === selectedProviderName &&
+                          selectedProviderName !== NEW_PROVIDER_SETTINGS_KEY
 
-                {/* Base URL */}
-                <div>
-                  <label className="mb-1 block text-[12px] text-muted-foreground">
-                    Base URL
-                  </label>
-                  <Input
-                    value={baseUrl}
-                    onChange={(e) => setBaseUrl(e.target.value)}
-                    className="h-8 text-[13px]"
-                  />
-                </div>
+                        return (
+                          <button
+                            key={providerItem.name}
+                            type="button"
+                            onClick={() =>
+                              selectProviderName(providerItem.name)
+                            }
+                            className={cn(
+                              "flex w-full items-start gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors",
+                              isActive
+                                ? "border-border/55 bg-accent/45 text-foreground"
+                                : "border-transparent text-muted-foreground hover:border-border/30 hover:bg-accent/20 hover:text-foreground"
+                            )}
+                          >
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-[13px] font-medium">
+                                {providerItem.name}
+                              </span>
+                              <span className="mt-1 block truncate text-[11px] text-muted-foreground/80">
+                                {providerItem.kind}
+                              </span>
+                            </span>
+                            <span
+                              className={cn(
+                                "mt-1 size-2 rounded-full",
+                                providerItem.active
+                                  ? "bg-blue-400"
+                                  : "bg-muted-foreground/30"
+                              )}
+                            />
+                          </button>
+                        )
+                      })
+                    )
+                  ) : channelsLoading && supportedChannels.length === 0 ? (
+                    <p className="px-3 py-4 text-[12px] text-muted-foreground">
+                      Loading channels...
+                    </p>
+                  ) : filteredChannels.length === 0 ? (
+                    <p className="px-3 py-4 text-[12px] text-muted-foreground">
+                      {supportedChannels.length === 0 && !normalizedItemQuery
+                        ? "No supported channels available."
+                        : "No matching channels."}
+                    </p>
+                  ) : (
+                    filteredChannels.map((channel) => {
+                      const isActive = channel.transport === selectedTransport
 
-                <Separator className="opacity-30" />
-
-                {/* Models */}
-                <div>
-                  <label className="mb-2 block text-[12px] font-medium text-muted-foreground">
-                    Models
-                  </label>
-                  <div className="space-y-3">
-                    {models.map((row, i) => (
-                      <div
-                        key={i}
-                        className="rounded-lg border border-border/30 bg-muted/20 p-3"
-                      >
-                        <div className="flex items-start gap-2">
-                          <div className="grid flex-1 grid-cols-1 gap-2 sm:grid-cols-2">
-                            <Input
-                              value={row.id}
-                              onChange={(e) =>
-                                updateModelRow(i, { id: e.target.value })
-                              }
-                              placeholder="Model ID (e.g. gpt-4.1-mini)"
-                              className="h-7 text-[12px]"
-                            />
-                            <Input
-                              value={row.display_name}
-                              onChange={(e) =>
-                                updateModelRow(i, {
-                                  display_name: e.target.value,
-                                })
-                              }
-                              placeholder="Display Name (optional)"
-                              className="h-7 text-[12px]"
-                            />
-                            <Input
-                              value={row.limit_context}
-                              onChange={(e) =>
-                                updateModelRow(i, {
-                                  limit_context: e.target.value,
-                                })
-                              }
-                              placeholder="Context limit"
-                              className="h-7 text-[12px]"
-                              inputMode="numeric"
-                            />
-                            <Input
-                              value={row.limit_output}
-                              onChange={(e) =>
-                                updateModelRow(i, {
-                                  limit_output: e.target.value,
-                                })
-                              }
-                              placeholder="Output limit"
-                              className="h-7 text-[12px]"
-                              inputMode="numeric"
-                            />
-                          </div>
-                          {models.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={() => removeModelRow(i)}
-                              className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                            >
-                              <X className="size-3.5" />
-                            </button>
+                      return (
+                        <button
+                          key={channel.transport}
+                          type="button"
+                          onClick={() => selectTransport(channel.transport)}
+                          className={cn(
+                            "flex w-full items-start gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors",
+                            isActive
+                              ? "border-border/55 bg-accent/45 text-foreground"
+                              : "border-transparent text-muted-foreground hover:border-border/30 hover:bg-accent/20 hover:text-foreground"
                           )}
-                        </div>
-                        {/* Reasoning toggle */}
-                        <div className="mt-2 flex flex-wrap items-center gap-3">
-                          <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                            <Switch
-                              checked={row.supports_reasoning}
-                              onCheckedChange={(checked: boolean) =>
-                                updateModelRow(i, {
-                                  supports_reasoning: checked,
-                                })
-                              }
-                            />
-                            Reasoning
-                          </label>
-                          {row.supports_reasoning && (
-                            <Select
-                              value={row.reasoning_effort}
-                              onValueChange={(value) =>
-                                handleReasoningEffortChange(i, value)
-                              }
-                            >
-                              <SelectTrigger
-                                className="h-6 w-[100px] text-[11px]"
-                                size="sm"
-                              >
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="low">Low</SelectItem>
-                                <SelectItem value="medium">Medium</SelectItem>
-                                <SelectItem value="high">High</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          )}
+                        >
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-[13px] font-medium">
+                              {channel.label}
+                            </span>
+                            <span className="mt-1 block truncate text-[11px] text-muted-foreground/80">
+                              {channel.transport}
+                            </span>
+                          </span>
+                          <span
+                            className={cn(
+                              "mt-1 size-2 rounded-full",
+                              isActive
+                                ? "bg-blue-400"
+                                : "bg-muted-foreground/30"
+                            )}
+                          />
+                        </button>
+                      )
+                    })
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex min-h-0 flex-col overflow-hidden border-l border-border/25">
+              {isProvidersSection ? (
+                <>
+                  <div className="shrink-0 border-b border-border/25 px-4 py-3">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h2 className="truncate text-[15px] font-semibold">
+                            {selectedProvider
+                              ? selectedProvider.name
+                              : "New Provider"}
+                          </h2>
+                          <Badge variant="outline" className="text-[10px]">
+                            {selectedProvider
+                              ? selectedProvider.active
+                                ? "Active"
+                                : "Inactive"
+                              : "Draft"}
+                          </Badge>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() =>
-                      setModels((prev) => [...prev, emptyModelRow()])
-                    }
-                    className="mt-2"
-                  >
-                    <Plus className="mr-1.5 size-3" />
-                    Add Model
-                  </Button>
-                </div>
 
-                <Button
-                  type="submit"
-                  size="sm"
-                  disabled={
-                    submitting ||
-                    (!editing && !name.trim()) ||
-                    !hasValidModel ||
-                    (!editing && !apiKey.trim())
-                  }
-                  className="mt-2 w-full"
-                >
-                  <Plus className="mr-1.5 size-3.5" />
-                  {editing ? "Update Provider" : "Add Provider"}
-                </Button>
-              </form>
-            </Card>
-          )}
-        </section>
+                      {selectedProvider ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => void handleDeleteProvider()}
+                          className="shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        >
+                          <Trash2 className="size-3.5" />
+                          Delete
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                    <form onSubmit={handleSubmit} className="space-y-4">
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="space-y-1.5">
+                          <label className="workspace-form-label">Name</label>
+                          <Input
+                            value={name}
+                            onChange={(event) => setName(event.target.value)}
+                            placeholder="e.g. openai-main"
+                            className="h-9 text-[13px]"
+                            disabled={selectedProvider != null}
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="workspace-form-label">
+                            Protocol
+                          </label>
+                          <Select value={kind} onValueChange={handleKindChange}>
+                            <SelectTrigger className="h-9 w-full text-[13px]">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="openai-responses">
+                                OpenAI Responses
+                              </SelectItem>
+                              <SelectItem value="openai-chat-completions">
+                                OpenAI Chat Completions
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="workspace-form-label">
+                          API key
+                          {selectedProvider
+                            ? " (leave blank to keep existing)"
+                            : ""}
+                        </label>
+                        <Input
+                          type="text"
+                          value={apiKey}
+                          onChange={(event) => setApiKey(event.target.value)}
+                          placeholder="sk-..."
+                          className="h-9 text-[13px]"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="workspace-form-label">Base URL</label>
+                        <Input
+                          value={baseUrl}
+                          onChange={(event) => setBaseUrl(event.target.value)}
+                          className="h-9 text-[13px]"
+                        />
+                      </div>
+
+                      <div className="space-y-2.5 border-t border-border/20 pt-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <p className="workspace-form-label">Models</p>
+
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              setModels((prev) => [emptyModelRow(), ...prev])
+                            }
+                          >
+                            <Plus className="size-3.5" />
+                            Add Model
+                          </Button>
+                        </div>
+
+                        <div className="space-y-2.5">
+                          {models.map((row, index) => (
+                            <div
+                              key={`${row.id}:${index}`}
+                              className="workspace-panel-soft px-3 py-3"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <p className="text-sm font-medium text-foreground">
+                                  Model {index + 1}
+                                </p>
+
+                                {models.length > 1 ? (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    onClick={() => removeModelRow(index)}
+                                    aria-label={`Remove model ${index + 1}`}
+                                    className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                                  >
+                                    <X className="size-3.5" />
+                                  </Button>
+                                ) : null}
+                              </div>
+
+                              <div className="mt-3 grid gap-2.5 md:grid-cols-2">
+                                <div className="space-y-1.5">
+                                  <label className="workspace-form-label">
+                                    Model ID
+                                  </label>
+                                  <Input
+                                    value={row.id}
+                                    onChange={(event) =>
+                                      updateModelRow(index, {
+                                        id: event.target.value,
+                                      })
+                                    }
+                                    placeholder="e.g. gpt-5.4"
+                                    className="h-9 text-[13px]"
+                                  />
+                                </div>
+
+                                <div className="space-y-1.5">
+                                  <label className="workspace-form-label">
+                                    Display name
+                                  </label>
+                                  <Input
+                                    value={row.display_name}
+                                    onChange={(event) =>
+                                      updateModelRow(index, {
+                                        display_name: event.target.value,
+                                      })
+                                    }
+                                    placeholder="Optional label shown in the UI"
+                                    className="h-9 text-[13px]"
+                                  />
+                                </div>
+
+                                <div className="space-y-1.5">
+                                  <label className="workspace-form-label">
+                                    Context limit
+                                  </label>
+                                  <Input
+                                    value={row.limit_context}
+                                    onChange={(event) =>
+                                      updateModelRow(index, {
+                                        limit_context: event.target.value,
+                                      })
+                                    }
+                                    placeholder="Context limit"
+                                    className="h-9 text-[13px]"
+                                    inputMode="numeric"
+                                  />
+                                </div>
+
+                                <div className="space-y-1.5">
+                                  <label className="workspace-form-label">
+                                    Output limit
+                                  </label>
+                                  <Input
+                                    value={row.limit_output}
+                                    onChange={(event) =>
+                                      updateModelRow(index, {
+                                        limit_output: event.target.value,
+                                      })
+                                    }
+                                    placeholder="Output limit"
+                                    className="h-9 text-[13px]"
+                                    inputMode="numeric"
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="mt-3 flex flex-col gap-3 rounded-xl border border-border/20 bg-background/55 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+                                <label className="flex items-center gap-3 text-sm text-foreground">
+                                  <Switch
+                                    checked={row.supports_reasoning}
+                                    onCheckedChange={(checked: boolean) =>
+                                      updateModelRow(index, {
+                                        supports_reasoning: checked,
+                                      })
+                                    }
+                                  />
+                                  <span>
+                                    Reasoning support
+                                    <span className="mt-1 block text-[12px] text-muted-foreground">
+                                      Only expose reasoning effort controls for
+                                      models that explicitly support them.
+                                    </span>
+                                  </span>
+                                </label>
+
+                                {row.supports_reasoning ? (
+                                  <Select
+                                    value={row.reasoning_effort}
+                                    onValueChange={(value) =>
+                                      handleReasoningEffortChange(index, value)
+                                    }
+                                  >
+                                    <SelectTrigger
+                                      className="h-9 w-full text-[13px] sm:w-[160px]"
+                                      size="sm"
+                                    >
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="low">Low</SelectItem>
+                                      <SelectItem value="medium">
+                                        Medium
+                                      </SelectItem>
+                                      <SelectItem value="high">High</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                ) : null}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end border-t border-border/20 pt-4">
+                        <Button
+                          type="submit"
+                          disabled={
+                            submitting ||
+                            (!selectedProvider && !name.trim()) ||
+                            !hasValidModel ||
+                            (!selectedProvider && !apiKey.trim())
+                          }
+                          className="min-w-[190px]"
+                        >
+                          <Plus className="size-3.5" />
+                          {selectedProvider
+                            ? "Update Provider"
+                            : "Create Provider"}
+                        </Button>
+                      </div>
+                    </form>
+                  </div>
+                </>
+              ) : (
+                <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                  <ChannelsPanel embedded />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
-    </ScrollArea>
+    </div>
   )
 }

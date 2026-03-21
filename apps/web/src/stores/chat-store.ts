@@ -39,6 +39,8 @@ import { useSessionSettingsStore } from "@/stores/session-settings-store"
 const SESSION_HISTORY_PAGE_SIZE = 5
 const INITIAL_SESSION_HISTORY_PAGE_SIZE = 1
 const MAX_CACHED_SESSION_SNAPSHOTS = 24
+export const NEW_PROVIDER_SETTINGS_KEY = "__new_provider__"
+export type SettingsSection = "providers" | "channels"
 
 const defaultIdleScheduler = createIdleScheduler()
 
@@ -200,6 +202,25 @@ function trimSessionSnapshotsToKnownSessions(
   )
 }
 
+function resolveSelectedProviderName(
+  providerList: ProviderListItem[],
+  current: string | null
+): string | null {
+  if (current === NEW_PROVIDER_SETTINGS_KEY) {
+    return current
+  }
+
+  if (current && providerList.some((provider) => provider.name === current)) {
+    return current
+  }
+
+  return (
+    providerList.find((provider) => provider.active)?.name ??
+    providerList[0]?.name ??
+    null
+  )
+}
+
 type ChatStore = {
   sessions: SessionListItem[]
   activeSessionId: string | null
@@ -212,6 +233,8 @@ type ChatStore = {
   chatState: ChatState
   provider: ProviderInfo | null
   providerList: ProviderListItem[]
+  selectedProviderName: string | null
+  settingsSection: SettingsSection
   error: string | null
   view: AppView
   contextPressure: number | null
@@ -225,6 +248,8 @@ type ChatStore = {
   cancelTurn: () => Promise<void>
   refreshProviders: () => void
   setView: (view: AppView) => void
+  setSettingsSection: (section: SettingsSection) => void
+  selectProviderName: (name: string | null) => void
   createProvider: (body: {
     name: string
     kind: string
@@ -471,6 +496,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
     chatState: "idle",
     provider: null,
     providerList: [],
+    selectedProviderName: null,
+    settingsSection: "providers",
     error: null,
     view: "chat",
     contextPressure: null,
@@ -1052,7 +1079,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
           if (wasActive && nextActiveId) {
             useSessionSettingsStore.getState().setActiveSessionId(nextActiveId)
             void hydrateSession(nextActiveId)
-            void useSessionSettingsStore.getState().hydrateForSession(nextActiveId)
+            void useSessionSettingsStore
+              .getState()
+              .hydrateForSession(nextActiveId)
           } else if (wasActive) {
             useSessionSettingsStore.getState().clear()
           }
@@ -1164,13 +1193,44 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
     refreshProviders: () => {
       Promise.all([apiListProviders(), fetchProviders()])
-        .then(([providerList, provider]) => set({ providerList, provider }))
+        .then(([providerList, provider]) =>
+          set((state) => ({
+            providerList,
+            provider,
+            selectedProviderName: resolveSelectedProviderName(
+              providerList,
+              state.selectedProviderName
+            ),
+          }))
+        )
         .catch(() => {})
     },
 
-    setView: (view: AppView) => set({ view }),
+    setView: (view: AppView) =>
+      set((state) => ({
+        view: view === "channels" ? "settings" : view,
+        settingsSection:
+          view === "channels"
+            ? "channels"
+            : view === "settings"
+              ? state.settingsSection
+              : state.settingsSection,
+        selectedProviderName:
+          view === "settings"
+            ? resolveSelectedProviderName(
+                state.providerList,
+                state.selectedProviderName
+              )
+            : state.selectedProviderName,
+      })),
+
+    setSettingsSection: (section) => set({ settingsSection: section }),
+
+    selectProviderName: (name) =>
+      set({ selectedProviderName: name, settingsSection: "providers" }),
 
     createProvider: async (body) => {
+      set({ selectedProviderName: body.name })
       await apiCreateProvider(body)
       get().refreshProviders()
     },
