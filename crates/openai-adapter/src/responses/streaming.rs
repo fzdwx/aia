@@ -2,30 +2,12 @@ use agent_core::{Completion, CompletionSegment, CompletionUsage, StreamEvent, To
 use serde_json::Value;
 
 use crate::{
-    OpenAiAdapterError, extract_reasoning_stream_text, extract_stream_text, parse_tool_arguments,
+    OpenAiAdapterError, StreamingToolCallAccumulator, extract_reasoning_stream_text,
+    extract_stream_text, parse_tool_arguments,
     streaming::{StreamingState, StreamingTranscript},
 };
 
 use super::OpenAiResponsesModel;
-
-#[derive(Default)]
-struct PendingToolCall {
-    id: String,
-    name: String,
-    arguments: String,
-}
-
-impl PendingToolCall {
-    fn clear(&mut self) {
-        self.id.clear();
-        self.name.clear();
-        self.arguments.clear();
-    }
-
-    fn is_empty(&self) -> bool {
-        self.name.is_empty()
-    }
-}
 
 #[derive(Default)]
 pub(super) struct ResponsesStreamingState {
@@ -34,7 +16,7 @@ pub(super) struct ResponsesStreamingState {
     saw_text_delta: bool,
     saw_reasoning_delta: bool,
     tool_calls: Vec<(String, String, String)>,
-    current_tool: PendingToolCall,
+    current_tool: StreamingToolCallAccumulator,
     response_id: Option<String>,
     response_status: Option<String>,
     incomplete_reason: Option<String>,
@@ -49,22 +31,22 @@ impl ResponsesStreamingState {
             return;
         }
 
-        let id = if self.current_tool.id.is_empty() {
-            format!("openai-stream-call-{}", self.tool_calls.len() + 1)
-        } else {
-            self.current_tool.id.clone()
+        let Some(tool_name) = self.current_tool.tool_name().map(ToString::to_string) else {
+            self.current_tool.clear();
+            return;
         };
-        let arguments = parse_tool_arguments(&self.current_tool.arguments).unwrap_or_default();
-        sink(StreamEvent::ToolCallDetected {
-            invocation_id: id.clone(),
-            tool_name: self.current_tool.name.clone(),
-            arguments,
-        });
-        self.tool_calls.push((
-            id,
-            self.current_tool.name.clone(),
-            self.current_tool.arguments.clone(),
-        ));
+
+        let id = self
+            .current_tool
+            .invocation_id_or(|| format!("openai-stream-call-{}", self.tool_calls.len() + 1));
+        if !self.current_tool.detection_emitted() {
+            sink(StreamEvent::ToolCallDetected {
+                invocation_id: id.clone(),
+                tool_name: tool_name.clone(),
+                arguments: self.current_tool.parsed_arguments(),
+            });
+        }
+        self.tool_calls.push((id, tool_name, self.current_tool.raw_arguments().to_string()));
         self.current_tool.clear();
     }
 }
@@ -115,18 +97,21 @@ impl StreamingState for ResponsesStreamingState {
             }
             Some("response.function_call_arguments.delta") => {
                 let delta = event["delta"].as_str().unwrap_or("");
-                self.current_tool.arguments.push_str(delta);
+                self.current_tool.push_arguments_delta(delta);
             }
             Some("response.output_item.added") => {
                 let item = &event["item"];
                 if item["type"].as_str() == Some("function_call") {
-                    self.current_tool.id = item["id"]
-                        .as_str()
-                        .or_else(|| item["call_id"].as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    self.current_tool.name = item["name"].as_str().unwrap_or("").to_string();
-                    self.current_tool.arguments.clear();
+                    self.current_tool.clear();
+                    if let Some(invocation_id) =
+                        item["id"].as_str().or_else(|| item["call_id"].as_str())
+                    {
+                        self.current_tool.set_invocation_id(invocation_id.to_string());
+                    }
+                    if let Some(tool_name) = item["name"].as_str().filter(|value| !value.is_empty())
+                    {
+                        self.current_tool.set_tool_name(tool_name.to_string());
+                    }
                 }
             }
             Some("response.function_call_arguments.done") => {

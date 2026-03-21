@@ -3,6 +3,63 @@ use serde_json::{Value, json};
 
 use crate::OpenAiAdapterError;
 
+#[derive(Default)]
+pub(crate) struct StreamingToolCallAccumulator {
+    invocation_id: Option<String>,
+    tool_name: Option<String>,
+    arguments: String,
+    emitted_detection: bool,
+}
+
+impl StreamingToolCallAccumulator {
+    pub(crate) fn set_invocation_id(&mut self, invocation_id: impl Into<String>) {
+        self.invocation_id = Some(invocation_id.into());
+    }
+
+    pub(crate) fn set_tool_name(&mut self, tool_name: impl Into<String>) {
+        self.tool_name = Some(tool_name.into());
+    }
+
+    pub(crate) fn push_arguments_delta(&mut self, arguments_delta: &str) {
+        self.arguments.push_str(arguments_delta);
+    }
+
+    pub(crate) fn invocation_id_or(&self, fallback: impl FnOnce() -> String) -> String {
+        self.invocation_id.clone().unwrap_or_else(fallback)
+    }
+
+    pub(crate) fn tool_name(&self) -> Option<&str> {
+        self.tool_name.as_deref()
+    }
+
+    pub(crate) fn parsed_arguments(&self) -> Value {
+        parse_tool_arguments(&self.arguments).unwrap_or_default()
+    }
+
+    pub(crate) fn raw_arguments(&self) -> &str {
+        self.arguments.as_str()
+    }
+
+    pub(crate) fn detection_emitted(&self) -> bool {
+        self.emitted_detection
+    }
+
+    pub(crate) fn mark_detection_emitted(&mut self) {
+        self.emitted_detection = true;
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.invocation_id = None;
+        self.tool_name = None;
+        self.arguments.clear();
+        self.emitted_detection = false;
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.tool_name.is_none() && self.arguments.is_empty() && self.invocation_id.is_none()
+    }
+}
+
 pub(crate) fn role_name(role: &Role) -> &'static str {
     match role {
         Role::System => "system",

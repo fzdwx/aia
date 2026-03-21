@@ -4,24 +4,17 @@ use agent_core::{Completion, CompletionSegment, CompletionUsage, StreamEvent, To
 use serde_json::Value;
 
 use crate::{
-    OpenAiAdapterError, parse_tool_arguments,
+    OpenAiAdapterError, StreamingToolCallAccumulator, parse_tool_arguments,
     streaming::{StreamingState, StreamingTranscript},
 };
 
 use super::OpenAiChatCompletionsModel;
 
 #[derive(Default)]
-struct StreamingToolCallState {
-    id: Option<String>,
-    name: Option<String>,
-    arguments: String,
-}
-
-#[derive(Default)]
 pub(super) struct ChatCompletionsStreamingState {
     text_buf: String,
     thinking_buf: String,
-    tool_calls: BTreeMap<usize, StreamingToolCallState>,
+    tool_calls: BTreeMap<usize, StreamingToolCallAccumulator>,
     finish_reason: Option<String>,
     usage: Option<CompletionUsage>,
     transcript: StreamingTranscript,
@@ -35,33 +28,31 @@ impl ChatCompletionsStreamingState {
             .unwrap_or(self.tool_calls.len() as u64) as usize;
         let state = self.tool_calls.entry(index).or_default();
         if let Some(id) = tool_delta.get("id").and_then(|value| value.as_str()) {
-            state.id = Some(id.to_string());
-        }
-        if let Some(name) = tool_delta
-            .get("function")
-            .and_then(|value| value.get("name"))
-            .and_then(|value| value.as_str())
-        {
-            if state.name.is_none() {
-                let invocation_id = state
-                    .id
-                    .clone()
-                    .unwrap_or_else(|| format!("openai-chat-stream-call-{}", index + 1));
-                let arguments = parse_tool_arguments(&state.arguments).unwrap_or_default();
-                sink(StreamEvent::ToolCallDetected {
-                    invocation_id,
-                    tool_name: name.to_string(),
-                    arguments,
-                });
-            }
-            state.name = Some(name.to_string());
+            state.set_invocation_id(id.to_string());
         }
         if let Some(arguments_delta) = tool_delta
             .get("function")
             .and_then(|value| value.get("arguments"))
             .and_then(|value| value.as_str())
         {
-            state.arguments.push_str(arguments_delta);
+            state.push_arguments_delta(arguments_delta);
+        }
+        if let Some(name) = tool_delta
+            .get("function")
+            .and_then(|value| value.get("name"))
+            .and_then(|value| value.as_str())
+        {
+            if !state.detection_emitted() {
+                let invocation_id =
+                    state.invocation_id_or(|| format!("openai-chat-stream-call-{}", index + 1));
+                sink(StreamEvent::ToolCallDetected {
+                    invocation_id,
+                    tool_name: name.to_string(),
+                    arguments: state.parsed_arguments(),
+                });
+                state.mark_detection_emitted();
+            }
+            state.set_tool_name(name.to_string());
         }
     }
 }
@@ -124,12 +115,12 @@ impl StreamingState for ChatCompletionsStreamingState {
             segments.push(CompletionSegment::Text(self.text_buf));
         }
         for (index, state) in self.tool_calls {
-            let Some(name) = state.name else {
+            let Some(name) = state.tool_name().map(ToString::to_string) else {
                 continue;
             };
             let invocation_id =
-                state.id.unwrap_or_else(|| format!("openai-chat-stream-call-{}", index + 1));
-            let arguments = parse_tool_arguments(&state.arguments).unwrap_or_default();
+                state.invocation_id_or(|| format!("openai-chat-stream-call-{}", index + 1));
+            let arguments = parse_tool_arguments(state.raw_arguments()).unwrap_or_default();
             segments.push(CompletionSegment::ToolUse(
                 ToolCall::new(name)
                     .with_invocation_id(invocation_id)
