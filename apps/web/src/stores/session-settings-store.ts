@@ -4,6 +4,7 @@ import {
   fetchSessionSettings,
   updateSessionSettings as apiUpdateSessionSettings,
 } from "@/lib/api"
+import { useChatStore } from "@/stores/chat-store"
 import type {
   ProviderInfo,
   ProviderListItem,
@@ -127,6 +128,15 @@ export const useSessionSettingsStore = create<SessionSettingsStore>((set, get) =
           reasoning_effort: nextReasoningEffort,
         },
       })
+
+      useChatStore.setState((state) => ({
+        provider: info,
+        sessions: get().syncSessionListModel(
+          state.sessions,
+          activeSessionId,
+          modelId
+        ),
+      }))
 
       return info
     } catch (error) {

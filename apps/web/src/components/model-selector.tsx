@@ -1,4 +1,3 @@
-import { useEffect, useRef, useState } from "react"
 import { Check } from "lucide-react"
 
 import {
@@ -21,8 +20,6 @@ export function ModelSelector() {
   const hydrating = useSessionSettingsStore((s) => s.hydrating)
   const updating = useSessionSettingsStore((s) => s.updating)
   const switchModel = useSessionSettingsStore((s) => s.switchModel)
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
 
   const activeProviderName = sessionSettings?.provider
   const activeModelId = sessionSettings?.model
@@ -32,27 +29,17 @@ export function ModelSelector() {
     ? "loading model..."
     : activeModel?.display_name ?? activeModelId ?? "no model"
 
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
-    }
-    if (open) {
-      document.addEventListener("mousedown", handleClickOutside)
-    }
-    return () => document.removeEventListener("mousedown", handleClickOutside)
-  }, [open])
-
   if (providerList.length === 0) return null
 
   return (
-    <div ref={ref} className="min-w-0">
+    <div className="min-w-0">
       <Select
-        open={open}
-        onOpenChange={setOpen}
         disabled={hydrating || updating}
-        value={activeProviderName && activeModelId ? `${activeProviderName}::${activeModelId}` : null}
+        value={
+          activeProviderName && activeModelId
+            ? `${activeProviderName}::${activeModelId}`
+            : undefined
+        }
         onValueChange={(value) => {
           if (!value) return
           const [providerName, modelId] = value.split("::")

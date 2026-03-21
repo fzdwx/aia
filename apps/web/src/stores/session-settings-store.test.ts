@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "vite-plus/test"
 
 import { useSessionSettingsStore } from "./session-settings-store"
+import { useChatStore } from "./chat-store"
 import type { ProviderListItem } from "@/lib/types"
 
 type FetchMock = typeof fetch
@@ -41,6 +42,20 @@ describe("session settings store", () => {
       activeSessionId: null,
       sessionSettings: null,
       hydrating: false,
+      updating: false,
+      error: null,
+    })
+    useChatStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Session 1",
+          created_at: "2026-03-21T00:00:00Z",
+          updated_at: "2026-03-21T00:00:00Z",
+          model: "gpt-5",
+        },
+      ],
+      provider: null,
     })
   })
 
@@ -113,6 +128,12 @@ describe("session settings store", () => {
       protocol: "openai-responses",
       reasoning_effort: null,
     })
+    expect(useChatStore.getState().provider).toEqual({
+      name: "openai",
+      model: "gpt-4.1-mini",
+      connected: true,
+    })
+    expect(useChatStore.getState().sessions[0]?.model).toBe("gpt-4.1-mini")
   })
 
   test("hydrateForSession surfaces loading failure", async () => {

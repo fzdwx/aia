@@ -1,5 +1,17 @@
 # 演进日志
 
+## 2026-03-21 Session 101
+
+**Diagnosis**：上一轮已经把 session 级模型切换收口到 `session-settings-store.switchModel(...)`，并补了 store 侧请求/状态同步测试，但用户继续反馈“现在只有改思考等级才调用接口”。继续排查后发现真正断在组件层：`ModelSelector` 额外用本地 `open` state + `document.mousedown` 手动做“外部点击关闭”，而 Base UI `SelectContent` 实际渲染在 portal 里。点击模型项时，这个外部点击监听会先把弹层关闭，导致 item click 还没完成就被打断，因此看起来只有思考等级 selector 会真的触发 `/api/session/settings`。
+**Decision**：不再让 `ModelSelector` 平行接管 Base UI Select 的开关生命周期，而是回到组件库的默认 open/close 语义：删除本地 `open/ref/useEffect` 与 portal 不兼容的 outside-click 关闭逻辑，只保留 `onValueChange` 负责模型切换。与此同时保留 store 侧同步 `chat-store` 的修复，让模型切换成功后 UI 快照与 session 列表模型都同步更新。
+**Changes**：
+- `apps/web/src/components/model-selector.tsx`：删除本地 `open` state、`ref` 与 `document.mousedown` 外部点击监听，改回由 Base UI `Select` 自己管理展开/关闭；同时把空值从 `null` 调整为 `undefined`，更贴合当前 Select 受控值契约。
+- `apps/web/src/stores/session-settings-store.ts`、`apps/web/src/stores/session-settings-store.test.ts`：保留并验证模型切换成功后对 `chat-store.provider` 与 `sessions[].model` 的同步，确保接口成功后 UI 展示状态与当前 session 快照一致。
+- `docs/{status.md,evolution-log.md}`：补记“模型选择点击曾被 portal 外部点击逻辑提前截断”的真实根因与修复方式。
+**Verification**：`just web-typecheck`、`just web-test`；另外使用 headless Playwright 对真实页面做 route-mocked 点击验证，确认点击 `GPT-4.1 Mini` 后会实际发出 `PUT /api/session/settings`，请求体包含 `session_id/provider/model/reasoning_effort`。
+**Commit**：`50677fd fix(web): restore model switch request dispatch`。
+**Next direction**：如果继续沿输入区稳定性收口，下一步优先把模型/思考等级这类 session setting 交互补成正式浏览器级回归测试基础设施，而不是继续只依赖 store 单测覆盖 selector 组件行为。
+
 ## 2026-03-21 Session 100
 
 **Diagnosis**：上一轮已经把 session 级模型/思考等级拆到独立 `session-settings-store`，但输入区控件仍然隐式依赖异步 hydrate 何时完成：切换 session 时模型/思考等级可能短暂显示旧值，settings 请求失败也没有显式 UI 反馈。这正好对应上一轮“下一步优先考虑把 current model / session setting loading/disabled 态显式投影到输入区”的方向。
