@@ -8,7 +8,7 @@
 - `apps/agent-server/src/session_manager/{types.rs,mod.rs}`：`SessionSlot` 新增 `provider_binding` 快照；建 slot 与 runtime return 时同步维护；`get_session_settings(...)` 对 running session 改为直接返回内存 binding，不再回读 `.jsonl`。
 - `apps/agent-server/src/session_manager/provider_sync.rs`：运行中 session 且 `runtime` 已取走时，更新 settings 不再 `load_jsonl_or_default + save_jsonl`，只更新 `provider_binding/pending_provider_binding` 并返回对应 provider info，避免和 turn 追加写并发打架。
 - `apps/agent-server/tests/session_manager/{mod.rs,provider_sync/mod.rs}`：新增“running session 保留内存 provider binding”“running session settings update 不重写 session file”回归测试。
-**Commit**：`43472cc fix(server): avoid tape rewrite during session updates`。
+**Commit**：`c7670c5 fix(server): avoid tape rewrite during session updates`。
 
 ## 2026-03-21 Session 101
 
