@@ -220,6 +220,65 @@ fn session_slot_finish_turn_restores_idle_state_and_clears_pending_binding() {
 }
 
 #[test]
+fn session_slot_factory_fails_on_malformed_latest_provider_binding() {
+    let root = temp_session_dir("slot-factory-malformed-binding");
+    let config = sample_manager_config(&root);
+    let session_path = config.sessions_dir.join("session-1.jsonl");
+    std::fs::write(
+        &session_path,
+        concat!(
+            "{\"id\":1,\"kind\":\"event\",\"payload\":{\"name\":\"provider_binding\",\"data\":{\"name\":\"older\",\"model\":\"gpt-4.1-mini\",\"base_url\":\"https://api.openai.com/v1\",\"protocol\":\"openai-responses\"}},\"meta\":{},\"date\":\"2026-03-21T00:00:00Z\"}\n",
+            "{\"id\":2,\"kind\":\"event\",\"payload\":{\"name\":\"provider_binding\",\"data\":{\"broken\":true}},\"meta\":{},\"date\":\"2026-03-21T00:00:01Z\"}\n"
+        ),
+    )
+    .expect("broken session tape should be written");
+
+    let error = SessionSlotFactory::new(&config)
+        .create("session-1")
+        .err()
+        .expect("malformed latest binding should fail slot recovery");
+
+    assert!(error.message.contains("provider_binding"));
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn get_session_settings_reports_recovery_error_for_malformed_latest_provider_binding() {
+    let temp_root = temp_session_dir("settings-malformed-binding");
+    let cleanup_root = temp_root.clone();
+    let config = sample_manager_config(&temp_root);
+    config
+        .store
+        .create_session(&agent_store::SessionRecord::new(
+            "session-1",
+            "Broken Session",
+            "stale-store-model",
+        ))
+        .expect("broken session should exist in store");
+    std::fs::write(
+        config.sessions_dir.join("session-1.jsonl"),
+        concat!(
+            "{\"id\":1,\"kind\":\"event\",\"payload\":{\"name\":\"provider_binding\",\"data\":{\"name\":\"older\",\"model\":\"gpt-4.1-mini\",\"base_url\":\"https://api.openai.com/v1\",\"protocol\":\"openai-responses\"}},\"meta\":{},\"date\":\"2026-03-21T00:00:00Z\"}\n",
+            "{\"id\":2,\"kind\":\"event\",\"payload\":{\"name\":\"provider_binding\",\"data\":{\"broken\":true}},\"meta\":{},\"date\":\"2026-03-21T00:00:01Z\"}\n"
+        ),
+    )
+    .expect("broken session tape should be written");
+
+    run_async(async {
+        let handle = spawn_session_manager(config);
+        let error = handle
+            .get_session_settings("session-1".into())
+            .await
+            .expect_err("malformed latest binding should surface recovery error");
+
+        assert!(error.message.contains("provider_binding"));
+    });
+
+    let _ = std::fs::remove_dir_all(cleanup_root);
+}
+
+#[test]
 fn collect_runtime_events_reports_missing_subscriber() {
     let path = temp_session_path("missing-subscriber");
     let store = Arc::new(agent_store::AiaStore::new(":memory:").expect("memory store"));

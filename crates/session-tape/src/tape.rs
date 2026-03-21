@@ -78,12 +78,26 @@ impl SessionTape {
         ))
     }
 
-    pub fn latest_provider_binding(&self) -> Option<SessionProviderBinding> {
-        let entry = self.entries.iter().rev().find(|entry| {
-            entry.kind == "event" && entry.event_name() == Some("provider_binding")
+    pub fn try_latest_provider_binding(
+        &self,
+    ) -> Result<Option<SessionProviderBinding>, SessionTapeError> {
+        let Some(entry) =
+            self.entries.iter().rev().find(|entry| {
+                entry.kind == "event" && entry.event_name() == Some("provider_binding")
+            })
+        else {
+            return Ok(None);
+        };
+        let data = entry.event_data().ok_or_else(|| {
+            SessionTapeError::new("provider_binding 事件缺少 data 载荷".to_string())
         })?;
-        let data = entry.event_data()?;
-        serde_json::from_value(data.clone()).ok()
+        serde_json::from_value(data.clone()).map(Some).map_err(|error| {
+            SessionTapeError::new(format!("provider_binding 事件解码失败: {error}"))
+        })
+    }
+
+    pub fn latest_provider_binding(&self) -> Option<SessionProviderBinding> {
+        self.try_latest_provider_binding().ok().flatten()
     }
 
     pub fn handoff(&mut self, name: impl Into<String>, state: Value) -> Handoff {

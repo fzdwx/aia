@@ -50,20 +50,35 @@ fn provider_binding_event_uses_explicit_error_payload_on_serialize_failure() {
 }
 
 #[test]
-fn malformed_latest_provider_binding_does_not_fall_back_to_stale_older_binding() {
+fn try_latest_provider_binding_returns_error_for_malformed_latest_binding() {
     let mut tape = SessionTape::new();
     tape.bind_provider(SessionProviderBinding::Provider {
         name: "older".into(),
         model: "gpt-4.1-mini".into(),
         base_url: "https://api.openai.com/v1".into(),
         protocol: "openai-responses".into(),
+        reasoning_effort: None,
     });
     tape.append_entry(TapeEntry::event(
         "provider_binding",
         Some(serde_json::json!({ "broken": true })),
     ));
 
-    assert_eq!(tape.latest_provider_binding(), None);
+    let error = tape
+        .try_latest_provider_binding()
+        .expect_err("malformed latest binding should fail explicitly");
+
+    assert!(error.to_string().contains("provider_binding"));
+}
+
+#[test]
+fn try_latest_provider_binding_returns_none_when_binding_absent() {
+    let tape = SessionTape::new();
+
+    assert_eq!(
+        tape.try_latest_provider_binding().expect("missing binding should be allowed"),
+        None
+    );
 }
 
 #[test]
@@ -80,6 +95,7 @@ fn 会记住最近一次_provider_绑定() {
         model: "gpt-4.1-mini".into(),
         base_url: "https://api.openai.com/v1".into(),
         protocol: "openai-responses".into(),
+        reasoning_effort: None,
     });
 
     assert_eq!(
@@ -89,6 +105,7 @@ fn 会记住最近一次_provider_绑定() {
             model: "gpt-4.1-mini".into(),
             base_url: "https://api.openai.com/v1".into(),
             protocol: "openai-responses".into(),
+            reasoning_effort: None,
         })
     );
 }
@@ -111,6 +128,7 @@ fn 旧版_provider_绑定缺少协议字段时仍可恢复() {
             model: "gpt-4.1-mini".into(),
             base_url: "https://api.openai.com/v1".into(),
             protocol: "openai-responses".into(),
+            reasoning_effort: None,
         }
     );
 }

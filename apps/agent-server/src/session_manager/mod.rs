@@ -63,6 +63,7 @@ const UNAVAILABLE_SESSION_MODEL: &str = "unavailable";
 
 struct SessionManagerLoop {
     slots: HashMap<SessionId, SessionSlot>,
+    hydration_errors: HashMap<SessionId, RuntimeWorkerError>,
     config: SessionManagerConfig,
     command_tx: mpsc::Sender<SessionCommand>,
     command_rx: mpsc::Receiver<SessionCommand>,
@@ -78,7 +79,15 @@ impl SessionManagerLoop {
         return_tx: mpsc::Sender<RuntimeReturn>,
         return_rx: mpsc::Receiver<RuntimeReturn>,
     ) -> Self {
-        Self { slots: HashMap::new(), config, command_tx, command_rx, return_tx, return_rx }
+        Self {
+            slots: HashMap::new(),
+            hydration_errors: HashMap::new(),
+            config,
+            command_tx,
+            command_rx,
+            return_tx,
+            return_rx,
+        }
     }
 
     async fn run(mut self) {
@@ -97,8 +106,20 @@ impl SessionManagerLoop {
         if let Ok(records) = self.config.store.list_sessions_async().await {
             let slot_factory = SessionSlotFactory::new(&self.config);
             for record in records {
-                if let Ok(slot) = slot_factory.create(&record.id) {
-                    self.slots.insert(record.id, slot);
+                match slot_factory.create(&record.id) {
+                    Ok(slot) => {
+                        self.hydration_errors.remove(&record.id);
+                        self.slots.insert(record.id, slot);
+                    }
+                    Err(error) => {
+                        self.hydration_errors.insert(
+                            record.id,
+                            RuntimeWorkerError::internal(format!(
+                                "session recovery failed: {}",
+                                error.message
+                            )),
+                        );
+                    }
                 }
             }
         }
@@ -234,6 +255,7 @@ impl SessionManagerLoop {
         })?;
 
         let slot = SessionSlotFactory::new(&self.config).create(&session_id)?;
+        self.hydration_errors.remove(&session_id);
         self.slots.insert(session_id.clone(), slot);
 
         let _ = self
@@ -269,6 +291,7 @@ impl SessionManagerLoop {
         }
 
         self.slots.remove(session_id);
+        self.hydration_errors.remove(session_id);
 
         let session_path = self.config.sessions_dir.join(format!("{session_id}.jsonl"));
         if session_path.exists() {
@@ -364,7 +387,9 @@ impl SessionManagerLoop {
         session_id: &str,
     ) -> Result<SessionProviderBinding, RuntimeWorkerError> {
         let slot = self.slots.get(session_id).ok_or_else(|| {
-            RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
+            self.hydration_errors.get(session_id).cloned().unwrap_or_else(|| {
+                RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
+            })
         })?;
 
         if slot.runtime().is_some() || slot.status() == SlotStatus::Running {
@@ -373,7 +398,9 @@ impl SessionManagerLoop {
 
         let tape = SessionTape::load_jsonl_or_default(&slot.session_path)
             .map_err(|error| RuntimeWorkerError::internal(format!("tape load failed: {error}")))?;
-        Ok(tape.latest_provider_binding().unwrap_or(SessionProviderBinding::Bootstrap))
+        tape.try_latest_provider_binding()
+            .map_err(|error| RuntimeWorkerError::internal(error.to_string()))
+            .map(|binding| binding.unwrap_or(SessionProviderBinding::Bootstrap))
     }
 }
 
@@ -390,8 +417,10 @@ impl<'a> SessionSlotFactory<'a> {
         let session_path = self.config.sessions_dir.join(format!("{session_id}.jsonl"));
         let tape = SessionTape::load_jsonl_or_default(&session_path)
             .map_err(|error| RuntimeWorkerError::internal(format!("tape load failed: {error}")))?;
-        let provider_binding =
-            tape.latest_provider_binding().unwrap_or(SessionProviderBinding::Bootstrap);
+        let provider_binding = tape
+            .try_latest_provider_binding()
+            .map_err(|error| RuntimeWorkerError::internal(error.to_string()))?
+            .unwrap_or(SessionProviderBinding::Bootstrap);
 
         let selection = choose_provider_for_tape(&self.config.registry, &tape);
         let prompt_cache = prompt_cache_for_selection(&selection, session_id);
