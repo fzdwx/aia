@@ -44,12 +44,6 @@ const hourFormatter = new Intl.DateTimeFormat("en-US", {
   hour: "2-digit",
 })
 
-const RANGE_OPTIONS: Array<{ value: TraceDashboardRange; label: string }> = [
-  { value: "today", label: "Today" },
-  { value: "week", label: "Week" },
-  { value: "month", label: "Month" },
-]
-
 function formatCompactCount(value: number | null | undefined) {
   return value != null ? compactNumberFormatter.format(value) : "-"
 }
@@ -132,7 +126,7 @@ function DashboardMetricCard({
   detail: string
 }) {
   return (
-    <section className="rounded-[22px] border border-border/35 bg-background/85 p-3 shadow-[0_18px_45px_-28px_rgba(15,23,42,0.32)]">
+    <section className="trace-overview-card rounded-[22px] border border-border/25 bg-card p-3">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-[11px] tracking-[0.16em] text-muted-foreground uppercase">
@@ -213,7 +207,7 @@ function TrendChartCard({ dashboard }: { dashboard: TraceDashboard }) {
   const activePoint = dashboard.trend[resolvedIndex]
 
   return (
-    <section className="rounded-[28px] border border-border/35 bg-background/85 p-5 shadow-[0_20px_50px_-32px_rgba(15,23,42,0.35)]">
+    <section className="trace-overview-card trace-overview-section rounded-[28px] border border-border/25 bg-card p-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-[11px] tracking-[0.16em] text-muted-foreground uppercase">
@@ -229,7 +223,7 @@ function TrendChartCard({ dashboard }: { dashboard: TraceDashboard }) {
           </p>
         </div>
 
-        <div className="min-w-[220px] rounded-[20px] border border-border/35 bg-muted/20 px-4 py-3">
+        <div className="min-w-[220px] rounded-[20px] border border-border/25 bg-muted/10 px-4 py-3">
           <p className="text-[11px] tracking-[0.14em] text-muted-foreground uppercase">
             {formatChartBucket(
               dashboard.range,
@@ -289,7 +283,7 @@ function TrendChartCard({ dashboard }: { dashboard: TraceDashboard }) {
         </div>
       </div>
 
-      <div className="relative mt-5 overflow-hidden rounded-[22px] border border-border/30 bg-muted/[0.12] px-3 py-4">
+      <div className="trace-overview-chart relative mt-5 overflow-hidden rounded-[22px] border border-border/25 bg-muted/[0.08] px-3 py-4">
         <svg
           viewBox={`0 0 ${chart.width} ${chart.height}`}
           className="h-[280px] w-full"
@@ -416,7 +410,7 @@ function ActivityHeatmapCard({
   const cells = activity.slice(-364)
 
   return (
-    <section className="rounded-[28px] border border-border/35 bg-background/85 p-5 shadow-[0_20px_50px_-32px_rgba(15,23,42,0.35)]">
+    <section className="trace-overview-card trace-overview-section rounded-[28px] border border-border/25 bg-card p-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-[11px] tracking-[0.16em] text-muted-foreground uppercase">
@@ -431,7 +425,7 @@ function ActivityHeatmapCard({
         </div>
       </div>
 
-      <div className="mt-5 grid grid-flow-col grid-rows-7 gap-1 overflow-x-auto rounded-[22px] border border-border/25 bg-muted/[0.12] p-4">
+      <div className="trace-overview-chart mt-5 grid grid-flow-col grid-rows-7 gap-1 overflow-x-auto rounded-[22px] border border-border/25 bg-muted/[0.08] p-4">
         {cells.map((point) => {
           const intensity = Math.max(
             point.total_requests / maxRequests,
@@ -453,7 +447,7 @@ function ActivityHeatmapCard({
               key={point.day_start_ms}
               title={`${shortDateFormatter.format(new Date(point.day_start_ms))} · ${point.total_requests} requests · ${point.total_sessions} sessions`}
               className={cn(
-                "size-3 rounded-[4px] border border-border/20 transition-transform hover:scale-110",
+                "trace-overview-heatmap-cell size-3 rounded-[4px] border border-border/20",
                 tone
               )}
             />
@@ -483,7 +477,7 @@ function WorkspaceEntryCard({
   return (
     <section
       className={cn(
-        "rounded-[28px] border border-border/35 bg-linear-to-br p-5",
+        "trace-overview-card trace-overview-section rounded-[28px] border border-border/25 bg-linear-to-br p-5",
         accentClass
       )}
     >
@@ -553,16 +547,21 @@ function WorkspaceEntryCard({
 
 export function TraceOverviewPanel() {
   const dashboard = useTraceOverviewStore((state) => state.dashboard)
-  const range = useTraceOverviewStore((state) => state.range)
   const loading = useTraceOverviewStore((state) => state.loading)
   const error = useTraceOverviewStore((state) => state.error)
   const initialize = useTraceOverviewStore((state) => state.initialize)
-  const setRange = useTraceOverviewStore((state) => state.setRange)
   const openWorkspace = useTraceStore((state) => state.openWorkspace)
 
   useEffect(() => {
     void initialize().catch(() => {})
   }, [initialize])
+
+  useEffect(() => {
+    document.body.classList.add("trace-overview-active")
+    return () => {
+      document.body.classList.remove("trace-overview-active")
+    }
+  }, [])
 
   const current = dashboard?.current ?? null
   const previous = dashboard?.previous ?? null
@@ -571,50 +570,6 @@ export function TraceOverviewPanel() {
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-5 py-4">
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-[1440px] flex-col gap-4">
-          <section className="flex flex-wrap items-center justify-between gap-3 rounded-[24px] border border-border/35 bg-background/80 px-4 py-3 shadow-[0_18px_45px_-32px_rgba(15,23,42,0.28)]">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-3 text-[12px] text-muted-foreground">
-                <span className="font-medium text-foreground">Overview</span>
-                <span>
-                  Last trace{" "}
-                  {formatActivityAt(
-                    dashboard?.overall_summary.latest_request_started_at_ms
-                  )}
-                </span>
-                <span>
-                  P95{" "}
-                  {dashboard?.overall_summary.p95_duration_ms != null
-                    ? `${dashboard.overall_summary.p95_duration_ms} ms`
-                    : "-"}
-                </span>
-                <span>
-                  {formatCount(
-                    dashboard?.overall_summary.total_tool_spans ?? 0
-                  )}{" "}
-                  tool spans
-                </span>
-              </div>
-            </div>
-
-            <div className="inline-flex rounded-full border border-border/40 bg-background/85 p-1">
-              {RANGE_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => void setRange(option.value).catch(() => {})}
-                  className={cn(
-                    "rounded-full px-3 py-1.5 text-[12px] transition-colors",
-                    option.value === range
-                      ? "bg-foreground text-background"
-                      : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </section>
-
           {error ? (
             <div className="rounded-2xl border border-destructive/20 bg-destructive/[0.05] px-4 py-3 text-[12px] text-destructive">
               {error}
@@ -716,7 +671,7 @@ export function TraceOverviewPanel() {
           ) : null}
 
           {loading && !dashboard ? (
-            <div className="rounded-2xl border border-border/30 bg-background/65 px-4 py-6 text-[12px] text-muted-foreground">
+            <div className="trace-overview-card rounded-2xl border border-border/25 bg-card px-4 py-6 text-[12px] text-muted-foreground">
               Loading dashboard analytics...
             </div>
           ) : null}

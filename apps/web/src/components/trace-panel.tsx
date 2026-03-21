@@ -24,7 +24,7 @@ import {
   asString,
   extractTraceText,
 } from "@/lib/trace-inspection"
-import type { TraceEvent, TraceRecord } from "@/lib/types"
+import type { TraceDashboardRange, TraceEvent, TraceRecord } from "@/lib/types"
 import {
   buildTraceLoopGroups,
   formatTraceDuration,
@@ -42,6 +42,23 @@ import { useTraceStore } from "@/stores/trace-store"
 
 type InspectorTab = "content" | "overview" | "events"
 
+const TRACE_OVERVIEW_RANGE_OPTIONS: Array<{
+  value: TraceDashboardRange
+  label: string
+}> = [
+  { value: "today", label: "Today" },
+  { value: "week", label: "Week" },
+  { value: "month", label: "Month" },
+]
+
+const traceOverviewDateFormatter = new Intl.DateTimeFormat("zh-CN", {
+  hour12: false,
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+})
+
 function formatDateTime(value: number) {
   return new Date(value).toLocaleString("zh-CN", {
     hour12: false,
@@ -55,6 +72,11 @@ function formatDateTime(value: number) {
 
 function formatCount(value: number | null | undefined) {
   return value != null ? value.toLocaleString("en-US") : "-"
+}
+
+function formatOverviewActivityAt(value: number | null | undefined) {
+  if (value == null) return "-"
+  return traceOverviewDateFormatter.format(new Date(value))
 }
 
 function truncate(text: string, max: number) {
@@ -1285,7 +1307,10 @@ export function TracePanel() {
   const refreshTraces = useTraceStore((state) => state.refreshTraces)
   const selectTrace = useTraceStore((state) => state.selectTrace)
   const selectNode = useTraceStore((state) => state.selectNode)
+  const overviewDashboard = useTraceOverviewStore((state) => state.dashboard)
+  const overviewRange = useTraceOverviewStore((state) => state.range)
   const refreshOverview = useTraceOverviewStore((state) => state.refresh)
+  const setOverviewRange = useTraceOverviewStore((state) => state.setRange)
 
   const [payloadOpen, setPayloadOpen] = useState(false)
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("content")
@@ -1344,35 +1369,81 @@ export function TracePanel() {
 
   const traceDescription =
     traceSurface === "overview"
-      ? "Inspect request volume, token usage, failures, and activity before drilling into individual spans."
+      ? null
       : traceView === "compression"
         ? "Review compression runs, loop timing, and payload details without mixing them into the main conversation trace stream."
         : "Inspect conversation loops, waterfall timing, and span payloads from the current workspace."
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="flex items-center justify-between gap-2 border-b border-border/30 px-4 py-2.5">
-        <div className="flex items-start gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/30 px-4 py-2.5">
+        <div className="flex min-w-0 flex-1 items-start gap-3">
           <button
             onClick={() => setView("chat")}
             className="mt-0.5 flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
           >
             <ArrowLeft className="size-3.5" />
           </button>
-          <div>
+          <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-sm font-semibold tracking-tight">Trace</h1>
               <Badge variant="secondary" className="text-[10px]">
                 {traceSurface === "overview" ? "overview" : traceView}
               </Badge>
             </div>
-            <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
-              {traceDescription}
-            </p>
+            {traceDescription ? (
+              <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+                {traceDescription}
+              </p>
+            ) : null}
+            {traceSurface === "overview" ? (
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                <span>
+                  Last trace{" "}
+                  {formatOverviewActivityAt(
+                    overviewDashboard?.overall_summary
+                      .latest_request_started_at_ms
+                  )}
+                </span>
+                <span>
+                  P95{" "}
+                  {overviewDashboard?.overall_summary.p95_duration_ms != null
+                    ? `${overviewDashboard.overall_summary.p95_duration_ms} ms`
+                    : "-"}
+                </span>
+                <span>
+                  {formatCount(
+                    overviewDashboard?.overall_summary.total_tool_spans ?? 0
+                  )}{" "}
+                  tool spans
+                </span>
+              </div>
+            ) : null}
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          {traceSurface === "overview" ? (
+            <div className="inline-flex rounded-full border border-border/40 bg-background/85 p-1">
+              {TRACE_OVERVIEW_RANGE_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() =>
+                    void setOverviewRange(option.value).catch(() => {})
+                  }
+                  className={cn(
+                    "rounded-full px-3 py-1.5 text-[12px] transition-colors",
+                    option.value === overviewRange
+                      ? "bg-foreground text-background"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
           <Button
             variant="outline"
             size="sm"

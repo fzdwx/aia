@@ -246,6 +246,34 @@ body::before {
   background-size: 200px 200px;
 }
 
+body.trace-overview-active::before {
+  display: none;
+}
+
+.trace-overview-card {
+  box-shadow: 0 12px 28px -24px rgb(15 23 42 / 0.28);
+}
+
+.light .trace-overview-card {
+  box-shadow: 0 12px 24px -24px rgb(15 23 42 / 0.16);
+}
+
+.trace-overview-section {
+  contain: layout paint style;
+  content-visibility: auto;
+  contain-intrinsic-size: 420px;
+}
+
+.trace-overview-chart {
+  contain: layout paint style;
+}
+
+.trace-overview-heatmap-cell {
+  transition:
+    background-color 150ms ease,
+    opacity 150ms ease;
+}
+
 #root {
   min-height: 100vh;
 }
