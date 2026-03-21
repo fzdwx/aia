@@ -230,7 +230,7 @@ README 里真正难的是这些能力：
 负责 Web ↔ 运行时桥接：
 
 - 基于 axum 构建 HTTP + SSE 服务器，监听端口 3434
-- `agent-server` 二进制默认仍启动 HTTP + SSE server，但现在也提供 `self` 子命令：以编译期内嵌的 `docs/self.md` 约束直接走同一套 session manager / runtime turn 主链进行终端对话，用于自我进化与无前端场景下的本地驱动；CLI 还支持在 `self` 后追加启动任务参数，让首轮直接带着用户指定方向开始；CLI 内的 `/help`、`/status`、`/compress`、`/handoff` 同样复用现有 session manager 命令面，而不是旁路操作 runtime；格式错误的内建命令会在 CLI 本地直接报 usage，而不会误作为普通 prompt 送给模型
+- `agent-server` 二进制默认仍启动 HTTP + SSE server，但现在也提供 `self` 子命令：编译期内嵌的 `docs/self.md` 会在 bootstrap 时直接安装为 self session 的 system prompt，随后首轮只发送一个很薄的 user-direction message 来触发本轮 wake；CLI 仍支持在 `self` 后追加启动任务参数，让首轮直接带着用户指定方向开始；CLI 内的 `/help`、`/status`、`/compress`、`/handoff` 同样复用现有 session manager 命令面，而不是旁路操作 runtime；格式错误的内建命令会在 CLI 本地直接报 usage，而不会误作为普通 prompt 送给模型
 - `apps/agent-server` 现在也提供可复用的 lib façade，而不只是二进制入口：嵌入方可直接调用 `bootstrap_state_with_options(ServerBootstrapOptions)` 拿到带 `AppState` / `SessionManagerHandle` / SSE 广播的完整 control-plane，不必再手写 `SessionManagerConfig` 或复制 bootstrap 装配逻辑
 - 启动时从 `.aia/providers.json`、`.aia/session.jsonl`、`.aia/store.sqlite3` 恢复本地状态
 - 通过后台 runtime worker 独占 `AgentRuntime`、provider registry 与 session 落盘状态

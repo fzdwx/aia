@@ -1,20 +1,31 @@
 use super::{
-    EMBEDDED_SELF_PATH, SELF_SESSION_TITLE_PREFIX, build_initial_self_prompt,
-    build_self_session_title,
+    EMBEDDED_SELF_PATH, SELF_SESSION_TITLE_PREFIX, build_initial_self_message,
+    build_self_chat_system_prompt, build_self_session_title,
 };
 
 #[test]
-fn self_prompt_embeds_self_contents() {
-    let prompt = build_initial_self_prompt(None);
-    assert!(prompt.contains(EMBEDDED_SELF_PATH));
-    assert!(prompt.contains("<docs-self-md>"));
-    assert!(prompt.contains("直接开始本轮对话"));
+fn self_system_prompt_embeds_self_contents() {
+    let config = build_self_chat_system_prompt();
+    let prompt = config.custom_prompt.expect("self chat should install custom prompt");
+
+    assert!(prompt.contains("autonomous engineering agent"));
+    assert!(prompt.contains("docs/evolution-log.md"));
+    assert!(!prompt.contains(EMBEDDED_SELF_PATH));
 }
 
 #[test]
-fn self_prompt_appends_startup_task() {
-    let prompt = build_initial_self_prompt(Some("stabilize self chat boot flow"));
-    assert!(prompt.contains("启动附加任务"));
+fn self_initial_message_starts_wake_without_embedding_docs() {
+    let prompt = build_initial_self_message(None);
+
+    assert!(prompt.contains("开始本轮 wake"));
+    assert!(prompt.contains("system prompt"));
+    assert!(!prompt.contains(EMBEDDED_SELF_PATH));
+}
+
+#[test]
+fn self_initial_message_appends_startup_task() {
+    let prompt = build_initial_self_message(Some("stabilize self chat boot flow"));
+    assert!(prompt.contains("优先处理这项任务"));
     assert!(prompt.contains("stabilize self chat boot flow"));
 }
 

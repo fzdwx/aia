@@ -6,19 +6,28 @@ use std::{io::Write, sync::Arc};
 
 use tokio::io::{AsyncBufReadExt, BufReader};
 
-use crate::{bootstrap::ServerInitError, state::AppState};
+use crate::{
+    bootstrap::{ServerBootstrapOptions, ServerInitError},
+    state::AppState,
+};
 
 use self::commands::{SelfCommand, parse_self_command, print_help};
-use self::prompt::{build_initial_self_prompt, build_self_session_title};
+use self::prompt::{
+    build_initial_self_message, build_self_chat_system_prompt, build_self_session_title,
+};
 use self::session::{
     print_session_status, run_handoff, run_manual_compress, submit_prompt_and_wait,
 };
+
+pub fn self_chat_bootstrap_options() -> ServerBootstrapOptions {
+    ServerBootstrapOptions::default().with_system_prompt(build_self_chat_system_prompt())
+}
 
 pub async fn run_self_chat(
     state: Arc<AppState>,
     startup_task: Option<String>,
 ) -> Result<(), ServerInitError> {
-    let self_prompt = build_initial_self_prompt(startup_task.as_deref());
+    let initial_message = build_initial_self_message(startup_task.as_deref());
     let mut events = state.broadcast_tx.subscribe();
     let session = state
         .session_manager
@@ -39,7 +48,7 @@ pub async fn run_self_chat(
     }
     print_help();
 
-    submit_prompt_and_wait(&state, &mut events, &session.id, self_prompt).await?;
+    submit_prompt_and_wait(&state, &mut events, &session.id, initial_message).await?;
 
     let mut stdin = BufReader::new(tokio::io::stdin()).lines();
     loop {

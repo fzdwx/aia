@@ -21,7 +21,7 @@ pub fn parse_cli_command(args: impl IntoIterator<Item = String>) -> Result<CliCo
 }
 
 pub fn cli_usage() -> &'static str {
-    "Usage:\n  agent-server                    Start the HTTP+SSE server\n  agent-server self [task...]    Start terminal self-chat with embedded docs/self.md guidance and an optional startup task"
+    "Usage:\n  agent-server                    Start the HTTP+SSE server\n  agent-server self [task...]    Start terminal self-chat with embedded docs/self.md installed as the system prompt and an optional startup task"
 }
 
 #[cfg(test)]

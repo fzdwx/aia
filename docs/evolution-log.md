@@ -1,5 +1,17 @@
 # 演进日志
 
+## 2026-03-21 Session 93
+
+**Diagnosis**：`agent-server self` 虽然已经把 `docs/self.md` 改成编译期内嵌，但实际运行时仍是先用默认 server system prompt 建 session，再把整份 `self.md` 塞进首条 user prompt。这会让 self 约束落点不对，也继续把“长期规则”和“本轮用户输入”混在一起。
+**Decision**：让 self 约束真正回到 system prompt：`self` 子命令在 bootstrap 阶段直接用内嵌 `docs/self.md` 覆盖 session system prompt，首轮只发送一个很薄的 wake message；若带启动任务，则把它拼进这条首轮 user-direction message，而不是再把整份规则文本重复塞进用户消息。
+**Changes**：
+- `apps/agent-server/src/self_chat/{mod.rs,prompt.rs}`：新增 self 专用 `SystemPromptConfig` builder，并把首轮消息改成纯 wake/user-direction 文本；`self` 启动入口新增 `self_chat_bootstrap_options()`。
+- `apps/agent-server/src/{main.rs,lib.rs,cli/mod.rs}`：`self` 启动路径改为走 `bootstrap_state_with_options(self_chat_bootstrap_options())`，CLI usage 同步改成“`docs/self.md` 作为 system prompt”表述。
+- `apps/agent-server/tests/self_chat/prompt/mod.rs`、`README.md`、`docs/{requirements.md,architecture.md,status.md,evolution-log.md}`：同步补测试并更新文档叙述，明确 self 模式现在是“system prompt + 首轮 wake message”结构。
+**Verification**：`cargo fmt --all`、`cargo test -p agent-server`、`cargo check --workspace`、`cargo test --workspace`。
+**Commit**：未提交。
+**Next direction**：如果继续收口 self 模式，下一步优先考虑是否要给首轮 wake message 一个更明确的结构化模板，避免不同 provider 对“开始本轮 wake”的理解继续漂移，而不是把更多长期规则再塞回 user prompt。
+
 ## 2026-03-20 Session 92
 
 **Diagnosis**：上一轮虽然已经把 `SystemPromptConfig` 和 `RuntimeHooks` 提升到共享层，但真正想“驱动其他客户端”的调用方如果要复用 `agent-server`，仍然得自己构造底层 `SessionManagerConfig`，甚至当前 crate 还只是 bin 入口，没有一层正式的 lib façade 可供嵌入。这意味着高层扩展点虽然存在，但嵌入成本仍然偏高。

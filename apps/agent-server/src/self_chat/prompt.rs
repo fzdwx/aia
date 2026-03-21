@@ -1,24 +1,23 @@
+use agent_prompts::SystemPromptConfig;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) const SELF_SESSION_TITLE_PREFIX: &str = "Self evolution";
+#[cfg(test)]
 const EMBEDDED_SELF_PATH: &str = "docs/self.md";
 const EMBEDDED_SELF_CONTENT: &str = include_str!("../../../../docs/self.md");
 
-pub(crate) fn build_initial_self_prompt(startup_task: Option<&str>) -> String {
-    let task_section = startup_task
-        .map(str::trim)
-        .filter(|task| !task.is_empty())
-        .map(|task| {
-            format!(
-                "\n\n本次启动附加任务（来自用户启动参数）：\n{task}\n\n请在遵守上述约束的前提下，优先完成这项任务。"
-            )
-        })
-        .unwrap_or_default();
+pub(crate) fn build_self_chat_system_prompt() -> SystemPromptConfig {
+    SystemPromptConfig::default().with_custom_prompt(EMBEDDED_SELF_CONTENT.trim())
+}
 
-    format!(
-        "以下内容来自编译期内嵌的 `{EMBEDDED_SELF_PATH}`。请先完整吸收，不要复述整份文件，只需按其中约束直接开始本轮对话。\n\n<docs-self-md>\n{}\n</docs-self-md>{task_section}",
-        EMBEDDED_SELF_CONTENT.trim()
-    )
+pub(crate) fn build_initial_self_message(startup_task: Option<&str>) -> String {
+    let trimmed_task = startup_task.map(str::trim).filter(|task| !task.is_empty());
+    match trimmed_task {
+        Some(task) => format!(
+            "开始本轮 wake。优先处理这项任务：\n{task}\n\n按 system prompt 直接行动，不要先复述规则。"
+        ),
+        None => "开始本轮 wake。按 system prompt 直接行动，不要先复述规则。".to_string(),
+    }
 }
 
 pub(crate) fn build_self_session_title() -> String {

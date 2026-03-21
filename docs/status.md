@@ -16,7 +16,7 @@
 - 最新 channel-feishu 收口：`crates/channel-feishu/src/lib.rs` 已收回为薄 façade，公开接口继续保持 `build_feishu_runtime_adapter` 与 `FeishuMessageTarget`，具体实现整体下沉到 `runtime.rs`，不再把 2800+ 行实现细节长期堆在 crate 根文件。
 - 最新 channel-feishu 内部细拆：`crates/channel-feishu/src/runtime.rs` 又继续按职责拆出 `config.rs`、`protocol.rs`、`card.rs` 与 `tests.rs`；配置 schema/解析、协议 DTO/帧编解码、卡片状态机/请求构造与测试已分层，主流程文件开始回到“长连接与回复编排主线”角色。
 - 最新 session_manager 收口：`apps/agent-server/src/session_manager/mod.rs` 在先前拆出 `query_ops` 之后，又继续把 provider 注册表同步与 turn worker/SSE 投影主线下沉到 `session_manager/{provider_sync,turn_execution}.rs`；同时根模块也已从“散落函数集合”收口为 `SessionManagerLoop`、`SessionSlotFactory` 等职责对象，provider/query/turn/tool-trace 分别由显式服务对象承接，避免同一模块继续混合运行时归还、SSE 广播与 provider 重绑细节。
-- 最新 self-chat 收口：`agent-server self` 不再在运行时读取 `docs/self.md`，而是改为编译期内嵌 prompt；同时 `self` 子命令现在支持附加启动任务参数，让首轮对话可直接带着用户指定目标启动。
+- 最新 self-chat 收口：`agent-server self` 不再在运行时读取 `docs/self.md`，并且该文件内容现已作为 self session 的 system prompt 在 bootstrap 时直接注入；首轮用户消息只负责触发本轮 wake 并可附带用户指定的启动任务，不再把整份 `self.md` 再塞进首条 user prompt。
 - 最新 Web Markdown 收口：`apps/web` 的共享 Markdown 渲染入口已从 `streamdown` 切到 `markstream-react`，继续保留流式渲染调用面，同时把样式适配收口到现有 `MarkdownContent` 门面；当前聊天 Markdown 也已进一步按官方 React 组件/迁移文档对齐为 `NodeRenderer + setCustomComponents` 形态，流式消息优先走 parsed `nodes`，代码块改回官方 `codeBlockProps` 配置，外链节点则通过自定义 `link` 组件统一补上安全打开语义，减少继续依赖旧 renderer 私有 DOM 结构或过厚本地 override。
 - 最新 Web Markdown 微调：`MarkdownContent` 现已透传当前明暗主题到 `markstream-react`，聊天代码块也已改成自定义极简 header，语言标签按 hover 轻微提亮；同时 `apps/web` 已显式接入 `shiki` 与 `stream-markdown`，并按官方 React 安装路径改为 `code_block -> MarkdownCodeBlockNode` 渲染，避免 renderer 切换后继续退回 plain code 或默认卡片边框过重。
 - 最新 model 收口：`apps/agent-server/src/model/mod.rs` 现作为目录根模块承接 provider 选择、model 构建与带 trace 的完成链路；先前只做一层转发的 `factory/runner/bootstrap` 已并回根模块，只保留真正独立的 `model/trace.rs` 负责 `ModelTraceRecorder` 与 trace 持久化细节，避免在根层再挂一排同名薄文件。
@@ -183,8 +183,8 @@
 - 完成 compression 日志独立视图：`apps/agent-server` 的 trace 列表/汇总已支持按 `request_kind` 过滤，`apps/web` 把普通对话 trace 与上下文压缩日志拆成独立视图，不再混合展示
 - 完成 trace 首屏请求合并与查询提速：`apps/agent-server` 新增 `/api/traces/overview` 单次概览读取，`apps/web` 的 trace store 会合并同页重复刷新，`agent-store` 也已为 trace 列表/汇总热点查询补齐复合索引
 - 修正 `/api/traces/overview` 分页语义：`agent-store` 的 trace page 现真正按返回 `items` 数量分页，`page_size` 不再只是“loop 数上限”；同时 overview summary 也已落到本地 SQLite 快照表 `llm_trace_overview_summaries`，并进一步收口为由 loop 差量驱动的增量维护路径，避免每次 span 写入都重扫整张聚合表
-- 完成 `agent-server` 基础 CLI 双入口：二进制默认仍启动 HTTP+SSE server，同时新增 `self` 子命令以内嵌 `docs/self.md` prompt 直接进入终端对话；其 turn 提交、自动预压缩与事件消费复用同一套 session manager / runtime 主链，而不是另造一条 CLI 专用 agent loop
-- 完成 `agent-server self` 启动任务注入：`self` 子命令现可在启动时附带用户想优先处理的任务文本，并把它拼进首轮 prompt，而不必先进对话后再手动补一条说明
+- 完成 `agent-server` 基础 CLI 双入口：二进制默认仍启动 HTTP+SSE server，同时新增 `self` 子命令以内嵌 `docs/self.md` 作为 system prompt 直接进入终端对话；其 turn 提交、自动预压缩与事件消费复用同一套 session manager / runtime 主链，而不是另造一条 CLI 专用 agent loop
+- 完成 `agent-server self` 启动任务注入：`self` 子命令现可在启动时附带用户想优先处理的任务文本，并把它作为首轮 user-direction message 发送，而不必先进对话后再手动补一条说明
 - 完成 `agent-server self` 首批内建命令：`/help`、`/status`、`/compress`、`/handoff <name> <summary>` 已接到现有 session manager 命令面，便于在终端自我进化模式下查看命令说明、上下文压力、手动压缩和创建 handoff，而不必回到 Web；格式错误的内建命令也会在本地直接返回 usage，而不是误发给模型
 - 完成 Web 聊天区一次 session 切换滚动抖动收口：`ChatMessages` 在切换 session 时改为用 `useLayoutEffect` 同步恢复到底部，避免首帧先渲染旧滚动位置再跳动到最新消息
 - 完成 `read` 工具元信息文案纠偏：聊天内工具时间线里，`read` 的 meta 改为显示真实 1-based 行号范围（如 `L121-160`），不再把 `offset` 和 `lines_read` 误显示成含糊区间
