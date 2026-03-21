@@ -140,7 +140,8 @@ impl SessionManagerLoop {
             }
             SessionCommand::UpdateSessionSettings { session_id, provider_binding, reply } => {
                 let mut provider_sync = ProviderSyncService::new(&mut self.slots, &mut self.config);
-                let result = provider_sync.update_session_provider_binding(&session_id, provider_binding);
+                let result =
+                    provider_sync.update_session_provider_binding(&session_id, provider_binding);
                 let _ = reply.send(result);
             }
             SessionCommand::CreateProvider { input, reply } => {
@@ -356,7 +357,8 @@ impl<'a> SessionSlotFactory<'a> {
         let session_path = self.config.sessions_dir.join(format!("{session_id}.jsonl"));
         let tape = SessionTape::load_jsonl_or_default(&session_path)
             .map_err(|error| RuntimeWorkerError::internal(format!("tape load failed: {error}")))?;
-        let provider_binding = tape.latest_provider_binding().unwrap_or(SessionProviderBinding::Bootstrap);
+        let provider_binding =
+            tape.latest_provider_binding().unwrap_or(SessionProviderBinding::Bootstrap);
 
         let selection = choose_provider_for_tape(&self.config.registry, &tape);
         let prompt_cache = prompt_cache_for_selection(&selection, session_id);
@@ -435,10 +437,7 @@ fn choose_provider_for_tape(
     registry
         .active_provider()
         .cloned()
-        .map(|profile| ProviderLaunchChoice::OpenAi {
-            profile,
-            reasoning_effort: None,
-        })
+        .map(|profile| ProviderLaunchChoice::OpenAi { profile, reasoning_effort: None })
         .unwrap_or(ProviderLaunchChoice::Bootstrap)
 }
 
@@ -452,10 +451,7 @@ fn prepare_runtime_sync(
     let selection = registry
         .active_provider()
         .cloned()
-        .map(|profile| ProviderLaunchChoice::OpenAi {
-            profile,
-            reasoning_effort: None,
-        })
+        .map(|profile| ProviderLaunchChoice::OpenAi { profile, reasoning_effort: None })
         .unwrap_or(ProviderLaunchChoice::Bootstrap);
 
     let (identity, model) = build_model_from_selection(selection, trace_store).map_err(
@@ -468,7 +464,7 @@ fn prepare_runtime_sync(
             model: profile.active_model_id().unwrap_or("").to_string(),
             base_url: profile.base_url.clone(),
             protocol: profile.kind.protocol_name().to_string(),
-            reasoning_effort: profile.active_model_config().and_then(|model| model.reasoning_effort.clone()),
+            reasoning_effort: None,
         },
         None => SessionProviderBinding::Bootstrap,
     };

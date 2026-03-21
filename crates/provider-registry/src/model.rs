@@ -29,7 +29,6 @@ pub struct ModelConfig {
     pub default_temperature: Option<f32>,
     #[serde(default)]
     pub supports_reasoning: bool,
-    pub reasoning_effort: Option<String>,
 }
 
 impl ModelConfig {
@@ -40,7 +39,6 @@ impl ModelConfig {
             limit: None,
             default_temperature: None,
             supports_reasoning: false,
-            reasoning_effort: None,
         }
     }
 }

@@ -76,7 +76,6 @@ fn server_model_marks_cancelled_openai_errors_as_cancelled() {
             limit: Some(ModelLimit { context: Some(200_000), output: Some(8_192) }),
             default_temperature: None,
             supports_reasoning: false,
-            reasoning_effort: None,
         }],
         active_model: Some("gpt-5.4".to_string()),
     };
@@ -85,7 +84,7 @@ fn server_model_marks_cancelled_openai_errors_as_cancelled() {
         ProviderLaunchChoice::OpenAi { profile, reasoning_effort: None },
         None,
     )
-        .expect("model should build");
+    .expect("model should build");
 
     let abort = AbortSignal::new();
     let cancel = abort.clone();
@@ -152,7 +151,6 @@ fn responses_model_call_writes_llm_trace_record() {
             limit: Some(ModelLimit { context: Some(200_000), output: Some(8_192) }),
             default_temperature: None,
             supports_reasoning: false,
-            reasoning_effort: None,
         }],
         active_model: Some("gpt-5.4".to_string()),
     };
@@ -246,7 +244,6 @@ fn responses_http_502_writes_failed_trace_record() {
             limit: Some(ModelLimit { context: Some(200_000), output: Some(8_192) }),
             default_temperature: None,
             supports_reasoning: false,
-            reasoning_effort: None,
         }],
         active_model: Some("gpt-5.4".to_string()),
     };

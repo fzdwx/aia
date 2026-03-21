@@ -22,10 +22,7 @@ use trace::ModelTraceRecorder;
 #[derive(Clone, Debug, PartialEq)]
 pub enum ProviderLaunchChoice {
     Bootstrap,
-    OpenAi {
-        profile: ProviderProfile,
-        reasoning_effort: Option<String>,
-    },
+    OpenAi { profile: ProviderProfile, reasoning_effort: Option<String> },
 }
 
 pub struct ServerModel {
@@ -205,7 +202,6 @@ fn build_model_identity(
         .map(|model| model.id.clone())
         .or_else(|| profile.active_model.clone())
         .unwrap_or_default();
-    let reasoning_effort = reasoning_effort.or_else(|| model_config.and_then(|model| model.reasoning_effort.clone()));
     let limit = model_config.and_then(|model| {
         model
             .limit

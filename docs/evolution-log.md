@@ -1,5 +1,17 @@
 # 演进日志
 
+## 2026-03-21 Session 104
+
+**Diagnosis**：上一轮虽然已经把 provider 注册表从 `.aia/providers.json` 搬进 SQLite，但落地形态仍是单行 `provider_registry` JSON 快照，查询/更新粒度依旧停留在“整份 registry 覆写”。与此同时，provider 领域模型里还留着 `ModelConfig.reasoning_effort`，而当前产品语义已经明确思考等级是 session 级设置，这个字段与 session tape 里的 `provider_binding.reasoning_effort` 重叠且容易造成默认值语义漂移。
+**Decision**：继续把 provider 持久化收口到更真实的关系模型：`agent-store` 改为用 `providers` + `provider_models` 两张表承接 provider 基本资料和一对多 model 列表；provider-registry 继续保留内存聚合模型，但不再负责文件 IO。与此同时删除 provider 侧 `ModelConfig.reasoning_effort`，让思考等级只保留在 session settings / tape binding 这一层。
+**Changes**：
+- `crates/agent-store/src/provider.rs`、`crates/agent-store/tests/provider/mod.rs`：将 provider 持久化从单行 JSON 快照改为 `providers` + `provider_models` 两张表，并补“一 provider 多 model” round-trip 测试。
+- `crates/provider-registry/src/{model.rs,registry.rs}`、`crates/provider-registry/tests/lib/mod.rs`：删除 provider model 上的 `reasoning_effort` 字段；去掉旧文件读写/legacy fallback 逻辑与对应测试，保留聚合模型与行为测试。
+- `apps/agent-server/src/{model/mod.rs,session_manager/mod.rs,routes/provider/mod.rs}`、`apps/agent-server/tests/{model/mod.rs,routes/provider/mod.rs}`：runtime identity 不再从 provider model 默认推导 reasoning；provider DTO/测试同步移除该字段，session 级 reasoning 继续只走 `/api/session/settings` 与 tape binding。
+**Verification**：`cargo test -p provider-registry -p agent-store -p agent-server`；`cargo check`。
+**Commit**：未提交。
+**Next direction**：如果继续沿 bootstrap/control-plane 收口，下一步优先把 `ServerBootstrapOptions.registry_path` 这类历史命名收缩到更贴近实际职责的 store/workspace 语义，而不是继续保留“provider registry path”这类已经失真的入口名。
+
 ## 2026-03-21 Session 103
 
 **Diagnosis**：当前 provider 注册表仍单独落在 `.aia/providers.json`，而 channel profile、session 元信息与 trace 已经统一进入 `.aia/store.sqlite3`。这让 `apps/agent-server` bootstrap 与 provider CRUD 继续维持一条额外的文件持久化路径，也让 provider 状态成为当前控制面里少数还没纳入同一 SQLite 事务边界的配置面。用户这轮又明确说明“不需要兼容旧的”，因此继续保留 `providers.json` 与 legacy fallback 的收益已经低于其复杂度成本。

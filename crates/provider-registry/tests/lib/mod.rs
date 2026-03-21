@@ -1,88 +1,12 @@
-use std::{
-    fs,
-    path::PathBuf,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
     ModelConfig, ModelLimit, ProviderKind, ProviderProfile, ProviderRegistry, default_registry_path,
 };
 
-fn temp_file(name: &str) -> PathBuf {
-    let suffix = SystemTime::now().duration_since(UNIX_EPOCH).expect("时间有效").as_nanos();
-    std::env::temp_dir().join(format!("aia-{name}-{suffix}.json"))
-}
-
 #[test]
 fn 默认存储路径位于项目隐藏目录() {
     assert_eq!(default_registry_path(), aia_config::default_registry_path());
-}
-
-#[test]
-fn 新路径缺失时会回退读取旧_sessions_providers_json() {
-    let dir = std::env::temp_dir().join(format!(
-        "aia-provider-registry-legacy-{}",
-        SystemTime::now().duration_since(UNIX_EPOCH).expect("时间有效").as_nanos()
-    ));
-    let registry_path = dir.join(".aia").join("providers.json");
-    let legacy_path = dir.join(".aia").join("sessions").join("providers.json");
-    fs::create_dir_all(legacy_path.parent().expect("legacy parent")).expect("create dir");
-
-    let legacy_contents = serde_json::json!({
-        "providers": [
-            {
-                "name": "legacy",
-                "kind": "OpenAiResponses",
-                "base_url": "http://127.0.0.1:11434/v1",
-                "api_key": "sk-test",
-                "models": [
-                    {
-                        "id": "gpt-test",
-                        "display_name": "Legacy",
-                        "limit": {
-                            "context": 4096,
-                            "output": 2048
-                        },
-                        "default_temperature": null,
-                        "supports_reasoning": false,
-                        "reasoning_effort": null
-                    }
-                ],
-                "active_model": "gpt-test"
-            }
-        ],
-        "active_provider": "legacy"
-    });
-    fs::write(&legacy_path, serde_json::to_string_pretty(&legacy_contents).expect("serialize"))
-        .expect("write legacy registry");
-
-    let registry = ProviderRegistry::load_or_default(&registry_path).expect("load fallback");
-
-    assert_eq!(registry.providers().len(), 1);
-    assert_eq!(registry.active_provider().map(|provider| provider.name.as_str()), Some("legacy"));
-
-    let _ = fs::remove_dir_all(dir);
-}
-
-#[test]
-fn 可保存并重新载入注册表() {
-    let path = temp_file("provider-registry");
-    let mut registry = ProviderRegistry::default();
-    registry.upsert(ProviderProfile::openai_responses(
-        "main",
-        "https://api.openai.com/v1",
-        "secret",
-        "gpt-4.1-mini",
-    ));
-    registry.set_active("main").expect("设置活动 provider 成功");
-
-    registry.save(&path).expect("保存成功");
-    let restored = ProviderRegistry::load_or_default(&path).expect("加载成功");
-
-    assert_eq!(restored.providers().len(), 1);
-    assert_eq!(restored.active_provider().map(|provider| provider.name.as_str()), Some("main"));
-
-    let _ = fs::remove_file(path);
 }
 
 #[test]
@@ -129,37 +53,6 @@ fn 可构造_openai_兼容聊天补全_provider() {
     assert_eq!(provider.name, "compat");
     assert_eq!(provider.base_url, "http://127.0.0.1:8000/v1");
     assert_eq!(provider.active_model_id(), Some("minum-security-llm"));
-}
-
-#[test]
-fn 模型_limit_可保存并重新载入() {
-    let path = temp_file("provider-registry-limit");
-    let mut registry = ProviderRegistry::default();
-    registry.upsert(ProviderProfile {
-        name: "main".into(),
-        kind: ProviderKind::OpenAiResponses,
-        base_url: "https://api.openai.com/v1".into(),
-        api_key: "secret".into(),
-        models: vec![ModelConfig {
-            id: "gpt-4.1".into(),
-            display_name: Some("GPT-4.1".into()),
-            limit: Some(ModelLimit { context: Some(200_000), output: Some(131_072) }),
-            default_temperature: Some(0.2),
-            supports_reasoning: true,
-            reasoning_effort: Some("medium".into()),
-        }],
-        active_model: Some("gpt-4.1".into()),
-    });
-
-    registry.save(&path).expect("保存成功");
-    let restored = ProviderRegistry::load_or_default(&path).expect("加载成功");
-
-    assert_eq!(
-        restored.providers()[0].models[0].limit,
-        Some(ModelLimit { context: Some(200_000), output: Some(131_072) })
-    );
-
-    let _ = fs::remove_file(path);
 }
 
 #[test]
@@ -218,4 +111,33 @@ fn 无效_active_model_会在写入时回退到首个模型() {
     });
 
     assert_eq!(registry.providers()[0].active_model_id(), Some("gpt-4.1-mini"));
+}
+
+#[test]
+fn 模型_limit_仍保留在领域模型里() {
+    let mut registry = ProviderRegistry::default();
+    registry.upsert(ProviderProfile {
+        name: "main".into(),
+        kind: ProviderKind::OpenAiResponses,
+        base_url: "https://api.openai.com/v1".into(),
+        api_key: "secret".into(),
+        models: vec![ModelConfig {
+            id: "gpt-4.1".into(),
+            display_name: Some("GPT-4.1".into()),
+            limit: Some(ModelLimit { context: Some(200_000), output: Some(131_072) }),
+            default_temperature: Some(0.2),
+            supports_reasoning: true,
+        }],
+        active_model: Some("gpt-4.1".into()),
+    });
+
+    assert_eq!(
+        registry.providers()[0].models[0].limit,
+        Some(ModelLimit { context: Some(200_000), output: Some(131_072) })
+    );
+}
+
+#[test]
+fn 时间辅助在当前环境可用() {
+    let _ = SystemTime::now().duration_since(UNIX_EPOCH).expect("时间有效").as_nanos();
 }

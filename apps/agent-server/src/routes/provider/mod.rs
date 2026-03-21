@@ -38,7 +38,6 @@ pub(crate) struct ModelConfigDto {
     pub default_temperature: Option<f32>,
     #[serde(default)]
     pub supports_reasoning: bool,
-    pub reasoning_effort: Option<String>,
 }
 
 impl From<&ModelLimit> for ModelLimitDto {
@@ -61,7 +60,6 @@ impl From<&ModelConfig> for ModelConfigDto {
             limit: model.limit.as_ref().map(ModelLimitDto::from),
             default_temperature: model.default_temperature,
             supports_reasoning: model.supports_reasoning,
-            reasoning_effort: model.reasoning_effort.clone(),
         }
     }
 }
@@ -74,7 +72,6 @@ impl From<ModelConfigDto> for ModelConfig {
             limit: dto.limit.map(ModelLimit::from),
             default_temperature: dto.default_temperature,
             supports_reasoning: dto.supports_reasoning,
-            reasoning_effort: dto.reasoning_effort,
         }
     }
 }

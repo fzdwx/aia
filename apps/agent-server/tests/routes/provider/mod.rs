@@ -13,7 +13,6 @@ fn model_config_dto_round_trip_preserves_limit() {
         limit: Some(ModelLimitDto { context: Some(200_000), output: Some(131_072) }),
         default_temperature: Some(0.2),
         supports_reasoning: true,
-        reasoning_effort: Some("medium".into()),
     };
 
     let model = ModelConfig::from(dto.clone());
@@ -65,7 +64,6 @@ fn provider_list_item_marks_active_provider() {
             limit: Some(ModelLimit { context: Some(200_000), output: Some(8_192) }),
             default_temperature: Some(0.2),
             supports_reasoning: true,
-            reasoning_effort: Some("medium".into()),
         }],
         active_model: Some("gpt-5.4".into()),
     };
