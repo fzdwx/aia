@@ -9,7 +9,7 @@
 - `apps/web/src/stores/session-settings-store.ts`、`apps/web/src/stores/session-settings-store.test.ts`：保留并验证模型切换成功后对 `chat-store.provider` 与 `sessions[].model` 的同步，确保接口成功后 UI 展示状态与当前 session 快照一致。
 - `docs/{status.md,evolution-log.md}`：补记“模型选择点击曾被 portal 外部点击逻辑提前截断”的真实根因与修复方式。
 **Verification**：`just web-typecheck`、`just web-test`；另外使用 headless Playwright 对真实页面做 route-mocked 点击验证，确认点击 `GPT-4.1 Mini` 后会实际发出 `PUT /api/session/settings`，请求体包含 `session_id/provider/model/reasoning_effort`。
-**Commit**：`50677fd fix(web): restore model switch request dispatch`。
+**Commit**：`5175d3d fix(web): restore model switch request dispatch`。
 **Next direction**：如果继续沿输入区稳定性收口，下一步优先把模型/思考等级这类 session setting 交互补成正式浏览器级回归测试基础设施，而不是继续只依赖 store 单测覆盖 selector 组件行为。
 
 ## 2026-03-21 Session 100
