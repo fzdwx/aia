@@ -458,7 +458,9 @@ fn choose_provider_for_tape(
                     return ProviderLaunchChoice::OpenAi {
                         profile: profile.clone(),
                         model,
-                        reasoning_effort,
+                        reasoning_effort: crate::reasoning::ReasoningEffort::parse_persisted(
+                            reasoning_effort,
+                        ),
                     };
                 }
             }

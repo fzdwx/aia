@@ -79,7 +79,7 @@ impl OpenAiChatCompletionsModel {
         }
         apply_prompt_cache(&mut body, request.prompt_cache.as_ref());
         if let Some(effort) = &request.model.reasoning_effort {
-            body["reasoning_effort"] = json!(effort);
+            body["reasoning_effort"] = json!(effort.as_api_value());
         }
         body
     }

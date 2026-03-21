@@ -8,7 +8,7 @@ use std::{
 
 use agent_core::{
     AbortSignal, CompletionRequest, ConversationItem, LanguageModel, Message, ModelDisposition,
-    ModelIdentity, Role,
+    ModelIdentity, ReasoningEffort, Role,
 };
 use agent_store::{AiaStore, LlmTraceStatus};
 use provider_registry::{ModelConfig, ModelLimit, ProviderKind, ProviderProfile};
@@ -231,7 +231,7 @@ fn build_model_from_selection_drops_reasoning_for_unsupported_model() {
         ProviderLaunchChoice::OpenAi {
             model: "gpt-5.4".into(),
             profile,
-            reasoning_effort: Some("high".into()),
+            reasoning_effort: Some(ReasoningEffort::High),
         },
         None,
     )
@@ -241,7 +241,7 @@ fn build_model_from_selection_drops_reasoning_for_unsupported_model() {
 }
 
 #[test]
-fn build_model_from_selection_drops_invalid_reasoning_literal() {
+fn build_model_from_selection_keeps_reasoning_none_without_override() {
     let profile = ProviderProfile {
         name: "rayin".to_string(),
         kind: ProviderKind::OpenAiResponses,
@@ -257,11 +257,7 @@ fn build_model_from_selection_drops_invalid_reasoning_literal() {
     };
 
     let (identity, _) = build_model_from_selection(
-        ProviderLaunchChoice::OpenAi {
-            model: "gpt-5.4".into(),
-            profile,
-            reasoning_effort: Some("turbo".into()),
-        },
+        ProviderLaunchChoice::OpenAi { model: "gpt-5.4".into(), profile, reasoning_effort: None },
         None,
     )
     .expect("model should build");
@@ -298,7 +294,7 @@ fn build_model_from_selection_uses_selected_model_instead_of_provider_default() 
         ProviderLaunchChoice::OpenAi {
             profile,
             model: "gpt-5-mini".into(),
-            reasoning_effort: Some("high".into()),
+            reasoning_effort: Some(ReasoningEffort::High),
         },
         None,
     )
@@ -309,7 +305,7 @@ fn build_model_from_selection_uses_selected_model_instead_of_provider_default() 
         identity.limit,
         Some(agent_core::ModelLimit { context: Some(100_000), output: Some(4_096) })
     );
-    assert_eq!(identity.reasoning_effort, Some("high".into()));
+    assert_eq!(identity.reasoning_effort, Some(ReasoningEffort::High));
 }
 
 #[test]

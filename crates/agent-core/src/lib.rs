@@ -15,7 +15,7 @@ mod tests;
 pub use completion::{
     Completion, CompletionRequest, CompletionSegment, CompletionStopReason, CompletionUsage,
     LlmTraceRequestContext, ModelDisposition, ModelIdentity, ModelLimit, PromptCacheConfig,
-    PromptCacheRetention, RequestTimeoutConfig,
+    PromptCacheRetention, ReasoningEffort, RequestTimeoutConfig,
 };
 pub use conversation::{ConversationItem, Message, Role};
 pub use error::CoreError;

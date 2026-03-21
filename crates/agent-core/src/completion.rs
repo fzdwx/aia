@@ -16,13 +16,73 @@ pub struct ModelLimit {
     pub output: Option<u32>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReasoningEffort {
+    Minimal,
+    Low,
+    Medium,
+    High,
+    Xhigh,
+}
+
+impl ReasoningEffort {
+    pub fn as_api_value(self) -> &'static str {
+        match self {
+            Self::Minimal => "minimal",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Xhigh => "xhigh",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "minimal" => Some(Self::Minimal),
+            "low" => Some(Self::Low),
+            "medium" => Some(Self::Medium),
+            "high" => Some(Self::High),
+            "xhigh" => Some(Self::Xhigh),
+            _ => None,
+        }
+    }
+
+    pub fn parse_optional(value: Option<&str>) -> Result<Option<Self>, String> {
+        value
+            .map(|value| {
+                Self::parse(value).ok_or_else(|| format!("invalid reasoning_effort: {value}"))
+            })
+            .transpose()
+    }
+
+    pub fn normalize(value: Option<String>) -> Option<String> {
+        value.and_then(|value| Self::parse(&value).map(|effort| effort.as_api_value().to_string()))
+    }
+
+    pub fn parse_persisted(value: Option<String>) -> Option<Self> {
+        value.and_then(|value| Self::parse(&value))
+    }
+
+    pub fn normalize_for_model(value: Option<String>, supports_reasoning: bool) -> Option<Self> {
+        if !supports_reasoning {
+            return None;
+        }
+        Self::parse_persisted(value)
+    }
+
+    pub fn serialize_optional(value: Option<Self>) -> Option<String> {
+        value.map(|effort| effort.as_api_value().to_string())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ModelIdentity {
     pub provider: String,
     pub name: String,
     pub disposition: ModelDisposition,
     #[serde(default)]
-    pub reasoning_effort: Option<String>,
+    pub reasoning_effort: Option<ReasoningEffort>,
     #[serde(default)]
     pub limit: Option<ModelLimit>,
 }
@@ -42,7 +102,7 @@ impl ModelIdentity {
         }
     }
 
-    pub fn with_reasoning_effort(mut self, effort: Option<String>) -> Self {
+    pub fn with_reasoning_effort(mut self, effort: Option<ReasoningEffort>) -> Self {
         self.reasoning_effort = effort;
         self
     }

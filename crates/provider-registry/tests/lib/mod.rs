@@ -122,6 +122,21 @@ fn 模型_limit_仍保留在领域模型里() {
 }
 
 #[test]
+fn provider_model_config_limit_复用_agent_core_共享类型() {
+    let shared_limit = agent_core::ModelLimit { context: Some(128_000), output: Some(16_384) };
+
+    let model = ModelConfig {
+        id: "gpt-5-mini".into(),
+        display_name: Some("GPT-5 Mini".into()),
+        limit: Some(shared_limit.clone()),
+        default_temperature: None,
+        supports_reasoning: true,
+    };
+
+    assert_eq!(model.limit, Some(shared_limit));
+}
+
+#[test]
 fn 时间辅助在当前环境可用() {
     let _ = SystemTime::now().duration_since(UNIX_EPOCH).expect("时间有效").as_nanos();
 }

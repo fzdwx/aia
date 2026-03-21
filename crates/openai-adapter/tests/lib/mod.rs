@@ -8,7 +8,7 @@ use std::{
 use agent_core::{
     AbortSignal, CompletionRequest, CompletionSegment, CompletionStopReason, ConversationItem,
     LanguageModel, Message, ModelDisposition, ModelIdentity, PromptCacheConfig,
-    PromptCacheRetention, Role, StreamEvent, ToolCall, ToolDefinition, ToolResult,
+    PromptCacheRetention, ReasoningEffort, Role, StreamEvent, ToolCall, ToolDefinition, ToolResult,
 };
 use agent_core_macros::ToolArgsSchema as DeriveToolArgsSchema;
 use serde::{Deserialize, Serialize};
@@ -114,7 +114,7 @@ fn 请求体带_reasoning_effort_时发送_reasoning_块() {
     .expect("模型创建成功");
 
     let mut request = sample_request();
-    request.model.reasoning_effort = Some("high".into());
+    request.model.reasoning_effort = Some(ReasoningEffort::High);
     let body = model.build_request_body(&request);
 
     assert_eq!(body["reasoning"]["effort"], json!("high"));
@@ -999,7 +999,7 @@ fn 聊天补全请求体会映射_reasoning_effort() {
 
     let mut request = sample_request();
     request.model.name = "minum-security-llm".into();
-    request.model.reasoning_effort = Some("high".into());
+    request.model.reasoning_effort = Some(ReasoningEffort::High);
     let body = model.build_request_body(&request);
 
     assert_eq!(body["reasoning_effort"], json!("high"));

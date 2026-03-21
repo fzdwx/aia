@@ -157,6 +157,20 @@ fn 工具定义可直接接收手写参数_schema() {
 }
 
 #[test]
+fn model_identity_使用共享_reasoning_effort_语义并保留稳定序列化() {
+    let identity = ModelIdentity::new("openai", "gpt-5", ModelDisposition::Balanced)
+        .with_reasoning_effort(Some(ReasoningEffort::High));
+
+    let value = serde_json::to_value(&identity).expect("model identity should serialize");
+
+    assert_eq!(value["reasoning_effort"], serde_json::json!("high"));
+    assert_eq!(
+        serde_json::from_value::<ModelIdentity>(value).expect("model identity should deserialize"),
+        identity
+    );
+}
+
+#[test]
 fn 完成结果可提取纯文本() {
     let completion = Completion {
         segments: vec![

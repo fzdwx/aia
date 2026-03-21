@@ -70,7 +70,7 @@ impl OpenAiResponsesModel {
         }
         apply_prompt_cache(&mut body, request.prompt_cache.as_ref());
         if let Some(effort) = &request.model.reasoning_effort {
-            body["reasoning"] = json!({"effort": effort, "summary": "auto"});
+            body["reasoning"] = json!({"effort": effort.as_api_value(), "summary": "auto"});
         }
         body
     }

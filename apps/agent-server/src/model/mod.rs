@@ -7,7 +7,7 @@ use std::{sync::Arc, time::Instant};
 
 use agent_core::{
     AbortSignal, Completion, CompletionRequest, CoreError, LanguageModel, ModelDisposition,
-    ModelIdentity, ModelLimit, StreamEvent,
+    ModelIdentity, StreamEvent,
 };
 use agent_store::AiaStore;
 use async_trait::async_trait;
@@ -23,7 +23,7 @@ use trace::ModelTraceRecorder;
 #[derive(Clone, Debug, PartialEq)]
 pub enum ProviderLaunchChoice {
     Bootstrap,
-    OpenAi { profile: ProviderProfile, model: String, reasoning_effort: Option<String> },
+    OpenAi { profile: ProviderProfile, model: String, reasoning_effort: Option<ReasoningEffort> },
 }
 
 pub struct ServerModel {
@@ -169,7 +169,7 @@ pub fn model_identity_from_selection(selection: &ProviderLaunchChoice) -> ModelI
 fn build_openai_model(
     profile: ProviderProfile,
     selected_model: &str,
-    reasoning_effort: Option<String>,
+    reasoning_effort: Option<ReasoningEffort>,
     trace_store: Option<Arc<AiaStore>>,
 ) -> Result<(ModelIdentity, ServerModel), ServerSetupError> {
     let identity = build_model_identity(&profile, selected_model, reasoning_effort);
@@ -198,22 +198,17 @@ fn build_openai_model(
 fn build_model_identity(
     profile: &ProviderProfile,
     selected_model: &str,
-    reasoning_effort: Option<String>,
+    reasoning_effort: Option<ReasoningEffort>,
 ) -> ModelIdentity {
     let model_config = profile.models.iter().find(|model| model.id == selected_model);
     let model_id = model_config
         .map(|model| model.id.clone())
         .or_else(|| profile.default_model_id().map(str::to_string))
         .unwrap_or_default();
-    let limit = model_config.and_then(|model| {
-        model
-            .limit
-            .as_ref()
-            .map(|limit| ModelLimit { context: limit.context, output: limit.output })
-    });
+    let limit = model_config.and_then(|model| model.limit.clone());
 
     let normalized_reasoning_effort = ReasoningEffort::normalize_for_model(
-        reasoning_effort,
+        ReasoningEffort::serialize_optional(reasoning_effort),
         model_config.is_some_and(|model| model.supports_reasoning),
     );
 

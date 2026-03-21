@@ -1,3 +1,4 @@
+use agent_core::ModelLimit;
 use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -13,12 +14,6 @@ impl ProviderKind {
             Self::OpenAiChatCompletions => "openai-chat-completions",
         }
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ModelLimit {
-    pub context: Option<u32>,
-    pub output: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

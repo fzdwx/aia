@@ -23,6 +23,6 @@ fn normalize_for_model_drops_invalid_or_unsupported_values() {
     assert_eq!(ReasoningEffort::normalize_for_model(Some("turbo".into()), true), None);
     assert_eq!(
         ReasoningEffort::normalize_for_model(Some("high".into()), true),
-        Some("high".into())
+        Some(ReasoningEffort::High)
     );
 }
