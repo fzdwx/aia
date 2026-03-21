@@ -38,16 +38,15 @@ export function ChatInput() {
   const cancelTurn = useChatStore((s) => s.cancelTurn)
   const chatState = useChatStore((s) => s.chatState)
   const providerList = useChatStore((s) => s.providerList)
-  const refreshProviders = useChatStore((s) => s.refreshProviders)
+  const setSessionReasoningEffort = useChatStore(
+    (s) => s.setSessionReasoningEffort
+  )
   const sessionSettings = useSessionSettingsStore((s) => s.sessionSettings)
   const sessionSettingsHydrating = useSessionSettingsStore((s) => s.hydrating)
   const sessionSettingsUpdating = useSessionSettingsStore((s) => s.updating)
   const sessionSettingsError = useSessionSettingsStore((s) => s.error)
   const supportsReasoning = useSessionSettingsStore((s) =>
     s.supportsReasoning(providerList)
-  )
-  const setReasoningEffort = useSessionSettingsStore(
-    (s) => s.setReasoningEffort
   )
   const disabled = chatState === "active"
 
@@ -86,11 +85,9 @@ export function ChatInput() {
               disabled={settingsBusy}
               onValueChange={(next) => {
                 if (!next) return
-                void setReasoningEffort(providerList, next as ThinkingLevel)
-                  .then((info) => {
-                    if (info) refreshProviders()
-                  })
-                  .catch(() => {})
+                void setSessionReasoningEffort(next as ThinkingLevel).catch(
+                  () => {}
+                )
               }}
             >
               <SelectTrigger

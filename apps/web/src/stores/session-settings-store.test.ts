@@ -1,10 +1,20 @@
 import { afterEach, beforeEach, describe, expect, test } from "vite-plus/test"
+import assert from "node:assert/strict"
 
 import { useSessionSettingsStore } from "./session-settings-store"
 import { useChatStore } from "./chat-store"
 import type { ProviderListItem } from "@/lib/types"
 
 type FetchMock = typeof fetch
+type ResponseResolver = (value: Response) => void
+
+function requireResolver(
+  resolver: ResponseResolver | null,
+  message: string
+): ResponseResolver {
+  assert.ok(resolver, message)
+  return resolver
+}
 
 const originalFetch = globalThis.fetch
 
@@ -43,7 +53,6 @@ const providerList: ProviderListItem[] = [
 describe("session settings store", () => {
   beforeEach(() => {
     useSessionSettingsStore.setState({
-      activeSessionId: null,
       sessionSettings: null,
       hydrating: false,
       updating: false,
@@ -68,7 +77,6 @@ describe("session settings store", () => {
 
   test("supportsReasoning reflects active session model capability", () => {
     useSessionSettingsStore.setState({
-      activeSessionId: "session-1",
       sessionSettings: {
         provider: "openai",
         model: "gpt-5",
@@ -115,7 +123,6 @@ describe("session settings store", () => {
     }) as FetchMock
 
     useSessionSettingsStore.setState({
-      activeSessionId: "session-1",
       sessionSettings: {
         provider: "openai",
         model: "gpt-5",
@@ -127,7 +134,7 @@ describe("session settings store", () => {
 
     await useSessionSettingsStore
       .getState()
-      .switchModel(providerList, "openai", "gpt-4.1-mini", "xhigh")
+      .switchModel("session-1", providerList, "openai", "gpt-4.1-mini", "xhigh")
 
     expect(calls[0]?.url).toBe("/api/session/settings")
     expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({
@@ -142,7 +149,7 @@ describe("session settings store", () => {
       protocol: "openai-responses",
       reasoning_effort: null,
     })
-    expect(useChatStore.getState().sessions[0]?.model).toBe("gpt-4.1-mini")
+    expect(useChatStore.getState().sessions[0]?.model).toBe("gpt-5")
   })
 
   test("switchModel preserves current session reasoning when moving between supported models without explicit override", async () => {
@@ -164,7 +171,6 @@ describe("session settings store", () => {
     }) as FetchMock
 
     useSessionSettingsStore.setState({
-      activeSessionId: "session-1",
       sessionSettings: {
         provider: "openai",
         model: "gpt-5",
@@ -176,7 +182,7 @@ describe("session settings store", () => {
 
     await useSessionSettingsStore
       .getState()
-      .switchModel(providerList, "openai", "gpt-5-mini")
+      .switchModel("session-1", providerList, "openai", "gpt-5-mini")
 
     expect(calls[0]?.url).toBe("/api/session/settings")
     expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({
@@ -210,7 +216,6 @@ describe("session settings store", () => {
       new Response(null, { status: 500 })) as FetchMock
 
     useSessionSettingsStore.setState({
-      activeSessionId: "session-1",
       sessionSettings: {
         provider: "openai",
         model: "gpt-5",
@@ -225,12 +230,159 @@ describe("session settings store", () => {
     await expect(
       useSessionSettingsStore
         .getState()
-        .switchModel(providerList, "openai", "gpt-5", "xhigh")
+        .switchModel("session-1", providerList, "openai", "gpt-5", "xhigh")
     ).rejects.toThrow()
 
     expect(useSessionSettingsStore.getState().updating).toBe(false)
     expect(useSessionSettingsStore.getState().error).toContain(
       "PUT /api/session/settings failed"
     )
+  })
+
+  test("hydrateForSession ignores stale response after newer session hydration", async () => {
+    let resolveSessionOne: ((value: Response) => void) | null = null
+    let resolveSessionTwo: ((value: Response) => void) | null = null
+
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString()
+      if (url.includes("session_id=session-1")) {
+        return await new Promise<Response>((resolve) => {
+          resolveSessionOne = resolve
+        })
+      }
+      if (url.includes("session_id=session-2")) {
+        return await new Promise<Response>((resolve) => {
+          resolveSessionTwo = resolve
+        })
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }) as FetchMock
+
+    const sessionOneHydration = useSessionSettingsStore
+      .getState()
+      .hydrateForSession("session-1")
+    const sessionTwoHydration = useSessionSettingsStore
+      .getState()
+      .hydrateForSession("session-2")
+
+    requireResolver(
+      resolveSessionTwo,
+      "expected session-2 hydration resolver"
+    )(
+      new Response(
+        JSON.stringify({
+          provider: "openai",
+          model: "gpt-5-mini",
+          protocol: "openai-responses",
+          reasoning_effort: "high",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    )
+    await sessionTwoHydration
+
+    requireResolver(
+      resolveSessionOne,
+      "expected session-1 hydration resolver"
+    )(
+      new Response(
+        JSON.stringify({
+          provider: "openai",
+          model: "gpt-4.1-mini",
+          protocol: "openai-responses",
+          reasoning_effort: null,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    )
+    await sessionOneHydration
+
+    expect(useSessionSettingsStore.getState().sessionSettings).toEqual({
+      provider: "openai",
+      model: "gpt-5-mini",
+      protocol: "openai-responses",
+      reasoning_effort: "high",
+    })
+  })
+
+  test("hydrateForSession invalidates stale in-flight mutation response from prior session", async () => {
+    let resolveMutation: ((value: Response) => void) | null = null
+    let resolveHydration: ((value: Response) => void) | null = null
+
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit
+    ) => {
+      const url = typeof input === "string" ? input : input.toString()
+      if (url === "/api/session/settings" && init?.method === "PUT") {
+        return await new Promise<Response>((resolve) => {
+          resolveMutation = resolve
+        })
+      }
+      if (url.includes("/api/session/settings?session_id=session-2")) {
+        return await new Promise<Response>((resolve) => {
+          resolveHydration = resolve
+        })
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }) as FetchMock
+
+    useSessionSettingsStore.setState({
+      sessionSettings: {
+        provider: "openai",
+        model: "gpt-5",
+        protocol: "openai-responses",
+        reasoning_effort: "high",
+      },
+      hydrating: false,
+      updating: false,
+      error: null,
+    })
+
+    const mutation = useSessionSettingsStore
+      .getState()
+      .switchModel("session-1", providerList, "openai", "gpt-5-mini")
+    const hydration = useSessionSettingsStore
+      .getState()
+      .hydrateForSession("session-2")
+
+    requireResolver(
+      resolveHydration,
+      "expected session-2 hydration resolver"
+    )(
+      new Response(
+        JSON.stringify({
+          provider: "openai",
+          model: "gpt-4.1-mini",
+          protocol: "openai-responses",
+          reasoning_effort: null,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    )
+    await hydration
+
+    requireResolver(
+      resolveMutation,
+      "expected session mutation resolver"
+    )(
+      new Response(
+        JSON.stringify({
+          name: "openai",
+          model: "gpt-5-mini",
+          connected: true,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    )
+    await mutation
+
+    expect(useSessionSettingsStore.getState().sessionSettings).toEqual({
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      protocol: "openai-responses",
+      reasoning_effort: null,
+    })
+    expect(useSessionSettingsStore.getState().updating).toBe(false)
   })
 })

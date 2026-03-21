@@ -25,10 +25,12 @@ import type {
   ContextCompressionNotice,
   CurrentTurnSnapshot,
   ModelConfig,
+  ProviderInfo,
   ProviderListItem,
   SessionListItem,
   SseEvent,
   StreamingTurn,
+  ThinkingLevel,
   TurnLifecycle,
   TurnStatus,
 } from "@/lib/types"
@@ -242,7 +244,7 @@ type ChatStore = {
   handleSseEvent: (event: SseEvent) => void
   submitTurn: (prompt: string) => void
   cancelTurn: () => Promise<void>
-  refreshProviders: () => void
+  refreshProviders: () => Promise<void>
   setView: (view: AppView) => void
   setSettingsSection: (section: SettingsSection) => void
   selectProviderName: (name: string | null) => void
@@ -266,6 +268,14 @@ type ChatStore = {
   fetchSessions: () => Promise<void>
   createSession: () => Promise<void>
   switchSession: (id: string) => Promise<void>
+  switchSessionModel: (
+    providerName: string,
+    modelId: string,
+    reasoningEffort?: ThinkingLevel | null
+  ) => Promise<ProviderInfo | null>
+  setSessionReasoningEffort: (
+    reasoningEffort: ThinkingLevel | null
+  ) => Promise<ProviderInfo | null>
   loadOlderTurns: () => Promise<void>
   deleteSession: (id: string) => Promise<void>
 }
@@ -504,14 +514,13 @@ export const useChatStore = create<ChatStore>((set, get) => {
           const activeId = sessions[0]?.id ?? null
           set({ sessions, activeSessionId: activeId })
           if (activeId) {
-            useSessionSettingsStore.getState().setActiveSessionId(activeId)
             void hydrateSession(activeId)
             void useSessionSettingsStore.getState().hydrateForSession(activeId)
           }
         })
         .catch(() => {})
 
-      get().refreshProviders()
+      void get().refreshProviders()
     },
 
     handleSseEvent: (event: SseEvent) => {
@@ -1061,7 +1070,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
           cancelPendingHistoryHydration()
           if (wasActive && nextActiveId) {
-            useSessionSettingsStore.getState().setActiveSessionId(nextActiveId)
             void hydrateSession(nextActiveId)
             void useSessionSettingsStore
               .getState()
@@ -1175,18 +1183,19 @@ export const useChatStore = create<ChatStore>((set, get) => {
       }
     },
 
-    refreshProviders: () => {
-      apiListProviders()
-        .then((providerList) =>
-          set((state) => ({
+    refreshProviders: async () => {
+      try {
+        const providerList = await apiListProviders()
+        set((state) => ({
+          providerList,
+          selectedProviderName: resolveSelectedProviderName(
             providerList,
-            selectedProviderName: resolveSelectedProviderName(
-              providerList,
-              state.selectedProviderName
-            ),
-          }))
-        )
-        .catch(() => {})
+            state.selectedProviderName
+          ),
+        }))
+      } catch {
+        return
+      }
     },
 
     setView: (view: AppView) =>
@@ -1215,17 +1224,17 @@ export const useChatStore = create<ChatStore>((set, get) => {
     createProvider: async (body) => {
       set({ selectedProviderName: body.name })
       await apiCreateProvider(body)
-      get().refreshProviders()
+      await get().refreshProviders()
     },
 
     updateProvider: async (name, body) => {
       await apiUpdateProvider(name, body)
-      get().refreshProviders()
+      await get().refreshProviders()
     },
 
     deleteProvider: async (name) => {
       await apiDeleteProvider(name)
-      get().refreshProviders()
+      await get().refreshProviders()
     },
 
     fetchSessions: async () => {
@@ -1256,9 +1265,45 @@ export const useChatStore = create<ChatStore>((set, get) => {
         return
       }
       cancelPendingHistoryHydration()
-      useSessionSettingsStore.getState().setActiveSessionId(id)
       await hydrateSession(id)
       await useSessionSettingsStore.getState().hydrateForSession(id)
+    },
+
+    switchSessionModel: async (providerName, modelId, reasoningEffort) => {
+      const sessionId = get().activeSessionId
+      if (!sessionId) return null
+
+      const info = await useSessionSettingsStore
+        .getState()
+        .switchModel(
+          sessionId,
+          get().providerList,
+          providerName,
+          modelId,
+          reasoningEffort
+        )
+
+      set((state) => ({
+        sessions: state.sessions.map((session) =>
+          session.id === sessionId ? { ...session, model: modelId } : session
+        ),
+      }))
+      await get().refreshProviders()
+      return info
+    },
+
+    setSessionReasoningEffort: async (reasoningEffort) => {
+      const sessionId = get().activeSessionId
+      if (!sessionId) return null
+
+      const info = await useSessionSettingsStore
+        .getState()
+        .setReasoningEffort(sessionId, get().providerList, reasoningEffort)
+
+      if (info) {
+        await get().refreshProviders()
+      }
+      return info
     },
 
     loadOlderTurns: async () => {

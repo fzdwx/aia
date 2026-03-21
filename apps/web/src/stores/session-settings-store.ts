@@ -4,11 +4,9 @@ import {
   fetchSessionSettings,
   updateSessionSettings as apiUpdateSessionSettings,
 } from "@/lib/api"
-import { useChatStore } from "@/stores/chat-store"
 import type {
   ProviderInfo,
   ProviderListItem,
-  SessionListItem,
   SessionSettings,
   ThinkingLevel,
 } from "@/lib/types"
@@ -26,50 +24,47 @@ function findProviderModel(
 }
 
 type SessionSettingsStore = {
-  activeSessionId: string | null
   sessionSettings: SessionSettings | null
   hydrating: boolean
   updating: boolean
   error: string | null
-  setActiveSessionId: (sessionId: string | null) => void
   hydrateForSession: (sessionId: string) => Promise<void>
   clear: () => void
   supportsReasoning: (providerList: ProviderListItem[]) => boolean
   switchModel: (
+    sessionId: string,
     providerList: ProviderListItem[],
     providerName: string,
     modelId: string,
     reasoningEffort?: ThinkingLevel | null
   ) => Promise<ProviderInfo>
   setReasoningEffort: (
+    sessionId: string,
     providerList: ProviderListItem[],
     reasoningEffort: ThinkingLevel | null
   ) => Promise<ProviderInfo | null>
-  syncSessionListModel: (
-    sessions: SessionListItem[],
-    sessionId: string,
-    modelId: string
-  ) => SessionListItem[]
 }
+
+let latestHydrationRequestId = 0
+let latestMutationRequestId = 0
 
 export const useSessionSettingsStore = create<SessionSettingsStore>(
   (set, get) => ({
-    activeSessionId: null,
     sessionSettings: null,
     hydrating: false,
     updating: false,
     error: null,
 
-    setActiveSessionId: (activeSessionId) => set({ activeSessionId }),
-
     hydrateForSession: async (sessionId: string) => {
-      set({ activeSessionId: sessionId, hydrating: true, error: null })
+      const requestId = ++latestHydrationRequestId
+      latestMutationRequestId += 1
+      set({ hydrating: true, updating: false, error: null })
       try {
         const sessionSettings = await fetchSessionSettings(sessionId)
-        if (get().activeSessionId !== sessionId) return
+        if (requestId !== latestHydrationRequestId) return
         set({ sessionSettings, hydrating: false })
       } catch (error) {
-        if (get().activeSessionId !== sessionId) return
+        if (requestId !== latestHydrationRequestId) return
         set({
           hydrating: false,
           error:
@@ -81,12 +76,15 @@ export const useSessionSettingsStore = create<SessionSettingsStore>(
     },
 
     clear: () =>
-      set({
-        activeSessionId: null,
-        sessionSettings: null,
-        hydrating: false,
-        updating: false,
-        error: null,
+      set(() => {
+        latestHydrationRequestId += 1
+        latestMutationRequestId += 1
+        return {
+          sessionSettings: null,
+          hydrating: false,
+          updating: false,
+          error: null,
+        }
       }),
 
     supportsReasoning: (providerList) => {
@@ -95,16 +93,12 @@ export const useSessionSettingsStore = create<SessionSettingsStore>(
     },
 
     switchModel: async (
+      sessionId,
       providerList,
       providerName,
       modelId,
       reasoningEffort
     ) => {
-      const activeSessionId = get().activeSessionId
-      if (!activeSessionId) {
-        throw new Error("no active session")
-      }
-
       const provider = providerList.find((item) => item.name === providerName)
       if (!provider) {
         throw new Error(`provider not found: ${providerName}`)
@@ -118,14 +112,19 @@ export const useSessionSettingsStore = create<SessionSettingsStore>(
         ? (reasoningEffort ?? get().sessionSettings?.reasoning_effort ?? null)
         : null
 
+      const requestId = ++latestMutationRequestId
       set({ updating: true, error: null })
       try {
         const info = await apiUpdateSessionSettings({
-          session_id: activeSessionId,
+          session_id: sessionId,
           provider: providerName,
           model: modelId,
           reasoning_effort: nextReasoningEffort,
         })
+
+        if (requestId !== latestMutationRequestId) {
+          return info
+        }
 
         set({
           updating: false,
@@ -137,16 +136,11 @@ export const useSessionSettingsStore = create<SessionSettingsStore>(
           },
         })
 
-        useChatStore.setState((state) => ({
-          sessions: get().syncSessionListModel(
-            state.sessions,
-            activeSessionId,
-            modelId
-          ),
-        }))
-
         return info
       } catch (error) {
+        if (requestId !== latestMutationRequestId) {
+          throw error
+        }
         set({
           updating: false,
           error:
@@ -158,20 +152,16 @@ export const useSessionSettingsStore = create<SessionSettingsStore>(
       }
     },
 
-    setReasoningEffort: async (providerList, reasoningEffort) => {
+    setReasoningEffort: async (sessionId, providerList, reasoningEffort) => {
       const sessionSettings = get().sessionSettings
       if (!sessionSettings) return null
       return get().switchModel(
+        sessionId,
         providerList,
         sessionSettings.provider,
         sessionSettings.model,
         reasoningEffort
       )
     },
-
-    syncSessionListModel: (sessions, sessionId, modelId) =>
-      sessions.map((session) =>
-        session.id === sessionId ? { ...session, model: modelId } : session
-      ),
   })
 )

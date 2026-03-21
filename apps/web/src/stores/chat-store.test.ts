@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vite-plus/test"
 import assert from "node:assert/strict"
 
 import { __setIdleSchedulerForTests, useChatStore } from "./chat-store"
+import { useSessionSettingsStore } from "./session-settings-store"
 import type { SseEvent } from "@/lib/types"
 
 type FetchMock = typeof fetch
@@ -1267,6 +1268,104 @@ describe("chat store submitTurn", () => {
     assert.equal(
       state._sessionSnapshots["session-1"]?.latestTurn?.turn_id,
       "turn-current"
+    )
+
+    globalThis.fetch = originalFetchImpl
+  })
+
+  test("switchSessionModel refreshes providers and updates active session projection", async () => {
+    const originalFetchImpl = globalThis.fetch
+
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString()
+      if (url === "/api/session/settings") {
+        return new Response(
+          JSON.stringify({
+            name: "openai",
+            model: "gpt-5-mini",
+            connected: true,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      }
+      if (url === "/api/providers/list") {
+        return new Response(
+          JSON.stringify([
+            {
+              name: "openai",
+              kind: "openai-responses",
+              base_url: "https://api.openai.com",
+              active: true,
+              models: [
+                {
+                  id: "gpt-5-mini",
+                  display_name: "GPT-5 Mini",
+                  limit: null,
+                  default_temperature: null,
+                  supports_reasoning: true,
+                },
+              ],
+            },
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }) as FetchMock
+
+    useChatStore.setState({
+      ...initialState,
+      sessions: [
+        {
+          id: "session-1",
+          title: "Session 1",
+          created_at: "2026-03-21T00:00:00Z",
+          updated_at: "2026-03-21T00:00:00Z",
+          model: "gpt-5",
+        },
+      ],
+      providerList: [
+        {
+          name: "openai",
+          kind: "openai-responses",
+          base_url: "https://api.openai.com",
+          active: true,
+          models: [
+            {
+              id: "gpt-5",
+              display_name: "GPT-5",
+              limit: null,
+              default_temperature: null,
+              supports_reasoning: true,
+            },
+            {
+              id: "gpt-5-mini",
+              display_name: "GPT-5 Mini",
+              limit: null,
+              default_temperature: null,
+              supports_reasoning: true,
+            },
+          ],
+        },
+      ],
+    })
+    useSessionSettingsStore.setState({
+      sessionSettings: {
+        provider: "openai",
+        model: "gpt-5",
+        protocol: "openai-responses",
+        reasoning_effort: "high",
+      },
+      hydrating: false,
+      updating: false,
+      error: null,
+    })
+
+    await useChatStore.getState().switchSessionModel("openai", "gpt-5-mini")
+
+    expect(useChatStore.getState().sessions[0]?.model).toBe("gpt-5-mini")
+    expect(useChatStore.getState().providerList[0]?.models[0]?.id).toBe(
+      "gpt-5-mini"
     )
 
     globalThis.fetch = originalFetchImpl

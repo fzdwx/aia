@@ -15,12 +15,11 @@ import { useSessionSettingsStore } from "@/stores/session-settings-store"
 
 export function ModelSelector() {
   const providerList = useChatStore((s) => s.providerList)
-  const refreshProviders = useChatStore((s) => s.refreshProviders)
   const chatState = useChatStore((s) => s.chatState)
+  const switchSessionModel = useChatStore((s) => s.switchSessionModel)
   const sessionSettings = useSessionSettingsStore((s) => s.sessionSettings)
   const hydrating = useSessionSettingsStore((s) => s.hydrating)
   const updating = useSessionSettingsStore((s) => s.updating)
-  const switchModel = useSessionSettingsStore((s) => s.switchModel)
 
   const activeProviderName = sessionSettings?.provider
   const activeModelId = sessionSettings?.model
@@ -45,9 +44,7 @@ export function ModelSelector() {
           if (!value) return
           const [providerName, modelId] = value.split("::")
           if (!providerName || !modelId) return
-          void switchModel(providerList, providerName, modelId)
-            .then(() => refreshProviders())
-            .catch(() => {})
+          void switchSessionModel(providerName, modelId).catch(() => {})
         }}
       >
         <SelectTrigger
