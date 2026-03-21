@@ -27,7 +27,7 @@ pub fn build_server_user_agent() -> String {
 /// `SessionManagerConfig` directly.
 #[derive(Clone, Default)]
 pub struct ServerBootstrapOptions {
-    registry_path: Option<PathBuf>,
+    data_dir: Option<PathBuf>,
     workspace_root: Option<PathBuf>,
     user_agent: Option<String>,
     request_timeout: Option<RequestTimeoutConfig>,
@@ -36,8 +36,8 @@ pub struct ServerBootstrapOptions {
 }
 
 impl ServerBootstrapOptions {
-    pub fn with_registry_path(mut self, path: impl Into<PathBuf>) -> Self {
-        self.registry_path = Some(path.into());
+    pub fn with_data_dir(mut self, path: impl Into<PathBuf>) -> Self {
+        self.data_dir = Some(path.into());
         self
     }
 
@@ -268,10 +268,9 @@ impl ServerBootstrap {
 
 impl BootstrapPaths {
     fn discover(options: &ServerBootstrapOptions) -> Result<Self, ServerInitError> {
-        let registry_path =
-            options.registry_path.clone().unwrap_or_else(provider_registry::default_registry_path);
-        let store_path = aia_config::store_path_from_registry_path(&registry_path);
-        let sessions_dir = aia_config::sessions_dir_from_registry_path(&registry_path);
+        let data_dir = options.data_dir.clone().unwrap_or_else(aia_config::aia_dir_path);
+        let store_path = data_dir.join(aia_config::STORE_FILE_NAME);
+        let sessions_dir = data_dir.join(aia_config::SESSIONS_DIR_NAME);
         let workspace_root = match options.workspace_root.clone() {
             Some(path) => path,
             None => std::env::current_dir()

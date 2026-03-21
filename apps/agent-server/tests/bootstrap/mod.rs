@@ -41,7 +41,7 @@ fn bootstrap_state_with_options_applies_embedded_runtime_customization() {
 
         let state = bootstrap_state_with_options(
             ServerBootstrapOptions::default()
-                .with_registry_path(root.join("providers.json"))
+                .with_data_dir(root.join(".aia"))
                 .with_workspace_root(root.clone())
                 .with_user_agent("embed-test/1.0")
                 .with_system_prompt(
@@ -107,7 +107,7 @@ fn bootstrap_state_with_options_applies_custom_request_timeout() {
 
         let state = bootstrap_state_with_options(
             ServerBootstrapOptions::default()
-                .with_registry_path(root.join("providers.json"))
+                .with_data_dir(root.join(".aia"))
                 .with_workspace_root(root.clone())
                 .with_request_timeout(RequestTimeoutConfig { read_timeout_ms: Some(900_000) })
                 .with_runtime_hooks(hooks),

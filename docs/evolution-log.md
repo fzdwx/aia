@@ -1,5 +1,17 @@
 # 演进日志
 
+## 2026-03-21 Session 105
+
+**Diagnosis**：在 provider 注册表已经完全进入 SQLite、bootstrap 也不再从 `providers.json` 读取之后，`ServerBootstrapOptions.registry_path` 这个命名已经失真：它实际上只被用来反推出 `.aia/store.sqlite3` 和 `.aia/sessions/`，不再代表任何真实的“provider registry path”。继续保留这个入口名会误导后续嵌入方，也和当前 control-plane façade 应暴露稳定、真实职责配置面的方向不一致。
+**Decision**：直接把 bootstrap 高层输入从 `registry_path` 收口为 `data_dir`。`apps/agent-server` 现在按 `data_dir` 直接派生 `.aia/store.sqlite3` 与 `.aia/sessions/`，默认仍落到 `aia_config::aia_dir_path()`；不再继续借“providers.json 路径”表达整个应用数据目录。
+**Changes**：
+- `apps/agent-server/src/bootstrap/mod.rs`：`ServerBootstrapOptions` 把 `registry_path` 重命名为 `data_dir`，`BootstrapPaths::discover(...)` 直接从数据目录派生 `store.sqlite3` 与 `sessions/`。
+- `apps/agent-server/tests/bootstrap/mod.rs`：嵌入式 bootstrap 测试改为通过 `with_data_dir(root.join(".aia"))` 注入数据目录。
+- `docs/{status.md,architecture.md,evolution-log.md}`：同步把 bootstrap 配置面叙述从 `registry_path` 更新为 `data_dir`。
+**Verification**：待本轮执行 `cargo test -p agent-server` 与 `cargo check` 后补充。
+**Commit**：未提交。
+**Next direction**：如果继续沿 bootstrap/control-plane 收口，下一步优先评估是否要把 `workspace_root` 与 `data_dir` 的默认发现策略抽成共享 helper，并显式区分“宿主工作目录”和“aia 数据目录”的契约，而不是继续在 app 壳里局部推导。
+
 ## 2026-03-21 Session 104
 
 **Diagnosis**：上一轮虽然已经把 provider 注册表从 `.aia/providers.json` 搬进 SQLite，但落地形态仍是单行 `provider_registry` JSON 快照，查询/更新粒度依旧停留在“整份 registry 覆写”。与此同时，provider 领域模型里还留着 `ModelConfig.reasoning_effort`，而当前产品语义已经明确思考等级是 session 级设置，这个字段与 session tape 里的 `provider_binding.reasoning_effort` 重叠且容易造成默认值语义漂移。
