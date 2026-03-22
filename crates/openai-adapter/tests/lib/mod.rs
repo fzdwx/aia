@@ -75,13 +75,40 @@ fn 请求体会映射模型指令消息与工具() {
     let body = model.build_request_body(&sample_request());
 
     assert_eq!(body["model"], json!("gpt-4.1-mini"));
-    assert_eq!(body["instructions"], json!("保持简洁"));
+    assert!(body.get("instructions").is_none() || body["instructions"].is_null());
     assert_eq!(body["input"][0]["role"], json!("system"));
-    assert_eq!(body["input"][1]["content"], json!("帮我总结当前工作区"));
+    assert_eq!(body["input"][0]["content"], json!("保持简洁"));
+    assert_eq!(body["input"][1]["role"], json!("system"));
+    assert_eq!(body["input"][1]["content"], json!("你是代码助手"));
+    assert_eq!(body["input"][2]["content"], json!("帮我总结当前工作区"));
     assert_eq!(body["tools"][0]["name"], json!("search_code"));
     assert_eq!(body["tools"][0]["parameters"]["required"], json!(["query"]));
     assert_eq!(body["parallel_tool_calls"], json!(true));
     assert!(body.get("reasoning").is_none() || body["reasoning"].is_null());
+}
+
+#[test]
+fn responses_请求体在缺少或空指令时不追加额外_system_消息() {
+    let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
+        "http://127.0.0.1:1",
+        "test-key",
+        "gpt-4.1-mini",
+    ))
+    .expect("模型创建成功");
+
+    let mut without_instructions = sample_request();
+    without_instructions.instructions = None;
+    let without_instructions_body = model.build_request_body(&without_instructions);
+
+    assert_eq!(without_instructions_body["input"].as_array().map(|items| items.len()), Some(2));
+    assert_eq!(without_instructions_body["input"][0]["content"], json!("你是代码助手"));
+
+    let mut empty_instructions = sample_request();
+    empty_instructions.instructions = Some(String::new());
+    let empty_instructions_body = model.build_request_body(&empty_instructions);
+
+    assert_eq!(empty_instructions_body["input"].as_array().map(|items| items.len()), Some(2));
+    assert_eq!(empty_instructions_body["input"][0]["content"], json!("你是代码助手"));
 }
 
 #[test]
@@ -174,11 +201,11 @@ fn responses_请求体会保留结构化工具调用与结果() {
 
     let body = model.build_request_body(&request);
 
-    assert_eq!(body["input"][2]["type"], json!("function_call"));
-    assert_eq!(body["input"][2]["call_id"], json!("call_1"));
-    assert_eq!(body["input"][3]["type"], json!("function_call_output"));
+    assert_eq!(body["input"][3]["type"], json!("function_call"));
     assert_eq!(body["input"][3]["call_id"], json!("call_1"));
-    assert_eq!(body["input"][3]["output"], json!("found"));
+    assert_eq!(body["input"][4]["type"], json!("function_call_output"));
+    assert_eq!(body["input"][4]["call_id"], json!("call_1"));
+    assert_eq!(body["input"][4]["output"], json!("found"));
 }
 
 #[test]
@@ -200,11 +227,11 @@ fn responses_工具结果请求体会发送完整上下文() {
     let body = model.build_request_body(&request);
 
     assert!(body.get("previous_response_id").is_none());
-    assert_eq!(body["input"].as_array().map(|items| items.len()), Some(4));
-    assert_eq!(body["input"][2]["type"], json!("function_call"));
-    assert_eq!(body["input"][2]["call_id"], json!("call_1"));
-    assert_eq!(body["input"][3]["type"], json!("function_call_output"));
+    assert_eq!(body["input"].as_array().map(|items| items.len()), Some(5));
+    assert_eq!(body["input"][3]["type"], json!("function_call"));
     assert_eq!(body["input"][3]["call_id"], json!("call_1"));
+    assert_eq!(body["input"][4]["type"], json!("function_call_output"));
+    assert_eq!(body["input"][4]["call_id"], json!("call_1"));
 }
 
 #[test]

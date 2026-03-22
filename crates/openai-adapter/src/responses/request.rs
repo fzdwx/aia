@@ -43,7 +43,15 @@ impl OpenAiResponsesModel {
     }
 
     pub fn build_request_body(&self, request: &CompletionRequest) -> Value {
-        let input = request.conversation.iter().map(responses_input_item).collect::<Vec<_>>();
+        let mut input = Vec::new();
+        if let Some(instructions) = request.instructions.as_ref().filter(|value| !value.is_empty())
+        {
+            input.push(json!({
+                "role": "system",
+                "content": instructions,
+            }));
+        }
+        input.extend(request.conversation.iter().map(responses_input_item));
 
         let tools = request
             .available_tools
@@ -60,7 +68,6 @@ impl OpenAiResponsesModel {
 
         let mut body = json!({
             "model": self.config.model,
-            "instructions": request.instructions,
             "input": input,
             "tools": tools,
             "parallel_tool_calls": request.parallel_tool_calls.unwrap_or(true),
