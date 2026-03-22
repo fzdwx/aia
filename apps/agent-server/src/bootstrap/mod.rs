@@ -4,7 +4,6 @@ use std::{
 };
 
 use agent_core::RequestTimeoutConfig;
-use agent_prompts::SystemPromptConfig;
 use agent_runtime::RuntimeHooks;
 use agent_store::{AiaStore, SessionRecord, generate_session_id};
 use channel_bridge::ChannelProfileRegistry;
@@ -31,7 +30,7 @@ pub struct ServerBootstrapOptions {
     workspace_root: Option<PathBuf>,
     user_agent: Option<String>,
     request_timeout: Option<RequestTimeoutConfig>,
-    system_prompt: SystemPromptConfig,
+    system_prompt: Option<String>,
     runtime_hooks: RuntimeHooks,
 }
 
@@ -56,8 +55,8 @@ impl ServerBootstrapOptions {
         self
     }
 
-    pub fn with_system_prompt(mut self, system_prompt: SystemPromptConfig) -> Self {
-        self.system_prompt = system_prompt;
+    pub fn with_system_prompt(mut self, system_prompt: impl Into<String>) -> Self {
+        self.system_prompt = Some(system_prompt.into());
         self
     }
 

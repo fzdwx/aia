@@ -53,7 +53,7 @@ fn sample_config(root: &std::path::Path, registry: ProviderRegistry) -> SessionM
         request_timeout: RequestTimeoutConfig {
             read_timeout_ms: Some(aia_config::DEFAULT_SERVER_REQUEST_TIMEOUT_MS),
         },
-        system_prompt: agent_prompts::SystemPromptConfig::default(),
+        system_prompt: None,
         runtime_hooks: agent_runtime::RuntimeHooks::default(),
     }
 }

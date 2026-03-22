@@ -3,7 +3,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_core::RequestTimeoutConfig;
-use agent_prompts::SystemPromptConfig;
 use agent_runtime::RuntimeHooks;
 
 use super::{ServerBootstrapOptions, bootstrap_state_with_options};
@@ -44,11 +43,7 @@ fn bootstrap_state_with_options_applies_embedded_runtime_customization() {
                 .with_data_dir(root.join(".aia"))
                 .with_workspace_root(root.clone())
                 .with_user_agent("embed-test/1.0")
-                .with_system_prompt(
-                    SystemPromptConfig::default()
-                        .with_custom_prompt("你是嵌入式客户端代理。")
-                        .with_append_section("嵌入方附加约束"),
-                )
+                .with_system_prompt("你是嵌入式客户端代理。")
                 .with_runtime_hooks(hooks),
         )
         .await
@@ -82,8 +77,7 @@ fn bootstrap_state_with_options_applies_embedded_runtime_customization() {
     assert_eq!(seen.len(), 1);
     assert_eq!(seen[0].0, "embed-test/1.0");
     assert!(seen[0].1.contains("你是嵌入式客户端代理。"));
-    assert!(seen[0].1.contains("嵌入方附加约束"));
-    assert!(seen[0].1.contains("Context Contract"));
+    assert!(!seen[0].1.contains("Context Contract"));
 
     let _ = std::fs::remove_dir_all(root);
 }

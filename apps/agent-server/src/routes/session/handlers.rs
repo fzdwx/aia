@@ -7,8 +7,8 @@ use axum::{
 use provider_registry::ProviderKind;
 use session_tape::SessionProviderBinding;
 
-use agent_core::ReasoningEffort;
 use crate::state::SharedState;
+use agent_core::ReasoningEffort;
 
 use super::{
     AutoCompressRequest, CreateSessionRequest, HandoffRequest, SessionQuery,

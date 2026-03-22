@@ -2,7 +2,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use agent_core::{RequestTimeoutConfig, ToolRegistry};
-use agent_prompts::SystemPromptConfig;
 use agent_runtime::{AgentRuntime, ContextStats, RuntimeHooks, RuntimeSubscriberId, TurnLifecycle};
 use agent_store::{AiaStore, SessionRecord};
 use provider_registry::ProviderRegistry;
@@ -279,7 +278,7 @@ pub struct SessionManagerConfig {
     pub workspace_root: PathBuf,
     pub user_agent: String,
     pub request_timeout: RequestTimeoutConfig,
-    pub system_prompt: SystemPromptConfig,
+    pub system_prompt: Option<String>,
     pub runtime_hooks: RuntimeHooks,
 }
 

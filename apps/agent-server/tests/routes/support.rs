@@ -96,7 +96,7 @@ pub(crate) fn test_state_with_session_manager_setup(
         request_timeout: RequestTimeoutConfig {
             read_timeout_ms: Some(aia_config::DEFAULT_SERVER_REQUEST_TIMEOUT_MS),
         },
-        system_prompt: agent_prompts::SystemPromptConfig::default(),
+        system_prompt: None,
         runtime_hooks: agent_runtime::RuntimeHooks::default(),
     });
     let channel_adapter_catalog = Arc::new(build_channel_adapter_catalog(

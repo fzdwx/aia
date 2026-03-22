@@ -64,7 +64,7 @@ fn sample_manager_config(root: &std::path::Path) -> SessionManagerConfig {
         request_timeout: RequestTimeoutConfig {
             read_timeout_ms: Some(aia_config::DEFAULT_SERVER_REQUEST_TIMEOUT_MS),
         },
-        system_prompt: agent_prompts::SystemPromptConfig::default(),
+        system_prompt: None,
         runtime_hooks: agent_runtime::RuntimeHooks::default(),
     }
 }
@@ -370,7 +370,7 @@ fn handle_cancel_turn_marks_running_snapshot_as_cancelled() {
         request_timeout: RequestTimeoutConfig {
             read_timeout_ms: Some(aia_config::DEFAULT_SERVER_REQUEST_TIMEOUT_MS),
         },
-        system_prompt: agent_prompts::SystemPromptConfig::default(),
+        system_prompt: None,
         runtime_hooks: agent_runtime::RuntimeHooks::default(),
     };
 
@@ -414,7 +414,7 @@ fn spawned_turn_worker_completes_bootstrap_turn() {
             request_timeout: RequestTimeoutConfig {
                 read_timeout_ms: Some(aia_config::DEFAULT_SERVER_REQUEST_TIMEOUT_MS),
             },
-            system_prompt: agent_prompts::SystemPromptConfig::default(),
+            system_prompt: None,
             runtime_hooks: agent_runtime::RuntimeHooks::default(),
         });
 
@@ -499,9 +499,7 @@ fn spawned_turn_worker_applies_custom_system_prompt_and_runtime_hooks() {
             request_timeout: RequestTimeoutConfig {
                 read_timeout_ms: Some(aia_config::DEFAULT_SERVER_REQUEST_TIMEOUT_MS),
             },
-            system_prompt: agent_prompts::SystemPromptConfig::default()
-                .with_custom_prompt("你是测试客户端代理。")
-                .with_append_section("额外客户端约束"),
+            system_prompt: Some("你是测试客户端代理。".into()),
             runtime_hooks,
         });
 
@@ -527,8 +525,7 @@ fn spawned_turn_worker_applies_custom_system_prompt_and_runtime_hooks() {
     let seen_instructions = seen_instructions.lock().expect("test mutex should lock");
     assert!(!seen_instructions.is_empty());
     assert!(seen_instructions[0].contains("你是测试客户端代理。"));
-    assert!(seen_instructions[0].contains("额外客户端约束"));
-    assert!(seen_instructions[0].contains("Context Contract"));
+    assert!(!seen_instructions[0].contains("Context Contract"));
 
     let _ = std::fs::remove_dir_all(cleanup_root);
 }

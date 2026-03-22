@@ -5,8 +5,7 @@ use super::{
 
 #[test]
 fn self_system_prompt_embeds_self_contents() {
-    let config = build_self_chat_system_prompt();
-    let prompt = config.custom_prompt.expect("self chat should install custom prompt");
+    let prompt = build_self_chat_system_prompt();
 
     assert!(prompt.contains("autonomous engineering agent"));
     assert!(prompt.contains("docs/evolution-log.md"));

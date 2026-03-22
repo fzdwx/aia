@@ -3,6 +3,17 @@ pub mod tool_descriptions;
 
 pub use system_prompt::{SystemPromptBlock, SystemPromptConfig, build_system_prompt};
 
+const AIA_AGENTS_TEMPLATE: &str = include_str!("../prompts/aia-agents.md");
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AiaAgentsPromptContext {
+    pub platform: String,
+    pub working_directory: String,
+    pub local_date: String,
+    pub weekday: String,
+    pub timezone: String,
+}
+
 /// Auto-compression: structured handoff summary prompt template.
 ///
 /// Contains `{{token_budget}}` — call [`handoff_summary`] to render.
@@ -19,6 +30,23 @@ pub const AGENT_HANDOFF_THRESHOLD: f64 = 0.80;
 
 /// Threshold at which the runtime auto-compresses context.
 pub const AUTO_COMPRESSION_THRESHOLD: f64 = 0.95;
+
+pub fn aia_agents_prompt_template() -> &'static str {
+    AIA_AGENTS_TEMPLATE.trim()
+}
+
+pub fn render_aia_agents_prompt(context: AiaAgentsPromptContext) -> String {
+    render(
+        aia_agents_prompt_template(),
+        &[
+            ("platform", &context.platform),
+            ("working_directory", &context.working_directory),
+            ("local_date", &context.local_date),
+            ("weekday", &context.weekday),
+            ("timezone", &context.timezone),
+        ],
+    )
+}
 
 /// Render the handoff summary prompt with the given token budget.
 pub fn handoff_summary(token_budget: u32) -> String {

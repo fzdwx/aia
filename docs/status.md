@@ -4,6 +4,8 @@
 
 - 阶段：Web 界面实现
 - 当前细分步骤：Web 界面 ↔ 运行时桥接收口
+- 最新默认提示词收口：`agent-prompts` 现已新增共享 `aia-agents.md` 模板、`AiaAgentsPromptContext` 与 `render_aia_agents_prompt(...)` 渲染入口；模板中的平台、工作路径、本地日期、星期与时区都不再硬编码，而是由 `apps/agent-server` 基于真实运行时采集后注入。与此同时，`SessionManagerConfig.system_prompt` 与 `ServerBootstrapOptions.system_prompt` 也都已收口为 `Option<String>`：默认情况下 session 会渲染 `aia-agents` 并追加 `Context Contract`，但如果嵌入方或用户显式传入 system prompt，就直接使用用户给定文本，不再额外拼装 block/guideline。对应测试已覆盖共享渲染、session prompt 默认/覆盖路径，以及 bootstrap 透传链路。
+- 最新 system prompt 配置收口：`agent-prompts::SystemPromptConfig` 已去掉 `custom_prompt`，并把 `prompt_guidelines` 收口为更直接的 `guidelines`。当前这个共享配置只负责在给定 base prompt 之上追加 guideline / section / context block；真正的“整段 system prompt 替换”统一留在外层的 `Option<String>` 覆盖路径处理，避免共享层继续保留第二套替换语义。
 - 最新前端进展：`apps/web` 的 `Channels` 入口已改成 transport-centric 配置台：左侧常驻 sidebar 在 `channels` 视图下直接列出 server 返回的全部 supported channel type，右侧主面板只展示当前 type 的 schema 配置项与启停状态；对应的 catalog/profile 读取、CRUD 与当前选中 transport 也已从 `chat-store` 拆到独立 `channels-store`，避免继续把配置面板状态混进会话/SSE 主链。
 - 最新前端 session 所有权收口：`apps/web` 当前已把 active session 的 ownership 与 model / reasoning mutation 责任继续收回 `chat-store`；`session-settings-store` 只保留 session settings 的水合与更新资源态，不再镜像 active session，也不再反向写 `chat-store`。与此同时，`switchSessionModel(...)` 与 `setSessionReasoningEffort(...)` 现在会在 mutation 完成后统一等待 provider 列表刷新，`ModelSelector` / `ChatInput` 组件侧不再拼 `.then(refreshProviders())` 式胶水，避免 UI 在 session 列表投影与 provider 面板之间出现短暂不同步。
 - 最新前端配置台收口：`apps/web` 的 `Settings` 已继续收口成更接近真实设置应用的二级工作区：外层 app sidebar 进入 `Settings` 后只负责切换 `Providers / Channels` 两个设置分类，而右侧主区域再承接对应分类的 item 列表与详情编辑区，形成“左分类，右侧列表 + 详情”的两级信息架构；原本独立的 `Channels` 配置入口也因此并回 settings workspace，继续避免再保留第二套路由级配置页面。

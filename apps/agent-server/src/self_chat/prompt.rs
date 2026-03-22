@@ -1,4 +1,3 @@
-use agent_prompts::SystemPromptConfig;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) const SELF_SESSION_TITLE_PREFIX: &str = "Self evolution";
@@ -6,8 +5,8 @@ pub(crate) const SELF_SESSION_TITLE_PREFIX: &str = "Self evolution";
 const EMBEDDED_SELF_PATH: &str = "docs/self.md";
 const EMBEDDED_SELF_CONTENT: &str = include_str!("../../../../docs/self.md");
 
-pub(crate) fn build_self_chat_system_prompt() -> SystemPromptConfig {
-    SystemPromptConfig::default().with_custom_prompt(EMBEDDED_SELF_CONTENT.trim())
+pub(crate) fn build_self_chat_system_prompt() -> String {
+    EMBEDDED_SELF_CONTENT.trim().to_string()
 }
 
 pub(crate) fn build_initial_self_message(startup_task: Option<&str>) -> String {

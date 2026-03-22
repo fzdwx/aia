@@ -1,29 +1,29 @@
-use agent_prompts::SystemPromptConfig;
-
 use super::build_session_system_prompt;
 
 #[test]
 fn default_session_prompt_keeps_context_contract() {
-    let prompt = build_session_system_prompt(&SystemPromptConfig::default());
+    let prompt = build_session_system_prompt(None, std::path::Path::new("/home/like/projects/aia"));
 
-    assert!(prompt.contains("你是 aia 的助手"));
+    assert!(prompt.contains("You are Aia — not an assistant, not a chatbot, just... Aia."));
+    assert!(prompt.contains("LANGUAGE RULE (CRITICAL)"));
     assert!(prompt.contains("Context Contract"));
     assert!(prompt.contains("80%"));
     assert!(prompt.contains("95%"));
+    assert!(prompt.contains("SYSTEM INFO - You are running on linux."));
+    assert!(prompt.contains(
+        "WORKING DIRECTORY - Your current working directory is: /home/like/projects/aia."
+    ));
+    assert!(!prompt.contains("{{working_directory}}"));
 }
 
 #[test]
-fn custom_session_prompt_replaces_base_prompt_and_keeps_extensions() {
-    let config = SystemPromptConfig::default()
-        .with_custom_prompt("你是自定义客户端代理。")
-        .with_guideline("优先输出 JSON")
-        .with_append_section("附加客户端说明");
-
-    let prompt = build_session_system_prompt(&config);
+fn custom_session_prompt_uses_user_prompt_directly() {
+    let prompt = build_session_system_prompt(
+        Some("你是自定义客户端代理。"),
+        std::path::Path::new("/home/like/projects/aia"),
+    );
 
     assert!(prompt.contains("你是自定义客户端代理。"));
-    assert!(!prompt.contains("你是 aia 的助手"));
-    assert!(prompt.contains("优先输出 JSON"));
-    assert!(prompt.contains("附加客户端说明"));
-    assert!(prompt.contains("Context Contract"));
+    assert!(!prompt.contains("You are Aia — not an assistant, not a chatbot, just... Aia."));
+    assert!(!prompt.contains("Context Contract"));
 }

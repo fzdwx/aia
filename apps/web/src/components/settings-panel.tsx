@@ -260,24 +260,9 @@ export function SettingsPanel() {
     [normalizedItemQuery, supportedChannels]
   )
 
-  const selectedChannelDefinition =
-    supportedChannels.find(
-      (channel) => channel.transport === selectedTransport
-    ) ??
-    supportedChannels[0] ??
-    null
-
   const workspaceDescription = isProvidersSection
-    ? "先选左侧 Provider，再在右侧完成连接参数与模型目录。新增 Provider 时，先补 Name、API Key 与至少一个模型。"
-    : "先选左侧 Channel 类型，再在右侧补齐运行配置并决定是否启用。缺失必填项时不会允许提交。"
-
-  const workspaceContext = isProvidersSection
-    ? selectedProvider
-      ? `当前对象：${selectedProvider.name} · ${providerHost(selectedProvider.base_url)}`
-      : "当前对象：新建 Provider 草稿（提交后写入注册表）"
-    : selectedChannelDefinition
-      ? `当前对象：${selectedChannelDefinition.label} · ${selectedChannelDefinition.transport}`
-      : "当前对象：等待服务端返回可配置 Channel 类型"
+    ? "Provider connections and model catalogs"
+    : "Channel transport profiles"
 
   const providerSubmitDisabled =
     submitting ||
@@ -300,17 +285,11 @@ export function SettingsPanel() {
             <ArrowLeft className="size-3" />
           </button>
           <div className="min-w-0">
-            <p className="text-[10px] font-medium tracking-[0.14em] text-muted-foreground uppercase">
-              {isProvidersSection ? "Provider workspace" : "Channel workspace"}
-            </p>
             <h1 className="mt-0.5 text-sm font-semibold tracking-tight">
               Settings Workbench
             </h1>
             <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
               {workspaceDescription}
-            </p>
-            <p className="mt-1 truncate text-[11px] text-foreground/80">
-              {workspaceContext}
             </p>
           </div>
         </div>
@@ -327,8 +306,8 @@ export function SettingsPanel() {
               onChange={(event) => setItemQuery(event.target.value)}
               placeholder={
                 isProvidersSection
-                  ? "按名称、协议筛选 Provider"
-                  : "按名称、transport 筛选 Channel"
+                  ? "Filter providers by name or protocol"
+                  : "Filter channels by label or transport"
               }
               className="h-9 pl-9 text-[13px]"
             />
@@ -342,7 +321,7 @@ export function SettingsPanel() {
               className="h-9 px-3"
             >
               <Plus className="size-3.5" />
-              新建 Provider
+              New Provider
             </Button>
           ) : null}
         </div>
@@ -378,8 +357,8 @@ export function SettingsPanel() {
                     filteredProviders.length === 0 ? (
                       <p className="px-3 py-4 text-[12px] text-muted-foreground">
                         {providerList.length === 0 && !normalizedItemQuery
-                          ? "还没有 Provider。点击右上角“新建 Provider”开始接入。"
-                          : "没有匹配项。尝试按名称或协议关键词筛选。"}
+                          ? "No providers yet. Start with New Provider in the top-right corner."
+                          : "No matches found. Try filtering by name or protocol."}
                       </p>
                     ) : (
                       filteredProviders.map((providerItem) => {
@@ -437,13 +416,13 @@ export function SettingsPanel() {
                     )
                   ) : channelsLoading && supportedChannels.length === 0 ? (
                     <p className="px-3 py-4 text-[12px] text-muted-foreground">
-                      正在加载 Channel 类型...
+                      Loading channel transports...
                     </p>
                   ) : filteredChannels.length === 0 ? (
                     <p className="px-3 py-4 text-[12px] text-muted-foreground">
                       {supportedChannels.length === 0 && !normalizedItemQuery
-                        ? "服务端暂未返回可配置 Channel。"
-                        : "没有匹配项。尝试按 transport 或名称筛选。"}
+                        ? "The server has not returned any configurable channels yet."
+                        : "No matches found. Try filtering by transport or label."}
                     </p>
                   ) : (
                     filteredChannels.map((channel) => {
@@ -498,7 +477,7 @@ export function SettingsPanel() {
                               {fieldCount} field{fieldCount === 1 ? "" : "s"}
                             </span>
                             <span className="rounded-sm border border-border/30 px-1.5 py-0.5">
-                              {configured ? configured.id : "未创建配置"}
+                              {configured ? configured.id : "no saved profile"}
                             </span>
                           </span>
                         </button>
@@ -536,8 +515,8 @@ export function SettingsPanel() {
                         </div>
                         <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
                           {selectedProvider
-                            ? `主机 ${providerHost(selectedProvider.base_url)} · ${selectedProvider.models.length} 个模型已登记。`
-                            : "填写连接参数后提交，Provider 会写入注册表并可立即用于会话。"}
+                            ? `Host ${providerHost(selectedProvider.base_url)} · ${selectedProvider.models.length} models registered.`
+                            : "Submit the connection settings to register this provider and make it available to sessions immediately."}
                         </p>
                       </div>
 
@@ -550,7 +529,7 @@ export function SettingsPanel() {
                           className="h-9 shrink-0 px-3 text-destructive hover:bg-destructive/10 hover:text-destructive"
                         >
                           <Trash2 className="size-3.5" />
-                          删除
+                          Delete
                         </Button>
                       ) : null}
                     </div>
@@ -567,7 +546,8 @@ export function SettingsPanel() {
                             Connection
                           </p>
                           <p className="mt-1 text-[11px] text-muted-foreground">
-                            Name 作为注册键不可重复；Protocol 决定请求协议映射。
+                            Name is the registry key and must be unique.
+                            Protocol controls request mapping.
                           </p>
                         </div>
 
@@ -583,7 +563,7 @@ export function SettingsPanel() {
                               id={providerNameInputId}
                               value={name}
                               onChange={(event) => setName(event.target.value)}
-                              placeholder="例如：openai-main"
+                              placeholder="e.g. openai-main"
                               className="h-9 text-[13px]"
                               disabled={selectedProvider != null}
                             />
@@ -619,7 +599,22 @@ export function SettingsPanel() {
                             </Select>
                           </div>
 
-                          <div className="space-y-1.5 sm:col-span-2">
+                        </div>
+                      </section>
+
+                      <section className="rounded-xl border border-border/30 bg-card/70 p-3">
+                        <div className="mb-2.5">
+                          <p className="text-[11px] font-medium tracking-[0.12em] text-foreground uppercase">
+                            Authentication
+                          </p>
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            Required when creating a provider. Leave it blank
+                            while editing to keep the current key.
+                          </p>
+                        </div>
+
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <div className="space-y-1.5">
                             <label
                               htmlFor={providerBaseUrlInputId}
                               className="workspace-form-label"
@@ -635,52 +630,42 @@ export function SettingsPanel() {
                               className="h-9 text-[13px]"
                             />
                             <p className="workspace-form-note">
-                              该地址决定请求入口域名与路径前缀，例如 OpenAI
-                              兼容网关。
+                              This URL defines the request host and path prefix,
+                              such as an OpenAI-compatible gateway.
                             </p>
                           </div>
-                        </div>
-                      </section>
 
-                      <section className="rounded-xl border border-border/30 bg-card/70 p-3">
-                        <div className="mb-2.5">
-                          <p className="text-[11px] font-medium tracking-[0.12em] text-foreground uppercase">
-                            Authentication
-                          </p>
-                          <p className="mt-1 text-[11px] text-muted-foreground">
-                            新建时必填。编辑已存在 Provider
-                            时可留空以保留旧密钥。
-                          </p>
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <label
-                            htmlFor={providerApiKeyInputId}
-                            className="workspace-form-label"
-                          >
-                            API key
-                          </label>
-                          {selectedProvider ? (
-                            <p
-                              id={providerApiKeyHintId}
-                              className="workspace-form-note"
+                          <div className="space-y-1.5">
+                            <label
+                              htmlFor={providerApiKeyInputId}
+                              className="workspace-form-label"
                             >
-                              留空不会覆盖当前密钥。
-                            </p>
-                          ) : null}
-                          <Input
-                            id={providerApiKeyInputId}
-                            type="text"
-                            value={apiKey}
-                            onChange={(event) => setApiKey(event.target.value)}
-                            placeholder="sk-..."
-                            aria-describedby={
-                              selectedProvider
-                                ? providerApiKeyHintId
-                                : undefined
-                            }
-                            className="h-9 text-[13px]"
-                          />
+                              API key
+                            </label>
+                            {selectedProvider ? (
+                              <p
+                                id={providerApiKeyHintId}
+                                className="workspace-form-note"
+                              >
+                                Leave blank to keep the current key.
+                              </p>
+                            ) : null}
+                            <Input
+                              id={providerApiKeyInputId}
+                              type="text"
+                              value={apiKey}
+                              onChange={(event) =>
+                                setApiKey(event.target.value)
+                              }
+                              placeholder="sk-..."
+                              aria-describedby={
+                                selectedProvider
+                                  ? providerApiKeyHintId
+                                  : undefined
+                              }
+                              className="h-9 text-[13px]"
+                            />
+                          </div>
                         </div>
                       </section>
 
@@ -691,8 +676,9 @@ export function SettingsPanel() {
                               Model Catalog
                             </p>
                             <p className="mt-1 text-[11px] text-muted-foreground">
-                              至少需要一个有效 Model
-                              ID。上下文/输出限制为空时按后端默认处理。
+                              At least one valid Model ID is required. Context
+                              and output limits fall back to backend defaults
+                              when left blank.
                             </p>
                           </div>
 
@@ -710,7 +696,7 @@ export function SettingsPanel() {
                               className="h-8 px-2.5"
                             >
                               <Plus className="size-3.5" />
-                              添加模型
+                              Add model
                             </Button>
                           </div>
                         </div>
@@ -753,7 +739,7 @@ export function SettingsPanel() {
                                         display_name: event.target.value,
                                       })
                                     }
-                                    placeholder="可选展示名"
+                                    placeholder="Optional display name"
                                     className="h-9 text-[12px]"
                                     aria-label={`Model ${index + 1} display name`}
                                   />
@@ -820,7 +806,8 @@ export function SettingsPanel() {
                         </div>
 
                         <p className="mt-2 text-[11px] text-muted-foreground">
-                          Reasoning 开关表示该模型是否支持会话级 thinking 控制。
+                          The Reasoning switch indicates whether this model
+                          supports session-level thinking controls.
                         </p>
                       </section>
                     </div>
@@ -829,10 +816,10 @@ export function SettingsPanel() {
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <p className="text-[11px] text-muted-foreground">
                           {!hasValidModel
-                            ? "至少填写一个 Model ID 才能提交。"
+                            ? "Enter at least one Model ID before saving."
                             : selectedProvider
-                              ? "提交后会更新当前 Provider 配置。"
-                              : "提交后会创建新的 Provider 并自动选中。"}
+                              ? "Submitting will update the current provider."
+                              : "Submitting will create a new provider and select it automatically."}
                         </p>
                         <Button
                           type="submit"
@@ -840,7 +827,9 @@ export function SettingsPanel() {
                           className="min-h-9 min-w-[190px]"
                         >
                           <Plus className="size-3.5" />
-                          {selectedProvider ? "保存 Provider" : "创建 Provider"}
+                          {selectedProvider
+                            ? "Save provider"
+                            : "Create provider"}
                         </Button>
                       </div>
                     </div>

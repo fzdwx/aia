@@ -13,7 +13,10 @@ mod types;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use agent_core::{ModelIdentity, PromptCacheConfig, PromptCacheRetention as RuntimePromptCacheRetention, ReasoningEffort};
+use agent_core::{
+    ModelIdentity, PromptCacheConfig, PromptCacheRetention as RuntimePromptCacheRetention,
+    ReasoningEffort,
+};
 use agent_runtime::AgentRuntime;
 use agent_store::{AiaStore, SessionRecord, generate_session_id};
 use builtin_tools::build_tool_registry;
@@ -432,7 +435,10 @@ impl<'a> SessionSlotFactory<'a> {
         let session_append_path = session_path.clone();
         let workspace_root = self.config.workspace_root.clone();
         let mut runtime = AgentRuntime::with_tape(model, build_tool_registry(), identity, tape)
-            .with_instructions(build_session_system_prompt(&self.config.system_prompt))
+            .with_instructions(build_session_system_prompt(
+                self.config.system_prompt.as_deref(),
+                &self.config.workspace_root,
+            ))
             .with_hooks(self.config.runtime_hooks.clone())
             .with_session_id(session_id.to_string())
             .with_user_agent(self.config.user_agent.clone())
@@ -485,9 +491,7 @@ fn choose_provider_for_tape(
                     return ProviderLaunchChoice::OpenAi {
                         profile: profile.clone(),
                         model,
-                        reasoning_effort: ReasoningEffort::parse_persisted(
-                            reasoning_effort,
-                        ),
+                        reasoning_effort: ReasoningEffort::parse_persisted(reasoning_effort),
                     };
                 }
             }

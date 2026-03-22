@@ -14,20 +14,14 @@ impl SystemPromptBlock {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct SystemPromptConfig {
-    pub custom_prompt: Option<String>,
-    pub prompt_guidelines: Vec<String>,
+    pub guidelines: Vec<String>,
     pub append_sections: Vec<String>,
     pub context_blocks: Vec<SystemPromptBlock>,
 }
 
 impl SystemPromptConfig {
-    pub fn with_custom_prompt(mut self, prompt: impl Into<String>) -> Self {
-        self.custom_prompt = Some(prompt.into());
-        self
-    }
-
     pub fn with_guideline(mut self, guideline: impl Into<String>) -> Self {
-        self.prompt_guidelines.push(guideline.into());
+        self.guidelines.push(guideline.into());
         self
     }
 
@@ -44,12 +38,12 @@ impl SystemPromptConfig {
 
 pub fn build_system_prompt(base_prompt: impl AsRef<str>, config: &SystemPromptConfig) -> String {
     let mut sections = Vec::new();
-    let prompt = config.custom_prompt.as_deref().unwrap_or(base_prompt.as_ref()).trim();
+    let prompt = base_prompt.as_ref().trim();
     if !prompt.is_empty() {
         sections.push(prompt.to_string());
     }
 
-    let guidelines = dedupe_non_empty(&config.prompt_guidelines);
+    let guidelines = dedupe_non_empty(&config.guidelines);
     if !guidelines.is_empty() {
         sections.push(format!(
             "Additional guidelines:\n{}",

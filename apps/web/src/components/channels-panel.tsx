@@ -217,7 +217,7 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
           }
         >
           <p className="text-sm font-medium text-foreground">
-            暂无可配置 Channel。
+            No configurable channels available.
           </p>
           <p
             className="mt-2 text-[12px] leading-6 text-muted-foreground"
@@ -225,9 +225,9 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
             aria-live="polite"
           >
             {channelsLoading
-              ? "正在拉取 Channel catalog..."
+              ? "Loading channel catalog..."
               : (channelsError ??
-                "服务端没有返回任何 transport。请先检查后端 channel 注册与连接状态。")}
+                "The server returned no transports. Check channel registration and server connectivity first.")}
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <Button
@@ -383,8 +383,9 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
                 Configuration Fields
               </p>
               <p className="mt-1 text-[11px] text-muted-foreground">
-                按运行目标补齐连接参数与开关项；保存后会用于当前 transport
-                的实际配置。
+                Fill in the connection fields and runtime switches for this
+                transport. Saved values become the active transport
+                configuration.
               </p>
             </div>
 
@@ -412,16 +413,22 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
                         noteParts.push(description)
                       } else if (kind === "url") {
                         noteParts.push(
-                          "用于连接 transport 入口，建议填写可达的 URL。"
+                          "Used to connect to the transport endpoint. Enter a reachable URL."
                         )
                       } else if (kind === "secret") {
-                        noteParts.push("用于鉴权访问，建议使用受限权限的密钥。")
+                        noteParts.push(
+                          "Used for authenticated access. Prefer a key with limited scope."
+                        )
                       } else {
-                        noteParts.push("保存后该值会写入当前 transport 配置。")
+                        noteParts.push(
+                          "This value is saved into the current transport configuration."
+                        )
                       }
 
                       if (configuredChannel && kind === "secret") {
-                        noteParts.push("留空将保留当前已保存值。")
+                        noteParts.push(
+                          "Leave blank to keep the current saved value."
+                        )
                       }
 
                       const helperText = noteParts.join(" ")
@@ -512,7 +519,8 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
                         : undefined
                       const required = selectedRequired.has(key)
                       const helperText =
-                        description ?? "切换后会影响该 transport 的运行行为。"
+                        description ??
+                        "This switch affects how the transport runs."
                       const describedBy = [helperTextId, issueId]
                         .filter(Boolean)
                         .join(" ")
@@ -569,8 +577,8 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
               </div>
             ) : (
               <p className="text-[12px] leading-5 text-muted-foreground">
-                当前 transport
-                没有暴露可编辑字段。你仍可通过下方启用开关控制运行状态。
+                This transport exposes no editable fields. You can still control
+                its runtime state with the switch below.
               </p>
             )}
           </section>
