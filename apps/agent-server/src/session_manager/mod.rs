@@ -13,9 +13,7 @@ mod types;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use agent_core::{
-    ModelIdentity, PromptCacheConfig, PromptCacheRetention as RuntimePromptCacheRetention,
-};
+use agent_core::{ModelIdentity, PromptCacheConfig, PromptCacheRetention as RuntimePromptCacheRetention, ReasoningEffort};
 use agent_runtime::AgentRuntime;
 use agent_store::{AiaStore, SessionRecord, generate_session_id};
 use builtin_tools::build_tool_registry;
@@ -487,7 +485,7 @@ fn choose_provider_for_tape(
                     return ProviderLaunchChoice::OpenAi {
                         profile: profile.clone(),
                         model,
-                        reasoning_effort: crate::reasoning::ReasoningEffort::parse_persisted(
+                        reasoning_effort: ReasoningEffort::parse_persisted(
                             reasoning_effort,
                         ),
                     };

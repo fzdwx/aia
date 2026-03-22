@@ -5,7 +5,7 @@ use axum::{
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::reasoning::ReasoningEffort;
+use agent_core::ReasoningEffort;
 use crate::state::SharedState;
 use session_tape::SessionProviderBinding;
 

@@ -17,7 +17,7 @@ use openai_adapter::{
 };
 use provider_registry::{ProviderKind, ProviderProfile};
 
-use crate::reasoning::ReasoningEffort;
+use agent_core::ReasoningEffort;
 use trace::ModelTraceRecorder;
 
 #[derive(Clone, Debug, PartialEq)]

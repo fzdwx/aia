@@ -7,7 +7,7 @@ use axum::{
 use provider_registry::ProviderKind;
 use session_tape::SessionProviderBinding;
 
-use crate::reasoning::ReasoningEffort;
+use agent_core::ReasoningEffort;
 use crate::state::SharedState;
 
 use super::{
