@@ -68,6 +68,7 @@ export function ChatMessages() {
   const previousStreamingBlockCountRef = useRef(0)
   const shouldStickToBottomRef = useRef(true)
   const skipNextAutoScrollRef = useRef(false)
+  const isStreamingRef = useRef(false)
   const autoLoadingOlderTurnsRef = useRef(false)
   const historyHasMoreRef = useRef(historyHasMore)
   const historyLoadingMoreRef = useRef(historyLoadingMore)
@@ -78,6 +79,7 @@ export function ChatMessages() {
 
   const showHistoryHint = shouldShowHistoryHint(historyLoadingMore, scrollTop)
   const isStreaming = !!streamingTurn
+  isStreamingRef.current = isStreaming
 
   const scrollToBottom = useCallback(() => {
     bottomAnchorRef.current?.scrollIntoView({ behavior: "auto" })
@@ -173,7 +175,7 @@ export function ChatMessages() {
     if (!content) return
 
     const resizeObserver = new ResizeObserver(() => {
-      if (shouldStickToBottomRef.current) {
+      if (isStreamingRef.current && shouldStickToBottomRef.current) {
         bottomAnchorRef.current?.scrollIntoView({ behavior: "auto" })
       }
     })

@@ -13,6 +13,8 @@ markdown_tool_description!(edit_tool_description, "../prompts/tool/edit.md");
 markdown_tool_description!(apply_patch_tool_description, "../prompts/tool/apply_patch.md");
 markdown_tool_description!(glob_tool_description, "../prompts/tool/glob.md");
 markdown_tool_description!(grep_tool_description, "../prompts/tool/grep.md");
+markdown_tool_description!(codesearch_tool_description, "../prompts/tool/codesearch.md");
+markdown_tool_description!(websearch_tool_description, "../prompts/tool/websearch.md");
 markdown_tool_description!(tape_info_tool_description, "../prompts/tool/tape_info.md");
 markdown_tool_description!(tape_handoff_tool_description, "../prompts/tool/tape_handoff.md");
 

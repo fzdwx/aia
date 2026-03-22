@@ -13,8 +13,26 @@ import {
   type ToolRowItem,
 } from "./tool-timeline-helpers"
 
+const ACTIVE_DURATION_TICK_MS = 100
+
+function useDurationTicker(enabled: boolean) {
+  const [, setTick] = useState(0)
+
+  useEffect(() => {
+    if (!enabled) return
+
+    const timer = window.setInterval(() => {
+      setTick((current) => current + 1)
+    }, ACTIVE_DURATION_TICK_MS)
+
+    return () => window.clearInterval(timer)
+  }, [enabled])
+}
+
 function ToolRow({ item }: { item: ToolRowItem }) {
   const [showDetails, setShowDetails] = useState(false)
+  useDurationTicker(item.finishedAtMs == null)
+  const isRunning = item.finishedAtMs == null
   const renderData = {
     toolName: item.toolName,
     arguments: item.arguments,
@@ -25,7 +43,9 @@ function ToolRow({ item }: { item: ToolRowItem }) {
   const title = toolRendererRegistry.renderTitle(renderData)
   const meta = toolRendererRegistry.renderMeta(renderData)
   const detailsContent = toolRendererRegistry.renderDetails(renderData)
-  const duration = formatDurationMs(item.startedAtMs, item.finishedAtMs)
+  const duration = formatDurationMs(item.startedAtMs, item.finishedAtMs, {
+    live: isRunning,
+  })
 
   return (
     <div>
@@ -120,6 +140,7 @@ export function StreamingToolGroup({
   const completed = toolOutputs.filter((t) => t.completed)
   const active = toolOutputs.filter((t) => !t.completed)
   const activeSummary = buildCategorySummary(active)
+  useDurationTicker(active.length > 0)
 
   return (
     <div className="mb-2">
@@ -163,12 +184,13 @@ export function StreamingToolGroup({
                     {title || "preparing"}
                   </span>
                   <span className="shrink-0 text-muted-foreground/50">
-                    {tool.startedAtMs
+                    {tool.startedAtMs || tool.detectedAtMs
                       ? (formatDurationMs(
-                          tool.startedAtMs,
-                          tool.finishedAtMs
-                        ) ?? "0 ms")
-                      : "queued"}
+                          tool.startedAtMs ?? tool.detectedAtMs,
+                          tool.finishedAtMs,
+                          { live: true }
+                        ) ?? "0.0 s")
+                      : "running"}
                   </span>
                 </div>
               )

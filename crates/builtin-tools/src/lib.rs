@@ -1,18 +1,23 @@
 mod apply_patch;
+mod codesearch;
 mod edit;
+mod exa;
 mod glob;
 mod grep;
 mod read;
 mod shell;
 mod walk;
+mod websearch;
 mod write;
 
 pub use apply_patch::ApplyPatchTool;
+pub use codesearch::CodeSearchTool;
 pub use edit::EditTool;
 pub use glob::GlobTool;
 pub use grep::GrepTool;
 pub use read::ReadTool;
 pub use shell::ShellTool;
+pub use websearch::WebSearchTool;
 pub use write::WriteTool;
 
 pub fn should_skip_directory_name(name: &str) -> bool {
@@ -30,6 +35,8 @@ pub fn build_tool_registry() -> ToolRegistry {
     registry.register(Box::new(ApplyPatchTool));
     registry.register(Box::new(GlobTool));
     registry.register(Box::new(GrepTool));
+    registry.register(Box::new(CodeSearchTool));
+    registry.register(Box::new(WebSearchTool));
     registry
 }
 

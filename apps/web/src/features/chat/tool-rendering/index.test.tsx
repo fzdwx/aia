@@ -1,4 +1,5 @@
 import { Children, isValidElement, type ReactNode } from "react"
+import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, test } from "vite-plus/test"
 
 import { toolRendererRegistry } from "./index"
@@ -87,6 +88,192 @@ describe("tool renderer registry", () => {
     })
 
     expect(meta).not.toBe(null)
+  })
+
+  test("renders codesearch tool title from query", () => {
+    const title = toolRendererRegistry.renderTitle({
+      toolName: "functions.codesearch",
+      arguments: {
+        query: "React useState hook examples",
+        tokensNum: 5000,
+      },
+      outputContent: "",
+      succeeded: true,
+    })
+
+    expect(title).toBe("React useState hook examples")
+  })
+
+  test("renders codesearch tool meta from tokens and result status", () => {
+    const meta = toolRendererRegistry.renderMeta({
+      toolName: "functions.codesearch",
+      arguments: {
+        query: "Express.js middleware",
+        tokensNum: 3000,
+      },
+      details: {
+        result_found: false,
+      },
+      outputContent: "No code snippets or documentation found.",
+      succeeded: true,
+    })
+
+    expect(meta).not.toBe(null)
+    expect(isValidElement(meta)).toBe(true)
+    if (!isValidElement<ElementWithChildren>(meta)) {
+      throw new Error("expected codesearch meta to be a React element")
+    }
+
+    const badges = Children.toArray(meta.props.children)
+    expect(badges).toHaveLength(2)
+
+    const tokenBadge = badges[0]
+    expect(isValidElement(tokenBadge)).toBe(true)
+    if (!isValidElement<ElementWithChildren>(tokenBadge)) {
+      throw new Error("expected codesearch token badge to be a React element")
+    }
+    expect(tokenBadge.props.children).toBe("3,000 tok")
+
+    const resultBadge = badges[1]
+    expect(isValidElement(resultBadge)).toBe(true)
+    if (!isValidElement<ElementWithChildren>(resultBadge)) {
+      throw new Error("expected codesearch result badge to be a React element")
+    }
+    expect(resultBadge.props.children).toBe("no result")
+  })
+
+  test("renders codesearch details with top result card", () => {
+    const details = toolRendererRegistry.renderDetails({
+      toolName: "functions.codesearch",
+      arguments: {
+        query: "React useState hook examples",
+        tokensNum: 5000,
+      },
+      outputContent: [
+        "## useState Explained with Simple Examples | react.wiki",
+        "https://react.wiki/hooks/use-state-explained/",
+        "Practical examples and syntax for useState.",
+        "const [count, setCount] = useState(0);",
+      ].join("\n"),
+      succeeded: true,
+    })
+
+    expect(details).not.toBe(null)
+    const html = renderToStaticMarkup(<>{details}</>)
+    expect(html).toContain("Top Result")
+    expect(html).toContain("Code match")
+    expect(html).toContain("useState Explained with Simple Examples")
+    expect(html).toContain("https://react.wiki/hooks/use-state-explained/")
+    expect(html).toContain("Practical examples and syntax for useState.")
+  })
+
+  test("renders websearch tool title and meta from query and options", () => {
+    const title = toolRendererRegistry.renderTitle({
+      toolName: "functions.websearch",
+      arguments: {
+        query: "AI news 2026",
+        numResults: 5,
+        type: "deep",
+      },
+      outputContent: "",
+      succeeded: true,
+    })
+    const meta = toolRendererRegistry.renderMeta({
+      toolName: "functions.websearch",
+      arguments: {
+        query: "AI news 2026",
+        numResults: 5,
+        type: "deep",
+      },
+      details: {
+        result_found: true,
+      },
+      outputContent: "",
+      succeeded: true,
+    })
+
+    expect(title).toBe("AI news 2026")
+    expect(meta).not.toBe(null)
+    expect(isValidElement(meta)).toBe(true)
+    if (!isValidElement<ElementWithChildren>(meta)) {
+      throw new Error("expected websearch meta to be a React element")
+    }
+
+    const badges = Children.toArray(meta.props.children)
+    expect(badges).toHaveLength(2)
+
+    const resultBadge = badges[0]
+    expect(isValidElement(resultBadge)).toBe(true)
+    if (!isValidElement<ElementWithChildren>(resultBadge)) {
+      throw new Error("expected websearch result badge to be a React element")
+    }
+    expect(resultBadge.props.children).toBe("5 results")
+
+    const typeBadge = badges[1]
+    expect(isValidElement(typeBadge)).toBe(true)
+    if (!isValidElement<ElementWithChildren>(typeBadge)) {
+      throw new Error("expected websearch type badge to be a React element")
+    }
+    expect(typeBadge.props.children).toBe("Deep")
+  })
+
+  test("renders websearch details with top result card", () => {
+    const details = toolRendererRegistry.renderDetails({
+      toolName: "functions.websearch",
+      arguments: {
+        query: "AI news 2026",
+        numResults: 8,
+      },
+      outputContent: [
+        "## Latest AI News Roundup",
+        "https://example.com/ai-news-2026",
+        "Fresh updates from the AI industry in 2026.",
+        "Funding, model launches, and policy shifts.",
+      ].join("\n"),
+      succeeded: true,
+    })
+
+    expect(details).not.toBe(null)
+    const html = renderToStaticMarkup(<>{details}</>)
+    expect(html).toContain("Top Result")
+    expect(html).toContain("Web result")
+    expect(html).toContain("Latest AI News Roundup")
+    expect(html).toContain("https://example.com/ai-news-2026")
+    expect(html).toContain("example.com")
+  })
+
+  test("renders websearch preferred livecrawl badge", () => {
+    const meta = toolRendererRegistry.renderMeta({
+      toolName: "functions.websearch",
+      arguments: {
+        query: "AI news 2026",
+        numResults: 5,
+        livecrawl: "preferred",
+      },
+      details: {
+        result_found: true,
+      },
+      outputContent: "",
+      succeeded: true,
+    })
+
+    expect(meta).not.toBe(null)
+    expect(isValidElement(meta)).toBe(true)
+    if (!isValidElement<ElementWithChildren>(meta)) {
+      throw new Error("expected preferred livecrawl meta to be a React element")
+    }
+
+    const badges = Children.toArray(meta.props.children)
+    expect(badges).toHaveLength(2)
+
+    const livecrawlBadge = badges[1]
+    expect(isValidElement(livecrawlBadge)).toBe(true)
+    if (!isValidElement<ElementWithChildren>(livecrawlBadge)) {
+      throw new Error(
+        "expected preferred livecrawl badge to be a React element"
+      )
+    }
+    expect(livecrawlBadge.props.children).toBe("Live crawl")
   })
 
   test("renders write tool title with compacted path", () => {

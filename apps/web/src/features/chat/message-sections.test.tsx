@@ -12,6 +12,7 @@ import {
   StatusIndicator,
   UserMessageBlock,
 } from "./message-sections"
+import { formatDurationMs } from "./tool-timeline-helpers"
 
 function renderWithTheme(element: ReactElement) {
   return renderToStaticMarkup(
@@ -113,6 +114,27 @@ describe("chat message status surfaces", () => {
     expect(source).toContain("bottomAnchorRef")
     expect(source).toContain("scrollIntoView")
     expect(source).not.toContain("MutationObserver")
+  })
+
+  test("keeps streaming tool durations on an interval ticker", () => {
+    const source = readFileSync(
+      new URL("./tool-timeline.tsx", import.meta.url),
+      "utf8"
+    ).replace(/\s+/g, " ")
+
+    expect(source).toContain("const ACTIVE_DURATION_TICK_MS = 100")
+    expect(source).toContain("window.setInterval")
+    expect(source).toContain("useDurationTicker(item.finishedAtMs == null)")
+    expect(source).toContain("useDurationTicker(active.length > 0)")
+  })
+
+  test("formats live tool durations in smooth seconds", () => {
+    const now = Date.now()
+    const live = formatDurationMs(now - 340, undefined, { live: true })
+    const finished = formatDurationMs(now - 340, now)
+
+    expect(live).toBe("0.3 s")
+    expect(finished).toBe("340 ms")
   })
 
   test("uses auxiliary-alert tier for failure and cancelled blocks", () => {

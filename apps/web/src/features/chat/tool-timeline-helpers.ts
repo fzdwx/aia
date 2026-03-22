@@ -19,6 +19,8 @@ const TOOL_CATEGORIES: Record<string, ToolCategory> = {
   head: "read",
   tail: "read",
   grep: "search",
+  codesearch: "search",
+  websearch: "search",
   search: "search",
   find: "search",
   glob: "search",
@@ -97,11 +99,18 @@ export function fromStreamingTool(tool: StreamingToolOutput): ToolRowItem {
 
 export function formatDurationMs(
   startedAtMs: number | undefined,
-  finishedAtMs?: number
+  finishedAtMs?: number,
+  options?: { live?: boolean }
 ): string | null {
   if (!startedAtMs) return null
   const end = finishedAtMs ?? Date.now()
   const duration = Math.max(0, end - startedAtMs)
+
+  if (options?.live && finishedAtMs == null && duration < 60_000) {
+    const seconds = Math.floor(duration / 100) / 10
+    return `${seconds.toFixed(1)} s`
+  }
+
   if (duration < 1000) return `${duration} ms`
   if (duration < 60_000) return `${(duration / 1000).toFixed(1)} s`
   const minutes = Math.floor(duration / 60_000)

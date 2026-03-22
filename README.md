@@ -49,6 +49,8 @@ this repository currently runs as a library-first rust workspace with a web-firs
 - one user turn now runs as an internal multi-step loop: model → tool execution/results → model continuation
 - tool failures are recorded as structured facts instead of crashing the whole session
 - runtime cancellation propagates from server → runtime → provider streaming / embedded shell execution
+- built-in tools now include an Exa-backed `codesearch` lookup for fresh programming-library and API context
+- built-in tools now also include an Exa-backed `websearch` lookup for current web information beyond the knowledge cutoff
 - prompt caching is wired through the shared request path for OpenAI-compatible providers, with stable session-scoped cache keys and `24h` retention
 - trace data now follows an otel-shaped local model with stable trace/span ids, local events, and real tool spans
 - trace list loading now reads lightweight request summaries instead of deserializing full upstream request payloads for every row

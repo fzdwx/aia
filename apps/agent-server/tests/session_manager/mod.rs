@@ -5,12 +5,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::runtime_worker::RunningTurnHandle;
 use crate::sse::TurnStatus;
-use agent_core::RequestTimeoutConfig;
+use agent_core::{RequestTimeoutConfig, StreamEvent};
 
 use super::{
     CurrentTurnSnapshot, SessionManagerConfig, SessionQueryService, SessionSlot,
     SessionSlotFactory, SlotExecutionState, SlotStatus, collect_runtime_events, read_lock,
-    spawn_session_manager, update_current_turn_status, write_lock,
+    spawn_session_manager, update_current_turn_from_stream, update_current_turn_status, write_lock,
 };
 
 fn run_async<T>(future: impl Future<Output = T>) -> T {
@@ -194,6 +194,92 @@ fn session_slot_begin_turn_transitions_to_running_state() {
     assert!(slot.runtime().is_none());
     assert!(slot.running_turn().is_some());
     assert!(!running_turn.control.abort_signal().is_aborted());
+}
+
+#[test]
+fn tool_call_detected_projects_live_tool_block_before_start_event() {
+    let snapshot = Arc::new(RwLock::new(Some(CurrentTurnSnapshot {
+        turn_id: "turn-1".into(),
+        started_at_ms: 100,
+        user_message: "查点资料".into(),
+        status: TurnStatus::Working,
+        blocks: Vec::new(),
+    })));
+
+    update_current_turn_from_stream(
+        &snapshot,
+        &StreamEvent::ToolCallDetected {
+            invocation_id: "call-1".into(),
+            tool_name: "codesearch".into(),
+            arguments: serde_json::json!({
+                "query": "OpenAI Codex CLI apply_patch tool",
+                "tokensNum": 5000,
+            }),
+        },
+    );
+
+    let current = read_lock(&snapshot);
+    let current = current.as_ref().expect("current turn snapshot should exist");
+    assert_eq!(current.blocks.len(), 1);
+
+    let crate::runtime_worker::CurrentTurnBlock::Tool { tool } = &current.blocks[0] else {
+        panic!("expected detected tool block");
+    };
+
+    assert_eq!(tool.invocation_id, "call-1");
+    assert_eq!(tool.tool_name, "codesearch");
+    assert_eq!(
+        tool.arguments,
+        serde_json::json!({
+            "query": "OpenAI Codex CLI apply_patch tool",
+            "tokensNum": 5000,
+        })
+    );
+    assert!(tool.detected_at_ms > 0);
+    assert_eq!(tool.started_at_ms, None);
+    assert_eq!(tool.finished_at_ms, None);
+    assert!(!tool.completed);
+}
+
+#[test]
+fn tool_call_started_upgrades_existing_detected_tool_block() {
+    let snapshot = Arc::new(RwLock::new(Some(CurrentTurnSnapshot {
+        turn_id: "turn-1".into(),
+        started_at_ms: 100,
+        user_message: "查点资料".into(),
+        status: TurnStatus::Working,
+        blocks: Vec::new(),
+    })));
+
+    update_current_turn_from_stream(
+        &snapshot,
+        &StreamEvent::ToolCallDetected {
+            invocation_id: "call-1".into(),
+            tool_name: "codesearch".into(),
+            arguments: serde_json::json!({ "query": "Codex" }),
+        },
+    );
+    update_current_turn_from_stream(
+        &snapshot,
+        &StreamEvent::ToolCallStarted {
+            invocation_id: "call-1".into(),
+            tool_name: "codesearch".into(),
+            arguments: serde_json::json!({ "query": "Codex", "tokensNum": 5000 }),
+        },
+    );
+
+    let current = read_lock(&snapshot);
+    let current = current.as_ref().expect("current turn snapshot should exist");
+    assert_eq!(current.blocks.len(), 1);
+
+    let crate::runtime_worker::CurrentTurnBlock::Tool { tool } = &current.blocks[0] else {
+        panic!("expected tool block");
+    };
+
+    assert_eq!(tool.invocation_id, "call-1");
+    assert_eq!(tool.tool_name, "codesearch");
+    assert_eq!(tool.arguments, serde_json::json!({ "query": "Codex", "tokensNum": 5000 }));
+    assert!(tool.started_at_ms.is_some());
 }
 
 #[test]

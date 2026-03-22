@@ -3,15 +3,17 @@ use agent_prompts::tool_descriptions::shell_tool_description;
 use std::collections::BTreeSet;
 
 use super::{
-    ApplyPatchTool, EditTool, GlobTool, GrepTool, ReadTool, ShellTool, WriteTool,
-    build_tool_registry,
+    ApplyPatchTool, CodeSearchTool, EditTool, GlobTool, GrepTool, ReadTool, ShellTool,
+    WebSearchTool, WriteTool, build_tool_registry,
 };
 use crate::apply_patch::ApplyPatchToolArgs;
+use crate::codesearch::CodeSearchToolArgs;
 use crate::edit::EditToolArgs;
 use crate::glob::GlobToolArgs;
 use crate::grep::GrepToolArgs;
 use crate::read::ReadToolArgs;
 use crate::shell::ShellToolArgs;
+use crate::websearch::WebSearchToolArgs;
 use crate::write::WriteToolArgs;
 
 #[test]
@@ -23,10 +25,20 @@ fn registry_exposes_only_new_tool_names() {
         .map(|definition| definition.name)
         .collect::<BTreeSet<_>>();
 
-    let expected = ["shell", "read", "write", "edit", "apply_patch", "glob", "grep"]
-        .into_iter()
-        .map(str::to_owned)
-        .collect::<BTreeSet<_>>();
+    let expected = [
+        "shell",
+        "read",
+        "write",
+        "edit",
+        "apply_patch",
+        "glob",
+        "grep",
+        "codesearch",
+        "websearch",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect::<BTreeSet<_>>();
 
     assert_eq!(names, expected);
     assert!(!names.contains("bash"));
@@ -106,4 +118,39 @@ fn builtin_tool_definitions_match_derive_schema_output() {
     assert_eq!(grep.parameters["properties"]["path"]["type"], "string");
     assert_eq!(grep.parameters["properties"]["glob"]["type"], "string");
     assert_eq!(grep.parameters["properties"]["limit"]["type"], "integer");
+
+    let codesearch = CodeSearchTool.definition();
+    assert_eq!(codesearch.name, "codesearch");
+    assert_eq!(codesearch.parameters["type"], "object");
+    assert_eq!(codesearch.parameters["additionalProperties"], false);
+    assert_eq!(codesearch.parameters["properties"]["query"]["type"], "string");
+    assert_eq!(codesearch.parameters["properties"]["tokensNum"]["type"], "integer");
+    assert_eq!(codesearch.parameters["properties"]["tokensNum"]["minimum"], 1000);
+    assert_eq!(codesearch.parameters["properties"]["tokensNum"]["maximum"], 50000);
+    assert_eq!(codesearch.parameters["properties"]["tokensNum"]["default"], 5000);
+
+    let parsed: CodeSearchToolArgs = serde_json::from_value(serde_json::json!({
+        "query": "React useState hook examples",
+        "tokensNum": 6000,
+    }))
+    .expect("codesearch args should deserialize");
+    assert_eq!(parsed.tokens_num, 6000);
+
+    let websearch = WebSearchTool.definition();
+    assert_eq!(websearch.name, "websearch");
+    assert!(websearch.description.contains("2026"));
+    assert_eq!(websearch.parameters["properties"]["numResults"]["default"], 8);
+    assert_eq!(websearch.parameters["properties"]["livecrawl"]["type"], "string");
+    assert_eq!(websearch.parameters["properties"]["type"]["type"], "string");
+
+    let parsed: WebSearchToolArgs = serde_json::from_value(serde_json::json!({
+        "query": "AI news 2026",
+        "numResults": 5,
+        "livecrawl": "preferred",
+        "type": "deep",
+        "contextMaxCharacters": 8000,
+    }))
+    .expect("websearch args should deserialize");
+    assert_eq!(parsed.num_results, 5);
+    assert_eq!(parsed.context_max_characters, Some(8000));
 }

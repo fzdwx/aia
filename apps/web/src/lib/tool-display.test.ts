@@ -27,4 +27,24 @@ describe("tool display path", () => {
       "pwd"
     )
   })
+
+  test("uses query for namespaced codesearch tool", () => {
+    assert.equal(
+      getToolDisplayPath("functions.codesearch", undefined, {
+        query: "React useState hook examples",
+        tokensNum: 5000,
+      }),
+      "React useState hook examples"
+    )
+  })
+
+  test("uses query for namespaced websearch tool", () => {
+    assert.equal(
+      getToolDisplayPath("functions.websearch", undefined, {
+        query: "AI news 2026",
+        numResults: 8,
+      }),
+      "AI news 2026"
+    )
+  })
 })

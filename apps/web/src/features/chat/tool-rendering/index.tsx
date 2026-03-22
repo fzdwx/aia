@@ -12,8 +12,10 @@ import {
   createWriteRenderer,
 } from "./renderers/file-tools"
 import {
+  createCodeSearchRenderer,
   createGlobRenderer,
   createGrepRenderer,
+  createWebSearchRenderer,
 } from "./renderers/search-tools"
 import { createShellRenderer } from "./renderers/shell"
 import { createApplyPatchRenderer } from "./renderers/apply-patch"
@@ -28,6 +30,8 @@ export const toolRendererRegistry = createToolRendererRegistry(
     createReadRenderer(),
     createWriteRenderer(),
     createEditRenderer(),
+    createCodeSearchRenderer(),
+    createWebSearchRenderer(),
     createGlobRenderer(),
     createGrepRenderer(),
     createShellRenderer(),

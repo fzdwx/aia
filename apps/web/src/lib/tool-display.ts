@@ -52,6 +52,12 @@ export function getToolDisplayPath(
   if (normalizedToolName === "grep") {
     return stringArg(normalizedArgs, "pattern", "path", "file_path") ?? ""
   }
+  if (normalizedToolName === "codesearch") {
+    return stringArg(normalizedArgs, "query") ?? ""
+  }
+  if (normalizedToolName === "websearch") {
+    return stringArg(normalizedArgs, "query") ?? ""
+  }
   if (normalizedToolName === "shell") {
     return stringArg(normalizedArgs, "command", "cmd") ?? ""
   }
