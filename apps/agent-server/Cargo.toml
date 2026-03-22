@@ -13,6 +13,8 @@ builtin-tools = { path = "../../crates/builtin-tools" }
 agent-store = { path = "../../crates/agent-store" }
 channel-bridge = { path = "../../crates/channel-bridge" }
 channel-feishu = { path = "../../crates/channel-feishu" }
+channel-weixin = { path = "../../crates/channel-weixin" }
+weixin-client = { path = "../../crates/weixin-client" }
 openai-adapter = { path = "../../crates/openai-adapter" }
 provider-registry = { path = "../../crates/provider-registry" }
 session-tape = { path = "../../crates/session-tape" }

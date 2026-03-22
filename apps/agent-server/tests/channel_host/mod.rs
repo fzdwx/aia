@@ -3,7 +3,9 @@ use std::sync::Arc;
 use agent_core::StreamEvent;
 use agent_runtime::{TurnLifecycle, TurnOutcome};
 use agent_store::AiaStore;
-use channel_bridge::{ChannelRuntimeEvent, ChannelRuntimeSupervisor, ChannelTurnStatus};
+use channel_bridge::{
+    ChannelRuntimeEvent, ChannelRuntimeSupervisor, ChannelTransport, ChannelTurnStatus,
+};
 
 use crate::{
     session_manager::SessionManagerHandle,
@@ -60,6 +62,23 @@ fn build_channel_runtime_registers_feishu_adapter() {
     let catalog = build_channel_adapter_catalog(store, session_manager, broadcast_tx);
 
     let _runtime: ChannelRuntimeSupervisor = build_channel_runtime(catalog);
+}
+
+#[test]
+fn build_channel_runtime_registers_weixin_definition() {
+    let store = Arc::new(AiaStore::in_memory().expect("memory store"));
+    let session_manager = SessionManagerHandle::test_handle();
+    let broadcast_tx = tokio::sync::broadcast::channel(8).0;
+    let catalog = build_channel_adapter_catalog(store, session_manager, broadcast_tx);
+
+    let transports = catalog
+        .definitions()
+        .into_iter()
+        .map(|definition| definition.transport)
+        .collect::<Vec<_>>();
+
+    assert!(transports.contains(&ChannelTransport::Feishu));
+    assert!(transports.contains(&ChannelTransport::Weixin));
 }
 
 #[test]

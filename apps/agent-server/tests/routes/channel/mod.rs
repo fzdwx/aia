@@ -1,7 +1,10 @@
 use channel_bridge::{ChannelTransport, SupportedChannelDefinition};
 use serde_json::json;
 
-use super::{CreateChannelRequest, UpdateChannelRequest, config::merge_channel_config};
+use super::{
+    CreateChannelRequest, UpdateChannelRequest, WeixinLoginQrRequest, WeixinLoginStatusRequest,
+    config::merge_channel_config,
+};
 
 #[test]
 fn merge_channel_config_keeps_secret_when_patch_is_blank() {
@@ -70,4 +73,40 @@ fn update_channel_request_allows_partial_secret_update() {
         parsed.config.as_ref().and_then(|value| value.get("app_secret")),
         Some(&serde_json::json!(""))
     );
+}
+
+#[test]
+fn create_channel_request_deserializes_weixin_payload() {
+    let parsed: CreateChannelRequest = serde_json::from_value(serde_json::json!({
+        "id": "weixin-default",
+        "name": "Default Weixin",
+        "transport": "weixin",
+        "enabled": true,
+        "config": {
+            "bot_token": "bot-token"
+        }
+    }))
+    .expect("create channel request should deserialize");
+
+    assert_eq!(parsed.id, "weixin-default");
+    assert_eq!(parsed.transport, ChannelTransport::Weixin);
+    assert_eq!(parsed.config["bot_token"], "bot-token");
+}
+
+#[test]
+fn weixin_login_qr_request_deserializes_empty_payload() {
+    let parsed: WeixinLoginQrRequest = serde_json::from_value(serde_json::json!({}))
+        .expect("weixin qr request should deserialize");
+
+    let _ = parsed;
+}
+
+#[test]
+fn weixin_login_status_request_deserializes_qrcode_only() {
+    let parsed: WeixinLoginStatusRequest = serde_json::from_value(serde_json::json!({
+        "qrcode": "ticket-1"
+    }))
+    .expect("weixin login status request should deserialize");
+
+    assert_eq!(parsed.qrcode, "ticket-1");
 }

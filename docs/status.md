@@ -7,8 +7,11 @@
 - 最新默认提示词收口：`agent-prompts` 现已新增共享 `aia-agents.md` 模板、`AiaAgentsPromptContext` 与 `render_aia_agents_prompt(...)` 渲染入口；模板中的平台、工作路径、本地日期、星期与时区都不再硬编码，而是由 `apps/agent-server` 基于真实运行时采集后注入。与此同时，`SessionManagerConfig.system_prompt` 与 `ServerBootstrapOptions.system_prompt` 也都已收口为 `Option<String>`：默认情况下 session 会渲染 `aia-agents` 并追加 `Context Contract`，但如果嵌入方或用户显式传入 system prompt，就直接使用用户给定文本，不再额外拼装 block/guideline。对应测试已覆盖共享渲染、session prompt 默认/覆盖路径，以及 bootstrap 透传链路。
 - 最新 system prompt 配置收口：`agent-prompts::SystemPromptConfig` 已去掉 `custom_prompt`，并把 `prompt_guidelines` 收口为更直接的 `guidelines`。当前这个共享配置只负责在给定 base prompt 之上追加 guideline / section / context block；真正的“整段 system prompt 替换”统一留在外层的 `Option<String>` 覆盖路径处理，避免共享层继续保留第二套替换语义。
 - 最新前端进展：`apps/web` 的 `Channels` 入口已改成 transport-centric 配置台：左侧常驻 sidebar 在 `channels` 视图下直接列出 server 返回的全部 supported channel type，右侧主面板只展示当前 type 的 schema 配置项与启停状态；对应的 catalog/profile 读取、CRUD 与当前选中 transport 也已从 `chat-store` 拆到独立 `channels-store`，避免继续把配置面板状态混进会话/SSE 主链。
+- 最新前端工具时间线补齐：`apps/web` 的 chat tool timeline 现已把 `codesearch` 归入搜索类工具，并按 query 渲染标题、按 `tokensNum`/`result_found` 渲染 meta badge（如 `5000 tok`、`no result`），让 Exa 代码检索结果在流式和完成态里都保持和 `glob/grep` 一致的可读性。
 - 最新前端 session 所有权收口：`apps/web` 当前已把 active session 的 ownership 与 model / reasoning mutation 责任继续收回 `chat-store`；`session-settings-store` 只保留 session settings 的水合与更新资源态，不再镜像 active session，也不再反向写 `chat-store`。与此同时，`switchSessionModel(...)` 与 `setSessionReasoningEffort(...)` 现在会在 mutation 完成后统一等待 provider 列表刷新，`ModelSelector` / `ChatInput` 组件侧不再拼 `.then(refreshProviders())` 式胶水，避免 UI 在 session 列表投影与 provider 面板之间出现短暂不同步。
 - 最新前端配置台收口：`apps/web` 的 `Settings` 已继续收口成更接近真实设置应用的二级工作区：外层 app sidebar 进入 `Settings` 后只负责切换 `Providers / Channels` 两个设置分类，而右侧主区域再承接对应分类的 item 列表与详情编辑区，形成“左分类，右侧列表 + 详情”的两级信息架构；原本独立的 `Channels` 配置入口也因此并回 settings workspace，继续避免再保留第二套路由级配置页面。
+- 最新微信 client 进展：workspace 已新增共享 `crates/weixin-client`，先对齐 SunCodexClaw 当前依赖的 iLink/OpenClaw 私有微信协议，而不是直接耦合到官方 `access_token + media_id` 模型。当前 crate 已补齐扫码登录、二维码轮询、长轮询更新、文本发送、typing 状态、媒体上传发送与附件下载 helper，并通过本地假服务测试锁住关键 HTTP 头、消息体与 CDN 上传流程，为后续 `channel-weixin` 适配留出稳定低层边界。
+- 最新微信 channel 集成：workspace 当前又新增 `crates/channel-weixin`，并已把 `weixin` transport 接入 `channel-bridge`、`apps/agent-server` 的 adapter catalog 与 `/api/channels/catalog` 控制面。当前用户已可在 `Settings / Channels` 中看到并配置 `Weixin` transport；服务端运行态则通过长轮询消费微信消息、自动绑定 session、触发 turn，并把最终文本回答回写到微信。与此同时，`apps/agent-server` 还补了微信扫码登录路由，`apps/web` 的 `channels` 面板也为 `weixin` transport 增加了工作台式扫码区：用户可以直接获取二维码、轮询登录状态，并在登录成功后自动创建或更新 profile，而不需要手动复制 token。
 - 最新 Trace 视图收口：`apps/web` 的 `Trace` 页面现已拆成独立 `Overview` dashboard 与 `Conversation/Compression` explorer 两个子工作台：sidebar 顶部只负责页面导航，进入 explorer 后才显示 loop 列表与分页；overview 侧则不再自己并发拼三份 `/api/traces/summary`，而是改由 `trace-overview-store` 读取新的 `/api/traces/dashboard` 分析接口，一次拿到 KPI 卡片、失败态汇总、`input/output/cache` token 趋势图、年度活跃热力图与 conversation/compression 两条入口摘要，避免继续把累计信号和当前页 waterfall 混在同一块面板里。对应的当前 active loop / selected node 也已上提到 `trace-store`，避免继续把选择态散在 `TracePanel` 本地 state 里。
 - 最新 trace 汇总收口：`agent-store` 的 overview summary 已不再在每次 span 写入后全量扫描 `llm_trace_loops`。当前写路径会先刷新受影响的单个 loop 快照，再按该 loop 的旧值/新值差量维护 `llm_trace_overview_summaries`；其中 `unique_models` 与 `p95_duration_ms` 分别由新增的 `llm_trace_summary_model_counts`、`llm_trace_summary_duration_buckets` 辅助表精确维护，`llm_trace_loops` 也已补齐每 loop 的 input/output token 累计列，避免 summary 再回头扫描原始 span 表。
 - 最新 trace dashboard 收口：为了支撑 overview 的失败态 / token / 行变更 / session 活跃指标，`agent-store` 现已把 `session_id` 从 runtime → trace 记录链路贯通到 SQLite，并把 `llm_trace_loops` 再扩展为携带 `session_id`、估算成本、代码增删行的 loop 级分析记录；`/api/traces/dashboard` 会先只对 `llm_trace_dirty_loops` 标记的脏 trace 做 loop reconciliation，再按时间窗聚合出失败/部分失败计数与 token 趋势。与此同时，年度 activity 热力图已从“读时扫描 `llm_trace_loops` 做 `GROUP BY day + COUNT(DISTINCT session_id)`”收口为写时维护的 `llm_trace_activity_daily` / `llm_trace_activity_daily_sessions` 日桶物化表，dashboard 读路径只需按天范围读取固定桶，同时 `llm_trace_loops` 也补上独立 `latest_started_at_ms` 索引，减少 month/week summary 与 trend 的全表扫描。
@@ -17,6 +20,8 @@
 - 最新 provider 默认模型语义收口：provider 档案不再单独持久化额外的默认模型字段；当前默认模型统一取 `models` 列表首项，而 `agent-store` 会按 `provider_models.created_at` 倒序恢复模型顺序，避免再维护第二套“模型列表 + 额外活动模型”状态。
 - 最新驱动接口收口：`agent-prompts` 现已补上共享 `SystemPromptConfig + build_system_prompt(...)` 组合入口，`agent-runtime` 新增 `RuntimeHooks`，把 `before_agent_start`、`input`、`before_provider_request`、`tool_call`、`tool_result`、`turn_start/turn_end` 这组真正会影响外部客户端驱动面的生命周期钩子收口为稳定接口；`apps/agent-server` 的 `SessionManagerConfig` 也已直接承接这两类共享配置，让 session manager 不再把 system prompt 写死在 app 壳内部。
 - 最新 bootstrap 收口：`apps/agent-server` 现已补成 `lib + bin` 双入口，外部嵌入方不再需要手写 `SessionManagerConfig` 或复制启动装配，而是可以直接走 `bootstrap_state_with_options(ServerBootstrapOptions)` 把 `data_dir/workspace_root/user_agent/request_timeout/system_prompt/runtime_hooks` 一次性注入到共享 control-plane façade；与此同时，HTTP 监听地址也已从 bootstrap 状态装配中分离为独立 `ServerRunOptions`，嵌入方或 CLI 可在 `run_server_with_options(...)` / `--bind <addr>` 阶段覆写，而不必回退到更低层自己手拼 listener。
+- 最新工具扩展：`builtin-tools` 已新增 `codesearch`，按 `opencode` 的 `codesearch.ts` 语义接入 Exa Code API（`https://mcp.exa.ai/mcp`），支持 `query + tokensNum(1000-50000, default 5000)`，返回最新库/API 代码示例与文档上下文；共享工具描述、注册表与回归测试也已同步补齐。
+- 最新工具扩展补齐：`builtin-tools` 现又新增 `websearch`，按 `opencode` 的 `websearch.ts` 语义接入 Exa Web Search（同走 `https://mcp.exa.ai/mcp`），支持 `query`、`numResults`、`livecrawl`、`type` 与 `contextMaxCharacters`；其中共享描述会把“当前年份”替换为 `2026`，提醒模型在搜索最新资讯时显式带上今年年份。
 - 最新会话设置收口：Web 输入框现已支持直接设置当前 session 的思考等级（`Auto/Low/Medium/High`），而模型选择也已从“切全局 active provider/model”改为写入当前 session 的 provider binding。`apps/agent-server` 新增 `/api/session/settings` 读写接口，并把 `reasoning_effort` 和 provider/model 一起落到 session tape 的 `provider_binding` 事件中；因此不同 session 现在可拥有各自独立的模型与思考等级，不再互相污染。
 - 最新 session 当前模型权威收口：`GET /api/sessions` 现已改为通过 `session_manager` 投影当前 session 的真实 model，而不再直接信任 SQLite `sessions.model`；`PUT /api/session/settings` 也不再顺手把当前模型回写进 SQLite。对于 session tape 损坏、导致 `hydrate_slots()` 跳过的异常恢复路径，列表现在会显式返回 `unavailable`，避免继续泄漏陈旧数据库 model。
 - 最新 SessionSlot 状态机收口：`apps/agent-server` 的 `SessionSlot` 已从 `status + runtime + running_turn + pending_provider_binding` 的隐式组合，收口为显式 `Idle / Running` execution 状态机，并通过 `begin_turn / finish_turn / replace_pending_provider_binding` 等迁移方法统一驱动 turn 启停与 provider sync，减少不可能状态继续靠字段组合推断。
@@ -59,6 +64,8 @@
 - 建立 `agent-runtime`
 - 建立 `provider-registry`
 - 建立 `openai-adapter`
+- 建立 `channel-weixin`
+- 建立 `weixin-client`
 - 建立 `agent-store`
 - 建立 `apps/web` Web 工程骨架并演进为实际主工作台
 - 完成最小可运行验证与基础测试覆盖
@@ -211,6 +218,7 @@
 - 完成 `agent-server self` 首批内建命令：`/help`、`/status`、`/compress`、`/handoff <name> <summary>` 已接到现有 session manager 命令面，便于在终端自我进化模式下查看命令说明、上下文压力、手动压缩和创建 handoff，而不必回到 Web；格式错误的内建命令也会在本地直接返回 usage，而不是误发给模型
 - 完成 Web 聊天区一次 session 切换滚动抖动收口：`ChatMessages` 在切换 session 时改为用 `useLayoutEffect` 同步恢复到底部，避免首帧先渲染旧滚动位置再跳动到最新消息
 - 完成 `read` 工具元信息文案纠偏：聊天内工具时间线里，`read` 的 meta 改为显示真实 1-based 行号范围（如 `L121-160`），不再把 `offset` 和 `lines_read` 误显示成含糊区间
+- 完成内建 `codesearch` 工具：共享工具注册表现可直接向 Exa Code API 请求编程相关代码/文档上下文，并兼容 SSE 风格返回体解析、默认 30 秒超时与取消语义
 - 完成 Web Markdown renderer 替换：共享 `MarkdownContent` 现改用 `markstream-react`，聊天正文与推理内容不再依赖 `streamdown`；样式入口已同步改为 `markstream-react/index.css` 并补了基础渲染回归测试
 - 完成 Web Markdown 主题与样式收口：共享 Markdown renderer 现在会感知当前 `resolvedTheme` 并把 `isDark` 透传给 `markstream-react`；同时代码块/表格默认边框、阴影与 hover 操作区已重新压到当前聊天 UI 语义，并补了暗色主题回归测试
 - 完成 session 级模型设置：`apps/web` 的模型选择器与输入框思考等级现在都绑定当前 session；`apps/agent-server` 通过 `/api/session/settings` 持久化每个 session 的 provider/model/reasoning_effort，切换 session 时会恢复对应设置

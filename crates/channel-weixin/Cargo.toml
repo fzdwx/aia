@@ -1,0 +1,21 @@
+[package]
+name = "channel-weixin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+agent-core = { path = "../agent-core" }
+agent-core-macros = { path = "../agent-core-macros" }
+agent-runtime = { path = "../agent-runtime" }
+agent-store = { path = "../agent-store" }
+channel-bridge = { path = "../channel-bridge" }
+weixin-client = { path = "../weixin-client" }
+async-trait = "0.1"
+md-5 = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+
+[lib]
+path = "src/lib.rs"

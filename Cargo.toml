@@ -10,9 +10,11 @@ members = [
   "crates/agent-store",
   "crates/channel-bridge",
   "crates/channel-feishu",
+  "crates/channel-weixin",
   "crates/openai-adapter",
   "crates/provider-registry",
   "crates/session-tape",
+  "crates/weixin-client",
 ]
 resolver = "2"
 

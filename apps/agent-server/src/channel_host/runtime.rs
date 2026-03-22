@@ -5,6 +5,7 @@ use channel_bridge::{
     ChannelAdapterCatalog, ChannelRuntimeHost, ChannelRuntimeSupervisor, SupportedChannelDefinition,
 };
 use channel_feishu::build_feishu_runtime_adapter;
+use channel_weixin::build_weixin_runtime_adapter;
 
 use crate::{
     session_manager::{SessionManagerHandle, read_lock},
@@ -22,7 +23,8 @@ pub(crate) fn build_channel_adapter_catalog(
     let host: Arc<dyn ChannelRuntimeHost> =
         Arc::new(AgentServerChannelHost::new(store, session_manager, broadcast_tx));
     let mut catalog = ChannelAdapterCatalog::new();
-    catalog.register(build_feishu_runtime_adapter(host));
+    catalog.register(build_feishu_runtime_adapter(host.clone()));
+    catalog.register(build_weixin_runtime_adapter(host));
     catalog
 }
 

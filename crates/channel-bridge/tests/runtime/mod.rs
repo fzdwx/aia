@@ -129,7 +129,11 @@ fn registry_returns_supported_definitions() {
 fn channel_transport_serializes_to_wire_literal() {
     let value =
         serde_json::to_value(ChannelTransport::Feishu).expect("channel transport should serialize");
+    let weixin =
+        serde_json::to_value(ChannelTransport::Weixin).expect("channel transport should serialize");
 
     assert_eq!(value, serde_json::json!("feishu"));
+    assert_eq!(weixin, serde_json::json!("weixin"));
     assert_eq!(ChannelTransport::Feishu.to_string(), "feishu");
+    assert_eq!(ChannelTransport::Weixin.to_string(), "weixin");
 }

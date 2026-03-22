@@ -598,7 +598,6 @@ export function SettingsPanel() {
                               </SelectContent>
                             </Select>
                           </div>
-
                         </div>
                       </section>
 

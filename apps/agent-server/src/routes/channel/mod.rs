@@ -1,6 +1,6 @@
 use axum::{
     Router,
-    routing::{get, put},
+    routing::{get, post, put},
 };
 use channel_bridge::ChannelTransport;
 use serde::{Deserialize, Serialize};
@@ -34,6 +34,28 @@ pub(crate) struct UpdateChannelRequest {
     pub config: Option<Value>,
 }
 
+#[derive(Deserialize)]
+pub(crate) struct WeixinLoginQrRequest {}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub(crate) struct WeixinLoginQrResponse {
+    pub qrcode: String,
+    pub qrcode_url: String,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct WeixinLoginStatusRequest {
+    pub qrcode: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub(crate) struct WeixinLoginStatusResponse {
+    pub status: String,
+    pub bot_token: Option<String>,
+    pub account_id: Option<String>,
+    pub user_id: Option<String>,
+}
+
 mod config;
 mod handlers;
 mod mutation;
@@ -45,5 +67,7 @@ pub(crate) fn router() -> Router<SharedState> {
     Router::new()
         .route("/api/channels", get(handlers::list_channels).post(handlers::create_channel))
         .route("/api/channels/catalog", get(handlers::list_supported_channels))
+        .route("/api/channels/weixin/login/qr", post(handlers::create_weixin_login_qr))
+        .route("/api/channels/weixin/login/status", post(handlers::poll_weixin_login_status))
         .route("/api/channels/{id}", put(handlers::update_channel).delete(handlers::delete_channel))
 }

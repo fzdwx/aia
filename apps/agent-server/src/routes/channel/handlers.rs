@@ -4,15 +4,17 @@ use axum::{
     response::IntoResponse,
 };
 use channel_bridge::{ChannelProfile, SupportedChannelDefinition};
+use weixin_client::{WeixinClient, WeixinClientConfig};
 
 use crate::{channel_host::supported_channel_definitions, state::SharedState};
 
 use super::{
-    ChannelListItem, CreateChannelRequest, UpdateChannelRequest,
+    ChannelListItem, CreateChannelRequest, UpdateChannelRequest, WeixinLoginQrRequest,
+    WeixinLoginQrResponse, WeixinLoginStatusRequest, WeixinLoginStatusResponse,
     config::{channel_list_item, merge_channel_config},
     mutation::{ChannelMutation, apply_channel_mutation},
 };
-use crate::routes::common::{error_response, ok_response};
+use crate::routes::common::{error_response, json_response, ok_response};
 
 pub(crate) async fn list_supported_channels(
     State(state): State<SharedState>,
@@ -173,4 +175,61 @@ pub(crate) async fn delete_channel(
         return response;
     };
     ok_response()
+}
+
+pub(crate) async fn create_weixin_login_qr(
+    Json(_body): Json<WeixinLoginQrRequest>,
+) -> impl IntoResponse {
+    let client = match build_weixin_login_client() {
+        Ok(client) => client,
+        Err(error) => {
+            return error_response(axum::http::StatusCode::BAD_REQUEST, error.to_string());
+        }
+    };
+
+    match client.fetch_login_qr(None).await {
+        Ok(login_qr) => json_response(
+            axum::http::StatusCode::OK,
+            WeixinLoginQrResponse { qrcode: login_qr.qrcode, qrcode_url: login_qr.qrcode_url },
+        ),
+        Err(error) => error_response(
+            axum::http::StatusCode::BAD_GATEWAY,
+            format!("failed to fetch weixin login qr: {error}"),
+        ),
+    }
+}
+
+pub(crate) async fn poll_weixin_login_status(
+    Json(body): Json<WeixinLoginStatusRequest>,
+) -> impl IntoResponse {
+    if body.qrcode.trim().is_empty() {
+        return error_response(axum::http::StatusCode::BAD_REQUEST, "qrcode is required");
+    }
+
+    let client = match build_weixin_login_client() {
+        Ok(client) => client,
+        Err(error) => {
+            return error_response(axum::http::StatusCode::BAD_REQUEST, error.to_string());
+        }
+    };
+
+    match client.poll_login_status(&body.qrcode).await {
+        Ok(status) => json_response(
+            axum::http::StatusCode::OK,
+            WeixinLoginStatusResponse {
+                status: status.status,
+                bot_token: (!status.bot_token.trim().is_empty()).then_some(status.bot_token),
+                account_id: (!status.account_id.trim().is_empty()).then_some(status.account_id),
+                user_id: (!status.user_id.trim().is_empty()).then_some(status.user_id),
+            },
+        ),
+        Err(error) => error_response(
+            axum::http::StatusCode::BAD_GATEWAY,
+            format!("failed to poll weixin login status: {error}"),
+        ),
+    }
+}
+
+fn build_weixin_login_client() -> Result<WeixinClient, weixin_client::WeixinClientError> {
+    WeixinClient::new(WeixinClientConfig::new("", None))
 }

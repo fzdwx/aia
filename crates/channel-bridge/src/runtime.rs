@@ -13,12 +13,14 @@ use crate::{ChannelBindingStore, ChannelBridgeError, ChannelSessionService};
 #[serde(rename_all = "snake_case")]
 pub enum ChannelTransport {
     Feishu,
+    Weixin,
 }
 
 impl ChannelTransport {
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Feishu => "feishu",
+            Self::Weixin => "weixin",
         }
     }
 }

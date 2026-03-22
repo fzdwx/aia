@@ -25,6 +25,8 @@ README 里真正难的是这些能力：
 - `agent-runtime`：运行时编排与最小 turn 执行
 - `channel-bridge`：外部 channel 共享模型、已配置渠道档案存储 façade、adapter catalog、session 绑定、预压缩与幂等 helper
 - `channel-feishu`：飞书 channel 的协议实现、回复控制与 adapter
+- `channel-weixin`：微信 / iLink channel 的轮询协议实现与 adapter，复用共享 channel runtime host 与 session 绑定语义
+- `weixin-client`：微信 / iLink 私有桥接协议的低层 HTTP client 与媒体 helper，为后续 channel 适配提供复用边界
 - `provider-registry`：provider 资料、活动项与序列化模型；其中 provider 仍按“一 provider 多 model”建模，但 session 级 `reasoning_effort` 不再回流到 provider model 默认值
 - `openai-adapter`：首个真实模型适配层，负责把统一请求映射到 Responses 风格接口，并已切到原生 async `reqwest` 主链
 - `agent-store`：本地 SQLite session / trace 存储与查询
@@ -168,6 +170,27 @@ README 里真正难的是这些能力：
 - 持有飞书配置结构与校验逻辑，并通过 adapter 暴露对应 `config_schema`
 - 通过 `channel-bridge` 提供的通用宿主接口向上请求 session 绑定、turn 提交与运行时事件订阅，不直接依赖 `apps/agent-server` 本地类型
 - 不承载 channel 静态配置持久化，也不接管 app 壳的 HTTP/SSE 路由与全局状态装配
+
+### `channel-weixin`
+
+负责微信 / iLink channel 的平台适配：
+
+- 复用 `weixin-client` 暴露的二维码轮询、长轮询更新、文本回复、typing 状态与媒体 helper
+- 实现 `channel-bridge` 暴露的通用 `ChannelRuntimeAdapter`，作为第二个真实 transport adapter
+- 持有微信 channel 的配置结构、schema 与轮询 worker，负责把入站微信消息映射成 session turn，并把最终回答回写到微信
+- 通过 `channel-bridge` 提供的通用宿主接口请求 session 绑定、预压缩、turn 提交与运行时事件订阅，不直接依赖 `apps/agent-server` 内部实现细节
+- 不承载 channel 静态配置持久化，也不接管 app 壳 HTTP/SSE 路由与全局状态装配
+- 当前阶段允许一个受控例外：扫码登录仍通过 `apps/agent-server` 的 channel 控制面路由暴露给 Web 前端，完成“获取二维码 / 轮询登录状态 / 自动落库 profile”这条用户闭环；但这层只负责控制面桥接，不应继续承接更多微信协议状态机或基础设施细节
+
+### `weixin-client`
+
+负责微信 / iLink 私有桥接协议的低层 API client：
+
+- 承接扫码登录、二维码轮询、长轮询收消息、文本回复、typing 状态与媒体上传下载这组 HTTP / CDN 细节
+- 对外保持纯 client 边界，不直接承接 channel runtime、session 绑定或 app 壳桥接逻辑
+- 把请求头构造、业务 `ret/errcode` 判错、文本分片、媒体 AES-128-ECB 加解密与 CDN 上传下载收口在 crate 内，避免这些协议细节散落到未来的 channel adapter
+- 作为边缘集成 crate 与 `channel-bridge` 平行存在：后者保持 transport-neutral 抽象，前者只负责微信专属协议
+- 内部按 `client/config/error/media/protocol` 模块组织，`lib.rs` 保持薄 façade
 
 ### `openai-adapter`
 
