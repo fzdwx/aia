@@ -120,7 +120,7 @@ export const MarkdownRenderer = memo(
           codeBlockProps={CHAT_CODE_BLOCK_PROPS}
           content={streaming ? undefined : content}
           customId={CHAT_MARKDOWN_ID}
-          deferNodesUntilVisible
+          deferNodesUntilVisible={false}
           final={!streaming}
           isDark={resolvedTheme === "dark"}
           mermaidProps={CHAT_MERMAID_PROPS}

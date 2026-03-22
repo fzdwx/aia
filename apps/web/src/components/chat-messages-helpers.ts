@@ -2,10 +2,6 @@ export const HISTORY_LOAD_TRIGGER_PX = 80
 export const HISTORY_HINT_VISIBILITY_PX = 160
 export const STICK_TO_BOTTOM_THRESHOLD_PX = 120
 
-export function clampScrollTop(target: number, maxScrollTop: number) {
-  return Math.min(Math.max(target, 0), Math.max(maxScrollTop, 0))
-}
-
 export function distanceFromBottom({
   scrollHeight,
   scrollTop,

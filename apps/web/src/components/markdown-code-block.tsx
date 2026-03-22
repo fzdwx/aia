@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import {
   D2BlockNode,
   MarkdownCodeBlockNode,
@@ -122,8 +122,19 @@ export function MarkdownCodeBlock({
     () => formatLanguageLabel(node.language),
     [node.language]
   )
+  const diagramKind =
+    normalizedLanguage === "d2lang" ? "d2" : normalizedLanguage
   const resetTimerRef = useRef<number | null>(null)
   const [copied, setCopied] = useState(false)
+
+  const renderDiagramBlock = (content: ReactNode) => {
+    return (
+      <div className="chat-diagram-block" data-diagram-kind={diagramKind}>
+        <div className="chat-diagram-block-label">{languageLabel}</div>
+        <div className="chat-diagram-block-body">{content}</div>
+      </div>
+    )
+  }
 
   useEffect(() => {
     return () => {
@@ -140,53 +151,63 @@ export function MarkdownCodeBlock({
   if (normalizedLanguage === "mermaid") {
     const MermaidComponent = ctx?.customComponents?.mermaid
 
-    return MermaidComponent ? (
-      <MermaidComponent
-        isDark={ctx.isDark}
-        node={node}
-        {...(ctx.mermaidProps ?? {})}
-      />
-    ) : (
-      <MermaidBlockNode
-        isDark={ctx?.isDark}
-        loading={Boolean(node.loading)}
-        node={node}
-        {...(ctx?.mermaidProps ?? {})}
-      />
+    return renderDiagramBlock(
+      MermaidComponent ? (
+        <MermaidComponent
+          isDark={ctx.isDark}
+          node={node}
+          {...(ctx.mermaidProps ?? {})}
+        />
+      ) : (
+        <MermaidBlockNode
+          isDark={ctx?.isDark}
+          loading={Boolean(node.loading)}
+          node={node}
+          {...(ctx?.mermaidProps ?? {})}
+        />
+      )
     )
   }
 
   if (normalizedLanguage === "infographic") {
     const InfographicComponent = ctx?.customComponents?.infographic
 
-    return InfographicComponent ? (
-      <InfographicComponent
-        isDark={ctx?.isDark}
-        node={node}
-        {...(ctx?.infographicProps ?? {})}
-      />
-    ) : (
-      <InfographicBlockNode
-        isDark={ctx?.isDark}
-        loading={Boolean(node.loading)}
-        node={node}
-        {...(ctx?.infographicProps ?? {})}
-      />
+    return renderDiagramBlock(
+      InfographicComponent ? (
+        <InfographicComponent
+          isDark={ctx?.isDark}
+          node={node}
+          {...(ctx?.infographicProps ?? {})}
+        />
+      ) : (
+        <InfographicBlockNode
+          isDark={ctx?.isDark}
+          loading={Boolean(node.loading)}
+          node={node}
+          {...(ctx?.infographicProps ?? {})}
+        />
+      )
     )
   }
 
   if (normalizedLanguage === "d2" || normalizedLanguage === "d2lang") {
     const D2Component = ctx?.customComponents?.d2
 
-    return D2Component ? (
-      <D2Component isDark={ctx?.isDark} node={node} {...(ctx?.d2Props ?? {})} />
-    ) : (
-      <D2BlockNode
-        isDark={ctx?.isDark}
-        loading={Boolean(node.loading)}
-        node={node}
-        {...(ctx?.d2Props ?? {})}
-      />
+    return renderDiagramBlock(
+      D2Component ? (
+        <D2Component
+          isDark={ctx?.isDark}
+          node={node}
+          {...(ctx?.d2Props ?? {})}
+        />
+      ) : (
+        <D2BlockNode
+          isDark={ctx?.isDark}
+          loading={Boolean(node.loading)}
+          node={node}
+          {...(ctx?.d2Props ?? {})}
+        />
+      )
     )
   }
 

@@ -13,7 +13,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import type { ModelConfig } from "@/lib/types"
+import type {
+  ChannelListItem,
+  SupportedChannelDefinition,
+  ModelConfig,
+} from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useChannelsStore } from "@/stores/channels-store"
 import { NEW_PROVIDER_SETTINGS_KEY, useChatStore } from "@/stores/chat-store"
@@ -36,6 +40,41 @@ function emptyModelRow(): ModelFormRow {
   }
 }
 
+function providerHost(baseUrl: string): string {
+  try {
+    const normalized =
+      baseUrl.startsWith("http://") || baseUrl.startsWith("https://")
+        ? baseUrl
+        : `https://${baseUrl}`
+    return new URL(normalized).host
+  } catch {
+    return baseUrl.replace(/^https?:\/\//, "")
+  }
+}
+
+function providerProtocolLabel(kind: string): string {
+  if (kind === "openai-responses") return "Responses"
+  if (kind === "openai-chat-completions") return "Chat Completions"
+  return kind
+}
+
+function channelConfigFields(definition: SupportedChannelDefinition): number {
+  const schema = definition.config_schema as Record<string, unknown>
+  const properties = schema.properties
+  if (!properties || typeof properties !== "object") return 0
+  return Object.keys(properties).length
+}
+
+function configuredChannelForTransport(
+  configuredChannels: ChannelListItem[],
+  transport: string
+): ChannelListItem | null {
+  return (
+    configuredChannels.find((channel) => channel.transport === transport) ??
+    null
+  )
+}
+
 export function SettingsPanel() {
   const providerList = useChatStore((s) => s.providerList)
   const setView = useChatStore((s) => s.setView)
@@ -49,6 +88,7 @@ export function SettingsPanel() {
   const supportedChannels = useChannelsStore((s) => s.supportedChannels)
   const selectedTransport = useChannelsStore((s) => s.selectedTransport)
   const channelsLoading = useChannelsStore((s) => s.loading)
+  const configuredChannels = useChannelsStore((s) => s.configuredChannels)
   const selectTransport = useChannelsStore((s) => s.selectTransport)
 
   const selectedProvider =
@@ -220,36 +260,62 @@ export function SettingsPanel() {
     [normalizedItemQuery, supportedChannels]
   )
 
-  const settingsDescription = isProvidersSection
-    ? "Manage provider registry entries, endpoints, and model catalogs from the shared workspace."
-    : "Manage channel transports and runtime profiles from the shared workspace."
+  const selectedChannelDefinition =
+    supportedChannels.find(
+      (channel) => channel.transport === selectedTransport
+    ) ??
+    supportedChannels[0] ??
+    null
+
+  const workspaceDescription = isProvidersSection
+    ? "先选左侧 Provider，再在右侧完成连接参数与模型目录。新增 Provider 时，先补 Name、API Key 与至少一个模型。"
+    : "先选左侧 Channel 类型，再在右侧补齐运行配置并决定是否启用。缺失必填项时不会允许提交。"
+
+  const workspaceContext = isProvidersSection
+    ? selectedProvider
+      ? `当前对象：${selectedProvider.name} · ${providerHost(selectedProvider.base_url)}`
+      : "当前对象：新建 Provider 草稿（提交后写入注册表）"
+    : selectedChannelDefinition
+      ? `当前对象：${selectedChannelDefinition.label} · ${selectedChannelDefinition.transport}`
+      : "当前对象：等待服务端返回可配置 Channel 类型"
+
+  const providerSubmitDisabled =
+    submitting ||
+    (!selectedProvider && !name.trim()) ||
+    !hasValidModel ||
+    (!selectedProvider && !apiKey.trim())
+
+  const modelRowsWithId = models.filter((model) => model.id.trim())
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="flex items-center justify-between gap-2 border-b border-border/30 px-4 py-2.5">
-        <div className="flex items-start gap-3">
+      <div className="flex items-start justify-between gap-3 border-b border-border/30 px-4 py-2.5">
+        <div className="flex min-w-0 items-start gap-3">
           <button
             type="button"
             onClick={() => setView("chat")}
-            className="mt-0.5 flex size-9 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+            className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
             aria-label="Back to chat"
           >
-            <ArrowLeft className="size-3.5" />
+            <ArrowLeft className="size-3" />
           </button>
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-sm font-semibold tracking-tight">Settings</h1>
-              <Badge variant="secondary" className="text-[10px]">
-                {isProvidersSection ? "providers" : "channels"}
-              </Badge>
-            </div>
+          <div className="min-w-0">
+            <p className="text-[10px] font-medium tracking-[0.14em] text-muted-foreground uppercase">
+              {isProvidersSection ? "Provider workspace" : "Channel workspace"}
+            </p>
+            <h1 className="mt-0.5 text-sm font-semibold tracking-tight">
+              Settings Workbench
+            </h1>
             <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
-              {settingsDescription}
+              {workspaceDescription}
+            </p>
+            <p className="mt-1 truncate text-[11px] text-foreground/80">
+              {workspaceContext}
             </p>
           </div>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
           <div className="relative min-w-0 sm:w-[260px]">
             <label htmlFor={searchInputId} className="sr-only">
               {isProvidersSection ? "Search providers" : "Search channels"}
@@ -261,10 +327,10 @@ export function SettingsPanel() {
               onChange={(event) => setItemQuery(event.target.value)}
               placeholder={
                 isProvidersSection
-                  ? "Search providers..."
-                  : "Search channels..."
+                  ? "按名称、协议筛选 Provider"
+                  : "按名称、transport 筛选 Channel"
               }
-              className="h-10 pl-9 text-[13px]"
+              className="h-9 pl-9 text-[13px]"
             />
           </div>
 
@@ -273,10 +339,10 @@ export function SettingsPanel() {
               type="button"
               size="sm"
               onClick={() => selectProviderName(NEW_PROVIDER_SETTINGS_KEY)}
-              className="h-10 px-3"
+              className="h-9 px-3"
             >
               <Plus className="size-3.5" />
-              Add Provider
+              新建 Provider
             </Button>
           ) : null}
         </div>
@@ -288,10 +354,17 @@ export function SettingsPanel() {
             <div className="flex min-h-0 flex-col overflow-hidden">
               <div className="shrink-0 border-b border-border/25 px-3 py-2.5">
                 <div className="flex items-center justify-between gap-2">
-                  <p className="text-[12px] font-medium tracking-[0.08em] text-foreground uppercase">
-                    {isProvidersSection ? "Provider List" : "Channel List"}
-                  </p>
-                  <span className="font-mono text-[11px] text-muted-foreground">
+                  <div>
+                    <p className="text-[11px] font-medium tracking-[0.12em] text-foreground uppercase">
+                      {isProvidersSection ? "Registry" : "Channel Catalog"}
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                      {isProvidersSection
+                        ? "按可用性与连接信息快速判断目标 Provider"
+                        : "按接入状态与字段规模判断下一步配置成本"}
+                    </p>
+                  </div>
+                  <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
                     {isProvidersSection
                       ? filteredProviders.length
                       : filteredChannels.length}
@@ -305,8 +378,8 @@ export function SettingsPanel() {
                     filteredProviders.length === 0 ? (
                       <p className="px-3 py-4 text-[12px] text-muted-foreground">
                         {providerList.length === 0 && !normalizedItemQuery
-                          ? "No providers configured yet."
-                          : "No matching providers."}
+                          ? "还没有 Provider。点击右上角“新建 Provider”开始接入。"
+                          : "没有匹配项。尝试按名称或协议关键词筛选。"}
                       </p>
                     ) : (
                       filteredProviders.map((providerItem) => {
@@ -322,46 +395,64 @@ export function SettingsPanel() {
                               selectProviderName(providerItem.name)
                             }
                             className={cn(
-                              "flex min-h-12 w-full items-start gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                              "flex w-full flex-col gap-1 rounded-lg border px-3 py-2.5 text-left transition-colors",
                               isActive
                                 ? "border-border/55 bg-accent/45 text-foreground"
                                 : "border-transparent text-muted-foreground hover:border-border/30 hover:bg-accent/20 hover:text-foreground"
                             )}
                             aria-pressed={isActive}
                           >
-                            <span className="min-w-0 flex-1">
-                              <span className="block truncate text-[12px] font-medium">
-                                {providerItem.name}
+                            <span className="flex items-start justify-between gap-2">
+                              <span className="min-w-0">
+                                <span className="block truncate text-[12px] font-medium">
+                                  {providerItem.name}
+                                </span>
+                                <span className="mt-0.5 block truncate text-[11px] text-muted-foreground/90">
+                                  {providerHost(providerItem.base_url)}
+                                </span>
                               </span>
-                              <span className="mt-0.5 block truncate text-[10px] text-muted-foreground/80">
-                                {providerItem.kind}
+                              <span
+                                className={cn(
+                                  "mt-0.5 rounded-sm border px-1.5 py-0.5 text-[10px] font-medium",
+                                  providerItem.active
+                                    ? "border-[var(--trace-accent-strong)]/30 bg-[var(--trace-accent-strong)]/10 text-[var(--trace-accent-strong)]"
+                                    : "border-border/30 text-muted-foreground"
+                                )}
+                              >
+                                {providerItem.active ? "in use" : "standby"}
                               </span>
                             </span>
-                            <span
-                              className={cn(
-                                "mt-1 size-2 rounded-full",
-                                providerItem.active
-                                  ? "bg-[var(--trace-accent-strong)]"
-                                  : "bg-muted-foreground/30"
-                              )}
-                            />
+                            <span className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground/85">
+                              <span className="rounded-sm border border-border/30 px-1.5 py-0.5">
+                                {providerProtocolLabel(providerItem.kind)}
+                              </span>
+                              <span className="rounded-sm border border-border/30 px-1.5 py-0.5 tabular-nums">
+                                {providerItem.models.length} model
+                                {providerItem.models.length === 1 ? "" : "s"}
+                              </span>
+                            </span>
                           </button>
                         )
                       })
                     )
                   ) : channelsLoading && supportedChannels.length === 0 ? (
                     <p className="px-3 py-4 text-[12px] text-muted-foreground">
-                      Loading channels...
+                      正在加载 Channel 类型...
                     </p>
                   ) : filteredChannels.length === 0 ? (
                     <p className="px-3 py-4 text-[12px] text-muted-foreground">
                       {supportedChannels.length === 0 && !normalizedItemQuery
-                        ? "No supported channels available."
-                        : "No matching channels."}
+                        ? "服务端暂未返回可配置 Channel。"
+                        : "没有匹配项。尝试按 transport 或名称筛选。"}
                     </p>
                   ) : (
                     filteredChannels.map((channel) => {
                       const isActive = channel.transport === selectedTransport
+                      const configured = configuredChannelForTransport(
+                        configuredChannels,
+                        channel.transport
+                      )
+                      const fieldCount = channelConfigFields(channel)
 
                       return (
                         <button
@@ -369,29 +460,47 @@ export function SettingsPanel() {
                           type="button"
                           onClick={() => selectTransport(channel.transport)}
                           className={cn(
-                            "flex min-h-12 w-full items-start gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                            "flex w-full flex-col gap-1 rounded-lg border px-3 py-2.5 text-left transition-colors",
                             isActive
                               ? "border-border/55 bg-accent/45 text-foreground"
                               : "border-transparent text-muted-foreground hover:border-border/30 hover:bg-accent/20 hover:text-foreground"
                           )}
                           aria-pressed={isActive}
                         >
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-[12px] font-medium">
-                              {channel.label}
+                          <span className="flex items-start justify-between gap-2">
+                            <span className="min-w-0">
+                              <span className="block truncate text-[12px] font-medium">
+                                {channel.label}
+                              </span>
+                              <span className="mt-0.5 block truncate text-[11px] text-muted-foreground/90">
+                                {channel.transport}
+                              </span>
                             </span>
-                            <span className="mt-0.5 block truncate text-[10px] text-muted-foreground/80">
-                              {channel.transport}
+                            <span
+                              className={cn(
+                                "mt-0.5 rounded-sm border px-1.5 py-0.5 text-[10px] font-medium",
+                                configured?.enabled
+                                  ? "border-[var(--trace-accent-strong)]/30 bg-[var(--trace-accent-strong)]/10 text-[var(--trace-accent-strong)]"
+                                  : configured
+                                    ? "border-amber-500/40 bg-amber-500/10 text-amber-600"
+                                    : "border-border/30 text-muted-foreground"
+                              )}
+                            >
+                              {configured
+                                ? configured.enabled
+                                  ? "running"
+                                  : "paused"
+                                : "setup"}
                             </span>
                           </span>
-                          <span
-                            className={cn(
-                              "mt-1 size-2 rounded-full",
-                              isActive
-                                ? "bg-[var(--trace-accent-strong)]"
-                                : "bg-muted-foreground/30"
-                            )}
-                          />
+                          <span className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground/85">
+                            <span className="rounded-sm border border-border/30 px-1.5 py-0.5 tabular-nums">
+                              {fieldCount} field{fieldCount === 1 ? "" : "s"}
+                            </span>
+                            <span className="rounded-sm border border-border/30 px-1.5 py-0.5">
+                              {configured ? configured.id : "未创建配置"}
+                            </span>
+                          </span>
                         </button>
                       )
                     })
@@ -403,23 +512,33 @@ export function SettingsPanel() {
             <div className="flex min-h-0 flex-col overflow-hidden border-l border-border/25">
               {isProvidersSection ? (
                 <>
-                  <div className="shrink-0 border-b border-border/25 px-3 py-2">
+                  <div className="shrink-0 border-b border-border/25 px-3 py-2.5">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <h2 className="truncate text-[14px] font-semibold">
+                          <h2 className="truncate text-[15px] font-semibold">
                             {selectedProvider
                               ? selectedProvider.name
-                              : "New Provider"}
+                              : "新建 Provider"}
                           </h2>
                           <Badge variant="outline" className="text-[10px]">
                             {selectedProvider
                               ? selectedProvider.active
-                                ? "Active"
-                                : "Inactive"
-                              : "Draft"}
+                                ? "in use"
+                                : "standby"
+                              : "draft"}
+                          </Badge>
+                          <Badge variant="outline" className="text-[10px]">
+                            {selectedProvider
+                              ? providerProtocolLabel(selectedProvider.kind)
+                              : providerProtocolLabel(kind)}
                           </Badge>
                         </div>
+                        <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                          {selectedProvider
+                            ? `主机 ${providerHost(selectedProvider.base_url)} · ${selectedProvider.models.length} 个模型已登记。`
+                            : "填写连接参数后提交，Provider 会写入注册表并可立即用于会话。"}
+                        </p>
                       </div>
 
                       {selectedProvider ? (
@@ -428,157 +547,191 @@ export function SettingsPanel() {
                           variant="ghost"
                           size="sm"
                           onClick={() => void handleDeleteProvider()}
-                          className="h-10 shrink-0 px-3 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          className="h-9 shrink-0 px-3 text-destructive hover:bg-destructive/10 hover:text-destructive"
                         >
                           <Trash2 className="size-3.5" />
-                          Delete
+                          删除
                         </Button>
                       ) : null}
                     </div>
                   </div>
 
-                  <div className="min-h-0 flex-1 overflow-y-auto p-3">
-                    <form onSubmit={handleSubmit} className="space-y-3">
-                      <div className="grid gap-2 sm:grid-cols-2">
+                  <form
+                    onSubmit={handleSubmit}
+                    className="flex min-h-0 flex-1 flex-col overflow-hidden"
+                  >
+                    <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
+                      <section className="rounded-xl border border-border/30 bg-card/70 p-3">
+                        <div className="mb-2.5">
+                          <p className="text-[11px] font-medium tracking-[0.12em] text-foreground uppercase">
+                            Connection
+                          </p>
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            Name 作为注册键不可重复；Protocol 决定请求协议映射。
+                          </p>
+                        </div>
+
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <div className="space-y-1.5">
+                            <label
+                              htmlFor={providerNameInputId}
+                              className="workspace-form-label"
+                            >
+                              Name
+                            </label>
+                            <Input
+                              id={providerNameInputId}
+                              value={name}
+                              onChange={(event) => setName(event.target.value)}
+                              placeholder="例如：openai-main"
+                              className="h-9 text-[13px]"
+                              disabled={selectedProvider != null}
+                            />
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <label
+                              id={providerProtocolLabelId}
+                              htmlFor={providerProtocolInputId}
+                              className="workspace-form-label"
+                            >
+                              Protocol
+                            </label>
+                            <Select
+                              value={kind}
+                              onValueChange={handleKindChange}
+                            >
+                              <SelectTrigger
+                                id={providerProtocolInputId}
+                                aria-labelledby={providerProtocolLabelId}
+                                className="h-9 w-full text-[13px]"
+                              >
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="openai-responses">
+                                  OpenAI Responses
+                                </SelectItem>
+                                <SelectItem value="openai-chat-completions">
+                                  OpenAI Chat Completions
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div className="space-y-1.5 sm:col-span-2">
+                            <label
+                              htmlFor={providerBaseUrlInputId}
+                              className="workspace-form-label"
+                            >
+                              Base URL
+                            </label>
+                            <Input
+                              id={providerBaseUrlInputId}
+                              value={baseUrl}
+                              onChange={(event) =>
+                                setBaseUrl(event.target.value)
+                              }
+                              className="h-9 text-[13px]"
+                            />
+                            <p className="workspace-form-note">
+                              该地址决定请求入口域名与路径前缀，例如 OpenAI
+                              兼容网关。
+                            </p>
+                          </div>
+                        </div>
+                      </section>
+
+                      <section className="rounded-xl border border-border/30 bg-card/70 p-3">
+                        <div className="mb-2.5">
+                          <p className="text-[11px] font-medium tracking-[0.12em] text-foreground uppercase">
+                            Authentication
+                          </p>
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            新建时必填。编辑已存在 Provider
+                            时可留空以保留旧密钥。
+                          </p>
+                        </div>
+
                         <div className="space-y-1.5">
                           <label
-                            htmlFor={providerNameInputId}
+                            htmlFor={providerApiKeyInputId}
                             className="workspace-form-label"
                           >
-                            Name
+                            API key
                           </label>
+                          {selectedProvider ? (
+                            <p
+                              id={providerApiKeyHintId}
+                              className="workspace-form-note"
+                            >
+                              留空不会覆盖当前密钥。
+                            </p>
+                          ) : null}
                           <Input
-                            id={providerNameInputId}
-                            value={name}
-                            onChange={(event) => setName(event.target.value)}
-                            placeholder="e.g. openai-main"
-                            className="h-10 text-[13px]"
-                            disabled={selectedProvider != null}
+                            id={providerApiKeyInputId}
+                            type="text"
+                            value={apiKey}
+                            onChange={(event) => setApiKey(event.target.value)}
+                            placeholder="sk-..."
+                            aria-describedby={
+                              selectedProvider
+                                ? providerApiKeyHintId
+                                : undefined
+                            }
+                            className="h-9 text-[13px]"
                           />
                         </div>
+                      </section>
 
-                        <div className="space-y-1.5">
-                          <label
-                            id={providerProtocolLabelId}
-                            htmlFor={providerProtocolInputId}
-                            className="workspace-form-label"
-                          >
-                            Protocol
-                          </label>
-                          <Select value={kind} onValueChange={handleKindChange}>
-                            <SelectTrigger
-                              id={providerProtocolInputId}
-                              aria-labelledby={providerProtocolLabelId}
-                              className="h-10 w-full text-[13px]"
+                      <section className="rounded-xl border border-border/30 bg-card/70 p-3">
+                        <div className="mb-2.5 flex flex-wrap items-start justify-between gap-2">
+                          <div>
+                            <p className="text-[11px] font-medium tracking-[0.12em] text-foreground uppercase">
+                              Model Catalog
+                            </p>
+                            <p className="mt-1 text-[11px] text-muted-foreground">
+                              至少需要一个有效 Model
+                              ID。上下文/输出限制为空时按后端默认处理。
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span className="rounded-sm border border-border/30 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground tabular-nums">
+                              {modelRowsWithId.length} active
+                            </span>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                setModels((prev) => [emptyModelRow(), ...prev])
+                              }
+                              className="h-8 px-2.5"
                             >
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="openai-responses">
-                                OpenAI Responses
-                              </SelectItem>
-                              <SelectItem value="openai-chat-completions">
-                                OpenAI Chat Completions
-                              </SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <label
-                          htmlFor={providerApiKeyInputId}
-                          className="workspace-form-label"
-                        >
-                          API key
-                        </label>
-                        {selectedProvider ? (
-                          <p
-                            id={providerApiKeyHintId}
-                            className="workspace-form-note"
-                          >
-                            Leave blank to keep the existing key.
-                          </p>
-                        ) : null}
-                        <Input
-                          id={providerApiKeyInputId}
-                          type="text"
-                          value={apiKey}
-                          onChange={(event) => setApiKey(event.target.value)}
-                          placeholder="sk-..."
-                          aria-describedby={
-                            selectedProvider ? providerApiKeyHintId : undefined
-                          }
-                          className="h-10 text-[13px]"
-                        />
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <label
-                          htmlFor={providerBaseUrlInputId}
-                          className="workspace-form-label"
-                        >
-                          Base URL
-                        </label>
-                        <Input
-                          id={providerBaseUrlInputId}
-                          value={baseUrl}
-                          onChange={(event) => setBaseUrl(event.target.value)}
-                          className="h-10 text-[13px]"
-                        />
-                      </div>
-
-                      <div className="space-y-2 border-t border-border/20 pt-3">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <p className="workspace-form-label">Models</p>
-
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() =>
-                              setModels((prev) => [emptyModelRow(), ...prev])
-                            }
-                            className="h-10 px-3"
-                          >
-                            <Plus className="size-3.5" />
-                            Add Model
-                          </Button>
+                              <Plus className="size-3.5" />
+                              添加模型
+                            </Button>
+                          </div>
                         </div>
 
-                        <div className="space-y-2">
-                          {models.map((row, index) => (
-                            <div
-                              key={`${row.id}:${index}`}
-                              className="workspace-panel-soft px-2.5 py-2.5"
-                            >
-                              <div className="flex items-start justify-between gap-2">
-                                <p className="text-sm font-medium text-foreground">
-                                  Model {index + 1}
-                                </p>
+                        <div className="overflow-x-auto rounded-lg border border-border/25">
+                          <div className="min-w-[840px]">
+                            <div className="grid grid-cols-[minmax(220px,2fr)_minmax(170px,1.4fr)_110px_110px_120px_44px] gap-2 border-b border-border/20 bg-muted/[0.12] px-2.5 py-2 text-[10px] font-medium tracking-[0.08em] text-muted-foreground uppercase">
+                              <span>Model ID</span>
+                              <span>Display Name</span>
+                              <span>Context</span>
+                              <span>Output</span>
+                              <span>Reasoning</span>
+                              <span className="text-center">-</span>
+                            </div>
 
-                                {models.length > 1 ? (
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="icon-sm"
-                                    onClick={() => removeModelRow(index)}
-                                    aria-label={`Remove model ${index + 1}`}
-                                    className="size-9 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                                  >
-                                    <X className="size-3.5" />
-                                  </Button>
-                                ) : null}
-                              </div>
-
-                              <div className="mt-2 grid gap-2 md:grid-cols-2">
-                                <div className="space-y-1.5">
-                                  <label
-                                    htmlFor={`${settingsScopeId}-model-id-${index}`}
-                                    className="workspace-form-label"
-                                  >
-                                    Model ID
-                                  </label>
+                            <div className="divide-y divide-border/20">
+                              {models.map((row, index) => (
+                                <div
+                                  key={`${row.id}:${index}`}
+                                  className="grid grid-cols-[minmax(220px,2fr)_minmax(170px,1.4fr)_110px_110px_120px_44px] gap-2 px-2.5 py-2"
+                                >
                                   <Input
                                     id={`${settingsScopeId}-model-id-${index}`}
                                     value={row.id}
@@ -587,18 +740,11 @@ export function SettingsPanel() {
                                         id: event.target.value,
                                       })
                                     }
-                                    placeholder="e.g. gpt-5.4"
-                                    className="h-10 text-[13px]"
+                                    placeholder="gpt-5.4"
+                                    className="h-9 text-[12px]"
+                                    aria-label={`Model ${index + 1} ID`}
                                   />
-                                </div>
 
-                                <div className="space-y-1.5">
-                                  <label
-                                    htmlFor={`${settingsScopeId}-model-display-name-${index}`}
-                                    className="workspace-form-label"
-                                  >
-                                    Display name
-                                  </label>
                                   <Input
                                     id={`${settingsScopeId}-model-display-name-${index}`}
                                     value={row.display_name}
@@ -607,18 +753,11 @@ export function SettingsPanel() {
                                         display_name: event.target.value,
                                       })
                                     }
-                                    placeholder="Optional label shown in the UI"
-                                    className="h-10 text-[13px]"
+                                    placeholder="可选展示名"
+                                    className="h-9 text-[12px]"
+                                    aria-label={`Model ${index + 1} display name`}
                                   />
-                                </div>
 
-                                <div className="space-y-1.5">
-                                  <label
-                                    htmlFor={`${settingsScopeId}-model-context-limit-${index}`}
-                                    className="workspace-form-label"
-                                  >
-                                    Context limit
-                                  </label>
                                   <Input
                                     id={`${settingsScopeId}-model-context-limit-${index}`}
                                     value={row.limit_context}
@@ -627,19 +766,12 @@ export function SettingsPanel() {
                                         limit_context: event.target.value,
                                       })
                                     }
-                                    placeholder="Context limit"
-                                    className="h-10 text-[13px]"
+                                    placeholder="ctx"
+                                    className="h-9 text-[12px]"
                                     inputMode="numeric"
+                                    aria-label={`Model ${index + 1} context limit`}
                                   />
-                                </div>
 
-                                <div className="space-y-1.5">
-                                  <label
-                                    htmlFor={`${settingsScopeId}-model-output-limit-${index}`}
-                                    className="workspace-form-label"
-                                  >
-                                    Output limit
-                                  </label>
                                   <Input
                                     id={`${settingsScopeId}-model-output-limit-${index}`}
                                     value={row.limit_output}
@@ -648,57 +780,71 @@ export function SettingsPanel() {
                                         limit_output: event.target.value,
                                       })
                                     }
-                                    placeholder="Output limit"
-                                    className="h-10 text-[13px]"
+                                    placeholder="out"
+                                    className="h-9 text-[12px]"
                                     inputMode="numeric"
+                                    aria-label={`Model ${index + 1} output limit`}
                                   />
+
+                                  <div className="flex items-center justify-center rounded-md border border-border/25 bg-background/60 px-2">
+                                    <Switch
+                                      checked={row.supports_reasoning}
+                                      onCheckedChange={(checked: boolean) =>
+                                        updateModelRow(index, {
+                                          supports_reasoning: checked,
+                                        })
+                                      }
+                                      size="default"
+                                      aria-label={`Model ${index + 1} reasoning support`}
+                                    />
+                                  </div>
+
+                                  <div className="flex items-center justify-center">
+                                    {models.length > 1 ? (
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon-sm"
+                                        onClick={() => removeModelRow(index)}
+                                        aria-label={`Remove model ${index + 1}`}
+                                        className="size-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                                      >
+                                        <X className="size-3.5" />
+                                      </Button>
+                                    ) : null}
+                                  </div>
                                 </div>
-                              </div>
-
-                              <div className="mt-2 flex flex-col gap-2 rounded-xl border border-border/20 bg-background/55 px-2.5 py-2 sm:flex-row sm:items-center sm:justify-between">
-                                <label className="flex items-center gap-2 text-sm text-foreground">
-                                  <Switch
-                                    checked={row.supports_reasoning}
-                                    onCheckedChange={(checked: boolean) =>
-                                      updateModelRow(index, {
-                                        supports_reasoning: checked,
-                                      })
-                                    }
-                                    size="default"
-                                  />
-                                  <span>
-                                    Reasoning support
-                                    <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                                      Indicates whether this model supports
-                                      session-level thinking controls.
-                                    </span>
-                                  </span>
-                                </label>
-                              </div>
+                              ))}
                             </div>
-                          ))}
+                          </div>
                         </div>
-                      </div>
 
-                      <div className="flex justify-end border-t border-border/20 pt-3">
+                        <p className="mt-2 text-[11px] text-muted-foreground">
+                          Reasoning 开关表示该模型是否支持会话级 thinking 控制。
+                        </p>
+                      </section>
+                    </div>
+
+                    <div className="shrink-0 border-t border-border/20 px-3 py-2.5">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <p className="text-[11px] text-muted-foreground">
+                          {!hasValidModel
+                            ? "至少填写一个 Model ID 才能提交。"
+                            : selectedProvider
+                              ? "提交后会更新当前 Provider 配置。"
+                              : "提交后会创建新的 Provider 并自动选中。"}
+                        </p>
                         <Button
                           type="submit"
-                          disabled={
-                            submitting ||
-                            (!selectedProvider && !name.trim()) ||
-                            !hasValidModel ||
-                            (!selectedProvider && !apiKey.trim())
-                          }
-                          className="min-h-10 min-w-[190px]"
+                          disabled={providerSubmitDisabled}
+                          className="min-h-9 min-w-[190px]"
                         >
                           <Plus className="size-3.5" />
-                          {selectedProvider
-                            ? "Update Provider"
-                            : "Create Provider"}
+                          {selectedProvider ? "保存 Provider" : "创建 Provider"}
                         </Button>
                       </div>
-                    </form>
-                  </div>
+                    </div>
+                  </form>
                 </>
               ) : (
                 <div className="min-h-0 flex-1 overflow-y-auto p-3">
