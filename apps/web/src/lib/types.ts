@@ -7,12 +7,14 @@ export type StreamEvent =
       invocation_id: string
       tool_name: string
       arguments: Record<string, unknown> | null
+      detected_at_ms: number
     }
   | {
       kind: "tool_call_started"
       invocation_id: string
       tool_name: string
       arguments: Record<string, unknown> | null
+      started_at_ms: number
     }
   | {
       kind: "tool_output_delta"
@@ -28,6 +30,7 @@ export type StreamEvent =
       content: string
       details?: Record<string, unknown>
       failed: boolean
+      finished_at_ms: number
     }
   | { kind: "done" }
 

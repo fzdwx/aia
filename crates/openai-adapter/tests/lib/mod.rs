@@ -888,17 +888,21 @@ fn responses_流式工具调用支持_call_id_字段() {
         CompletionSegment::ToolUse(ToolCall { tool_name, invocation_id, .. })
             if tool_name == "search_code" && invocation_id == "call_from_call_id"
     )));
-    assert_eq!(
-        deltas,
-        vec![
+    assert!(matches!(
+        deltas.as_slice(),
+        [
             StreamEvent::ToolCallDetected {
-                invocation_id: "call_from_call_id".into(),
-                tool_name: "search_code".into(),
-                arguments: json!({"query":"agent-runtime"}),
+                invocation_id,
+                tool_name,
+                arguments,
+                detected_at_ms,
             },
             StreamEvent::Done,
-        ]
-    );
+        ] if invocation_id == "call_from_call_id"
+            && tool_name == "search_code"
+            && arguments == &json!({"query":"agent-runtime"})
+            && *detected_at_ms > 0
+    ));
 }
 
 #[test]
@@ -1265,20 +1269,27 @@ fn 聊天补全流式调用可逐段收到文本与工具() {
         CompletionSegment::ToolUse(ToolCall { tool_name, invocation_id, .. })
             if tool_name == "search_code" && invocation_id == "call_1"
     )));
-    assert_eq!(
-        deltas,
-        vec![
-            StreamEvent::ThinkingDelta { text: "先分析".into() },
-            StreamEvent::TextDelta { text: "答".into() },
-            StreamEvent::TextDelta { text: "案".into() },
+    assert!(matches!(
+        deltas.as_slice(),
+        [
+            StreamEvent::ThinkingDelta { text },
+            StreamEvent::TextDelta { text: first_text },
+            StreamEvent::TextDelta { text: second_text },
             StreamEvent::ToolCallDetected {
-                invocation_id: "call_1".into(),
-                tool_name: "search_code".into(),
-                arguments: Value::default(),
+                invocation_id,
+                tool_name,
+                arguments,
+                detected_at_ms,
             },
             StreamEvent::Done,
-        ]
-    );
+        ] if text == "先分析"
+            && first_text == "答"
+            && second_text == "案"
+            && invocation_id == "call_1"
+            && tool_name == "search_code"
+            && arguments == &Value::default()
+            && *detected_at_ms > 0
+    ));
 }
 
 #[test]
@@ -1329,15 +1340,19 @@ fn 聊天补全流式工具调用重复发送名称时只检测一次() {
                 && invocation_id == "call_1"
                 && arguments == &json!({"query":"agent-runtime"})
     )));
-    assert_eq!(
-        deltas,
-        vec![
+    assert!(matches!(
+        deltas.as_slice(),
+        [
             StreamEvent::ToolCallDetected {
-                invocation_id: "call_1".into(),
-                tool_name: "search_code".into(),
-                arguments: Value::default(),
+                invocation_id,
+                tool_name,
+                arguments,
+                detected_at_ms,
             },
             StreamEvent::Done,
-        ]
-    );
+        ] if invocation_id == "call_1"
+            && tool_name == "search_code"
+            && arguments == &Value::default()
+            && *detected_at_ms > 0
+    ));
 }

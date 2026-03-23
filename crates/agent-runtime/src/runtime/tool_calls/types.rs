@@ -79,11 +79,12 @@ impl ExecuteToolCallContext<'_> {
         }
     }
 
-    pub(in super::super) fn started_event(&self) -> StreamEvent {
+    pub(in super::super) fn started_event(&self, started_at_ms: u64) -> StreamEvent {
         StreamEvent::ToolCallStarted {
             invocation_id: self.call.invocation_id.clone(),
             tool_name: self.call.tool_name.clone(),
             arguments: self.call.arguments.clone(),
+            started_at_ms,
         }
     }
 }

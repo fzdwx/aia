@@ -734,7 +734,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
                   invocationId: data.invocation_id,
                   toolName: data.tool_name,
                   arguments: normalizeToolArguments(data.arguments),
-                  detectedAtMs: Date.now(),
+                  detectedAtMs: data.detected_at_ms,
                   output: "",
                   completed: false,
                 },
@@ -757,11 +757,11 @@ export const useChatStore = create<ChatStore>((set, get) => {
                   ...b.tool,
                   toolName: data.tool_name || b.tool.toolName,
                   arguments: normalizeToolArguments(data.arguments),
-                  startedAtMs: b.tool.startedAtMs ?? Date.now(),
+                  startedAtMs: b.tool.startedAtMs ?? data.started_at_ms,
                 },
               }
             } else {
-              const startedAtMs = Date.now()
+              const startedAtMs = data.started_at_ms
               blocks.push({
                 type: "tool",
                 tool: {
@@ -790,20 +790,17 @@ export const useChatStore = create<ChatStore>((set, get) => {
                 ...b,
                 tool: {
                   ...b.tool,
-                  startedAtMs: b.tool.startedAtMs ?? Date.now(),
                   output: b.tool.output + data.text,
                 },
               }
             } else {
-              const startedAtMs = Date.now()
               blocks.push({
                 type: "tool",
                 tool: {
                   invocationId: data.invocation_id,
                   toolName: "",
                   arguments: {},
-                  detectedAtMs: startedAtMs,
-                  startedAtMs,
+                  detectedAtMs: 0,
                   output: data.text,
                   completed: false,
                 },
@@ -824,7 +821,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
                 ...b,
                 tool: {
                   ...b.tool,
-                  finishedAtMs: Date.now(),
+                  finishedAtMs: data.finished_at_ms,
                   completed: true,
                   resultContent: data.content,
                   resultDetails: data.details,

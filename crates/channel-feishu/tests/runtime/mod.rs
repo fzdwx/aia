@@ -359,6 +359,7 @@ fn streaming_card_state_applies_stream_events_incrementally() {
             invocation_id: "tool-1".into(),
             tool_name: "grep".into(),
             arguments: json!({ "pattern": "feishu" }),
+            started_at_ms: 12,
         },
     );
     apply_stream_event_to_feishu_card_state(
@@ -377,6 +378,7 @@ fn streaming_card_state_applies_stream_events_incrementally() {
             content: "完成".into(),
             details: None,
             failed: false,
+            finished_at_ms: 22,
         },
     );
     apply_stream_event_to_feishu_card_state(

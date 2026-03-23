@@ -1,3 +1,5 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use agent_core::{Completion, CompletionSegment, CompletionUsage, StreamEvent, ToolCall};
 use serde_json::Value;
 
@@ -8,6 +10,10 @@ use crate::{
 };
 
 use super::OpenAiResponsesModel;
+
+fn now_timestamp_ms() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
+}
 
 #[derive(Default)]
 pub(super) struct ResponsesStreamingState {
@@ -44,6 +50,7 @@ impl ResponsesStreamingState {
                 invocation_id: id.clone(),
                 tool_name: tool_name.clone(),
                 arguments: self.current_tool.parsed_arguments(),
+                detected_at_ms: now_timestamp_ms(),
             });
         }
         self.tool_calls.push((id, tool_name, self.current_tool.raw_arguments().to_string()));

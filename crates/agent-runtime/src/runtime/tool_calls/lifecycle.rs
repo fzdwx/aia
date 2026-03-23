@@ -113,12 +113,15 @@ where
         )?;
         context.source_entry_ids.push(tool_result_event_id);
 
+        let finished_at_ms = now_timestamp_ms();
+
         on_delta(StreamEvent::ToolCallCompleted {
             invocation_id: context.call.invocation_id.clone(),
             tool_name: context.call.tool_name.clone(),
             content: tool_result.content.clone(),
             details: tool_result.details.clone(),
             failed: stream_failed,
+            finished_at_ms,
         });
 
         self.publish_event(RuntimeEvent::ToolInvocation {
@@ -128,7 +131,7 @@ where
         Ok(ToolInvocationLifecycle {
             call: context.call.clone(),
             started_at_ms: context.started_at_ms,
-            finished_at_ms: now_timestamp_ms(),
+            finished_at_ms,
             trace_context: context.tool_trace_context,
             outcome,
         })

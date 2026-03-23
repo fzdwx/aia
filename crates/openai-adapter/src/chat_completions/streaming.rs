@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_core::{Completion, CompletionSegment, CompletionUsage, StreamEvent, ToolCall};
 use serde_json::Value;
@@ -9,6 +10,10 @@ use crate::{
 };
 
 use super::OpenAiChatCompletionsModel;
+
+fn now_timestamp_ms() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
+}
 
 #[derive(Default)]
 pub(super) struct ChatCompletionsStreamingState {
@@ -49,6 +54,7 @@ impl ChatCompletionsStreamingState {
                     invocation_id,
                     tool_name: name.to_string(),
                     arguments: state.parsed_arguments(),
+                    detected_at_ms: now_timestamp_ms(),
                 });
                 state.mark_detection_emitted();
             }

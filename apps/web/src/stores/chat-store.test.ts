@@ -307,6 +307,7 @@ describe("chat store submitTurn", () => {
         arguments: {
           file_path: "/home/like/projects/aia/AGENTS.md",
         },
+        started_at_ms: 123,
       },
     }
 
@@ -323,7 +324,70 @@ describe("chat store submitTurn", () => {
     assert.deepEqual(state.blocks[0].tool.arguments, {
       file_path: "/home/like/projects/aia/AGENTS.md",
     })
-    expect(typeof state.blocks[0].tool.startedAtMs).toBe("number")
+    expect(state.blocks[0].tool.startedAtMs).toBe(123)
+  })
+
+  test("keeps tool duration timestamps aligned with backend stream events", () => {
+    useChatStore.setState({
+      activeSessionId: "session-1",
+      chatState: "active",
+      streamingTurn: {
+        userMessage: "search docs",
+        status: "working",
+        blocks: [],
+      },
+    })
+
+    useChatStore.getState().handleSseEvent({
+      type: "stream",
+      data: {
+        session_id: "session-1",
+        turn_id: "turn-1",
+        kind: "tool_call_detected",
+        invocation_id: "functions.websearch:1",
+        tool_name: "functions.websearch",
+        arguments: { q: "agent runtime timestamps" },
+        detected_at_ms: 1000,
+      },
+    })
+
+    useChatStore.getState().handleSseEvent({
+      type: "stream",
+      data: {
+        session_id: "session-1",
+        turn_id: "turn-1",
+        kind: "tool_call_started",
+        invocation_id: "functions.websearch:1",
+        tool_name: "functions.websearch",
+        arguments: { q: "agent runtime timestamps" },
+        started_at_ms: 2200,
+      },
+    })
+
+    useChatStore.getState().handleSseEvent({
+      type: "stream",
+      data: {
+        session_id: "session-1",
+        turn_id: "turn-1",
+        kind: "tool_call_completed",
+        invocation_id: "functions.websearch:1",
+        tool_name: "functions.websearch",
+        content: "done",
+        failed: false,
+        finished_at_ms: 14350,
+      },
+    })
+
+    const state = useChatStore.getState().streamingTurn
+    expect(state?.blocks).toHaveLength(1)
+    expect(state?.blocks[0]?.type).toBe("tool")
+    if (state?.blocks[0]?.type !== "tool") {
+      throw new Error("expected tool block")
+    }
+
+    expect(state.blocks[0].tool.detectedAtMs).toBe(1000)
+    expect(state.blocks[0].tool.startedAtMs).toBe(2200)
+    expect(state.blocks[0].tool.finishedAtMs).toBe(14350)
   })
 
   test("keeps partial streaming content visible after cancelled error", () => {

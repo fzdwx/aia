@@ -125,11 +125,12 @@ where
                         );
                         let invocation = match override_result {
                             Some(result) => {
-                                on_delta(context.started_event());
+                                let started_at_ms = now_timestamp_ms();
+                                on_delta(context.started_event(started_at_ms));
                                 self.commit_prepared_tool_call(
                                     &mut context,
                                     super::super::tool_calls::PreparedToolCallOutcome::Completed {
-                                        started_at_ms: now_timestamp_ms(),
+                                        started_at_ms,
                                         tool_trace_context: llm_trace_context
                                             .map(|trace| build_tool_trace_context(trace, call)),
                                         result,
@@ -277,10 +278,21 @@ where
 
             for (assistant_entry_id, tool_call_entry_id, call, prepared, deltas) in prepared_results
             {
+                let started_at_ms = match &prepared {
+                    super::super::tool_calls::PreparedToolCallOutcome::Completed {
+                        started_at_ms,
+                        ..
+                    }
+                    | super::super::tool_calls::PreparedToolCallOutcome::Failed {
+                        started_at_ms,
+                        ..
+                    } => *started_at_ms,
+                };
                 on_delta(StreamEvent::ToolCallStarted {
                     invocation_id: call.invocation_id.clone(),
                     tool_name: call.tool_name.clone(),
                     arguments: call.arguments.clone(),
+                    started_at_ms,
                 });
                 for delta in deltas {
                     on_delta(StreamEvent::ToolOutputDelta {

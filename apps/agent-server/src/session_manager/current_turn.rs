@@ -86,7 +86,7 @@ pub(crate) fn update_current_turn_from_stream(
             Some(CurrentTurnBlock::Text { content }) => content.push_str(text),
             _ => current.blocks.push(CurrentTurnBlock::Text { content: text.clone() }),
         },
-        StreamEvent::ToolCallDetected { invocation_id, tool_name, arguments } => {
+        StreamEvent::ToolCallDetected { invocation_id, tool_name, arguments, detected_at_ms } => {
             if let Some(tool) = find_tool_output_mut(&mut current.blocks, invocation_id) {
                 tool.tool_name = tool_name.clone();
                 tool.arguments = normalize_object_value(arguments);
@@ -96,23 +96,23 @@ pub(crate) fn update_current_turn_from_stream(
                     tool_name.clone(),
                     normalize_object_value(arguments),
                     String::new(),
-                    now_timestamp_ms(),
+                    *detected_at_ms,
                     false,
                 ));
             }
         }
-        StreamEvent::ToolCallStarted { invocation_id, tool_name, arguments } => {
+        StreamEvent::ToolCallStarted { invocation_id, tool_name, arguments, started_at_ms } => {
             if let Some(tool) = find_tool_output_mut(&mut current.blocks, invocation_id) {
                 tool.tool_name = tool_name.clone();
                 tool.arguments = normalize_object_value(arguments);
-                tool.started_at_ms = Some(tool.started_at_ms.unwrap_or_else(now_timestamp_ms));
+                tool.started_at_ms = Some(tool.started_at_ms.unwrap_or(*started_at_ms));
             } else {
                 current.blocks.push(live_tool_block(
                     invocation_id.clone(),
                     tool_name.clone(),
                     normalize_object_value(arguments),
                     String::new(),
-                    now_timestamp_ms(),
+                    *started_at_ms,
                     true,
                 ));
             }
@@ -131,11 +131,18 @@ pub(crate) fn update_current_turn_from_stream(
                 ));
             }
         }
-        StreamEvent::ToolCallCompleted { invocation_id, tool_name, content, details, failed } => {
+        StreamEvent::ToolCallCompleted {
+            invocation_id,
+            tool_name,
+            content,
+            details,
+            failed,
+            finished_at_ms,
+        } => {
             if let Some(tool) = find_tool_output_mut(&mut current.blocks, invocation_id) {
                 tool.tool_name = tool_name.clone();
                 tool.completed = true;
-                tool.finished_at_ms = Some(now_timestamp_ms());
+                tool.finished_at_ms = Some(*finished_at_ms);
                 tool.result_content = Some(content.clone());
                 tool.result_details = details.clone();
                 tool.failed = Some(*failed);

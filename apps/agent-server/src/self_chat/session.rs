@@ -186,14 +186,14 @@ fn render_stream_event(
             print!("{text}");
             *streamed_text = true;
         }
-        StreamEvent::ToolCallDetected { invocation_id, tool_name, arguments } => {
+        StreamEvent::ToolCallDetected { invocation_id, tool_name, arguments, .. } => {
             if *streamed_text {
                 println!();
                 *streamed_text = false;
             }
             println!("[tool:detected] {tool_name} #{invocation_id} {arguments}");
         }
-        StreamEvent::ToolCallStarted { invocation_id, tool_name, arguments } => {
+        StreamEvent::ToolCallStarted { invocation_id, tool_name, arguments, .. } => {
             if *streamed_text {
                 println!();
                 *streamed_text = false;

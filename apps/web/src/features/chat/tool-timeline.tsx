@@ -316,49 +316,9 @@ export function StreamingToolGroup({
             </span>
           </div>
           <div className="mt-2 ml-4 space-y-2">
-            {active.map((tool) => {
-              const title = toolRendererRegistry.renderTitle({
-                toolName: tool.toolName,
-                arguments: tool.arguments,
-                details: tool.resultDetails ?? undefined,
-                outputContent: tool.resultContent ?? tool.output,
-                succeeded: !tool.failed,
-              })
-              return (
-                <div
-                  key={tool.invocationId}
-                  className="rounded-xl border border-amber-500/20 bg-amber-500/[0.04] px-3 py-2.5 text-[13px]"
-                >
-                  <div className="flex items-start gap-3">
-                    <span className="mt-1.5 size-2 shrink-0 rounded-full bg-amber-500" />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {tool.toolName && (
-                          <Badge
-                            variant="outline"
-                            className="border-border/50 bg-background/75 text-[10px] text-foreground/85"
-                          >
-                            {getToolDisplayName(tool.toolName)}
-                          </Badge>
-                        )}
-                      </div>
-                      <p className="mt-2 truncate text-[13px] font-medium text-foreground/85">
-                        {title || "preparing"}
-                      </p>
-                    </div>
-                    <span className="shrink-0 pt-0.5 text-[11px] text-muted-foreground/70 tabular-nums">
-                      {tool.startedAtMs || tool.detectedAtMs
-                        ? (formatDurationMs(
-                            tool.startedAtMs ?? tool.detectedAtMs,
-                            tool.finishedAtMs,
-                            { live: true }
-                          ) ?? "0.0 s")
-                        : "running"}
-                    </span>
-                  </div>
-                </div>
-              )
-            })}
+            {active.map((tool) => (
+              <ToolRow key={tool.invocationId} item={fromStreamingTool(tool)} />
+            ))}
           </div>
         </>
       )}

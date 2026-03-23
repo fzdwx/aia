@@ -95,11 +95,13 @@ pub enum StreamEvent {
         invocation_id: String,
         tool_name: String,
         arguments: serde_json::Value,
+        detected_at_ms: u64,
     },
     ToolCallStarted {
         invocation_id: String,
         tool_name: String,
         arguments: serde_json::Value,
+        started_at_ms: u64,
     },
     ToolOutputDelta {
         invocation_id: String,
@@ -112,6 +114,7 @@ pub enum StreamEvent {
         content: String,
         details: Option<serde_json::Value>,
         failed: bool,
+        finished_at_ms: u64,
     },
     Log {
         text: String,

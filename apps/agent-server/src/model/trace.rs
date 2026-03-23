@@ -214,7 +214,7 @@ impl TraceEventCollector {
                     });
                 }
             }
-            StreamEvent::ToolCallDetected { invocation_id, tool_name, arguments } => {
+            StreamEvent::ToolCallDetected { invocation_id, tool_name, arguments, .. } => {
                 self.events.push(LlmTraceEvent {
                     name: "response.tool_call_detected".to_string(),
                     at_ms,

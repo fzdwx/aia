@@ -62,9 +62,12 @@ describe("tool timeline", () => {
     )
 
     expect(html).toContain("Running tools")
-    expect(html).toContain("Running")
     expect(html).toContain("grep")
     expect(html).toContain("renderDetails")
+    expect(html).toContain(
+      "grid-cols-[minmax(58px,max-content)_minmax(0,1fr)_auto]"
+    )
+    expect(html).not.toContain("mt-2 truncate text-[13px] font-medium")
   })
 
   test("renders expandable completed tools with aria state and structured details", () => {

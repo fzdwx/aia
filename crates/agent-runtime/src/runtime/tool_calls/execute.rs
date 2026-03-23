@@ -26,17 +26,18 @@ where
         on_delta: &mut (dyn FnMut(StreamEvent) + Send),
     ) -> Result<ToolInvocationLifecycle, RuntimeError> {
         let mut context = context;
-        on_delta(context.started_event());
-        let prepared = self.prepare_tool_call(&context, on_delta).await;
+        let started_at_ms = now_timestamp_ms();
+        on_delta(context.started_event(started_at_ms));
+        let prepared = self.prepare_tool_call(&context, started_at_ms, on_delta).await;
         self.commit_prepared_tool_call(&mut context, prepared, on_delta)
     }
 
     pub(in super::super) async fn prepare_tool_call(
         &mut self,
         context: &ExecuteToolCallContext<'_>,
+        started_at_ms: u64,
         on_delta: &mut (dyn FnMut(StreamEvent) + Send),
     ) -> PreparedToolCallOutcome {
-        let started_at_ms = now_timestamp_ms();
         let tool_trace_context =
             context.parent_trace_context.map(|trace| build_tool_trace_context(trace, context.call));
         let available_tool_names = self
