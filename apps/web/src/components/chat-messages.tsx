@@ -15,7 +15,7 @@ import {
 } from "@/features/chat/message-sections"
 import {
   distanceFromBottom,
-  HISTORY_LOAD_TRIGGER_PX,
+  shouldLoadOlderTurnsOnScroll,
   shouldShowHistoryHint,
   shouldStickToBottom,
 } from "@/components/chat-messages-helpers"
@@ -59,74 +59,39 @@ export function ChatMessages() {
   const lastCompression = useChatStore((s) => s.lastCompression)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const prefersReducedMotion = usePrefersReducedMotion()
+
   const containerRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
-  const bottomAnchorRef = useRef<HTMLDivElement>(null)
-  const historyTriggerRef = useRef<HTMLDivElement>(null)
-  const previousSessionIdRef = useRef<string | null>(null)
-  const previousTurnCountRef = useRef(0)
-  const previousStreamingBlockCountRef = useRef(0)
-  const shouldStickToBottomRef = useRef(true)
-  const skipNextAutoScrollRef = useRef(false)
-  const isStreamingRef = useRef(false)
-  const autoLoadingOlderTurnsRef = useRef(false)
-  const historyHasMoreRef = useRef(historyHasMore)
-  const historyLoadingMoreRef = useRef(historyLoadingMore)
-  const sessionHydratingRef = useRef(sessionHydrating)
+  const autoFollowRef = useRef(true)
+  const prevSessionIdRef = useRef<string | null>(null)
+  const prevScrollTopRef = useRef(0)
   const rafPendingRef = useRef(false)
+  const scrollAnchorRef = useRef<number | null>(null)
+
   const [scrollTop, setScrollTop] = useState(0)
   const [isAtBottom, setIsAtBottom] = useState(true)
 
   const showHistoryHint = shouldShowHistoryHint(historyLoadingMore, scrollTop)
-  const isStreaming = !!streamingTurn
-  isStreamingRef.current = isStreaming
 
   const scrollToBottom = useCallback(() => {
-    bottomAnchorRef.current?.scrollIntoView({ behavior: "auto" })
-    shouldStickToBottomRef.current = true
+    const container = containerRef.current
+    if (!container) return
+    autoFollowRef.current = true
+    container.scrollTop = container.scrollHeight
+    prevScrollTopRef.current = container.scrollTop
     setIsAtBottom(true)
   }, [])
 
   const handleLoadOlderTurns = useCallback(async () => {
-    if (
-      autoLoadingOlderTurnsRef.current ||
-      historyLoadingMoreRef.current ||
-      sessionHydratingRef.current ||
-      !historyHasMoreRef.current
-    ) {
-      return
-    }
-
-    autoLoadingOlderTurnsRef.current = true
-    shouldStickToBottomRef.current = false
+    if (historyLoadingMore || sessionHydrating || !historyHasMore) return
     const container = containerRef.current
-    const previousScrollHeight = container?.scrollHeight ?? 0
-    skipNextAutoScrollRef.current = true
-    try {
-      await loadOlderTurns()
-      requestAnimationFrame(() => {
-        const nextContainer = containerRef.current
-        if (!nextContainer) {
-          autoLoadingOlderTurnsRef.current = false
-          return
-        }
-        const nextScrollHeight = nextContainer.scrollHeight
-        nextContainer.scrollTop += nextScrollHeight - previousScrollHeight
-        setScrollTop(nextContainer.scrollTop)
-        autoLoadingOlderTurnsRef.current = false
-      })
-    } catch {
-      autoLoadingOlderTurnsRef.current = false
-    }
-  }, [loadOlderTurns])
+    if (!container) return
+    autoFollowRef.current = false
+    scrollAnchorRef.current = container.scrollHeight
+    await loadOlderTurns()
+  }, [loadOlderTurns, historyLoadingMore, sessionHydrating, historyHasMore])
 
-  useEffect(() => {
-    historyHasMoreRef.current = historyHasMore
-    historyLoadingMoreRef.current = historyLoadingMore
-    sessionHydratingRef.current = sessionHydrating
-  }, [historyHasMore, historyLoadingMore, sessionHydrating])
-
-  // Scroll event tracking + container resize observer
+  // Effect 1: Scroll handler — detect direction, RAF-throttled state updates
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
@@ -137,46 +102,64 @@ export function ChatMessages() {
         scrollTop: container.scrollTop,
         clientHeight: container.clientHeight,
       })
-      shouldStickToBottomRef.current = shouldStickToBottom(dist)
+      const nextIsAtBottom = shouldStickToBottom(dist)
+
+      const userScrolledUp = container.scrollTop < prevScrollTopRef.current
+      if (userScrolledUp) {
+        autoFollowRef.current = false
+      } else if (nextIsAtBottom) {
+        autoFollowRef.current = true
+      }
+
+      prevScrollTopRef.current = container.scrollTop
 
       if (!rafPendingRef.current) {
         rafPendingRef.current = true
         requestAnimationFrame(() => {
           rafPendingRef.current = false
           setScrollTop(container.scrollTop)
-          setIsAtBottom(shouldStickToBottomRef.current)
+          setIsAtBottom(nextIsAtBottom)
         })
       }
 
-      if (typeof IntersectionObserver === "undefined") {
-        if (container.scrollTop <= HISTORY_LOAD_TRIGGER_PX) {
-          void handleLoadOlderTurns()
-        }
+      if (
+        shouldLoadOlderTurnsOnScroll({
+          scrollTop: container.scrollTop,
+          scrollHeight: container.scrollHeight,
+          clientHeight: container.clientHeight,
+          userScrolledUp,
+        })
+      ) {
+        void handleLoadOlderTurns()
       }
     }
 
-    const resizeObserver = new ResizeObserver(() => {
-      handleScroll()
-    })
-
     handleScroll()
     container.addEventListener("scroll", handleScroll)
-    resizeObserver.observe(container)
     return () => {
       container.removeEventListener("scroll", handleScroll)
-      resizeObserver.disconnect()
     }
   }, [activeSessionId, handleLoadOlderTurns])
 
-  // Content resize observer — auto-scroll when content grows during streaming
-  const hasContent = turns.length > 0 || isStreaming
+  // Effect 2: Content ResizeObserver — auto-scroll when content grows
   useEffect(() => {
     const content = contentRef.current
     if (!content) return
 
     const resizeObserver = new ResizeObserver(() => {
-      if (isStreamingRef.current && shouldStickToBottomRef.current) {
-        bottomAnchorRef.current?.scrollIntoView({ behavior: "auto" })
+      const container = containerRef.current
+      if (!container) return
+
+      const anchor = scrollAnchorRef.current
+      if (anchor !== null) {
+        scrollAnchorRef.current = null
+        const added = container.scrollHeight - anchor
+        if (added > 0) container.scrollTop += added
+        return
+      }
+
+      if (autoFollowRef.current) {
+        scrollToBottom()
       }
     })
 
@@ -184,111 +167,27 @@ export function ChatMessages() {
     return () => {
       resizeObserver.disconnect()
     }
-  }, [activeSessionId, hasContent])
+  }, [activeSessionId, scrollToBottom])
 
-  // Intersection observer for history loading trigger
-  useEffect(() => {
-    const container = containerRef.current
-    const historyTrigger = historyTriggerRef.current
-    if (!container || !historyTrigger) {
-      return
-    }
-
-    if (typeof IntersectionObserver === "undefined") {
-      if (container.scrollTop <= HISTORY_LOAD_TRIGGER_PX) {
-        void handleLoadOlderTurns()
-      }
-      return
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const entry = entries[0]
-        if (!entry?.isIntersecting) return
-        void handleLoadOlderTurns()
-      },
-      {
-        root: container,
-        rootMargin: "80px 0px 0px 0px",
-      }
-    )
-
-    observer.observe(historyTrigger)
-    return () => {
-      observer.disconnect()
-    }
-  }, [
-    activeSessionId,
-    turns.length,
-    historyHasMore,
-    historyLoadingMore,
-    sessionHydrating,
-    handleLoadOlderTurns,
-  ])
-
-  // Auto-scroll on session change, batch hydration, and new streaming blocks
+  // Effect 3: Session change — reset autoFollow and scroll to bottom
   useLayoutEffect(() => {
-    const container = containerRef.current
-    if (!container) return
+    if (prevSessionIdRef.current === activeSessionId) return
+    prevSessionIdRef.current = activeSessionId
+    autoFollowRef.current = true
+    scrollAnchorRef.current = null
+    scrollToBottom()
+  }, [activeSessionId, scrollToBottom])
 
-    const currentStreamingBlockCount = streamingTurn?.blocks.length ?? 0
-    const sessionChanged = previousSessionIdRef.current !== activeSessionId
-
-    if (sessionChanged) {
-      shouldStickToBottomRef.current = true
-      skipNextAutoScrollRef.current = false
-      container.scrollTop = container.scrollHeight
-      setScrollTop(container.scrollTop)
-      setIsAtBottom(true)
-      previousSessionIdRef.current = activeSessionId
-      previousTurnCountRef.current = turns.length
-      previousStreamingBlockCountRef.current = currentStreamingBlockCount
-      return
-    }
-
-    if (skipNextAutoScrollRef.current) {
-      skipNextAutoScrollRef.current = false
-      previousSessionIdRef.current = activeSessionId
-      previousTurnCountRef.current = turns.length
-      previousStreamingBlockCountRef.current = currentStreamingBlockCount
-      return
-    }
-
-    const hydratedManyTurns = turns.length > previousTurnCountRef.current + 1
-    const hydratedStreamingSnapshot =
-      currentStreamingBlockCount > previousStreamingBlockCountRef.current + 1
-
-    const shouldAutoScroll =
-      hydratedManyTurns ||
-      hydratedStreamingSnapshot ||
-      shouldStickToBottomRef.current
-
-    if (!shouldAutoScroll) {
-      previousSessionIdRef.current = activeSessionId
-      previousTurnCountRef.current = turns.length
-      previousStreamingBlockCountRef.current = currentStreamingBlockCount
-      return
-    }
-
-    const behavior: ScrollBehavior =
-      prefersReducedMotion ||
-      hydratedManyTurns ||
-      hydratedStreamingSnapshot ||
-      isStreaming
-        ? "auto"
-        : "smooth"
-
-    bottomAnchorRef.current?.scrollIntoView({ behavior })
-
-    previousSessionIdRef.current = activeSessionId
-    previousTurnCountRef.current = turns.length
-    previousStreamingBlockCountRef.current = currentStreamingBlockCount
+  // Effect 4: when the list mounts or new bottom-follow content appears, snap to bottom.
+  useLayoutEffect(() => {
+    if (!activeSessionId || !autoFollowRef.current) return
+    if (turns.length === 0 && !streamingTurn) return
+    scrollToBottom()
   }, [
     activeSessionId,
     turns.length,
-    streamingTurn?.blocks.length,
-    prefersReducedMotion,
-    isStreaming,
+    streamingTurn,
+    scrollToBottom,
   ])
 
   if (turns.length === 0 && !streamingTurn) {
@@ -313,7 +212,7 @@ export function ChatMessages() {
     <div className="relative min-h-0 flex-1">
       <div
         ref={containerRef}
-        className="h-full overflow-y-auto"
+        className="h-full overflow-y-auto [overflow-anchor:none]"
         role="log"
         aria-live="polite"
         aria-relevant="additions text"
@@ -325,11 +224,6 @@ export function ChatMessages() {
           )}
           {historyHasMore && (
             <>
-              <div
-                ref={historyTriggerRef}
-                className="h-px w-full"
-                aria-hidden="true"
-              />
               <div
                 className={
                   showHistoryHint
@@ -373,7 +267,7 @@ export function ChatMessages() {
                 {error}
               </div>
             )}
-            <div ref={bottomAnchorRef} aria-hidden="true" />
+            <div aria-hidden="true" className="h-px [overflow-anchor:auto]" />
           </div>
         </div>
         {streamingTurn && (

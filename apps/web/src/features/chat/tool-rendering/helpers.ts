@@ -1,5 +1,10 @@
 import { createElement, type ReactNode } from "react"
 
+export type DetailEntry = {
+  label: string
+  value: string | number
+}
+
 export function truncateInline(value: string, maxLength = 96): string {
   const compact = value.replace(/\s+/g, " ").trim()
   if (compact.length <= maxLength) return compact
@@ -89,4 +94,68 @@ export function compactPath(value: string, maxLength = 48): string {
   }
 
   return truncateInline(`.../${segments.slice(-1)[0] ?? compact}`, maxLength)
+}
+
+function toSentenceCase(key: string): string {
+  const normalized = key.replace(/[_-]+/g, " ").trim()
+  if (!normalized) return key
+
+  return normalized.replace(/\b\w/g, (segment) => segment.toUpperCase())
+}
+
+function summarizeStructuredValue(value: unknown): string | number | null {
+  if (typeof value === "string") {
+    const compact = value.replace(/\s+/g, " ").trim()
+    return compact ? truncateInline(compact, 84) : null
+  }
+
+  if (typeof value === "number") {
+    return value
+  }
+
+  if (typeof value === "boolean") {
+    return value ? "yes" : "no"
+  }
+
+  if (Array.isArray(value)) {
+    return value.length > 0
+      ? `${value.length} item${value.length === 1 ? "" : "s"}`
+      : null
+  }
+
+  if (value && typeof value === "object") {
+    const fieldCount = Object.keys(value).length
+    return fieldCount > 0
+      ? `${fieldCount} field${fieldCount === 1 ? "" : "s"}`
+      : null
+  }
+
+  return null
+}
+
+export function buildDetailEntries(
+  record: Record<string, unknown> | undefined,
+  options?: {
+    omitKeys?: Iterable<string>
+    maxEntries?: number
+  }
+): DetailEntry[] {
+  if (!record) return []
+
+  const omitted = new Set(options?.omitKeys ?? [])
+  const maxEntries = options?.maxEntries ?? 6
+
+  return Object.entries(record)
+    .filter(([key]) => !omitted.has(key))
+    .map(([key, value]) => {
+      const summarized = summarizeStructuredValue(value)
+      if (summarized == null) return null
+
+      return {
+        label: toSentenceCase(key),
+        value: summarized,
+      }
+    })
+    .filter((entry): entry is DetailEntry => entry != null)
+    .slice(0, maxEntries)
 }

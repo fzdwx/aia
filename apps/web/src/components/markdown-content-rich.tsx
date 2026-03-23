@@ -1,96 +1,72 @@
-import { memo, useMemo, type ReactNode } from "react"
-import NodeRenderer, {
-  type NodeComponentProps,
-  setCustomComponents,
-} from "markstream-react"
-import {
-  getMarkdown,
-  parseMarkdownToStructure,
-  type ParsedNode,
-} from "stream-markdown-parser"
+import { createElement, memo, type ComponentPropsWithoutRef } from "react"
+import { Check, Copy } from "lucide-react"
+import { cjk } from "@streamdown/cjk"
+import { createCodePlugin } from "@streamdown/code"
+import { math } from "@streamdown/math"
+import { mermaid } from "@streamdown/mermaid"
+import { Streamdown } from "streamdown"
+import type { IconMap } from "streamdown"
 
-import { MarkdownCodeBlock } from "@/components/markdown-code-block"
-import { useTheme } from "@/components/theme-provider"
 import { cn } from "@/lib/utils"
 
-type MarkstreamLinkNode = {
-  type: "link"
-  href: string
-  title: string | null
-  children?: ParsedNode[]
-}
-
-const CHAT_MARKDOWN_ID = "chat-markdown"
-const chatMarkdown = getMarkdown(CHAT_MARKDOWN_ID)
-
-const CHAT_CODE_BLOCK_PROPS = {
-  enableFontSizeControl: false,
-  showCollapseButton: false,
-  showCopyButton: true,
-  showExpandButton: false,
-  showFontSizeButtons: false,
-  showHeader: true,
-  showPreviewButton: false,
-} as const
-
-const CHAT_MERMAID_PROPS = {
-  showCollapseButton: false,
-  showCopyButton: true,
-  showExportButton: false,
-  showFullscreenButton: false,
-  showHeader: false,
-  showModeToggle: false,
-  showZoomControls: false,
-} as const
-
-function renderNodeChildren(
-  children: ParsedNode[] | undefined,
-  ctx: NodeComponentProps["ctx"],
-  renderNode: NodeComponentProps["renderNode"],
-  indexKey: NodeComponentProps["indexKey"],
-  scope: string
-): ReactNode {
-  if (!children || !ctx || !renderNode) return null
-
-  return children.map((child, index) =>
-    renderNode(child, `${String(indexKey ?? scope)}-${scope}-${index}`, ctx)
-  )
-}
-
-function isExternalHref(href: string): boolean {
-  return (
-    href.startsWith("http://") ||
-    href.startsWith("https://") ||
-    href.startsWith("mailto:") ||
-    href.startsWith("tel:")
-  )
-}
-
-function ChatLink({
-  node,
-  ctx,
-  renderNode,
-  indexKey,
-}: NodeComponentProps<MarkstreamLinkNode>) {
-  const external = isExternalHref(node.href)
-
-  return (
-    <a
-      className="link-node chat-markdown-link"
-      href={node.href}
-      rel={external ? "noreferrer" : undefined}
-      target={external ? "_blank" : undefined}
-      title={node.title ?? undefined}
-    >
-      {renderNodeChildren(node.children, ctx, renderNode, indexKey, "link")}
-    </a>
-  )
-}
-
-setCustomComponents(CHAT_MARKDOWN_ID, {
-  code_block: MarkdownCodeBlock,
-  link: ChatLink,
+const code = createCodePlugin({
+  themes: ["github-light", "github-dark"],
 })
+
+const markdownIcons = {
+  CheckIcon: Check,
+  CopyIcon: Copy,
+} satisfies Partial<IconMap>
+
+type MarkdownTag =
+  | "a"
+  | "blockquote"
+  | "code"
+  | "em"
+  | "h1"
+  | "h2"
+  | "h3"
+  | "h4"
+  | "h5"
+  | "h6"
+  | "hr"
+  | "p"
+  | "strong"
+
+type MarkdownComponentProps<T extends MarkdownTag> =
+  ComponentPropsWithoutRef<T> & {
+    node?: unknown
+  }
+
+function withClasses<T extends MarkdownTag>(tag: T, classes: string) {
+  return ({ className, ...props }: MarkdownComponentProps<T>) =>
+    createElement(tag, {
+      ...props,
+      className: cn(classes, className),
+    })
+}
+
+const markdownComponents = {
+  p: withClasses("p", "mb-2.5"),
+  strong: withClasses("strong", "font-semibold"),
+  em: withClasses("em", "italic"),
+  a: withClasses("a", "underline underline-offset-4"),
+  h1: withClasses("h1", "mb-2 text-[1em] font-semibold"),
+  h2: withClasses("h2", "mb-2 text-[1em] font-semibold"),
+  h3: withClasses("h3", "mb-2 text-[1em] font-semibold"),
+  h4: withClasses("h4", "mb-2 text-[1em] font-semibold"),
+  h5: withClasses("h5", "mb-2 text-[1em] font-semibold"),
+  h6: withClasses("h6", "mb-2 text-[1em] font-semibold"),
+  blockquote: withClasses(
+    "blockquote",
+    "mb-3 border-l-2 border-border/40 pl-4 text-muted-foreground"
+  ),
+  hr: withClasses("hr", "my-4 border-border/40"),
+  inlineCode: withClasses(
+    "code",
+    "rounded-[4px] border border-border/40 bg-muted/70 px-1.5 py-0.5 font-mono text-[0.85em] text-foreground"
+  ),
+} as const
 
 export const MarkdownRenderer = memo(
   ({
@@ -101,35 +77,16 @@ export const MarkdownRenderer = memo(
     content: string
     className?: string
     streaming?: boolean
-  }) => {
-    const { resolvedTheme } = useTheme()
-    const parsedNodes = useMemo<ParsedNode[]>(() => {
-      if (!streaming) {
-        return []
-      }
-
-      return parseMarkdownToStructure(content, chatMarkdown, {
-        final: false,
-      })
-    }, [content, streaming])
-
-    return (
-      <div className={cn("markdown-content", className)}>
-        <NodeRenderer
-          batchRendering
-          codeBlockProps={CHAT_CODE_BLOCK_PROPS}
-          content={streaming ? undefined : content}
-          customId={CHAT_MARKDOWN_ID}
-          deferNodesUntilVisible={false}
-          final={!streaming}
-          isDark={resolvedTheme === "dark"}
-          mermaidProps={CHAT_MERMAID_PROPS}
-          nodes={streaming ? parsedNodes : undefined}
-          showTooltips={false}
-          typewriter={false}
-          viewportPriority
-        />
-      </div>
-    )
-  }
+  }) => (
+    <div className={cn("markdown-content", className)}>
+      <Streamdown
+        components={markdownComponents}
+        icons={markdownIcons}
+        plugins={{ cjk, code, math, mermaid }}
+        remend={streaming ? undefined : { bold: false, boldItalic: false }}
+      >
+        {content}
+      </Streamdown>
+    </div>
+  )
 )

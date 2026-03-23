@@ -38,6 +38,7 @@ import { useSessionSettingsStore } from "@/stores/session-settings-store"
 
 const SESSION_HISTORY_PAGE_SIZE = 5
 const INITIAL_SESSION_HISTORY_PAGE_SIZE = 1
+const DEFERRED_SECOND_TURN_PAGE_SIZE = SESSION_HISTORY_PAGE_SIZE
 const MAX_CACHED_SESSION_SNAPSHOTS = 24
 export const NEW_PROVIDER_SETTINGS_KEY = "__new_provider__"
 export type SettingsSection = "providers" | "channels"
@@ -380,6 +381,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
       set((state) => ({
         ...applySessionSnapshot(hydratedSnapshot, false),
+        historyHasMore: historyPage.has_more,
+        historyNextBeforeTurnId: historyPage.next_before_turn_id,
         _sessionSnapshots: upsertSessionSnapshot(
           state._sessionSnapshots,
           id,
@@ -388,11 +391,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         ),
       }))
 
-      if (
-        INITIAL_SESSION_HISTORY_PAGE_SIZE < SESSION_HISTORY_PAGE_SIZE &&
-        historyPage.has_more &&
-        historyPage.next_before_turn_id
-      ) {
+      if (historyPage.has_more && historyPage.next_before_turn_id) {
         const beforeTurnId = historyPage.next_before_turn_id
         const abortController = new AbortController()
         pendingHistoryHydrationAbort = abortController
@@ -401,8 +400,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           void fetchHistory({
             sessionId: id,
             beforeTurnId,
-            limit:
-              SESSION_HISTORY_PAGE_SIZE - INITIAL_SESSION_HISTORY_PAGE_SIZE,
+            limit: DEFERRED_SECOND_TURN_PAGE_SIZE,
             signal: abortController.signal,
           })
             .then((olderHistoryPage) => {
@@ -1307,9 +1305,13 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     loadOlderTurns: async () => {
-      const sessionId = get().activeSessionId
-      const beforeTurnId = get().historyNextBeforeTurnId
-      if (!sessionId || !beforeTurnId || get().historyLoadingMore) return
+      cancelPendingHistoryHydration()
+      const state = get()
+      const sessionId = state.activeSessionId
+      const beforeTurnId = state.historyNextBeforeTurnId
+      if (!sessionId || get().historyLoadingMore) return
+
+      if (!beforeTurnId) return
 
       set({ historyLoadingMore: true })
       try {
@@ -1318,8 +1320,18 @@ export const useChatStore = create<ChatStore>((set, get) => {
           beforeTurnId,
           limit: SESSION_HISTORY_PAGE_SIZE,
         })
+
+        if (get().activeSessionId !== sessionId) {
+          set({ historyLoadingMore: false })
+          return
+        }
+
         set((state) => {
-          const turns = [...historyPage.turns, ...state.turns]
+          if (state.activeSessionId !== sessionId) {
+            return { historyLoadingMore: false }
+          }
+
+          const turns = mergeTurnsById(historyPage.turns, state.turns)
           return {
             turns,
             historyHasMore: historyPage.has_more,

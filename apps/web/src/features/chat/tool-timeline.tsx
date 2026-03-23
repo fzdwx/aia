@@ -1,11 +1,24 @@
-import { Check } from "lucide-react"
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Clock3,
+} from "lucide-react"
 import { memo, useEffect, useState } from "react"
 
 import { Shimmer } from "@/components/ai-elements/shimmer"
+import { Badge } from "@/components/ui/badge"
 import { getToolDisplayName } from "@/lib/tool-display"
+import { cn } from "@/lib/utils"
 import type { StreamingToolOutput } from "@/lib/types"
 
 import { toolRendererRegistry } from "./tool-rendering"
+import { buildDetailEntries } from "./tool-rendering/helpers"
+import {
+  DetailList,
+  ToolDetailSurface,
+  ToolInfoSection,
+} from "./tool-rendering/ui"
 import {
   buildCategorySummary,
   formatDurationMs,
@@ -14,6 +27,27 @@ import {
 } from "./tool-timeline-helpers"
 
 const ACTIVE_DURATION_TICK_MS = 100
+const OMITTED_ARGUMENT_KEYS = new Set([
+  "content",
+  "patch",
+  "patchText",
+  "old_string",
+  "new_string",
+  "value",
+  "text",
+  "input",
+  "contents",
+])
+const OMITTED_DETAIL_KEYS = new Set([
+  "stdout",
+  "stderr",
+  "diff",
+  "content",
+  "file_path",
+  "path",
+  "pattern",
+  "command",
+])
 
 function useDurationTicker(enabled: boolean) {
   const [, setTick] = useState(0)
@@ -29,10 +63,68 @@ function useDurationTicker(enabled: boolean) {
   }, [enabled])
 }
 
-function ToolRow({ item }: { item: ToolRowItem }) {
-  const [showDetails, setShowDetails] = useState(false)
-  useDurationTicker(item.finishedAtMs == null)
+function ToolSummaryLine({
+  item,
+  duration,
+}: {
+  item: ToolRowItem
+  duration: string | null
+}) {
   const isRunning = item.finishedAtMs == null
+  const title = toolRendererRegistry.renderTitle({
+    toolName: item.toolName,
+    arguments: item.arguments,
+    details: item.details,
+    outputContent: item.outputContent,
+    succeeded: item.succeeded,
+  })
+  const meta = toolRendererRegistry.renderMeta({
+    toolName: item.toolName,
+    arguments: item.arguments,
+    details: item.details,
+    outputContent: item.outputContent,
+    succeeded: item.succeeded,
+  })
+
+  return (
+    <div className="grid min-w-0 grid-cols-[minmax(58px,max-content)_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 text-[12px]">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <Badge
+          variant="outline"
+          className="border-border/50 bg-background/75 text-[10px] text-foreground/85"
+        >
+          {getToolDisplayName(item.toolName)}
+        </Badge>
+      </div>
+      <p
+        title={title || getToolDisplayName(item.toolName)}
+        className={cn(
+          "truncate text-left leading-5",
+          item.succeeded || isRunning
+            ? "text-foreground/85"
+            : "text-destructive"
+        )}
+      >
+        {title || getToolDisplayName(item.toolName)}
+      </p>
+      <div className="flex shrink-0 items-center gap-1.5 pl-1 text-[11px] text-muted-foreground/70">
+        {meta ? (
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground/75">
+            {meta}
+          </div>
+        ) : null}
+        {duration ? (
+          <span className="inline-flex items-center gap-1 tabular-nums">
+            <Clock3 className="size-3" />
+            {duration}
+          </span>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function renderToolDetailsPanel(item: ToolRowItem) {
   const renderData = {
     toolName: item.toolName,
     arguments: item.arguments,
@@ -40,44 +132,106 @@ function ToolRow({ item }: { item: ToolRowItem }) {
     outputContent: item.outputContent,
     succeeded: item.succeeded,
   }
-  const title = toolRendererRegistry.renderTitle(renderData)
-  const meta = toolRendererRegistry.renderMeta(renderData)
   const detailsContent = toolRendererRegistry.renderDetails(renderData)
+  const requestEntries = buildDetailEntries(item.arguments, {
+    omitKeys: OMITTED_ARGUMENT_KEYS,
+  })
+  const resultEntries = buildDetailEntries(item.details, {
+    omitKeys: OMITTED_DETAIL_KEYS,
+  })
+
+  if (
+    requestEntries.length === 0 &&
+    resultEntries.length === 0 &&
+    detailsContent == null
+  ) {
+    return null
+  }
+
+  return (
+    <ToolDetailSurface>
+      {requestEntries.length > 0 ? (
+        <ToolInfoSection
+          title="Request"
+          hint={`${requestEntries.length} field${requestEntries.length === 1 ? "" : "s"}`}
+        >
+          <DetailList entries={requestEntries} />
+        </ToolInfoSection>
+      ) : null}
+      {resultEntries.length > 0 ? (
+        <ToolInfoSection
+          title="Result details"
+          hint={`${resultEntries.length} field${resultEntries.length === 1 ? "" : "s"}`}
+          defaultOpen={false}
+        >
+          <DetailList entries={resultEntries} />
+        </ToolInfoSection>
+      ) : null}
+      {detailsContent ? detailsContent : null}
+    </ToolDetailSurface>
+  )
+}
+
+function ToolRow({ item }: { item: ToolRowItem }) {
+  const [showDetails, setShowDetails] = useState(false)
+  useDurationTicker(item.finishedAtMs == null)
+  const isRunning = item.finishedAtMs == null
   const duration = formatDurationMs(item.startedAtMs, item.finishedAtMs, {
     live: isRunning,
   })
+  const detailsContent = renderToolDetailsPanel(item)
+  const hasDetails = detailsContent != null
+  const detailsId = `tool-details-${item.id}`
 
   return (
-    <div>
+    <div
+      className={cn(
+        "rounded-xl border transition-colors",
+        isRunning
+          ? "border-amber-500/20 bg-amber-500/[0.04]"
+          : item.succeeded
+            ? "border-border/30 bg-background/55 hover:border-border/45"
+            : "border-destructive/20 bg-destructive/[0.03]"
+      )}
+    >
       <button
-        onClick={() => setShowDetails(!showDetails)}
-        className="grid w-full grid-cols-[minmax(56px,max-content)_1fr_auto] items-center gap-x-2 py-0.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
+        onClick={() => {
+          if (!hasDetails) return
+          setShowDetails(!showDetails)
+        }}
+        aria-expanded={hasDetails ? showDetails : undefined}
+        aria-controls={hasDetails ? detailsId : undefined}
+        aria-disabled={!hasDetails}
+        className="w-full px-3 py-2.5 text-left"
       >
-        <span
-          title={getToolDisplayName(item.toolName)}
-          className={`truncate text-left font-medium ${
-            item.succeeded
-              ? "text-muted-foreground/70"
-              : "text-destructive/80 line-through decoration-destructive/70"
-          }`}
-        >
-          {getToolDisplayName(item.toolName)}
-        </span>
-        <span title={title} className="truncate text-left">
-          {title}
-        </span>
-        <div className="flex items-center gap-2">
-          {meta}
-          {item.toolName !== "functions.read" && duration && (
-            <span className="shrink-0 text-muted-foreground/50">
-              {duration}
+        <div className="flex items-center gap-3">
+          <span
+            className={cn(
+              "size-2 shrink-0 rounded-full",
+              isRunning
+                ? "bg-amber-500"
+                : item.succeeded
+                  ? "bg-emerald-500"
+                  : "bg-destructive"
+            )}
+          />
+          <div className="min-w-0 flex-1">
+            <ToolSummaryLine item={item} duration={duration} />
+          </div>
+          {hasDetails ? (
+            <span className="text-muted-foreground/60">
+              {showDetails ? (
+                <ChevronDown className="size-4" />
+              ) : (
+                <ChevronRight className="size-4" />
+              )}
             </span>
-          )}
+          ) : null}
         </div>
       </button>
       {showDetails && detailsContent && (
-        <div className="mt-1 mb-2 ml-3 space-y-2.5 rounded-md border border-border/25 bg-muted/15 p-2">
-          {detailsContent}
+        <div id={detailsId} className="border-t border-border/20 px-3 pb-3">
+          <div className="pt-3">{detailsContent}</div>
         </div>
       )}
     </div>
@@ -105,7 +259,7 @@ export function ToolGroup({
     <div className="mb-3">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+        className="flex items-center gap-2 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
       >
         <span className="font-medium">
           {isStreaming ? "Exploring" : "Explored"}
@@ -120,7 +274,7 @@ export function ToolGroup({
         {allSucceeded && <Check className="size-3.5 text-emerald-500/70" />}
       </button>
       {open && (
-        <div className="mt-1 ml-5">
+        <div className="mt-2 ml-4 space-y-2">
           {items.map((item) => (
             <ToolRow key={item.id} item={item} />
           ))}
@@ -135,12 +289,12 @@ export function StreamingToolGroup({
 }: {
   toolOutputs: StreamingToolOutput[]
 }) {
-  if (toolOutputs.length === 0) return null
-
   const completed = toolOutputs.filter((t) => t.completed)
   const active = toolOutputs.filter((t) => !t.completed)
   const activeSummary = buildCategorySummary(active)
   useDurationTicker(active.length > 0)
+
+  if (toolOutputs.length === 0) return null
 
   return (
     <div className="mb-2">
@@ -150,10 +304,10 @@ export function StreamingToolGroup({
 
       {active.length > 0 && (
         <>
-          <div className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
+          <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
             <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-amber-500/70" />
             <Shimmer as="span" className="font-medium" duration={2}>
-              Exploring
+              Running tools
             </Shimmer>
             <span className="text-muted-foreground/70">
               {activeSummary
@@ -161,7 +315,7 @@ export function StreamingToolGroup({
                 .join(", ")}
             </span>
           </div>
-          <div className="mt-0.5 ml-3 space-y-0.5">
+          <div className="mt-2 ml-4 space-y-2">
             {active.map((tool) => {
               const title = toolRendererRegistry.renderTitle({
                 toolName: tool.toolName,
@@ -173,25 +327,35 @@ export function StreamingToolGroup({
               return (
                 <div
                   key={tool.invocationId}
-                  className="grid grid-cols-[minmax(48px,max-content)_1fr_auto] items-center gap-x-2 py-0.5 text-[13px] text-muted-foreground/60"
+                  className="rounded-xl border border-amber-500/20 bg-amber-500/[0.04] px-3 py-2.5 text-[13px]"
                 >
-                  {tool.toolName && (
-                    <span className="truncate text-left font-medium">
-                      {getToolDisplayName(tool.toolName)}
+                  <div className="flex items-start gap-3">
+                    <span className="mt-1.5 size-2 shrink-0 rounded-full bg-amber-500" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {tool.toolName && (
+                          <Badge
+                            variant="outline"
+                            className="border-border/50 bg-background/75 text-[10px] text-foreground/85"
+                          >
+                            {getToolDisplayName(tool.toolName)}
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="mt-2 truncate text-[13px] font-medium text-foreground/85">
+                        {title || "preparing"}
+                      </p>
+                    </div>
+                    <span className="shrink-0 pt-0.5 text-[11px] text-muted-foreground/70 tabular-nums">
+                      {tool.startedAtMs || tool.detectedAtMs
+                        ? (formatDurationMs(
+                            tool.startedAtMs ?? tool.detectedAtMs,
+                            tool.finishedAtMs,
+                            { live: true }
+                          ) ?? "0.0 s")
+                        : "running"}
                     </span>
-                  )}
-                  <span className="truncate text-left">
-                    {title || "preparing"}
-                  </span>
-                  <span className="shrink-0 text-muted-foreground/50">
-                    {tool.startedAtMs || tool.detectedAtMs
-                      ? (formatDurationMs(
-                          tool.startedAtMs ?? tool.detectedAtMs,
-                          tool.finishedAtMs,
-                          { live: true }
-                        ) ?? "0.0 s")
-                      : "running"}
-                  </span>
+                  </div>
                 </div>
               )
             })}

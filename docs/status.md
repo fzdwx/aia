@@ -38,8 +38,8 @@
 - 最新 channel-feishu 内部细拆：`crates/channel-feishu/src/runtime.rs` 又继续按职责拆出 `config.rs`、`protocol.rs`、`card.rs` 与 `tests.rs`；配置 schema/解析、协议 DTO/帧编解码、卡片状态机/请求构造与测试已分层，主流程文件开始回到“长连接与回复编排主线”角色。
 - 最新 session_manager 收口：`apps/agent-server/src/session_manager/mod.rs` 在先前拆出 `query_ops` 之后，又继续把 provider 注册表同步与 turn worker/SSE 投影主线下沉到 `session_manager/{provider_sync,turn_execution}.rs`；同时根模块也已从“散落函数集合”收口为 `SessionManagerLoop`、`SessionSlotFactory` 等职责对象，provider/query/turn/tool-trace 分别由显式服务对象承接，避免同一模块继续混合运行时归还、SSE 广播与 provider 重绑细节。
 - 最新 self-chat 收口：`agent-server self` 不再在运行时读取 `docs/self.md`，并且该文件内容现已作为 self session 的 system prompt 在 bootstrap 时直接注入；首轮用户消息只负责触发本轮 wake 并可附带用户指定的启动任务，不再把整份 `self.md` 再塞进首条 user prompt。
-- 最新 Web Markdown 收口：`apps/web` 的共享 Markdown 渲染入口已从 `streamdown` 切到 `markstream-react`，继续保留流式渲染调用面，同时把样式适配收口到现有 `MarkdownContent` 门面；当前聊天 Markdown 也已进一步按官方 React 组件/迁移文档对齐为 `NodeRenderer + setCustomComponents` 形态，流式消息优先走 parsed `nodes`，代码块改回官方 `codeBlockProps` 配置，外链节点则通过自定义 `link` 组件统一补上安全打开语义，减少继续依赖旧 renderer 私有 DOM 结构或过厚本地 override。
-- 最新 Web Markdown 微调：`MarkdownContent` 现已透传当前明暗主题到 `markstream-react`，聊天代码块也已改成自定义极简 header，语言标签按 hover 轻微提亮；同时 `apps/web` 已显式接入 `shiki` 与 `stream-markdown`，并按官方 React 安装路径改为 `code_block -> MarkdownCodeBlockNode` 渲染，避免 renderer 切换后继续退回 plain code 或默认卡片边框过重。
+- 最新 Web Markdown 回退：`apps/web` 的共享 Markdown 渲染入口已从 `markstream-react` 切回 `streamdown`，继续保持 `MarkdownContent` 门面不变，把渲染器差异收口在 `markdown-content-rich.tsx` 内部；聊天与推理区重新走 `streamdown + @streamdown/code + @streamdown/cjk + @streamdown/mermaid + @streamdown/math` 组合，避免继续依赖 `markstream-react` 的节点协议、自定义代码块组件和额外样式覆盖链路。
+- 最新 Web Markdown 依赖收口：`apps/web` 已移除 `markstream-react`、`stream-markdown`、`stream-markdown-parser` 与 `shiki` 相关耦合，重新恢复 `streamdown` 依赖、KaTeX 样式和基于 `data-streamdown` 的样式入口；对应回归测试也已改回验证 `streamdown` 的基础结构输出，以及表格、代码块、Mermaid 和数学公式渲染能力。
 - 最新 model 收口：`apps/agent-server/src/model/mod.rs` 现作为目录根模块承接 provider 选择、model 构建与带 trace 的完成链路；先前只做一层转发的 `factory/runner/bootstrap` 已并回根模块，只保留真正独立的 `model/trace.rs` 负责 `ModelTraceRecorder` 与 trace 持久化细节，避免在根层再挂一排同名薄文件。
 - 最新 bootstrap 收口：`apps/agent-server/src/bootstrap/mod.rs` 现直接承接 `ServerBootstrap` 启动主线；路径/工作区发现、持久化依赖加载、默认 session 补种、snapshot 构建、`AppState` 装配与 channel runtime 激活都留在同一个目录根模块里，不再额外保留 `bootstrap.rs + startup.rs` 双层跳转。
 - 最新 agent-server 路由收口：`apps/agent-server/src/routes/mod.rs` 现统一 merge 各资源子 router，`apps/agent-server/src/server/mod.rs` 只负责 listener 启动；`provider`、`session`、`trace`、`turn` 等资源模块都已改为目录形态并去掉独立 `dto.rs`，根层也不再保留 `routes.rs`、`server.rs` 这类扁平入口文件。
@@ -219,8 +219,8 @@
 - 完成 Web 聊天区一次 session 切换滚动抖动收口：`ChatMessages` 在切换 session 时改为用 `useLayoutEffect` 同步恢复到底部，避免首帧先渲染旧滚动位置再跳动到最新消息
 - 完成 `read` 工具元信息文案纠偏：聊天内工具时间线里，`read` 的 meta 改为显示真实 1-based 行号范围（如 `L121-160`），不再把 `offset` 和 `lines_read` 误显示成含糊区间
 - 完成内建 `codesearch` 工具：共享工具注册表现可直接向 Exa Code API 请求编程相关代码/文档上下文，并兼容 SSE 风格返回体解析、默认 30 秒超时与取消语义
-- 完成 Web Markdown renderer 替换：共享 `MarkdownContent` 现改用 `markstream-react`，聊天正文与推理内容不再依赖 `streamdown`；样式入口已同步改为 `markstream-react/index.css` 并补了基础渲染回归测试
-- 完成 Web Markdown 主题与样式收口：共享 Markdown renderer 现在会感知当前 `resolvedTheme` 并把 `isDark` 透传给 `markstream-react`；同时代码块/表格默认边框、阴影与 hover 操作区已重新压到当前聊天 UI 语义，并补了暗色主题回归测试
+- 完成 Web Markdown renderer 回退：共享 `MarkdownContent` 已重新改回 `streamdown`，聊天正文与推理内容继续复用同一门面，但不再依赖 `markstream-react` 的节点协议与自定义代码块组件
+- 完成 Web Markdown 依赖与样式回收：`apps/web` 已恢复 `streamdown` / `@streamdown/*` 依赖、KaTeX 样式与 `data-streamdown` 样式入口，并补回代码块、表格、Mermaid 与数学公式回归测试
 - 完成 session 级模型设置：`apps/web` 的模型选择器与输入框思考等级现在都绑定当前 session；`apps/agent-server` 通过 `/api/session/settings` 持久化每个 session 的 provider/model/reasoning_effort，切换 session 时会恢复对应设置
 
 ## 正在进行

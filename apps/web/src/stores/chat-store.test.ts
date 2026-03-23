@@ -8,11 +8,13 @@ import type { SseEvent } from "@/lib/types"
 type FetchMock = typeof fetch
 type ResponseResolver = (value: Response) => void
 
-function requireResolver(
-  resolver: ResponseResolver | null,
+function requireResolver<T>(
+  resolver: T | null | undefined,
   message: string
-): ResponseResolver {
-  assert.ok(resolver, message)
+): T {
+  if (resolver == null) {
+    throw new Error(message)
+  }
   return resolver
 }
 
@@ -624,11 +626,20 @@ describe("chat store submitTurn", () => {
     expect(state._sessionSnapshots["session-1"]?.streamingTurn).toBe(null)
   })
 
-  test("switchSession snapshots previous session with only latest turn and hydrates target from latest turn first", async () => {
+  test("switchSession hydrates latest turn first, idles in the second turn, then pages older history", async () => {
     const originalFetchImpl = globalThis.fetch
-    let resolveInitialHistory: ((value: Response) => void) | null = null
-    let resolveFullHistory: ((value: Response) => void) | null = null
+    let runIdleHydration: (() => void) | null = null
     let historyRequestCount = 0
+
+    __setIdleSchedulerForTests({
+      schedule: (callback) => {
+        runIdleHydration = callback
+        return 1
+      },
+      cancel: () => {
+        runIdleHydration = null
+      },
+    })
 
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString()
@@ -656,15 +667,120 @@ describe("chat store submitTurn", () => {
         })
       }
       if (url.includes("/api/session/history")) {
+        const searchParams = new URL(url, "http://localhost").searchParams
         historyRequestCount += 1
         if (historyRequestCount === 1) {
-          return await new Promise<Response>((resolve) => {
-            resolveInitialHistory = resolve
-          })
+          expect(searchParams.get("session_id")).toBe("session-2")
+          expect(searchParams.get("limit")).toBe("1")
+          expect(searchParams.get("before_turn_id")).toBe(null)
+          return new Response(
+            JSON.stringify({
+              turns: [
+                {
+                  turn_id: "turn-2-latest",
+                  started_at_ms: 11,
+                  finished_at_ms: 12,
+                  source_entry_ids: [3],
+                  user_message: "target latest question",
+                  blocks: [
+                    { kind: "assistant", content: "target latest answer" },
+                  ],
+                  assistant_message: "target latest answer",
+                  thinking: null,
+                  tool_invocations: [],
+                  usage: null,
+                  failure_message: null,
+                  outcome: "succeeded",
+                },
+              ],
+              has_more: true,
+              next_before_turn_id: "turn-2-latest",
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }
+          )
         }
-        return await new Promise<Response>((resolve) => {
-          resolveFullHistory = resolve
-        })
+        if (historyRequestCount === 2) {
+          expect(searchParams.get("session_id")).toBe("session-2")
+          expect(searchParams.get("limit")).toBe("5")
+          expect(searchParams.get("before_turn_id")).toBe("turn-2-latest")
+          return new Response(
+            JSON.stringify({
+              turns: [
+                {
+                  turn_id: "turn-2-second",
+                  started_at_ms: 9,
+                  finished_at_ms: 10,
+                  source_entry_ids: [4],
+                  user_message: "target second question",
+                  blocks: [
+                    { kind: "assistant", content: "target second answer" },
+                  ],
+                  assistant_message: "target second answer",
+                  thinking: null,
+                  tool_invocations: [],
+                  usage: null,
+                  failure_message: null,
+                  outcome: "succeeded",
+                },
+              ],
+              has_more: true,
+              next_before_turn_id: "turn-2-second",
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }
+          )
+        }
+        expect(historyRequestCount).toBe(3)
+        expect(searchParams.get("session_id")).toBe("session-2")
+        expect(searchParams.get("limit")).toBe("5")
+        expect(searchParams.get("before_turn_id")).toBe("turn-2-second")
+        return new Response(
+          JSON.stringify({
+            turns: [
+              {
+                turn_id: "turn-2-oldest",
+                started_at_ms: 5,
+                finished_at_ms: 6,
+                source_entry_ids: [5],
+                user_message: "target oldest question",
+                blocks: [
+                  { kind: "assistant", content: "target oldest answer" },
+                ],
+                assistant_message: "target oldest answer",
+                thinking: null,
+                tool_invocations: [],
+                usage: null,
+                failure_message: null,
+                outcome: "succeeded",
+              },
+              {
+                turn_id: "turn-2-older",
+                started_at_ms: 7,
+                finished_at_ms: 8,
+                source_entry_ids: [6],
+                user_message: "target older question",
+                blocks: [{ kind: "assistant", content: "target older answer" }],
+                assistant_message: "target older answer",
+                thinking: null,
+                tool_invocations: [],
+                usage: null,
+                failure_message: null,
+                outcome: "succeeded",
+              },
+            ],
+            has_more: false,
+            next_before_turn_id: null,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
       }
       throw new Error(`unexpected fetch: ${url}`)
     }) as FetchMock
@@ -712,105 +828,43 @@ describe("chat store submitTurn", () => {
       "turn-1-latest"
     )
 
-    requireResolver(
-      resolveInitialHistory,
-      "expected initial history resolver"
-    )(
-      new Response(
-        JSON.stringify({
-          turns: [
-            {
-              turn_id: "turn-2-latest",
-              started_at_ms: 11,
-              finished_at_ms: 12,
-              source_entry_ids: [3],
-              user_message: "target latest question",
-              blocks: [{ kind: "assistant", content: "target latest answer" }],
-              assistant_message: "target latest answer",
-              thinking: null,
-              tool_invocations: [],
-              usage: null,
-              failure_message: null,
-              outcome: "succeeded",
-            },
-          ],
-          has_more: true,
-          next_before_turn_id: "turn-2-latest",
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }
-      )
-    )
-
     await switchPromise
 
     const firstHydrated = useChatStore.getState()
     expect(firstHydrated.turns.length).toBe(1)
     expect(firstHydrated.turns[0]?.turn_id).toBe("turn-2-latest")
+    expect(firstHydrated.historyNextBeforeTurnId).toBe("turn-2-latest")
 
-    requireResolver(
-      resolveFullHistory,
-      "expected full history resolver"
-    )(
-      new Response(
-        JSON.stringify({
-          turns: [
-            {
-              turn_id: "turn-2-older",
-              started_at_ms: 9,
-              finished_at_ms: 10,
-              source_entry_ids: [4],
-              user_message: "target older question",
-              blocks: [{ kind: "assistant", content: "target older answer" }],
-              assistant_message: "target older answer",
-              thinking: null,
-              tool_invocations: [],
-              usage: null,
-              failure_message: null,
-              outcome: "succeeded",
-            },
-            {
-              turn_id: "turn-2-latest",
-              started_at_ms: 11,
-              finished_at_ms: 12,
-              source_entry_ids: [3],
-              user_message: "target latest question",
-              blocks: [{ kind: "assistant", content: "target latest answer" }],
-              assistant_message: "target latest answer",
-              thinking: null,
-              tool_invocations: [],
-              usage: null,
-              failure_message: null,
-              outcome: "succeeded",
-            },
-          ],
-          has_more: false,
-          next_before_turn_id: null,
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }
-      )
-    )
+    requireResolver<() => void>(
+      runIdleHydration as (() => void) | null,
+      "expected idle hydration callback"
+    )()
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    const fullyHydrated = useChatStore.getState()
+    const secondHydrated = useChatStore.getState()
     assert.deepEqual(
-      fullyHydrated.turns.map((turn) => turn.turn_id),
-      ["turn-2-older", "turn-2-latest"]
+      secondHydrated.turns.map((turn) => turn.turn_id),
+      ["turn-2-second", "turn-2-latest"]
     )
+    expect(secondHydrated.historyNextBeforeTurnId).toBe("turn-2-second")
+
+    await useChatStore.getState().loadOlderTurns()
+
+    const pagedHistory = useChatStore.getState()
+    assert.deepEqual(
+      pagedHistory.turns.map((turn) => turn.turn_id),
+      ["turn-2-oldest", "turn-2-older", "turn-2-second", "turn-2-latest"]
+    )
+    expect(pagedHistory.historyHasMore).toBe(false)
 
     globalThis.fetch = originalFetchImpl
   })
 
   test("switchSession keeps cached snapshot visible while hydrating next session", async () => {
     const originalFetchImpl = globalThis.fetch
-    let resolveHistory: ((value: Response) => void) | null = null
-    let resolveCurrentTurn: ((value: Response) => void) | null = null
+    let resolveHistory: ResponseResolver | null = null
+    let resolveCurrentTurn: ResponseResolver | null = null
 
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString()
@@ -915,8 +969,8 @@ describe("chat store submitTurn", () => {
     expect(duringHydration.turns[0]?.turn_id).toBe("turn-2-cached")
     expect(duringHydration.turns.length).toBe(1)
 
-    requireResolver(
-      resolveHistory,
+    requireResolver<ResponseResolver>(
+      resolveHistory as ResponseResolver | null,
       "expected history resolver"
     )(
       new Response(
@@ -946,8 +1000,8 @@ describe("chat store submitTurn", () => {
         }
       )
     )
-    requireResolver(
-      resolveCurrentTurn,
+    requireResolver<ResponseResolver>(
+      resolveCurrentTurn as ResponseResolver | null,
       "expected current turn resolver"
     )(
       new Response("null", {
@@ -969,11 +1023,20 @@ describe("chat store submitTurn", () => {
     globalThis.fetch = originalFetchImpl
   })
 
-  test("switchSession cancels background history backfill when leaving session", async () => {
+  test("switchSession cancels delayed second-turn hydration when leaving session", async () => {
     const originalFetchImpl = globalThis.fetch
-    let resolveInitialHistory: ((value: Response) => void) | null = null
-    let resolveBackgroundHistory: ((value: Response) => void) | null = null
+    let runIdleHydration: (() => void) | null = null
     let historyRequestCount = 0
+
+    __setIdleSchedulerForTests({
+      schedule: (callback) => {
+        runIdleHydration = callback
+        return 1
+      },
+      cancel: () => {
+        runIdleHydration = null
+      },
+    })
 
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString()
@@ -1016,90 +1079,78 @@ describe("chat store submitTurn", () => {
       if (url.includes("/api/session/history")) {
         historyRequestCount += 1
         if (historyRequestCount === 1) {
-          return await new Promise<Response>((resolve) => {
-            resolveInitialHistory = resolve
-          })
+          return new Response(
+            JSON.stringify({
+              turns: [
+                {
+                  turn_id: "turn-2-latest",
+                  started_at_ms: 11,
+                  finished_at_ms: 12,
+                  source_entry_ids: [3],
+                  user_message: "target latest question",
+                  blocks: [
+                    { kind: "assistant", content: "target latest answer" },
+                  ],
+                  assistant_message: "target latest answer",
+                  thinking: null,
+                  tool_invocations: [],
+                  usage: null,
+                  failure_message: null,
+                  outcome: "succeeded",
+                },
+              ],
+              has_more: true,
+              next_before_turn_id: "turn-2-latest",
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }
+          )
         }
-        return await new Promise<Response>((resolve) => {
-          resolveBackgroundHistory = resolve
-        })
+        return new Response(
+          JSON.stringify({
+            turns: [
+              {
+                turn_id: "turn-2-second",
+                started_at_ms: 9,
+                finished_at_ms: 10,
+                source_entry_ids: [4],
+                user_message: "target second question",
+                blocks: [
+                  { kind: "assistant", content: "target second answer" },
+                ],
+                assistant_message: "target second answer",
+                thinking: null,
+                tool_invocations: [],
+                usage: null,
+                failure_message: null,
+                outcome: "succeeded",
+              },
+            ],
+            has_more: false,
+            next_before_turn_id: null,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
       }
       throw new Error(`unexpected fetch: ${url}`)
     }) as FetchMock
 
     const switchPromise = useChatStore.getState().switchSession("session-2")
 
-    requireResolver(
-      resolveInitialHistory,
-      "expected initial history resolver"
-    )(
-      new Response(
-        JSON.stringify({
-          turns: [
-            {
-              turn_id: "turn-2-latest",
-              started_at_ms: 11,
-              finished_at_ms: 12,
-              source_entry_ids: [3],
-              user_message: "target latest question",
-              blocks: [{ kind: "assistant", content: "target latest answer" }],
-              assistant_message: "target latest answer",
-              thinking: null,
-              tool_invocations: [],
-              usage: null,
-              failure_message: null,
-              outcome: "succeeded",
-            },
-          ],
-          has_more: true,
-          next_before_turn_id: "turn-2-latest",
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }
-      )
-    )
-
     await switchPromise
     await useChatStore.getState().switchSession("session-3")
 
-    requireResolver(
-      resolveBackgroundHistory,
-      "expected background history resolver"
-    )(
-      new Response(
-        JSON.stringify({
-          turns: [
-            {
-              turn_id: "turn-2-older",
-              started_at_ms: 9,
-              finished_at_ms: 10,
-              source_entry_ids: [4],
-              user_message: "target older question",
-              blocks: [{ kind: "assistant", content: "target older answer" }],
-              assistant_message: "target older answer",
-              thinking: null,
-              tool_invocations: [],
-              usage: null,
-              failure_message: null,
-              outcome: "succeeded",
-            },
-          ],
-          has_more: false,
-          next_before_turn_id: null,
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }
-      )
-    )
-
     const state = useChatStore.getState()
     expect(state.activeSessionId).not.toBe("session-2")
+    expect(runIdleHydration).toBe(null)
+    expect(historyRequestCount).toBe(1)
     assert.equal(
-      state.turns.some((turn) => turn.turn_id === "turn-2-older"),
+      state.turns.some((turn) => turn.turn_id === "turn-2-second"),
       false
     )
 
@@ -1178,7 +1229,7 @@ describe("chat store submitTurn", () => {
     expect(state.chatState).toBe("idle")
   })
 
-  test("loadOlderTurns prepends history without dropping existing turns", async () => {
+  test("loadOlderTurns deduplicates overlapping page boundaries", async () => {
     const originalFetchImpl = globalThis.fetch
 
     globalThis.fetch = (async (input: RequestInfo | URL) => {
@@ -1195,6 +1246,20 @@ describe("chat store submitTurn", () => {
                 user_message: "older question",
                 blocks: [{ kind: "assistant", content: "older answer" }],
                 assistant_message: "older answer",
+                thinking: null,
+                tool_invocations: [],
+                usage: null,
+                failure_message: null,
+                outcome: "succeeded",
+              },
+              {
+                turn_id: "turn-current",
+                started_at_ms: 11,
+                finished_at_ms: 12,
+                source_entry_ids: [2],
+                user_message: "current question",
+                blocks: [{ kind: "assistant", content: "current answer" }],
+                assistant_message: "current answer",
                 thinking: null,
                 tool_invocations: [],
                 usage: null,

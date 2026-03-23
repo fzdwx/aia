@@ -108,12 +108,23 @@ describe("chat message status surfaces", () => {
     expect(source).toContain("text-center text-xs text-muted-foreground/80")
   })
 
-  test("keeps direct bottom-anchor scrolling for session recovery", () => {
+  test("drops session scroll restoration refs while keeping bottom-follow entrypoint", () => {
     const source = loadChatMessagesSource()
 
-    expect(source).toContain("bottomAnchorRef")
-    expect(source).toContain("scrollIntoView")
-    expect(source).not.toContain("MutationObserver")
+    expect(source).toContain("scrollToBottom()")
+    expect(source).toContain("if (turns.length === 0 && !streamingTurn) return")
+    expect(source).not.toContain("historyTriggerRef")
+    expect(source).not.toContain("bottomAnchorRef")
+    expect(source).not.toContain("previousScrollHeightRef")
+    expect(source).not.toContain("sessionBottomLockRef")
+  })
+
+  test("only pages older history from upward scrolling instead of top visibility", () => {
+    const source = loadChatMessagesSource()
+
+    expect(source).toContain("shouldLoadOlderTurnsOnScroll")
+    expect(source).toContain("userScrolledUp")
+    expect(source).not.toContain("IntersectionObserver")
   })
 
   test("keeps streaming tool durations on an interval ticker", () => {

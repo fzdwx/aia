@@ -131,7 +131,7 @@ function getHostname(url: string | null): string | null {
   }
 }
 
-function SearchResultCard({
+function renderSearchResultCard({
   kind,
   preview,
 }: {
@@ -214,7 +214,7 @@ function renderSearchDetails(data: {
     <div className="space-y-2.5">
       {data.succeeded && hasPreview ? (
         <ToolDetailSection title="Top Result">
-          <SearchResultCard kind={data.kind} preview={preview} />
+          {renderSearchResultCard({ kind: data.kind, preview })}
         </ToolDetailSection>
       ) : null}
       <ToolDetailSection title={data.succeeded ? "Content" : "Failure"}>

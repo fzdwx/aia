@@ -1,5 +1,17 @@
 # 演进日志
 
+## 2026-03-23 Session 106
+
+**Diagnosis**：用户怀疑近期 Web Markdown 从 `streamdown` 切到 `markstream-react` 后引入了问题，并明确要求直接切回。沿提交历史排查后确认真正的切换提交是 `e6b6b85 feat(web): switch markdown renderer to markstream-react`；当前运行时已完全走 `markstream-react + stream-markdown-parser + 自定义 code block` 路径，而 `MarkdownContent` 门面本身保持稳定，因此最小风险回退点应收口在渲染器实现、依赖与样式入口，而不是扩散到聊天/推理调用方。
+**Decision**：保持 `MarkdownContent` 公共调用面不变，把 `apps/web` 的共享 Markdown 渲染器回退到历史上的 `streamdown` 方案，同时移除只服务 `markstream-react` 的代码块适配层与对应依赖；保留并恢复 `streamdown` 侧原本可承接的代码高亮、Mermaid 图表与数学公式插件能力，文档和状态描述同步回到“当前主路径使用 `streamdown`”的真实状态。
+**Changes**：
+- `apps/web/src/components/markdown-content-rich.tsx`：从 `markstream-react` 的 `NodeRenderer + parsed nodes` 路径切回 `Streamdown`，继续通过统一门面向聊天与推理区输出 Markdown，并恢复 `mermaid` / `math` 插件。
+- `apps/web/src/components/markdown-code-block.tsx`、`apps/web/src/components/markdown-content.test.tsx`：删除只服务 `markstream-react` 的代码块组件，并把测试改回验证 `streamdown` 的基础结构、代码块、表格、Mermaid 和数学公式输出。
+- `apps/web/package.json`、`apps/web/src/index.css`、`apps/web/README.md`、`docs/status.md`：恢复 `streamdown` 依赖、KaTeX 样式与样式入口，移除 `markstream-react` 相关叙事。
+**Verification**：`just web-install`、`just web-format`、`just web-typecheck`、`just web-test`、`just web-check`。
+**Commit**：未提交。
+**Next direction**：如果后续还要继续优化 Web Markdown，优先围绕 `MarkdownContent` 门面之内做可替换实现和样式收口，而不是再次把节点协议、代码块自定义和主题耦合扩散到调用方。
+
 ## 2026-03-21 Session 105
 
 **Diagnosis**：在 provider 注册表已经完全进入 SQLite、bootstrap 也不再从 `providers.json` 读取之后，`ServerBootstrapOptions.registry_path` 这个命名已经失真：它实际上只被用来反推出 `.aia/store.sqlite3` 和 `.aia/sessions/`，不再代表任何真实的“provider registry path”。继续保留这个入口名会误导后续嵌入方，也和当前 control-plane façade 应暴露稳定、真实职责配置面的方向不一致。

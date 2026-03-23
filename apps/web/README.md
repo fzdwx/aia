@@ -21,7 +21,7 @@
 - 已支持流式状态累积、乐观消息渲染、会话历史分页与当前 turn 恢复
 - 已支持 stop/cancel 相关前端交互与 cancelled 状态展示
 - 已支持主题切换与本地主题状态同步
-- 聊天与推理区 Markdown 渲染现已切到 `markstream-react`，继续保留流式更新与代码块/表格等富文本能力
+- 聊天与推理区 Markdown 渲染已切回 `streamdown`，继续通过共享 `MarkdownContent` 门面承接流式更新、代码块、表格、Mermaid 图表与数学公式展示
 
 ## 开发规范
 
