@@ -49,9 +49,11 @@ export function ModelSelector() {
       >
         <SelectTrigger
           size="sm"
-          className="h-7 max-w-[220px] border-0 bg-transparent px-1.5 py-0 text-[11px] text-muted-foreground shadow-none hover:bg-accent/50 hover:text-foreground/80 disabled:opacity-50"
+          className="h-8 max-w-[240px] border-0 bg-transparent px-2 py-1 text-[11px] leading-[1.2] font-medium text-muted-foreground/90 shadow-none hover:bg-muted/60 hover:text-foreground/80 disabled:opacity-50 [&_svg:not([class*='size-'])]:size-3"
         >
-          <SelectValue>{displayLabel}</SelectValue>
+          <SelectValue className="text-[11px] leading-[1.15]">
+            {displayLabel}
+          </SelectValue>
         </SelectTrigger>
         <SelectContent
           align="start"
@@ -72,7 +74,7 @@ export function ModelSelector() {
                     key={`${provider.name}-${model.id}`}
                     value={`${provider.name}::${model.id}`}
                     className={cn(
-                      "px-2.5 py-1.5 text-[12px]",
+                      "px-2.5 py-1.5 text-[11px]",
                       !isActive && "text-muted-foreground"
                     )}
                   >

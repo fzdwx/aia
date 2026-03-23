@@ -77,7 +77,7 @@ export function ChatInput() {
       <div className="pointer-events-none absolute -top-10 right-0 left-0 h-10 bg-gradient-to-t from-background to-transparent" />
 
       <div className="mx-auto max-w-[720px]">
-        <div className="mb-1.5 flex items-center justify-start gap-2">
+        <div className="mb-1.5 flex items-center justify-start gap-2 text-[10px]">
           <ModelSelector />
           {supportsReasoning && (
             <Select
@@ -92,9 +92,9 @@ export function ChatInput() {
             >
               <SelectTrigger
                 size="sm"
-                className="h-7 border-0 bg-transparent px-1.5 py-0 text-[11px] text-muted-foreground shadow-none hover:bg-accent/50 hover:text-foreground/80 disabled:opacity-50"
+                className="h-8 border-0 bg-transparent px-2 py-1 text-[11px] leading-[1.2] font-medium text-muted-foreground/90 shadow-none hover:bg-muted/60 hover:text-foreground/80 disabled:opacity-50 [&_svg:not([class*='size-'])]:size-3"
               >
-                <SelectValue>
+                <SelectValue className="text-[11px] leading-[1.15]">
                   {getThinkingLevelLabel({
                     reasoningValue,
                     sessionSettingsHydrating,
@@ -104,7 +104,11 @@ export function ChatInput() {
               </SelectTrigger>
               <SelectContent align="start" alignItemWithTrigger={false}>
                 {THINKING_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
+                  <SelectItem
+                    key={option.value}
+                    value={option.value}
+                    className="text-[11px]"
+                  >
                     {option.label}
                   </SelectItem>
                 ))}

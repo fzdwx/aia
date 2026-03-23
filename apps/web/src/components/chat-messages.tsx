@@ -183,17 +183,12 @@ export function ChatMessages() {
     if (!activeSessionId || !autoFollowRef.current) return
     if (turns.length === 0 && !streamingTurn) return
     scrollToBottom()
-  }, [
-    activeSessionId,
-    turns.length,
-    streamingTurn,
-    scrollToBottom,
-  ])
+  }, [activeSessionId, turns.length, streamingTurn, scrollToBottom])
 
   if (turns.length === 0 && !streamingTurn) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center px-4">
-        <h2 className="font-serif text-3xl font-semibold tracking-tight text-foreground">
+        <h2 className="text-3xl font-semibold tracking-[-0.055em] text-foreground">
           What can I help with?
         </h2>
         <p className="mt-2.5 text-sm text-muted-foreground">
@@ -283,8 +278,8 @@ export function ChatMessages() {
         aria-label="Scroll to bottom"
         className={
           isAtBottom
-            ? "pointer-events-none absolute right-4 bottom-4 z-20 flex size-8 items-center justify-center rounded-full border border-border/50 bg-background/90 text-muted-foreground opacity-0 shadow-sm backdrop-blur-sm transition-opacity duration-200"
-            : "absolute right-4 bottom-4 z-20 flex size-8 items-center justify-center rounded-full border border-border/50 bg-background/90 text-muted-foreground opacity-100 shadow-sm backdrop-blur-sm transition-opacity duration-200 hover:bg-accent hover:text-accent-foreground"
+            ? "pointer-events-none absolute right-4 bottom-4 z-20 flex size-10 items-center justify-center rounded-full border border-border/50 bg-background/92 text-muted-foreground opacity-0 shadow-sm transition-opacity duration-200"
+            : "absolute right-4 bottom-4 z-20 flex size-10 items-center justify-center rounded-full border border-border/50 bg-background/92 text-muted-foreground opacity-100 shadow-sm transition-opacity duration-200 hover:bg-muted hover:text-foreground"
         }
         tabIndex={isAtBottom ? -1 : 0}
         onClick={scrollToBottom}

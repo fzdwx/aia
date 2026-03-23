@@ -1302,7 +1302,7 @@ function ResultSection({ trace }: { trace: TraceRecord }) {
         ) : (
           <div className="trace-accent-surface rounded-xl p-4">
             <div className="mb-2 flex items-center gap-2 text-sm font-medium text-foreground">
-              <CheckCircle2 className="size-4 text-[var(--trace-accent-strong)]" />
+              <CheckCircle2 className="size-4 text-foreground/55" />
               Assistant text
             </div>
             <TextBlock value={assistantText} className="max-h-[280px]" />
@@ -1439,7 +1439,7 @@ export function TraceDetailModal({
                       "text-[10px]",
                       trace.status === "failed"
                         ? "border-destructive/40 text-destructive"
-                        : "border-[var(--trace-accent-strong)]/40 text-[var(--trace-accent-strong)]"
+                        : "border-border/40 text-muted-foreground"
                     )}
                   >
                     {trace.status}

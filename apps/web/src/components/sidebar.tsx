@@ -28,7 +28,7 @@ export function Sidebar() {
     <aside className="flex h-full w-[280px] shrink-0 flex-col border-r border-border/50 bg-sidebar">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3">
-        <span className="font-serif text-[17px] font-semibold tracking-tight">
+        <span className="text-[0.95rem] font-semibold tracking-[-0.045em] text-foreground/92">
           aia
         </span>
       </div>
@@ -52,8 +52,8 @@ export function Sidebar() {
               className={cn(
                 "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] transition-colors duration-150",
                 settingsSection === "providers"
-                  ? "bg-accent/50 text-foreground/80"
-                  : "text-muted-foreground hover:bg-accent/30 hover:text-foreground/80"
+                  ? "bg-muted/65 text-foreground/82"
+                  : "text-muted-foreground hover:bg-muted/45 hover:text-foreground/80"
               )}
             >
               <Settings className="size-[14px] opacity-40" />
@@ -65,8 +65,8 @@ export function Sidebar() {
               className={cn(
                 "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] transition-colors duration-150",
                 settingsSection === "channels"
-                  ? "bg-accent/50 text-foreground/80"
-                  : "text-muted-foreground hover:bg-accent/30 hover:text-foreground/80"
+                  ? "bg-muted/65 text-foreground/82"
+                  : "text-muted-foreground hover:bg-muted/45 hover:text-foreground/80"
               )}
             >
               <PanelRightDashed className="size-[14px] opacity-40" />
@@ -79,7 +79,7 @@ export function Sidebar() {
           <div className="px-2 pt-2">
             <button
               onClick={() => createSession()}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-[7px] text-[13px] text-muted-foreground transition-colors duration-150 hover:bg-accent/50 hover:text-foreground/80"
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-[7px] text-[13px] text-muted-foreground transition-colors duration-150 hover:bg-muted/55 hover:text-foreground/80"
             >
               <Plus className="size-[14px] opacity-60" />
               <span>New session</span>
@@ -97,8 +97,8 @@ export function Sidebar() {
                   className={cn(
                     "group flex w-full items-center rounded-lg px-2.5 py-[7px] text-[13px] transition-colors duration-150",
                     isActive
-                      ? "bg-accent/50 text-foreground/80"
-                      : "text-muted-foreground hover:bg-accent/30 hover:text-foreground/80"
+                      ? "bg-muted/65 text-foreground/82"
+                      : "text-muted-foreground hover:bg-muted/45 hover:text-foreground/80"
                   )}
                 >
                   <button
@@ -142,8 +142,8 @@ export function Sidebar() {
         <button
           onClick={() => setView(view === "trace" ? "chat" : "trace")}
           className={cn(
-            "mb-1 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] text-muted-foreground transition-colors duration-150 hover:bg-accent/50 hover:text-foreground/80",
-            view === "trace" && "bg-accent/50 text-foreground/80"
+            "mb-1 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] text-muted-foreground transition-colors duration-150 hover:bg-muted/55 hover:text-foreground/80",
+            view === "trace" && "bg-muted/65 text-foreground/82"
           )}
         >
           <PanelRightDashed className="size-[14px] opacity-40" />
@@ -152,8 +152,8 @@ export function Sidebar() {
         <button
           onClick={() => setView(view === "settings" ? "chat" : "settings")}
           className={cn(
-            "mb-1 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] text-muted-foreground transition-colors duration-150 hover:bg-accent/50 hover:text-foreground/80",
-            view === "settings" && "bg-accent/50 text-foreground/80"
+            "mb-1 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] text-muted-foreground transition-colors duration-150 hover:bg-muted/55 hover:text-foreground/80",
+            view === "settings" && "bg-muted/65 text-foreground/82"
           )}
         >
           <Settings className="size-[14px] opacity-40" />

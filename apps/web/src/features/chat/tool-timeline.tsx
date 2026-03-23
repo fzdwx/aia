@@ -1,9 +1,4 @@
-import {
-  Check,
-  ChevronDown,
-  ChevronRight,
-  Clock3,
-} from "lucide-react"
+import { Check, ChevronDown, ChevronRight, Clock3 } from "lucide-react"
 import { memo, useEffect, useState } from "react"
 
 import { Shimmer } from "@/components/ai-elements/shimmer"
@@ -211,7 +206,7 @@ function ToolRow({ item }: { item: ToolRowItem }) {
               isRunning
                 ? "bg-amber-500"
                 : item.succeeded
-                  ? "bg-emerald-500"
+                  ? "bg-foreground/50"
                   : "bg-destructive"
             )}
           />
@@ -271,7 +266,7 @@ export function ToolGroup({
               .join(", ")}
           </span>
         )}
-        {allSucceeded && <Check className="size-3.5 text-emerald-500/70" />}
+        {allSucceeded && <Check className="size-3.5 text-foreground/55" />}
       </button>
       {open && (
         <div className="mt-2 ml-4 space-y-2">

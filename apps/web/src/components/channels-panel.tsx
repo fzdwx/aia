@@ -1004,7 +1004,7 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
               {weixinQrPanelState === "success" ? (
                 <div className="mt-3 space-y-3 rounded-lg border border-border/25 bg-muted/[0.16] p-3">
                   {weixinPollingState === "success" ? (
-                    <div className="rounded-lg border border-emerald-500/25 bg-emerald-500/[0.08] px-3 py-3">
+                    <div className="rounded-lg border border-border/30 bg-muted/35 px-3 py-3">
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="outline" className="text-[10px]">
                           confirmed

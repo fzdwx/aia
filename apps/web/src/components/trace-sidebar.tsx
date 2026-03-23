@@ -31,7 +31,7 @@ function loopStatusTone(group: {
     case "partial":
       return "bg-amber-500"
     default:
-      return "bg-emerald-500"
+      return "bg-foreground/40"
   }
 }
 
@@ -80,8 +80,8 @@ export function TraceSidebar() {
               className={cn(
                 "flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors duration-150",
                 traceSurface === "overview"
-                  ? "bg-accent/50 text-foreground/85"
-                  : "text-muted-foreground hover:bg-accent/30 hover:text-foreground/80"
+                  ? "bg-muted/65 text-foreground/85"
+                  : "text-muted-foreground hover:bg-muted/45 hover:text-foreground/80"
               )}
             >
               <Waypoints className="mt-0.5 size-3.5 shrink-0 opacity-70" />
@@ -93,8 +93,8 @@ export function TraceSidebar() {
               className={cn(
                 "flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors duration-150",
                 traceSurface === "workspace" && traceView === "conversation"
-                  ? "bg-accent/50 text-foreground/85"
-                  : "text-muted-foreground hover:bg-accent/30 hover:text-foreground/80"
+                  ? "bg-muted/65 text-foreground/85"
+                  : "text-muted-foreground hover:bg-muted/45 hover:text-foreground/80"
               )}
             >
               <Bot className="mt-0.5 size-3.5 shrink-0 opacity-70" />
@@ -106,8 +106,8 @@ export function TraceSidebar() {
               className={cn(
                 "flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors duration-150",
                 traceSurface === "workspace" && traceView === "compression"
-                  ? "bg-accent/50 text-foreground/85"
-                  : "text-muted-foreground hover:bg-accent/30 hover:text-foreground/80"
+                  ? "bg-muted/65 text-foreground/85"
+                  : "text-muted-foreground hover:bg-muted/45 hover:text-foreground/80"
               )}
             >
               <Layers3 className="mt-0.5 size-3.5 shrink-0 opacity-70" />
@@ -154,8 +154,8 @@ export function TraceSidebar() {
                 className={cn(
                   "mb-1.5 flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors duration-150",
                   isActive
-                    ? "bg-accent/50 text-foreground/85"
-                    : "text-muted-foreground hover:bg-accent/30 hover:text-foreground/80"
+                    ? "bg-muted/65 text-foreground/85"
+                    : "text-muted-foreground hover:bg-muted/45 hover:text-foreground/80"
                 )}
               >
                 <span

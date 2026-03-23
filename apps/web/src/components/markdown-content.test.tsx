@@ -15,6 +15,7 @@ describe("MarkdownRenderer", () => {
     expect(html).toContain("Paragraph with")
     expect(html).toContain("code")
     expect(html).toContain("<strong")
+    expect(html).toContain('class="inline-code"')
   })
 
   test("renders code blocks through streamdown container markup", () => {

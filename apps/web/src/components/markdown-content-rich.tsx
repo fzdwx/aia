@@ -62,10 +62,7 @@ const markdownComponents = {
     "mb-3 border-l-2 border-border/40 pl-4 text-muted-foreground"
   ),
   hr: withClasses("hr", "my-4 border-border/40"),
-  inlineCode: withClasses(
-    "code",
-    "rounded-[4px] border border-border/40 bg-muted/70 px-1.5 py-0.5 font-mono text-[0.85em] text-foreground"
-  ),
+  inlineCode: withClasses("code", "inline-code"),
 } as const
 
 export const MarkdownRenderer = memo(

@@ -921,7 +921,7 @@ function WaterfallRow({
       )}`}
       className={cn(
         "w-full border-b border-border/15 px-3 py-3 text-left transition-colors last:border-b-0",
-        selected ? "bg-accent/45" : "bg-transparent hover:bg-accent/20"
+        selected ? "bg-muted/65" : "bg-transparent hover:bg-muted/45"
       )}
     >
       <div
@@ -1453,7 +1453,7 @@ export function TracePanel() {
             <button
               type="button"
               onClick={() => setView("chat")}
-              className="mt-0.5 flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+              className="mt-0.5 flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
               aria-label="Back to chat"
             >
               <ArrowLeft className="size-3" />

@@ -279,7 +279,7 @@ export function SettingsPanel() {
           <button
             type="button"
             onClick={() => setView("chat")}
-            className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+            className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
             aria-label="Back to chat"
           >
             <ArrowLeft className="size-3" />
@@ -376,8 +376,8 @@ export function SettingsPanel() {
                             className={cn(
                               "flex w-full flex-col gap-1 rounded-lg border px-3 py-2.5 text-left transition-colors",
                               isActive
-                                ? "border-border/55 bg-accent/45 text-foreground"
-                                : "border-transparent text-muted-foreground hover:border-border/30 hover:bg-accent/20 hover:text-foreground"
+                                ? "border-border/55 bg-muted/65 text-foreground"
+                                : "border-transparent text-muted-foreground hover:border-border/30 hover:bg-muted/45 hover:text-foreground"
                             )}
                             aria-pressed={isActive}
                           >
@@ -394,7 +394,7 @@ export function SettingsPanel() {
                                 className={cn(
                                   "mt-0.5 rounded-sm border px-1.5 py-0.5 text-[10px] font-medium",
                                   providerItem.active
-                                    ? "border-[var(--trace-accent-strong)]/30 bg-[var(--trace-accent-strong)]/10 text-[var(--trace-accent-strong)]"
+                                    ? "border-border/40 bg-muted/55 text-foreground/80"
                                     : "border-border/30 text-muted-foreground"
                                 )}
                               >
@@ -441,8 +441,8 @@ export function SettingsPanel() {
                           className={cn(
                             "flex w-full flex-col gap-1 rounded-lg border px-3 py-2.5 text-left transition-colors",
                             isActive
-                              ? "border-border/55 bg-accent/45 text-foreground"
-                              : "border-transparent text-muted-foreground hover:border-border/30 hover:bg-accent/20 hover:text-foreground"
+                              ? "border-border/55 bg-muted/65 text-foreground"
+                              : "border-transparent text-muted-foreground hover:border-border/30 hover:bg-muted/45 hover:text-foreground"
                           )}
                           aria-pressed={isActive}
                         >
@@ -459,7 +459,7 @@ export function SettingsPanel() {
                               className={cn(
                                 "mt-0.5 rounded-sm border px-1.5 py-0.5 text-[10px] font-medium",
                                 configured?.enabled
-                                  ? "border-[var(--trace-accent-strong)]/30 bg-[var(--trace-accent-strong)]/10 text-[var(--trace-accent-strong)]"
+                                  ? "border-border/40 bg-muted/55 text-foreground/80"
                                   : configured
                                     ? "border-amber-500/40 bg-amber-500/10 text-amber-600"
                                     : "border-border/30 text-muted-foreground"
