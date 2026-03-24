@@ -243,6 +243,12 @@ function shouldShowToolRowCaret(item: ToolRowItem, hasDetails: boolean) {
 }
 
 function renderToolDetailsPanel(item: ToolRowItem) {
+  const normalizedToolName = normalizeToolName(item.toolName)
+  const detailsFirst = normalizedToolName === "Shell"
+  const requestOmitKeys =
+    normalizedToolName === "Shell"
+      ? new Set([...OMITTED_ARGUMENT_KEYS, "command", "description"])
+      : OMITTED_ARGUMENT_KEYS
   const renderData = {
     toolName: item.toolName,
     arguments: item.arguments,
@@ -252,7 +258,7 @@ function renderToolDetailsPanel(item: ToolRowItem) {
   }
   const detailsContent = toolRendererRegistry.renderDetails(renderData)
   const requestEntries = buildDetailEntries(item.arguments, {
-    omitKeys: OMITTED_ARGUMENT_KEYS,
+    omitKeys: requestOmitKeys,
   })
   const resultEntries = buildDetailEntries(item.details, {
     omitKeys: OMITTED_DETAIL_KEYS,
@@ -275,6 +281,7 @@ function renderToolDetailsPanel(item: ToolRowItem) {
 
   return (
     <ToolDetailSurface>
+      {detailsFirst && detailsContent ? detailsContent : null}
       {requestEntries.length > 0 ? (
         <ToolInfoSection
           title={toolTimelineCopy.section.request}
@@ -292,7 +299,7 @@ function renderToolDetailsPanel(item: ToolRowItem) {
           <DetailList entries={resultEntries} />
         </ToolInfoSection>
       ) : null}
-      {detailsContent ? detailsContent : null}
+      {!detailsFirst && detailsContent ? detailsContent : null}
     </ToolDetailSurface>
   )
 }

@@ -425,7 +425,65 @@ describe("tool renderer registry", () => {
       succeeded: true,
     })
 
-    expect(title).toBe("Shell — cargo check -p agent-runtime")
+    expect(title).toBe("cargo check -p agent-runtime")
+  })
+
+  test("renders shell tool title from description when provided", () => {
+    const title = toolRendererRegistry.renderTitle({
+      toolName: "Shell",
+      arguments: {
+        command: "cargo check -p agent-runtime",
+        description: "Run runtime crate checks",
+      },
+      outputContent: "",
+      succeeded: true,
+    })
+
+    expect(title).toBe("Run runtime crate checks")
+  })
+
+  test("renders shell tool details with command block and result", () => {
+    const details = toolRendererRegistry.renderDetails({
+      toolName: "Shell",
+      arguments: {
+        command: "cargo check -p agent-runtime",
+        description: "Run runtime crate checks",
+      },
+      details: {
+        command: "cargo check -p agent-runtime",
+        stdout: "Finished dev [unoptimized] target(s)",
+      },
+      outputContent: "Finished dev [unoptimized] target(s)",
+      succeeded: true,
+    })
+
+    const html = renderToStaticMarkup(<>{details}</>)
+    expect(html).toContain("$ cargo check -p agent-runtime")
+    expect(html).toContain("Result")
+    expect(html).toContain("Finished dev [unoptimized] target(s)")
+  })
+
+  test("renders shell tool details with mixed stdout and stderr streams", () => {
+    const details = toolRendererRegistry.renderDetails({
+      toolName: "Shell",
+      arguments: {
+        command: "cargo check -p agent-runtime",
+      },
+      details: {
+        command: "cargo check -p agent-runtime",
+        stdout: "warning summary",
+        stderr: "warning: unused import",
+      },
+      outputContent: "warning summary\nwarning: unused import",
+      succeeded: true,
+    })
+
+    const html = renderToStaticMarkup(<>{details}</>)
+    expect(html).toContain("$ cargo check -p agent-runtime")
+    expect(html).toContain("Result")
+    expect(html).toContain("warning summary")
+    expect(html).toContain("Failure")
+    expect(html).toContain("warning: unused import")
   })
 
   test("renders apply_patch title from first patch operation", () => {

@@ -23,6 +23,13 @@ function loadToolTimelineSource() {
   ).replace(/\s+/g, " ")
 }
 
+function loadWebCssSource() {
+  return readFileSync(
+    new URL("../../index.css", import.meta.url),
+    "utf8"
+  ).replace(/\s+/g, " ")
+}
+
 describe("tool timeline", () => {
   test("normalizes names when classifying context exploration tools", () => {
     expect(isContextExplorationTool("Read")).toBe(true)
@@ -182,6 +189,7 @@ describe("tool timeline", () => {
             toolName: "Shell",
             arguments: {
               command: "cargo check",
+              description: "Run workspace checks",
             },
             startedAtMs: 100,
             finishedAtMs: 220,
@@ -200,6 +208,7 @@ describe("tool timeline", () => {
             toolName: "Shell",
             arguments: {
               command: "cargo check",
+              description: "Run workspace checks",
             },
             detectedAtMs: Date.now() - 100,
             output: "",
@@ -210,6 +219,7 @@ describe("tool timeline", () => {
     )
 
     expect(completedHtml).toContain("Shell")
+    expect(completedHtml).toContain("Run workspace checks")
     expect(completedHtml).not.toContain("Explored")
     expect(completedHtml).not.toContain("Exploring")
 
@@ -217,6 +227,21 @@ describe("tool timeline", () => {
     expect(runningHtml).not.toContain("Explored")
     expect(runningHtml).not.toContain("Exploring")
     expect(runningHtml).not.toContain("Running tools")
+  })
+
+  test("uses slightly roomier tool-group spacing in shared web styles", () => {
+    const source = loadWebCssSource()
+
+    expect(source).toContain('[data-component="tool-group"]')
+    expect(source).toContain("padding-top: 0.125rem")
+    expect(source).toContain("padding-bottom: 0.125rem")
+    expect(source).toContain(
+      '[data-component="tool-group"][data-variant="standalone"]'
+    )
+    expect(source).toContain("gap: 0.25rem")
+    expect(source).toContain('[data-component="context-tool-group-list"]')
+    expect(source).toContain("margin-top: 0.375rem")
+    expect(source).toContain('[data-slot="context-tool-group-list-inner"]')
   })
 
   test("hides pending question tools until they have a stable outcome", () => {
@@ -319,6 +344,23 @@ describe("tool timeline", () => {
     expect(source).toContain('data-component="context-tool-group-trigger"')
     expect(source).toContain("setOpen((current) => !current)")
     expect(source).toContain('status="running"')
+  })
+
+  test("prioritizes shell command details before generic request and result fields", () => {
+    const source = loadToolTimelineSource()
+
+    expect(source).toContain(
+      'const detailsFirst = normalizedToolName === "Shell"'
+    )
+    expect(source).toContain(
+      "{detailsFirst && detailsContent ? detailsContent : null}"
+    )
+    expect(source).toContain(
+      "{!detailsFirst && detailsContent ? detailsContent : null}"
+    )
+    expect(source).toContain(
+      'new Set([...OMITTED_ARGUMENT_KEYS, "command", "description"])'
+    )
   })
 
   test("uses a fixed tween transition for detail panels to avoid spring jitter", () => {
