@@ -1,5 +1,7 @@
 import { getToolDisplayPath, normalizeToolArguments } from "@/lib/tool-display"
 
+import { toolTimelineCopy } from "../../tool-timeline-copy"
+
 import type { ToolRenderer } from "../types"
 import {
   compactPath,
@@ -38,7 +40,13 @@ export function createReadRenderer(): ToolRenderer {
       if (!content) return null
 
       return (
-        <ToolDetailSection title={data.succeeded ? "Content" : "Failure"}>
+        <ToolDetailSection
+          title={
+            data.succeeded
+              ? toolTimelineCopy.section.content
+              : toolTimelineCopy.section.failure
+          }
+        >
           <ExpandableOutput value={content} failed={!data.succeeded} />
         </ToolDetailSection>
       )
@@ -64,7 +72,13 @@ export function createWriteRenderer(): ToolRenderer {
       if (!data.outputContent) return null
 
       return (
-        <ToolDetailSection title={data.succeeded ? "Content" : "Failure"}>
+        <ToolDetailSection
+          title={
+            data.succeeded
+              ? toolTimelineCopy.section.result
+              : toolTimelineCopy.section.failure
+          }
+        >
           <ExpandableOutput
             value={data.outputContent}
             failed={!data.succeeded}
@@ -104,7 +118,13 @@ export function createEditRenderer(): ToolRenderer {
       if (!content) return null
 
       return (
-        <ToolDetailSection title={data.succeeded ? "Content" : "Failure"}>
+        <ToolDetailSection
+          title={
+            data.succeeded
+              ? toolTimelineCopy.section.patch
+              : toolTimelineCopy.section.failure
+          }
+        >
           <ExpandableOutput value={content} failed={!data.succeeded} />
         </ToolDetailSection>
       )

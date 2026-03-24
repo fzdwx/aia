@@ -30,6 +30,188 @@ function loadChatMessagesSource() {
 }
 
 describe("chat message status surfaces", () => {
+  test("merges only consecutive context exploration tools", () => {
+    const html = renderWithTheme(
+      <MemoizedTurnView
+        turn={{
+          turn_id: "turn-tools-context",
+          started_at_ms: 100,
+          finished_at_ms: 200,
+          source_entry_ids: [1],
+          user_message: "Question",
+          blocks: [
+            {
+              kind: "tool_invocation",
+              invocation: {
+                call: {
+                  invocation_id: "tool-read",
+                  tool_name: "read",
+                  arguments: { file_path: "docs/status.md" },
+                },
+                started_at_ms: 110,
+                finished_at_ms: 120,
+                outcome: {
+                  status: "succeeded",
+                  result: {
+                    invocation_id: "tool-read",
+                    tool_name: "read",
+                    content: "status",
+                    details: {},
+                  },
+                },
+              },
+            },
+            {
+              kind: "tool_invocation",
+              invocation: {
+                call: {
+                  invocation_id: "tool-grep",
+                  tool_name: "functions.grep",
+                  arguments: { pattern: "phase", path: "docs" },
+                },
+                started_at_ms: 121,
+                finished_at_ms: 130,
+                outcome: {
+                  status: "succeeded",
+                  result: {
+                    invocation_id: "tool-grep",
+                    tool_name: "functions.grep",
+                    content: "phase",
+                    details: {},
+                  },
+                },
+              },
+            },
+          ],
+          assistant_message: null,
+          thinking: null,
+          tool_invocations: [],
+          usage: null,
+          failure_message: null,
+          outcome: "succeeded",
+        }}
+      />
+    )
+
+    expect(html.match(/Explored/g)).toHaveLength(1)
+    expect(html).toContain("1 read")
+    expect(html).toContain("1 search")
+  })
+
+  test("breaks context groups on non-context tools and non-tool blocks", () => {
+    const html = renderWithTheme(
+      <MemoizedTurnView
+        turn={{
+          turn_id: "turn-tools-breaks",
+          started_at_ms: 100,
+          finished_at_ms: 260,
+          source_entry_ids: [1],
+          user_message: "Question",
+          blocks: [
+            {
+              kind: "tool_invocation",
+              invocation: {
+                call: {
+                  invocation_id: "tool-read-1",
+                  tool_name: "read",
+                  arguments: { file_path: "docs/status.md" },
+                },
+                started_at_ms: 110,
+                finished_at_ms: 120,
+                outcome: {
+                  status: "succeeded",
+                  result: {
+                    invocation_id: "tool-read-1",
+                    tool_name: "read",
+                    content: "status",
+                    details: {},
+                  },
+                },
+              },
+            },
+            {
+              kind: "tool_invocation",
+              invocation: {
+                call: {
+                  invocation_id: "tool-codesearch",
+                  tool_name: "codesearch",
+                  arguments: { query: "useEffect cleanup" },
+                },
+                started_at_ms: 121,
+                finished_at_ms: 140,
+                outcome: {
+                  status: "succeeded",
+                  result: {
+                    invocation_id: "tool-codesearch",
+                    tool_name: "codesearch",
+                    content: "results",
+                    details: {},
+                  },
+                },
+              },
+            },
+            {
+              kind: "tool_invocation",
+              invocation: {
+                call: {
+                  invocation_id: "tool-glob",
+                  tool_name: "glob",
+                  arguments: { pattern: "src/**/*.ts" },
+                },
+                started_at_ms: 141,
+                finished_at_ms: 160,
+                outcome: {
+                  status: "succeeded",
+                  result: {
+                    invocation_id: "tool-glob",
+                    tool_name: "glob",
+                    content: "matches",
+                    details: {},
+                  },
+                },
+              },
+            },
+            { kind: "assistant", content: "Done searching." },
+            {
+              kind: "tool_invocation",
+              invocation: {
+                call: {
+                  invocation_id: "tool-list",
+                  tool_name: "list",
+                  arguments: { path: "apps/web/src/features/chat" },
+                },
+                started_at_ms: 200,
+                finished_at_ms: 220,
+                outcome: {
+                  status: "succeeded",
+                  result: {
+                    invocation_id: "tool-list",
+                    tool_name: "list",
+                    content: "entries",
+                    details: {},
+                  },
+                },
+              },
+            },
+          ],
+          assistant_message: "Done searching.",
+          thinking: null,
+          tool_invocations: [],
+          usage: null,
+          failure_message: null,
+          outcome: "succeeded",
+        }}
+      />
+    )
+
+    expect(html.match(/Explored/g)).toHaveLength(3)
+    expect(html.match(/1 search/g)).toHaveLength(1)
+    expect(html).toContain("1 read")
+    expect(html).toContain("1 list")
+    expect(html).toContain("codesearch")
+    expect(html).toContain("Done searching.")
+  })
+
   test("renders the streaming status as a polite live region", () => {
     const html = renderToStaticMarkup(<StatusIndicator status="working" />)
 

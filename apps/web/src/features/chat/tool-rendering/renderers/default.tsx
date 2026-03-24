@@ -1,45 +1,78 @@
 import type { ToolRenderer } from "../types"
 import { getToolDisplayPath, normalizeToolArguments } from "@/lib/tool-display"
-import { formatScalar, truncateInline } from "../helpers"
-import { ExpandableOutput, ToolDetailSection } from "../ui"
+import { toolTimelineCopy } from "../../tool-timeline-copy"
+import { buildDetailEntries, truncateInline } from "../helpers"
+import {
+  DetailList,
+  ExpandableOutput,
+  ToolDetailSection,
+  ToolInfoSection,
+} from "../ui"
+
+function buildFallbackTitle(
+  data: Parameters<ToolRenderer["renderTitle"]>[0]
+): string {
+  const primary = getToolDisplayPath(
+    data.toolName,
+    data.details,
+    data.arguments
+  )
+
+  return primary
+    ? `Unknown · ${data.toolName} — ${truncateInline(primary, 64)}`
+    : `Unknown · ${data.toolName}`
+}
 
 export function createDefaultToolRenderer(): ToolRenderer {
   return {
     matches: () => true,
     renderTitle(data) {
-      const primary = getToolDisplayPath(
-        data.toolName,
-        data.details,
-        data.arguments
-      )
-      const entries = Object.entries(normalizeToolArguments(data.arguments))
-        .filter(
-          ([, value]) =>
-            value == null ||
-            typeof value === "string" ||
-            typeof value === "number" ||
-            typeof value === "boolean"
-        )
-        .slice(0, 3)
-        .map(
-          ([key, value]) => `${key}: ${truncateInline(formatScalar(value), 32)}`
-        )
-
-      return [primary, entries.join(" · ")].filter(Boolean).join(" — ")
+      return buildFallbackTitle(data)
     },
     renderMeta() {
       return null
     },
     renderDetails(data) {
-      if (!data.outputContent) return null
+      const normalizedArgs = normalizeToolArguments(data.arguments)
+      const argumentEntries = buildDetailEntries(normalizedArgs)
+      const detailEntries = buildDetailEntries(data.details)
+      const hasResult = Boolean(data.outputContent)
+
+      if (
+        argumentEntries.length === 0 &&
+        detailEntries.length === 0 &&
+        !hasResult
+      ) {
+        return null
+      }
 
       return (
-        <ToolDetailSection title={data.succeeded ? "Content" : "Failure"}>
-          <ExpandableOutput
-            value={data.outputContent}
-            failed={!data.succeeded}
-          />
-        </ToolDetailSection>
+        <div className="space-y-3">
+          {argumentEntries.length > 0 ? (
+            <ToolInfoSection title={toolTimelineCopy.section.request}>
+              <DetailList entries={argumentEntries} />
+            </ToolInfoSection>
+          ) : null}
+          {detailEntries.length > 0 ? (
+            <ToolInfoSection title={toolTimelineCopy.section.rawDetails}>
+              <DetailList entries={detailEntries} />
+            </ToolInfoSection>
+          ) : null}
+          {hasResult ? (
+            <ToolDetailSection
+              title={
+                data.succeeded
+                  ? toolTimelineCopy.section.result
+                  : toolTimelineCopy.section.failure
+              }
+            >
+              <ExpandableOutput
+                value={data.outputContent}
+                failed={!data.succeeded}
+              />
+            </ToolDetailSection>
+          ) : null}
+        </div>
       )
     },
   }

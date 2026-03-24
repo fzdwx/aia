@@ -1,8 +1,16 @@
 import { Children, isValidElement, type ReactNode } from "react"
+import { readFileSync } from "node:fs"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, test } from "vite-plus/test"
 
 import { toolRendererRegistry } from "./index"
+
+function loadToolRenderingUiSource() {
+  return readFileSync(new URL("./ui.tsx", import.meta.url), "utf8").replace(
+    /\s+/g,
+    " "
+  )
+}
 
 type ElementWithChildren = {
   children?: ReactNode
@@ -369,7 +377,7 @@ describe("tool renderer registry", () => {
       succeeded: true,
     })
 
-    expect(title).toBe("cargo check -p agent-runtime")
+    expect(title).toBe("Shell — cargo check -p agent-runtime")
   })
 
   test("renders apply_patch title from first patch operation", () => {
@@ -389,9 +397,37 @@ describe("tool renderer registry", () => {
       succeeded: true,
     })
 
-    expect(title).toBe(
-      "*** Update File: apps/web/src/components/chat-messages.tsx"
-    )
+    expect(title).toBe("Patch — apps/web/src/components/chat-messages.tsx")
+  })
+
+  test("renders question tool summary and ignored semantics", () => {
+    const title = toolRendererRegistry.renderTitle({
+      toolName: "functions.question",
+      arguments: {
+        question: "Override existing config?",
+      },
+      details: {
+        status: "ignored",
+      },
+      outputContent: "ignored by user",
+      succeeded: true,
+    })
+
+    const details = toolRendererRegistry.renderDetails({
+      toolName: "functions.question",
+      arguments: {
+        question: "Override existing config?",
+      },
+      details: {
+        status: "ignored",
+      },
+      outputContent: "ignored by user",
+      succeeded: true,
+    })
+
+    expect(title).toBe("Override existing config?")
+    const html = renderToStaticMarkup(<>{details}</>)
+    expect(html).toContain("Issue Ignored")
   })
 
   test("renders tape_handoff title from name and summary", () => {
@@ -421,6 +457,42 @@ describe("tool renderer registry", () => {
       succeeded: true,
     })
 
-    expect(title).toBe("src/main.rs — path: src/main.rs · recursive: true")
+    expect(title).toBe("Unknown · custom.tool — src/main.rs")
+  })
+
+  test("renders unknown tool details with chinese fallback sections", () => {
+    const details = toolRendererRegistry.renderDetails({
+      toolName: "custom.tool",
+      arguments: {
+        path: "src/main.rs",
+        recursive: true,
+      },
+      details: {
+        attempts: 2,
+      },
+      outputContent: "command failed with exit code 1",
+      succeeded: false,
+    })
+
+    expect(details).not.toBe(null)
+    const html = renderToStaticMarkup(<>{details}</>)
+    expect(html).toContain("Input")
+    expect(html).toContain("Raw Details")
+    expect(html).toContain("Failure")
+    expect(html).toContain("command failed with exit code 1")
+  })
+
+  test("reads shared timeline copy for expand and section labels", () => {
+    const source = loadToolRenderingUiSource()
+
+    expect(source).toContain(
+      'import { toolTimelineCopy } from "../tool-timeline-copy"'
+    )
+    expect(source).toContain("toolTimelineCopy.action.expand")
+    expect(source).toContain("toolTimelineCopy.action.collapse")
+    expect(source).toContain("toolTimelineCopy.section.content")
+    expect(source).not.toContain('"Collapse"')
+    expect(source).not.toContain('"Expand"')
+    expect(source).not.toContain('"JSON"')
   })
 })

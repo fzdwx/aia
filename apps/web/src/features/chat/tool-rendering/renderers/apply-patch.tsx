@@ -1,5 +1,7 @@
 import { getToolDisplayPath, normalizeToolArguments } from "@/lib/tool-display"
 
+import { toolTimelineCopy } from "../../tool-timeline-copy"
+
 import type { ToolRenderer } from "../types"
 import {
   createMetaBadge,
@@ -15,7 +17,16 @@ export function createApplyPatchRenderer(): ToolRenderer {
     renderTitle(data) {
       const args = normalizeToolArguments(data.arguments)
       const patch = getStringValue(args, "patch", "patchText")
-      if (!patch) return getToolDisplayPath(data.toolName, data.details, args)
+      if (!patch) {
+        const fallbackPath = getToolDisplayPath(
+          data.toolName,
+          data.details,
+          args
+        )
+        return fallbackPath
+          ? `${toolTimelineCopy.toolName.patch} — ${truncateInline(fallbackPath, 96)}`
+          : toolTimelineCopy.toolName.patch
+      }
       const firstOperation = patch
         .split("\n")
         .find(
@@ -24,7 +35,11 @@ export function createApplyPatchRenderer(): ToolRenderer {
             line.startsWith("*** Add File:") ||
             line.startsWith("*** Delete File:")
         )
-      return truncateInline(firstOperation ?? "apply patch", 120)
+      const filePath = firstOperation?.split(":").slice(1).join(":").trim()
+
+      return filePath
+        ? `${toolTimelineCopy.toolName.patch} — ${truncateInline(filePath, 96)}`
+        : toolTimelineCopy.toolName.patch
     },
     renderMeta(data) {
       const linesAdded = getNumberValue(data.details, "lines_added")
@@ -45,7 +60,13 @@ export function createApplyPatchRenderer(): ToolRenderer {
       if (!data.outputContent) return null
 
       return (
-        <ToolDetailSection title={data.succeeded ? "Content" : "Failure"}>
+        <ToolDetailSection
+          title={
+            data.succeeded
+              ? toolTimelineCopy.section.patch
+              : toolTimelineCopy.section.failure
+          }
+        >
           <ExpandableOutput
             value={data.outputContent}
             failed={!data.succeeded}

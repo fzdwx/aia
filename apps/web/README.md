@@ -19,6 +19,7 @@
 - 已接入 `shadcn` / 基础 UI 组件体系
 - 当前工作台已覆盖：左侧边栏、中央消息区、底部输入区、provider 管理、channel 配置、session 视图、trace 诊断视图
 - 已支持流式状态累积、乐观消息渲染、会话历史分页与当前 turn 恢复
+- 聊天消息里的工具时间线已按更接近 `opencode` 的语义收口：上下文探索工具会按组展示，`codesearch`、`websearch`、`shell`、文件编辑类与未知工具保持独立工具行；共享微文案、进行中/完成态、问题忽略与未知工具降级等边缘态也已统一到当前实现
 - 已支持 stop/cancel 相关前端交互与 cancelled 状态展示
 - 已支持主题切换与本地主题状态同步
 - 聊天与推理区 Markdown 渲染已切回 `streamdown`，继续通过共享 `MarkdownContent` 门面承接流式更新、代码块、表格、Mermaid 图表与数学公式展示

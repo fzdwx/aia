@@ -14,6 +14,7 @@ import { MemoizedStreamingToolGroup, MemoizedToolGroup } from "./tool-timeline"
 import {
   formatDurationMs,
   fromInvocation,
+  isContextExplorationTool,
 } from "@/features/chat/tool-timeline-helpers.ts"
 
 const CHAT_TURN_LABEL = "workspace-section-label text-foreground/70"
@@ -29,7 +30,19 @@ function groupBlocks(blocks: TurnBlock[]): BlockGroup[] {
   for (const block of blocks) {
     if (block.kind === "tool_invocation") {
       const last = result[result.length - 1]
-      if (last && last.type === "tools") {
+      const isContextTool = isContextExplorationTool(
+        block.invocation.call.tool_name
+      )
+      const lastInvocation =
+        last && last.type === "tools"
+          ? last.invocations[last.invocations.length - 1]
+          : null
+      const canAppendToContextGroup =
+        lastInvocation != null &&
+        isContextTool &&
+        isContextExplorationTool(lastInvocation.call.tool_name)
+
+      if (canAppendToContextGroup && last && last.type === "tools") {
         last.invocations.push(block.invocation)
       } else {
         result.push({ type: "tools", invocations: [block.invocation] })
@@ -51,7 +64,15 @@ function groupStreamingBlocks(blocks: StreamingTurn["blocks"]) {
   for (const block of blocks) {
     if (block.type === "tool") {
       const last = groups[groups.length - 1]
-      if (last && last.type === "tools") {
+      const isContextTool = isContextExplorationTool(block.tool.toolName)
+      const lastTool =
+        last && last.type === "tools" ? last.tools[last.tools.length - 1] : null
+      const canAppendToContextGroup =
+        lastTool != null &&
+        isContextTool &&
+        isContextExplorationTool(lastTool.toolName)
+
+      if (canAppendToContextGroup && last && last.type === "tools") {
         last.tools.push(block.tool)
       } else {
         groups.push({ type: "tools", tools: [block.tool] })
@@ -77,7 +98,7 @@ function ThinkingBlock({
     <div className="mb-2">
       <button
         onClick={() => setOpen(!open)}
-        className="text-caption flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
+        className="text-body-sm flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
       >
         {isStreaming ? (
           <span className="font-medium">Thinking</span>

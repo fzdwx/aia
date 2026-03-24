@@ -8,6 +8,61 @@ import {
 } from "@/components/ui/collapsible"
 import { cn } from "@/lib/utils"
 
+import { toolTimelineCopy } from "../tool-timeline-copy"
+
+type ToolSectionKind =
+  | "request"
+  | "result"
+  | "content"
+  | "failure"
+  | "issue"
+  | "issue-ignored"
+  | "patch"
+  | "raw-details"
+  | "top-result"
+  | "other"
+
+const TOOL_SECTION_ALIASES: Record<string, ToolSectionKind> = {
+  [toolTimelineCopy.section.request.toLowerCase()]: "request",
+  request: "request",
+  input: "request",
+  [toolTimelineCopy.section.result.toLowerCase()]: "result",
+  result: "result",
+  [toolTimelineCopy.section.content.toLowerCase()]: "content",
+  content: "content",
+  [toolTimelineCopy.section.failure.toLowerCase()]: "failure",
+  failure: "failure",
+  [toolTimelineCopy.section.issue.toLowerCase()]: "issue",
+  issue: "issue",
+  [toolTimelineCopy.section.issueIgnored.toLowerCase()]: "issue-ignored",
+  "issue ignored": "issue-ignored",
+  [toolTimelineCopy.section.patch.toLowerCase()]: "patch",
+  patch: "patch",
+  [toolTimelineCopy.section.rawDetails.toLowerCase()]: "raw-details",
+  "raw details": "raw-details",
+  "top result": "top-result",
+}
+
+function resolveToolSectionKind(title: string): ToolSectionKind {
+  return TOOL_SECTION_ALIASES[title.trim().toLowerCase()] ?? "other"
+}
+
+function resolveToolSectionTone(kind: ToolSectionKind) {
+  switch (kind) {
+    case "result":
+    case "content":
+    case "top-result":
+      return "output"
+    case "failure":
+    case "issue":
+      return "failure"
+    case "patch":
+      return "patch"
+    default:
+      return "neutral"
+  }
+}
+
 export function ExpandableOutput({
   value,
   failed,
@@ -20,22 +75,26 @@ export function ExpandableOutput({
   const lineCount = value.split("\n").length
 
   return (
-    <div className="space-y-2">
+    <div className="tool-timeline-output">
       <pre
-        className={`text-caption overflow-auto whitespace-pre-wrap ${
-          failed ? "text-destructive/90" : "text-muted-foreground/85"
-        } ${!open && needsCollapse ? "max-h-52" : ""}`}
+        data-failed={failed || undefined}
+        className={cn(
+          "tool-timeline-output-pre",
+          !open && needsCollapse && "tool-timeline-output-pre-clamped"
+        )}
       >
         {value}
       </pre>
       {needsCollapse ? (
         <button
           onClick={() => setOpen((current) => !current)}
-          className="text-meta inline-flex items-center gap-2 font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none"
+          className="tool-timeline-output-toggle inline-flex items-center gap-2 font-medium transition-colors hover:text-foreground focus-visible:outline-none"
         >
-          <span>{`${lineCount} lines`}</span>
+          <span>{`${lineCount} ${toolTimelineCopy.unit.line}`}</span>
           <span className="text-border/80">·</span>
-          {open ? "Collapse" : "Expand"}
+          {open
+            ? toolTimelineCopy.action.collapse
+            : toolTimelineCopy.action.expand}
         </button>
       ) : null}
     </div>
@@ -53,18 +112,11 @@ export function DetailList({
   if (visibleEntries.length === 0) return null
 
   return (
-    <dl className="space-y-2">
+    <dl className="tool-timeline-detail-list">
       {visibleEntries.map((entry) => (
-        <div
-          key={entry.label}
-          className="grid grid-cols-[minmax(80px,120px)_1fr] items-start gap-3"
-        >
-          <dt className="text-meta font-medium text-foreground/70">
-            {entry.label}
-          </dt>
-          <dd className="text-caption break-words text-foreground/85">
-            {entry.value}
-          </dd>
+        <div key={entry.label} className="tool-timeline-detail-list-row">
+          <dt className="tool-timeline-detail-list-label">{entry.label}</dt>
+          <dd className="tool-timeline-detail-list-value">{entry.value}</dd>
         </div>
       ))}
     </dl>
@@ -75,15 +127,23 @@ export function JsonBlock({ value }: { value: unknown }) {
   const [open, setOpen] = useState(false)
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className="overflow-hidden">
-      <CollapsibleTrigger className="flex w-full items-center justify-between py-1 text-left focus-visible:outline-none">
-        <span className="text-meta font-medium text-foreground/70">JSON</span>
-        <span className="text-meta text-muted-foreground">
-          {open ? "Collapse" : "Expand"}
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      className="tool-timeline-json"
+    >
+      <CollapsibleTrigger className="tool-timeline-json-trigger flex w-full items-center justify-between text-left focus-visible:outline-none">
+        <span className="tool-timeline-json-label">
+          {toolTimelineCopy.section.content}
+        </span>
+        <span className="tool-timeline-json-hint">
+          {open
+            ? toolTimelineCopy.action.collapse
+            : toolTimelineCopy.action.expand}
         </span>
       </CollapsibleTrigger>
-      <CollapsibleContent className="pt-1">
-        <pre className="text-meta max-h-72 overflow-auto text-foreground/85">
+      <CollapsibleContent className="tool-timeline-json-panel">
+        <pre className="tool-timeline-json-pre">
           {JSON.stringify(value, null, 2)}
         </pre>
       </CollapsibleContent>
@@ -98,11 +158,18 @@ export function ToolDetailSection({
   title: string
   children: ReactNode
 }) {
+  const kind = resolveToolSectionKind(title)
+  const tone = resolveToolSectionTone(kind)
+
   return (
-    <div className="space-y-2">
-      <p className="text-meta font-medium text-foreground/70">{title}</p>
-      {children}
-    </div>
+    <section
+      className="tool-timeline-detail-section"
+      data-tool-detail-kind={kind}
+      data-tool-detail-tone={tone}
+    >
+      <p className="tool-timeline-detail-title">{title}</p>
+      <div className="tool-timeline-detail-body">{children}</div>
+    </section>
   )
 }
 
@@ -118,16 +185,33 @@ export function ToolInfoSection({
   children: ReactNode
 }) {
   const [open, setOpen] = useState(defaultOpen)
+  const kind = resolveToolSectionKind(title)
+  const tone = resolveToolSectionTone(kind)
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className="overflow-hidden">
-      <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 py-1 text-left focus-visible:outline-none">
-        <span className="text-ui font-medium text-foreground/90">{title}</span>
-        <span className="text-meta text-muted-foreground">
-          {[hint, open ? "Collapse" : "Expand"].filter(Boolean).join(" · ")}
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      className="tool-timeline-info-section"
+      data-tool-detail-kind={kind}
+      data-tool-detail-tone={tone}
+    >
+      <CollapsibleTrigger className="tool-timeline-info-trigger flex w-full items-center justify-between gap-3 text-left focus-visible:outline-none">
+        <span className="tool-timeline-info-title">{title}</span>
+        <span className="tool-timeline-info-hint">
+          {[
+            hint,
+            open
+              ? toolTimelineCopy.action.collapse
+              : toolTimelineCopy.action.expand,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
         </span>
       </CollapsibleTrigger>
-      <CollapsibleContent className="pt-1">{children}</CollapsibleContent>
+      <CollapsibleContent className="tool-timeline-info-panel">
+        <div className="tool-timeline-info-content">{children}</div>
+      </CollapsibleContent>
     </Collapsible>
   )
 }
@@ -140,6 +224,8 @@ export function ToolDetailSurface({
   className?: string
 }) {
   return (
-    <div className={cn("space-y-3 pt-1.5 pl-4", className)}>{children}</div>
+    <div className={cn("tool-timeline-detail-surface", className)}>
+      {children}
+    </div>
   )
 }

@@ -1,7 +1,13 @@
 import { ChevronDown, ChevronRight } from "lucide-react"
 import { memo, useEffect, useState } from "react"
+import { AnimatePresence, motion } from "motion/react"
 
-import { Shimmer } from "@/components/ai-elements/shimmer"
+import { TextShimmer } from "@/components/ai-elements/text-shimmer"
+import { ToolStatusTitle } from "@/components/ai-elements/tool-status-title"
+import {
+  AnimatedCountList,
+  type CountItem,
+} from "@/components/ai-elements/animated-count-list"
 import { getToolDisplayName } from "@/lib/tool-display"
 import { cn } from "@/lib/utils"
 import type { StreamingToolOutput } from "@/lib/types"
@@ -14,11 +20,16 @@ import {
   ToolInfoSection,
 } from "./tool-rendering/ui"
 import {
-  buildCategorySummary,
+  coalesceStreamingToolOutputs,
+  contextToolSummary,
+  contextToolTrigger,
   formatDurationMs,
   fromStreamingTool,
+  isContextExplorationTool,
+  normalizeToolName,
   type ToolRowItem,
 } from "./tool-timeline-helpers"
+import { toolTimelineCopy } from "./tool-timeline-copy"
 
 const ACTIVE_DURATION_TICK_MS = 100
 const OMITTED_ARGUMENT_KEYS = new Set([
@@ -42,6 +53,122 @@ const OMITTED_DETAIL_KEYS = new Set([
   "pattern",
   "command",
 ])
+const EMPTY_TOOL_RESULT_FALLBACK = "No output returned."
+const FAILED_TOOL_RESULT_FALLBACK = "Tool execution failed."
+const EMPTY_QUESTION_RESULT_FALLBACK = "No additional details."
+const IGNORED_QUESTION_RESULT_FALLBACK = "Question ignored."
+
+function hasText(value: string | undefined | null): value is string {
+  return typeof value === "string" && value.trim().length > 0
+}
+
+function hasMeaningfulValue(value: unknown): boolean {
+  if (value == null) return false
+  if (typeof value === "string") return value.trim().length > 0
+  if (Array.isArray(value))
+    return value.some((entry) => hasMeaningfulValue(entry))
+  if (typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).some((entry) =>
+      hasMeaningfulValue(entry)
+    )
+  }
+  return true
+}
+
+function getStringRecordValue(
+  record: Record<string, unknown> | undefined,
+  ...keys: string[]
+): string | null {
+  if (!record) return null
+
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value
+    }
+  }
+
+  return null
+}
+
+function getBooleanRecordValue(
+  record: Record<string, unknown> | undefined,
+  ...keys: string[]
+): boolean {
+  if (!record) return false
+
+  return keys.some((key) => record[key] === true)
+}
+
+function isIgnoredQuestion(item: ToolRowItem): boolean {
+  if (normalizeToolName(item.toolName) !== "question") return false
+
+  const status = getStringRecordValue(item.details, "status", "state")
+  const action = getStringRecordValue(item.details, "action")
+
+  return (
+    getBooleanRecordValue(
+      item.details,
+      "ignored",
+      "was_ignored",
+      "skip_render"
+    ) ||
+    getBooleanRecordValue(item.arguments, "ignored") ||
+    status?.toLowerCase() === "ignored" ||
+    action?.toLowerCase() === "ignore" ||
+    action?.toLowerCase() === "ignored" ||
+    item.outputContent.toLowerCase().includes("ignored")
+  )
+}
+
+function hasQuestionResolution(item: ToolRowItem): boolean {
+  if (hasText(item.outputContent)) return true
+
+  return hasMeaningfulValue({
+    summary: getStringRecordValue(item.details, "summary"),
+    answer: getStringRecordValue(item.details, "answer"),
+    reason: getStringRecordValue(item.details, "reason"),
+    message: getStringRecordValue(item.details, "message"),
+  })
+}
+
+function shouldRenderToolItem(item: ToolRowItem): boolean {
+  if (normalizeToolName(item.toolName) !== "question") return true
+  if (!item.succeeded) return true
+  if (isIgnoredQuestion(item)) return true
+  return hasQuestionResolution(item)
+}
+
+function hasVisibleToolDetails(item: ToolRowItem): boolean {
+  return hasText(item.outputContent) || hasMeaningfulValue(item.details)
+}
+
+function getFallbackSubtitle(item: ToolRowItem): string | null {
+  if (normalizeToolName(item.toolName) === "question") {
+    if (isIgnoredQuestion(item)) return IGNORED_QUESTION_RESULT_FALLBACK
+    if (!item.succeeded) {
+      return hasText(item.outputContent)
+        ? item.outputContent.trim()
+        : FAILED_TOOL_RESULT_FALLBACK
+    }
+    if (item.finishedAtMs != null && !hasQuestionResolution(item)) {
+      return EMPTY_QUESTION_RESULT_FALLBACK
+    }
+    return null
+  }
+
+  if (!item.succeeded) {
+    return hasText(item.outputContent)
+      ? item.outputContent.trim()
+      : FAILED_TOOL_RESULT_FALLBACK
+  }
+
+  if (item.finishedAtMs != null && !hasVisibleToolDetails(item)) {
+    return EMPTY_TOOL_RESULT_FALLBACK
+  }
+
+  return null
+}
 
 function useDurationTicker(enabled: boolean) {
   const [, setTick] = useState(0)
@@ -57,7 +184,7 @@ function useDurationTicker(enabled: boolean) {
   }, [enabled])
 }
 
-function ToolSummaryLine({
+function ToolTrigger({
   item,
   duration,
 }: {
@@ -65,6 +192,7 @@ function ToolSummaryLine({
   duration: string | null
 }) {
   const isRunning = item.finishedAtMs == null
+  const displayName = getToolDisplayName(item.toolName)
   const title = toolRendererRegistry.renderTitle({
     toolName: item.toolName,
     arguments: item.arguments,
@@ -72,46 +200,30 @@ function ToolSummaryLine({
     outputContent: item.outputContent,
     succeeded: item.succeeded,
   })
-  const meta = toolRendererRegistry.renderMeta({
-    toolName: item.toolName,
-    arguments: item.arguments,
-    details: item.details,
-    outputContent: item.outputContent,
-    succeeded: item.succeeded,
-  })
+  const subtitle =
+    getFallbackSubtitle(item) ?? (title && title !== displayName ? title : null)
 
   return (
-    <div className="flex min-w-0 items-baseline justify-between gap-3">
-      <div className="flex min-w-0 flex-1 items-baseline gap-x-2 gap-y-1">
-        <span className="text-body-sm shrink-0 font-semibold text-foreground/94">
-          {getToolDisplayName(item.toolName)}
-        </span>
-        <p
-          title={title || getToolDisplayName(item.toolName)}
-          className={cn(
-            "text-ui min-w-0 truncate text-left",
-            item.succeeded || isRunning
-              ? "text-muted-foreground/82"
-              : "text-destructive"
-          )}
+    <div data-component="tool-trigger">
+      <span data-slot="tool-title">
+        {isRunning ? (
+          <TextShimmer text={displayName} active />
+        ) : (
+          displayName
+        )}
+      </span>
+      {!isRunning && subtitle ? (
+        <span
+          data-slot="tool-subtitle"
+          data-state={item.succeeded ? "default" : "failure"}
+          title={title ?? undefined}
         >
-          {title || getToolDisplayName(item.toolName)}
-        </p>
-      </div>
-      {(meta || duration) && (
-        <div className="flex shrink-0 items-baseline gap-x-2 gap-y-1 pl-3">
-          {meta ? (
-            <div className="text-ui flex shrink-0 flex-wrap items-baseline gap-x-2 gap-y-1 text-muted-foreground/68">
-              {meta}
-            </div>
-          ) : null}
-          {duration ? (
-            <span className="text-meta shrink-0 text-muted-foreground/56 tabular-nums">
-              {duration}
-            </span>
-          ) : null}
-        </div>
-      )}
+          {subtitle}
+        </span>
+      ) : null}
+      {!isRunning && duration ? (
+        <span data-slot="tool-duration">{duration}</span>
+      ) : null}
     </div>
   )
 }
@@ -144,16 +256,16 @@ function renderToolDetailsPanel(item: ToolRowItem) {
     <ToolDetailSurface>
       {requestEntries.length > 0 ? (
         <ToolInfoSection
-          title="Inputs"
-          hint={`${requestEntries.length} field${requestEntries.length === 1 ? "" : "s"}`}
+          title={toolTimelineCopy.section.request}
+          hint={`${requestEntries.length} ${toolTimelineCopy.unit.field}`}
         >
           <DetailList entries={requestEntries} />
         </ToolInfoSection>
       ) : null}
       {resultEntries.length > 0 ? (
         <ToolInfoSection
-          title="Result"
-          hint={`${resultEntries.length} field${resultEntries.length === 1 ? "" : "s"}`}
+          title={toolTimelineCopy.section.result}
+          hint={`${resultEntries.length} ${toolTimelineCopy.unit.field}`}
           defaultOpen={false}
         >
           <DetailList entries={resultEntries} />
@@ -176,8 +288,9 @@ function ToolRow({ item }: { item: ToolRowItem }) {
   const detailsId = `tool-details-${item.id}`
 
   return (
-    <div className="w-full">
+    <div data-component="tool-row">
       <button
+        type="button"
         onClick={() => {
           if (!hasDetails) return
           setShowDetails(!showDetails)
@@ -185,17 +298,19 @@ function ToolRow({ item }: { item: ToolRowItem }) {
         aria-expanded={hasDetails ? showDetails : undefined}
         aria-controls={hasDetails ? detailsId : undefined}
         aria-disabled={!hasDetails}
+        data-expandable={hasDetails}
+        data-component="tool-row-trigger"
         className={cn(
-          "w-full px-0 py-1.5 text-left transition-colors focus-visible:outline-none",
+          "focus-visible:outline-none",
           hasDetails ? "hover:text-foreground" : "cursor-default"
         )}
       >
-        <div className="flex items-start gap-2">
-          <div className="min-w-0 flex-1">
-            <ToolSummaryLine item={item} duration={duration} />
+        <div data-slot="tool-row-shell">
+          <div data-slot="tool-row-main">
+            <ToolTrigger item={item} duration={duration} />
           </div>
           {hasDetails ? (
-            <span className="mt-0.5 text-muted-foreground/35">
+            <span data-slot="tool-row-caret">
               {showDetails ? (
                 <ChevronDown className="size-3.5" />
               ) : (
@@ -205,55 +320,164 @@ function ToolRow({ item }: { item: ToolRowItem }) {
           ) : null}
         </div>
       </button>
-      {showDetails && detailsContent && (
-        <div id={detailsId} className="pt-1.5 pl-4">
-          <div>{detailsContent}</div>
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {showDetails && detailsContent && (
+          <motion.div
+            key="details"
+            id={detailsId}
+            data-slot="tool-row-details"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ type: "spring", stiffness: 500, damping: 35 }}
+            style={{ overflow: "hidden" }}
+          >
+            <div>{detailsContent}</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
 
-export function ToolGroup({
-  items,
-  isStreaming = false,
-}: {
-  items: ToolRowItem[]
-  isStreaming?: boolean
-}) {
-  const [open, setOpen] = useState(isStreaming)
-  const summary = buildCategorySummary(items)
-
-  useEffect(() => {
-    if (isStreaming) {
-      setOpen(true)
-    }
-  }, [isStreaming])
+function ContextToolTriggerRow({ item }: { item: ToolRowItem }) {
+  const trigger = contextToolTrigger(item)
 
   return (
-    <div className="mb-5 w-full">
-      <button
-        onClick={() => setOpen(!open)}
-        className="text-ui flex items-center gap-2 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none"
-      >
-        <span className="font-medium">
-          {isStreaming ? "Running" : "Explored"}
+    <div data-component="context-tool-trigger-row">
+      <span data-slot="tool-title">{trigger.title}</span>
+      {trigger.subtitle ? (
+        <span data-slot="tool-subtitle">{trigger.subtitle}</span>
+      ) : null}
+      {trigger.args.map((arg) => (
+        <span key={arg.key} data-slot="tool-arg">
+          {arg.key}={arg.value}
         </span>
-        {!open && (
-          <span className="text-meta mt-[2px] text-muted-foreground/70">
-            {summary
-              .map((s) => `${s.count} ${s.label}${s.count > 1 ? "s" : ""}`)
-              .join(", ")}
-          </span>
-        )}
-      </button>
-      {open && (
-        <div className="mt-2.5 space-y-3.5">
-          {items.map((item) => (
-            <ToolRow key={item.id} item={item} />
-          ))}
+      ))}
+    </div>
+  )
+}
+
+function buildCountItems(items: ToolRowItem[]): CountItem[] {
+  const summary = contextToolSummary(items)
+  const countItems: CountItem[] = []
+  const { contextCount } = toolTimelineCopy
+
+  if (summary.read > 0) {
+    countItems.push({
+      key: "read",
+      count: summary.read,
+      ...contextCount.read,
+    })
+  }
+  if (summary.search > 0) {
+    countItems.push({
+      key: "search",
+      count: summary.search,
+      ...contextCount.search,
+    })
+  }
+  if (summary.list > 0) {
+    countItems.push({
+      key: "list",
+      count: summary.list,
+      ...contextCount.list,
+    })
+  }
+
+  return countItems
+}
+
+export function ToolGroup({
+  items,
+  status = "completed",
+}: {
+  items: ToolRowItem[]
+  status?: "running" | "completed"
+}) {
+  const visibleItems = items.filter(shouldRenderToolItem)
+  const isContextGroup = visibleItems.every((item) =>
+    isContextExplorationTool(item.toolName)
+  )
+  const isRunning = status === "running"
+  const [open, setOpen] = useState(isRunning)
+  const countItems = isContextGroup ? buildCountItems(visibleItems) : []
+
+  useEffect(() => {
+    if (isRunning && isContextGroup) {
+      setOpen(true)
+    }
+  }, [isContextGroup, isRunning])
+
+  if (visibleItems.length === 0) return null
+
+  if (!isContextGroup) {
+    return (
+      <div data-component="tool-group" data-variant="standalone">
+        {visibleItems.map((item) => (
+          <ToolRow key={item.id} item={item} />
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div data-component="tool-group" data-variant="context">
+      {isRunning ? (
+        <div data-component="context-tool-group-trigger">
+          <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-amber-500/70" />
+          <ToolStatusTitle
+            active
+            activeText={toolTimelineCopy.groupStatus.running}
+            doneText={toolTimelineCopy.groupStatus.completed}
+          />
+          <AnimatedCountList items={countItems} />
         </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setOpen((current) => !current)}
+          aria-expanded={open}
+          data-interactive="true"
+          data-component="context-tool-group-trigger"
+          className="transition-colors hover:text-foreground focus-visible:outline-none"
+        >
+          <ToolStatusTitle
+            active={false}
+            activeText={toolTimelineCopy.groupStatus.running}
+            doneText={toolTimelineCopy.groupStatus.completed}
+          />
+          {!open ? (
+            <AnimatedCountList items={countItems} />
+          ) : null}
+          <span data-slot="context-group-caret">
+            {open ? (
+              <ChevronDown className="size-3" />
+            ) : (
+              <ChevronRight className="size-3" />
+            )}
+          </span>
+        </button>
       )}
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            key="list"
+            data-component="context-tool-group-list"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ type: "spring", stiffness: 500, damping: 35 }}
+            style={{ overflow: "hidden" }}
+          >
+            <div data-slot="context-tool-group-list-inner">
+              {visibleItems.map((item) => (
+                <ContextToolTriggerRow key={item.id} item={item} />
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
@@ -263,38 +487,21 @@ export function StreamingToolGroup({
 }: {
   toolOutputs: StreamingToolOutput[]
 }) {
-  const completed = toolOutputs.filter((t) => t.completed)
-  const active = toolOutputs.filter((t) => !t.completed)
-  const activeSummary = buildCategorySummary(active)
+  const coalescedToolOutputs = coalesceStreamingToolOutputs(toolOutputs)
+  const completed = coalescedToolOutputs.filter((t) => t.completed)
+  const active = coalescedToolOutputs.filter((t) => !t.completed)
   useDurationTicker(active.length > 0)
 
-  if (toolOutputs.length === 0) return null
+  if (coalescedToolOutputs.length === 0) return null
 
   return (
-    <div className="mb-3 w-full space-y-3">
+    <div data-component="tool-timeline-stream">
       {completed.length > 0 && (
-        <ToolGroup items={completed.map(fromStreamingTool)} isStreaming />
+        <ToolGroup items={completed.map(fromStreamingTool)} />
       )}
 
       {active.length > 0 && (
-        <>
-          <div className="text-ui flex items-center gap-2 text-muted-foreground">
-            <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-amber-500/70" />
-            <Shimmer as="span" className="font-medium" duration={2}>
-              Running tools
-            </Shimmer>
-            <span className="text-meta text-muted-foreground/70">
-              {activeSummary
-                .map((s) => `${s.count} ${s.label}${s.count > 1 ? "s" : ""}`)
-                .join(", ")}
-            </span>
-          </div>
-          <div className="space-y-3.5">
-            {active.map((tool) => (
-              <ToolRow key={tool.invocationId} item={fromStreamingTool(tool)} />
-            ))}
-          </div>
-        </>
+        <ToolGroup items={active.map(fromStreamingTool)} status="running" />
       )}
     </div>
   )

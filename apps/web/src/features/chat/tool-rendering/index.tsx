@@ -19,6 +19,7 @@ import {
 } from "./renderers/search-tools"
 import { createShellRenderer } from "./renderers/shell"
 import { createApplyPatchRenderer } from "./renderers/apply-patch"
+import { createQuestionRenderer } from "./renderers/question"
 import {
   createTapeHandoffRenderer,
   createTapeInfoRenderer,
@@ -36,6 +37,7 @@ export const toolRendererRegistry = createToolRendererRegistry(
     createGrepRenderer(),
     createShellRenderer(),
     createApplyPatchRenderer(),
+    createQuestionRenderer(),
     createTapeInfoRenderer(),
     createTapeHandoffRenderer(),
   ]

@@ -13,6 +13,8 @@ export type ToolRowItem = {
 
 type ToolCategory = "read" | "search" | "edit" | "other"
 
+const CONTEXT_EXPLORATION_TOOLS = new Set(["read", "glob", "grep", "list", "codesearch", "websearch"])
+
 const TOOL_CATEGORIES: Record<string, ToolCategory> = {
   read: "read",
   cat: "read",
@@ -41,7 +43,17 @@ const CATEGORY_LABELS: Record<ToolCategory, string> = {
 }
 
 function categorize(toolName: string): ToolCategory {
-  return TOOL_CATEGORIES[toolName.toLowerCase()] ?? "other"
+  return TOOL_CATEGORIES[normalizeToolName(toolName)] ?? "other"
+}
+
+export function normalizeToolName(toolName: string): string {
+  const lower = toolName.toLowerCase()
+  const segments = lower.split(".")
+  return segments[segments.length - 1] ?? lower
+}
+
+export function isContextExplorationTool(toolName: string): boolean {
+  return CONTEXT_EXPLORATION_TOOLS.has(normalizeToolName(toolName))
 }
 
 export function buildCategorySummary(
@@ -95,6 +107,162 @@ export function fromStreamingTool(tool: StreamingToolOutput): ToolRowItem {
     outputContent: tool.resultContent ?? tool.output,
     details: tool.resultDetails,
   }
+}
+
+function hasText(value: string | undefined): value is string {
+  return typeof value === "string" && value.trim().length > 0
+}
+
+function mergeDetails(
+  existing: Record<string, unknown> | undefined,
+  incoming: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  if (!existing) return incoming
+  if (!incoming) return existing
+  return { ...existing, ...incoming }
+}
+
+function pickToolTimestamp(
+  existing: number | undefined,
+  incoming: number | undefined
+): number {
+  if (typeof existing === "number" && existing > 0) return existing
+  if (typeof incoming === "number" && incoming > 0) return incoming
+  return existing ?? incoming ?? 0
+}
+
+export function coalesceStreamingToolOutputs(
+  toolOutputs: StreamingToolOutput[]
+): StreamingToolOutput[] {
+  const merged = new Map<string, StreamingToolOutput>()
+  const order: string[] = []
+
+  for (const tool of toolOutputs) {
+    const key = tool.invocationId
+    const existing = merged.get(key)
+
+    if (!existing) {
+      order.push(key)
+      merged.set(key, {
+        ...tool,
+        arguments: { ...tool.arguments },
+      })
+      continue
+    }
+
+    merged.set(key, {
+      invocationId: existing.invocationId,
+      toolName: hasText(existing.toolName) ? existing.toolName : tool.toolName,
+      arguments: { ...existing.arguments, ...tool.arguments },
+      detectedAtMs: pickToolTimestamp(existing.detectedAtMs, tool.detectedAtMs),
+      startedAtMs: existing.startedAtMs ?? tool.startedAtMs,
+      finishedAtMs: existing.finishedAtMs ?? tool.finishedAtMs,
+      output:
+        existing.output.length >= tool.output.length
+          ? existing.output
+          : tool.output,
+      completed: existing.completed || tool.completed,
+      resultContent: hasText(existing.resultContent)
+        ? existing.resultContent
+        : tool.resultContent,
+      resultDetails: mergeDetails(existing.resultDetails, tool.resultDetails),
+      failed: existing.failed ?? tool.failed,
+    })
+  }
+
+  return order
+    .map((key) => merged.get(key))
+    .filter((tool): tool is StreamingToolOutput => tool != null)
+}
+
+export type ContextToolTriggerInfo = {
+  title: string
+  subtitle: string
+  args: { key: string; value: string }[]
+}
+
+const CONTEXT_TRIGGER_ARG_OMIT = new Set([
+  "content",
+  "patch",
+  "patchText",
+  "old_string",
+  "new_string",
+  "value",
+  "text",
+  "input",
+  "contents",
+  "file_path",
+  "path",
+  "pattern",
+  "command",
+  "query",
+])
+
+export function contextToolTrigger(item: ToolRowItem): ContextToolTriggerInfo {
+  const name = normalizeToolName(item.toolName)
+  const args = item.arguments
+
+  let title = name
+  let subtitle = ""
+  const triggerArgs: { key: string; value: string }[] = []
+
+  if (name === "read") {
+    subtitle =
+      typeof args.file_path === "string"
+        ? args.file_path
+        : typeof args.path === "string"
+          ? args.path
+          : ""
+  } else if (name === "grep") {
+    subtitle = typeof args.pattern === "string" ? args.pattern : ""
+  } else if (name === "glob") {
+    subtitle = typeof args.pattern === "string" ? args.pattern : ""
+  } else if (name === "list") {
+    subtitle = typeof args.path === "string" ? args.path : ""
+  } else {
+    const firstStr = Object.values(args).find(
+      (v) => typeof v === "string"
+    ) as string | undefined
+    subtitle = firstStr ?? ""
+  }
+
+  for (const [key, val] of Object.entries(args)) {
+    if (CONTEXT_TRIGGER_ARG_OMIT.has(key)) continue
+    if (typeof val === "string" && val === subtitle) continue
+    if (val == null) continue
+    const display =
+      typeof val === "string"
+        ? val
+        : typeof val === "number" || typeof val === "boolean"
+          ? String(val)
+          : null
+    if (display != null) {
+      triggerArgs.push({ key, value: display })
+    }
+  }
+
+  return { title, subtitle, args: triggerArgs }
+}
+
+export type ContextToolSummary = {
+  read: number
+  search: number
+  list: number
+}
+
+export function contextToolSummary(items: ToolRowItem[]): ContextToolSummary {
+  let read = 0
+  let search = 0
+  let list = 0
+
+  for (const item of items) {
+    const cat = categorize(item.toolName)
+    if (cat === "read") read++
+    else if (cat === "search") search++
+    else list++
+  }
+
+  return { read, search, list }
 }
 
 export function formatDurationMs(
