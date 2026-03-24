@@ -229,7 +229,7 @@ describe("tool timeline", () => {
     expect(runningHtml).not.toContain("Running tools")
   })
 
-  test("uses slightly roomier tool-group spacing in shared web styles", () => {
+  test("keeps explored list spacing inside the animated panel", () => {
     const source = loadWebCssSource()
 
     expect(source).toContain('[data-component="tool-group"]')
@@ -240,7 +240,7 @@ describe("tool timeline", () => {
     )
     expect(source).toContain("gap: 0.25rem")
     expect(source).toContain('[data-component="context-tool-group-list"]')
-    expect(source).toContain("margin-top: 0.375rem")
+    expect(source).toContain("padding-top: 0.375rem")
     expect(source).toContain('[data-slot="context-tool-group-list-inner"]')
   })
 
@@ -461,6 +461,15 @@ describe("tool timeline", () => {
     expect(source).toContain(
       "CARETLESS_EXPANDABLE_TOOLS.has(normalizeToolName(item.toolName))"
     )
+  })
+
+  test("treats caret icons as decorative so expansion stays on the row trigger", () => {
+    const source = loadToolTimelineSource()
+
+    expect(source).toContain('data-slot="tool-row-caret"')
+    expect(source).toContain('data-slot="context-group-caret"')
+    expect(source).toContain('aria-hidden="true"')
+    expect(source).toContain('className="pointer-events-none"')
   })
 
   test("renders semantic containers for output, failure, and patch sections", () => {

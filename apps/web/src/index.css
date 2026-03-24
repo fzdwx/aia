@@ -692,7 +692,7 @@ body {
   }
 
   [data-component="context-tool-group-list"] {
-    margin-top: 0.375rem;
+    padding-top: 0.375rem;
   }
 
   [data-slot="context-tool-group-list-inner"] {
