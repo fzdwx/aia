@@ -4,6 +4,7 @@ import { Code2, ExternalLink, Globe2 } from "lucide-react"
 
 import { normalizeToolArguments } from "@/lib/tool-display"
 
+import { formatSearchInvocation } from "../../search-invocation"
 import type { ToolRenderer } from "../types"
 import {
   createMetaBadge,
@@ -228,10 +229,7 @@ export function createGlobRenderer(): ToolRenderer {
   return {
     matches: (toolName) => toolName === "Glob",
     renderTitle(data) {
-      const args = normalizeToolArguments(data.arguments)
-      const pattern = getStringValue(args, "pattern")
-      const path = getStringValue(args, "path")
-      return [pattern, path ? `in ${path}` : ""].filter(Boolean).join(" — ")
+      return formatSearchInvocation(data.toolName, data.arguments)
     },
     renderMeta(data) {
       return renderSearchMeta(data)
@@ -255,9 +253,7 @@ export function createGrepRenderer(): ToolRenderer {
   return {
     matches: (toolName) => toolName === "Grep",
     renderTitle(data) {
-      const args = normalizeToolArguments(data.arguments)
-      const pattern = getStringValue(args, "pattern")
-      return pattern ? truncateInline(pattern, 48) : ""
+      return formatSearchInvocation(data.toolName, data.arguments)
     },
     renderMeta(data) {
       return renderSearchMeta(data)

@@ -1,5 +1,8 @@
 import type { StreamingToolOutput, ToolInvocationLifecycle } from "@/lib/types"
 
+import { formatReadLineRange } from "./read-range"
+import { formatSearchInvocation } from "./search-invocation"
+
 export type ToolRowItem = {
   id: string
   toolName: string
@@ -186,10 +189,39 @@ export function coalesceStreamingToolOutputs(
 export type ContextToolTriggerInfo = {
   title: string
   subtitle: string
+  meta: string[]
   args: { key: string; value: string }[]
 }
 
+function buildReadContextMeta(item: ToolRowItem): string[] {
+  const range = formatReadLineRange({
+    offset: item.arguments.offset,
+    limit: item.arguments.limit,
+    linesRead: item.details?.lines_read,
+    totalLines: item.details?.total_lines,
+  })
+
+  return range ? [range] : []
+}
+
+function buildSearchContextMeta(item: ToolRowItem): string[] {
+  const matches =
+    typeof item.details?.matches === "number" ? item.details.matches : null
+  const returned =
+    typeof item.details?.returned === "number" ? item.details.returned : null
+  const truncated = item.details?.truncated === true
+
+  if (matches == null) return []
+  if (truncated && returned != null) {
+    return [`${matches} matches`, `showing ${returned}`]
+  }
+
+  return [`${matches} matches`]
+}
+
 const CONTEXT_TRIGGER_ARG_OMIT = new Set([
+  "offset",
+  "limit",
   "content",
   "patch",
   "patchText",
@@ -212,6 +244,7 @@ export function contextToolTrigger(item: ToolRowItem): ContextToolTriggerInfo {
 
   let title = name
   let subtitle = ""
+  let meta: string[] = []
   const triggerArgs: { key: string; value: string }[] = []
 
   if (name === "Read") {
@@ -221,10 +254,13 @@ export function contextToolTrigger(item: ToolRowItem): ContextToolTriggerInfo {
         : typeof args.path === "string"
           ? args.path
           : ""
+    meta = buildReadContextMeta(item)
   } else if (name === "Grep") {
-    subtitle = typeof args.pattern === "string" ? args.pattern : ""
+    subtitle = formatSearchInvocation(name, args)
+    meta = buildSearchContextMeta(item)
   } else if (name === "Glob") {
-    subtitle = typeof args.pattern === "string" ? args.pattern : ""
+    subtitle = formatSearchInvocation(name, args)
+    meta = buildSearchContextMeta(item)
   } else if (name === "list") {
     subtitle = typeof args.path === "string" ? args.path : ""
   } else {
@@ -249,7 +285,7 @@ export function contextToolTrigger(item: ToolRowItem): ContextToolTriggerInfo {
     }
   }
 
-  return { title, subtitle, args: triggerArgs }
+  return { title, subtitle, meta, args: triggerArgs }
 }
 
 export type ContextToolSummary = {
