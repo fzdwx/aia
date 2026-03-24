@@ -2,23 +2,11 @@ import { useRef, useState } from "react"
 import { ArrowUp, Square } from "lucide-react"
 
 import { ModelSelector } from "@/components/model-selector"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
-  getThinkingLevelLabel,
-  THINKING_OPTIONS,
-} from "@/components/chat-input-thinking"
-import type { ThinkingLevel } from "@/lib/types"
+import { ReasoningSelector } from "@/components/reasoning-selector"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat-store"
 import { useSessionSettingsStore } from "@/stores/session-settings-store"
 
-const CHAT_CONTROL_TEXT = "text-ui"
 const CHAT_MICRO_TEXT = "text-meta"
 const CHAT_INPUT_HELP = "text-muted-foreground/30"
 
@@ -41,26 +29,13 @@ export function ChatInput() {
   const submitTurn = useChatStore((s) => s.submitTurn)
   const cancelTurn = useChatStore((s) => s.cancelTurn)
   const chatState = useChatStore((s) => s.chatState)
-  const providerList = useChatStore((s) => s.providerList)
-  const setSessionReasoningEffort = useChatStore(
-    (s) => s.setSessionReasoningEffort
-  )
-  const sessionSettings = useSessionSettingsStore((s) => s.sessionSettings)
-  const sessionSettingsHydrating = useSessionSettingsStore((s) => s.hydrating)
-  const sessionSettingsUpdating = useSessionSettingsStore((s) => s.updating)
   const sessionSettingsError = useSessionSettingsStore((s) => s.error)
-  const supportsReasoning = useSessionSettingsStore((s) =>
-    s.supportsReasoning(providerList)
-  )
   const disabled = chatState === "active"
 
   const [value, setValue] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const canSend = value.trim().length > 0 && !disabled
-  const reasoningValue = sessionSettings?.reasoning_effort ?? "medium"
-  const settingsLoading = sessionSettingsHydrating || sessionSettingsUpdating
-  const settingsBusy = settingsLoading || disabled
 
   function handleSend() {
     if (!canSend) return
@@ -83,42 +58,7 @@ export function ChatInput() {
       <div className="mx-auto max-w-[720px]">
         <div className="mb-1.5 flex items-center justify-start gap-2">
           <ModelSelector />
-          {supportsReasoning && (
-            <Select
-              value={reasoningValue}
-              disabled={settingsBusy}
-              onValueChange={(next) => {
-                if (!next) return
-                void setSessionReasoningEffort(next as ThinkingLevel).catch(
-                  () => {}
-                )
-              }}
-            >
-              <SelectTrigger
-                size="sm"
-                className={`h-8 border-0 bg-transparent px-2 py-1 font-medium text-muted-foreground/90 shadow-none hover:bg-muted/60 hover:text-foreground/80 disabled:opacity-50 [&_svg:not([class*='size-'])]:size-3 ${CHAT_CONTROL_TEXT}`}
-              >
-                <SelectValue className={CHAT_CONTROL_TEXT}>
-                  {getThinkingLevelLabel({
-                    reasoningValue,
-                    sessionSettingsHydrating,
-                    sessionSettingsUpdating,
-                  })}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent align="start" alignItemWithTrigger={false}>
-                {THINKING_OPTIONS.map((option) => (
-                  <SelectItem
-                    key={option.value}
-                    value={option.value}
-                    className={CHAT_CONTROL_TEXT}
-                  >
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
+          <ReasoningSelector />
         </div>
         {sessionSettingsError && (
           <div className={`mb-2 ${CHAT_MICRO_TEXT} text-destructive/80`}>
