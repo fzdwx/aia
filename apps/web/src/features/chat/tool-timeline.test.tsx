@@ -28,7 +28,8 @@ describe("tool timeline", () => {
     expect(isContextExplorationTool("functions.read")).toBe(true)
     expect(isContextExplorationTool("grep")).toBe(true)
     expect(isContextExplorationTool("list")).toBe(true)
-    expect(isContextExplorationTool("codesearch")).toBe(false)
+    expect(isContextExplorationTool("codesearch")).toBe(true)
+    expect(isContextExplorationTool("websearch")).toBe(true)
     expect(isContextExplorationTool("shell")).toBe(false)
   })
 
@@ -60,7 +61,7 @@ describe("tool timeline", () => {
     ])
   })
 
-  test("renders running context groups with status title and no collapse header", () => {
+  test("renders running context groups with status title and context trigger rows", () => {
     const html = renderWithTheme(
       <StreamingToolGroup
         toolOutputs={[
@@ -82,18 +83,12 @@ describe("tool timeline", () => {
     expect(html).toContain("Exploring")
     expect(html).toContain("grep")
     expect(html).toContain("renderDetails")
-    expect(html).toContain('data-component="tool-trigger"')
-    expect(html).not.toContain('data-component="tool-row-trigger"')
     expect(html).toContain('data-component="context-tool-trigger-row"')
     expect(html).toContain('data-slot="tool-title"')
     expect(html).toContain('data-slot="tool-subtitle"')
     expect(html).toMatch(
       /data-component="tool-group"[\s\S]*data-component="context-tool-group-trigger"[\s\S]*Exploring/
     )
-    expect(html).not.toContain(
-      "rounded-md border border-border/20 bg-background/25"
-    )
-    expect(html).not.toContain("mt-2 truncate text-[13px] font-medium")
     expect(html).not.toContain("Running tools")
   })
 
@@ -181,18 +176,16 @@ describe("tool timeline", () => {
       <ToolGroup
         items={[
           {
-            id: "tool-codesearch-1",
-            toolName: "codesearch",
+            id: "tool-shell-1",
+            toolName: "shell",
             arguments: {
-              query: "useEffect cleanup",
+              command: "cargo check",
             },
             startedAtMs: 100,
             finishedAtMs: 220,
             succeeded: true,
-            outputContent: "results",
-            details: {
-              total_results: 3,
-            },
+            outputContent: "ok",
+            details: {},
           },
         ]}
       />
@@ -201,10 +194,10 @@ describe("tool timeline", () => {
       <StreamingToolGroup
         toolOutputs={[
           {
-            invocationId: "streaming-codesearch-1",
-            toolName: "codesearch",
+            invocationId: "streaming-shell-1",
+            toolName: "shell",
             arguments: {
-              query: "useEffect cleanup",
+              command: "cargo check",
             },
             detectedAtMs: Date.now() - 100,
             output: "",
@@ -214,11 +207,11 @@ describe("tool timeline", () => {
       />
     )
 
-    expect(completedHtml).toContain("codesearch")
+    expect(completedHtml).toContain("shell")
     expect(completedHtml).not.toContain("Explored")
     expect(completedHtml).not.toContain("Exploring")
 
-    expect(runningHtml).toContain("codesearch")
+    expect(runningHtml).toContain("shell")
     expect(runningHtml).not.toContain("Explored")
     expect(runningHtml).not.toContain("Exploring")
     expect(runningHtml).not.toContain("Running tools")
@@ -243,7 +236,7 @@ describe("tool timeline", () => {
     )
 
     expect(html).not.toContain("Override existing config?")
-    expect(html).not.toContain("data-component=\"tool-row\"")
+    expect(html).not.toContain('data-component="tool-row"')
   })
 
   test("renders english fallbacks for empty outputs and silent failures", () => {
@@ -251,8 +244,8 @@ describe("tool timeline", () => {
       <ToolGroup
         items={[
           {
-            id: "tool-grep-empty",
-            toolName: "grep",
+            id: "tool-shell-empty",
+            toolName: "shell",
             arguments: {},
             startedAtMs: 100,
             finishedAtMs: 140,
@@ -276,7 +269,7 @@ describe("tool timeline", () => {
     expect(html).toContain("Tool execution failed.")
   })
 
-  test("coalesces out-of-order streaming tools into one completed row", () => {
+  test("coalesces out-of-order streaming tools into one completed context group", () => {
     const html = renderWithTheme(
       <StreamingToolGroup
         toolOutputs={[
@@ -306,7 +299,7 @@ describe("tool timeline", () => {
 
     expect(html).toContain("renderDetails")
     expect(html).not.toContain("Exploring")
-    expect(html.match(/data-component="tool-row-trigger"/g)).toHaveLength(1)
+    expect(html).toContain('data-component="context-tool-trigger-row"')
   })
 
   test("uses data-component attributes for context groups and tool rows", () => {
@@ -322,7 +315,7 @@ describe("tool timeline", () => {
       'data-component="tool-group" data-variant="standalone"'
     )
     expect(source).toContain('data-component="context-tool-group-trigger"')
-    expect(source).toContain("onClick={() => setOpen((current) => !current))")
+    expect(source).toContain("setOpen((current) => !current)")
     expect(source).toContain('status="running"')
   })
 

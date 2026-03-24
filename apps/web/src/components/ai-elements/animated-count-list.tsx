@@ -40,8 +40,8 @@ export function AnimatedCountList({
             animate={{ opacity: 1, width: "auto" }}
             exit={{ opacity: 0, width: 0 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
-            style={{  overflow: "hidden", whiteSpace: "nowrap" }}
-            className='mt-[2px]'
+            style={{ overflow: "hidden", whiteSpace: "nowrap" }}
+            className="mt-[2px]"
           >
             {index > 0 ? ", " : ""}
             {formatCountItem(item)}

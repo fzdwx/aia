@@ -13,7 +13,14 @@ export type ToolRowItem = {
 
 type ToolCategory = "read" | "search" | "edit" | "other"
 
-const CONTEXT_EXPLORATION_TOOLS = new Set(["read", "glob", "grep", "list", "codesearch", "websearch"])
+const CONTEXT_EXPLORATION_TOOLS = new Set([
+  "read",
+  "glob",
+  "grep",
+  "list",
+  "codesearch",
+  "websearch",
+])
 
 const TOOL_CATEGORIES: Record<string, ToolCategory> = {
   read: "read",
@@ -220,9 +227,9 @@ export function contextToolTrigger(item: ToolRowItem): ContextToolTriggerInfo {
   } else if (name === "list") {
     subtitle = typeof args.path === "string" ? args.path : ""
   } else {
-    const firstStr = Object.values(args).find(
-      (v) => typeof v === "string"
-    ) as string | undefined
+    const firstStr = Object.values(args).find((v) => typeof v === "string") as
+      | string
+      | undefined
     subtitle = firstStr ?? ""
   }
 

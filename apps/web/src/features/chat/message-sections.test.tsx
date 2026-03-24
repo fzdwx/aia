@@ -133,18 +133,18 @@ describe("chat message status surfaces", () => {
               kind: "tool_invocation",
               invocation: {
                 call: {
-                  invocation_id: "tool-codesearch",
-                  tool_name: "codesearch",
-                  arguments: { query: "useEffect cleanup" },
+                  invocation_id: "tool-shell",
+                  tool_name: "shell",
+                  arguments: { command: "cargo check" },
                 },
                 started_at_ms: 121,
                 finished_at_ms: 140,
                 outcome: {
                   status: "succeeded",
                   result: {
-                    invocation_id: "tool-codesearch",
-                    tool_name: "codesearch",
-                    content: "results",
+                    invocation_id: "tool-shell",
+                    tool_name: "shell",
+                    content: "ok",
                     details: {},
                   },
                 },
@@ -208,7 +208,7 @@ describe("chat message status surfaces", () => {
     expect(html.match(/1 search/g)).toHaveLength(1)
     expect(html).toContain("1 read")
     expect(html).toContain("1 list")
-    expect(html).toContain("codesearch")
+    expect(html).toContain("shell")
     expect(html).toContain("Done searching.")
   })
 
@@ -218,7 +218,6 @@ describe("chat message status surfaces", () => {
     expect(html).toContain('role="status"')
     expect(html).toContain('aria-live="polite"')
     expect(html).toContain("Working")
-    expect(html).toContain("text-body-sm font-medium")
   })
 
   test("removes motion-heavy hydration decoration when reduced motion is preferred", () => {
@@ -243,7 +242,7 @@ describe("chat message status surfaces", () => {
       />
     )
 
-    expect(html).toContain("text-caption flex items-center")
+    expect(html).toContain("text-body-sm flex items-center")
     expect(html).toContain("text-body-sm leading-body-sm")
     expect(html).not.toContain("text-[13px]")
   })

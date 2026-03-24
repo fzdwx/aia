@@ -101,10 +101,10 @@ function ThinkingBlock({
         className="text-body-sm flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
       >
         {isStreaming ? (
-          <span className="font-medium">Thinking</span>
+          <span className="font-semibold">Thinking</span>
         ) : (
           <>
-            <span className="font-medium">Thought</span>
+            <span className="font-semibold">Thought</span>
             {!open && lastLine && (
               <span className="ml-1 max-w-[400px] truncate text-muted-foreground/50">
                 {lastLine}
@@ -166,7 +166,7 @@ export function StatusIndicator({
 }) {
   return (
     <div className="py-2" role="status" aria-live="polite" aria-atomic="true">
-      <Shimmer as="span" className="text-body-sm font-medium" duration={2}>
+      <Shimmer as="span" duration={4} spread={6}>
         {STATUS_LABELS[status]}
       </Shimmer>
     </div>

@@ -206,11 +206,7 @@ function ToolTrigger({
   return (
     <div data-component="tool-trigger">
       <span data-slot="tool-title">
-        {isRunning ? (
-          <TextShimmer text={displayName} active />
-        ) : (
-          displayName
-        )}
+        {isRunning ? <TextShimmer text={displayName} active /> : displayName}
       </span>
       {!isRunning && subtitle ? (
         <span
@@ -447,9 +443,7 @@ export function ToolGroup({
             activeText={toolTimelineCopy.groupStatus.running}
             doneText={toolTimelineCopy.groupStatus.completed}
           />
-          {!open ? (
-            <AnimatedCountList items={countItems} />
-          ) : null}
+          {!open ? <AnimatedCountList items={countItems} /> : null}
           <span data-slot="context-group-caret">
             {open ? (
               <ChevronDown className="size-3" />
