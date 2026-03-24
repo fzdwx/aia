@@ -22,6 +22,10 @@ pub struct ShellTool;
 pub(crate) struct ShellToolArgs {
     #[tool_schema(description = "The shell command to execute")]
     command: String,
+    #[tool_schema(
+        description = "Clear, concise description of what this command does in 5-10 words. Examples:\nInput: ls\nOutput: Lists files in current directory\n\nInput: git status\nOutput: Shows working tree status\n\nInput: npm install\nOutput: Installs package dependencies\n\nInput: mkdir foo\nOutput: Creates directory 'foo'"
+    )]
+    description: Option<String>,
 }
 
 #[async_trait]
@@ -43,6 +47,7 @@ impl Tool for ShellTool {
     ) -> Result<ToolResult, CoreError> {
         let args: ShellToolArgs = call.parse_arguments()?;
         let command = args.command;
+        let _description = args.description;
         let cwd = context.workspace_root.as_deref().unwrap_or_else(|| Path::new("."));
 
         if context.abort.is_aborted() {
