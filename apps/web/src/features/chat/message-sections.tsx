@@ -376,6 +376,7 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
               <MemoizedToolGroup
                 key={i}
                 items={group.invocations.map(fromInvocation)}
+                keepContextGroupsOpen
               />
             )
           }
