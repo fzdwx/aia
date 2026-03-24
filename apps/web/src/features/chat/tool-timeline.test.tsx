@@ -320,6 +320,58 @@ describe("tool timeline", () => {
     expect(source).toContain('status="running"')
   })
 
+  test("uses a fixed tween transition for detail panels to avoid spring jitter", () => {
+    const source = loadToolTimelineSource()
+
+    expect(source).toContain("const TOOL_DETAILS_TRANSITION =")
+    expect(source).toContain("duration: 0.18")
+    expect(source).toContain("ease: [0.16, 1, 0.3, 1]")
+    expect(source).toContain('ease: "linear"')
+    expect(source).toContain("transition={TOOL_DETAILS_TRANSITION}")
+    expect(source).not.toContain('type: "spring"')
+  })
+
+  test("renders edit tools as expandable rows without a caret icon", () => {
+    const html = renderWithTheme(
+      <ToolGroup
+        items={[
+          {
+            id: "tool-edit-inline",
+            toolName: "edit",
+            arguments: {
+              file_path: "apps/web/src/index.css",
+            },
+            startedAtMs: 100,
+            finishedAtMs: 220,
+            succeeded: true,
+            outputContent: "@@\n-old\n+new",
+            details: {
+              added: 1,
+              removed: 1,
+              diff: "@@\n-old\n+new",
+            },
+          },
+        ]}
+      />
+    )
+
+    expect(html).toContain('data-slot="tool-meta"')
+    expect(html).toContain("+1")
+    expect(html).toContain("-1")
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).not.toContain('data-slot="tool-row-caret"')
+    expect(html).not.toContain('data-slot="tool-row-inline-details"')
+  })
+
+  test("keeps write and apply_patch tools on the inline detail path", () => {
+    const source = loadToolTimelineSource()
+
+    expect(source).toContain(
+      'const INLINE_DETAIL_TOOLS = new Set(["write", "apply_patch"])'
+    )
+    expect(source).toContain("shouldShowToolRowCaret(item, hasDetails)")
+  })
+
   test("renders semantic containers for output, failure, and patch sections", () => {
     const html = renderWithTheme(
       <div>

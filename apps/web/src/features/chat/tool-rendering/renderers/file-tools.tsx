@@ -11,6 +11,24 @@ import {
 } from "../helpers"
 import { ExpandableOutput, ToolDetailSection } from "../ui"
 
+function buildEditDiffFromArguments(
+  data: Parameters<ToolRenderer["renderDetails"]>[0]
+) {
+  const args = normalizeToolArguments(data.arguments)
+  const oldString = getStringValue(args, "old_string")
+  const newString = getStringValue(args, "new_string")
+
+  if (!oldString && !newString) return null
+
+  const removed = oldString
+    ? oldString.split("\n").map((line) => `-${line}`)
+    : []
+  const added = newString ? newString.split("\n").map((line) => `+${line}`) : []
+  const lines = [...removed, ...added]
+
+  return lines.length > 0 ? lines.join("\n") : null
+}
+
 export function createReadRenderer(): ToolRenderer {
   return {
     matches: (toolName) => toolName === "read",
@@ -35,7 +53,10 @@ export function createReadRenderer(): ToolRenderer {
       return <>{createMetaBadge(`L${startLine}-${endLine}`)}</>
     },
     renderDetails(data) {
-      const content = getStringValue(data.details, "diff") ?? data.outputContent
+      const content =
+        getStringValue(data.details, "diff") ??
+        buildEditDiffFromArguments(data) ??
+        data.outputContent
 
       if (!content) return null
 
@@ -113,7 +134,10 @@ export function createEditRenderer(): ToolRenderer {
       )
     },
     renderDetails(data) {
-      const content = getStringValue(data.details, "diff") ?? data.outputContent
+      const content =
+        getStringValue(data.details, "diff") ??
+        buildEditDiffFromArguments(data) ??
+        data.outputContent
 
       if (!content) return null
 

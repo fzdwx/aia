@@ -369,16 +369,20 @@ describe("chat message status surfaces", () => {
     )
   })
 
-  test("keeps user markdown at a consistent reading measure", () => {
+  test("keeps user messages on the single-column width", () => {
     const html = renderWithTheme(
       <UserMessageBlock content={"A compact user message"} />
     )
 
-    expect(html).toContain("max-w-[66ch]")
+    expect(html).toContain('data-component="user-message"')
+    expect(html).toContain("justify-start")
+    expect(html).not.toContain("justify-end")
+    expect(html).toContain("w-full max-w-full")
     expect(html).toContain("text-body-sm")
+    expect(html).toContain("Copy message")
   })
 
-  test("keeps assistant markdown constrained in completed turns", () => {
+  test("uses message bodies instead of role heading rows", () => {
     const html = renderWithTheme(
       <MemoizedTurnView
         turn={{
@@ -398,10 +402,40 @@ describe("chat message status surfaces", () => {
       />
     )
 
-    expect(html).toContain("max-w-[66ch]")
+    expect(html).toContain('data-component="assistant-message"')
+    expect(html).toContain('data-component="text-part"')
+    expect(html).toContain('data-slot="user-message-copy-wrapper"')
+    expect(html).toContain('data-slot="text-part-copy-wrapper"')
+    expect(html).not.toContain("workspace-section-label text-foreground/70")
   })
 
-  test("keeps assistant markdown constrained while streaming", () => {
+  test("keeps assistant markdown on the single-column width in completed turns", () => {
+    const html = renderWithTheme(
+      <MemoizedTurnView
+        turn={{
+          turn_id: "turn-1",
+          started_at_ms: 100,
+          finished_at_ms: 200,
+          source_entry_ids: [1],
+          user_message: "Question",
+          blocks: [{ kind: "assistant", content: "# Title\n\nAnswer" }],
+          assistant_message: "# Title\n\nAnswer",
+          thinking: null,
+          tool_invocations: [],
+          usage: null,
+          failure_message: null,
+          outcome: "succeeded",
+        }}
+      />
+    )
+
+    expect(html).toContain('data-component="text-part"')
+    expect(html).toContain('data-slot="text-part-body"')
+    expect(html).toContain("w-full")
+    expect(html).toContain("Copy response")
+  })
+
+  test("keeps assistant markdown on the single-column width while streaming", () => {
     const html = renderWithTheme(
       <MemoizedStreamingView
         streaming={{
@@ -412,6 +446,8 @@ describe("chat message status surfaces", () => {
       />
     )
 
-    expect(html).toContain("max-w-[66ch]")
+    expect(html).toContain('data-component="assistant-message"')
+    expect(html).toContain("Copy response")
+    expect(html).toContain("w-full")
   })
 })

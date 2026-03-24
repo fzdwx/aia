@@ -32,6 +32,11 @@ import {
 import { toolTimelineCopy } from "./tool-timeline-copy"
 
 const ACTIVE_DURATION_TICK_MS = 100
+const TOOL_DETAILS_TRANSITION = {
+  height: { duration: 0.18, ease: [0.16, 1, 0.3, 1] },
+  opacity: { duration: 0.12, ease: "linear" },
+} as const
+const INLINE_DETAIL_TOOLS = new Set(["write", "apply_patch"])
 const OMITTED_ARGUMENT_KEYS = new Set([
   "content",
   "patch",
@@ -192,14 +197,16 @@ function ToolTrigger({
   duration: string | null
 }) {
   const isRunning = item.finishedAtMs == null
-  const displayName = getToolDisplayName(item.toolName)
-  const title = toolRendererRegistry.renderTitle({
+  const renderData = {
     toolName: item.toolName,
     arguments: item.arguments,
     details: item.details,
     outputContent: item.outputContent,
     succeeded: item.succeeded,
-  })
+  }
+  const displayName = getToolDisplayName(item.toolName)
+  const title = toolRendererRegistry.renderTitle(renderData)
+  const meta = isRunning ? null : toolRendererRegistry.renderMeta(renderData)
   const subtitle =
     getFallbackSubtitle(item) ?? (title && title !== displayName ? title : null)
 
@@ -217,11 +224,21 @@ function ToolTrigger({
           {subtitle}
         </span>
       ) : null}
+      {!isRunning && meta ? <span data-slot="tool-meta">{meta}</span> : null}
       {!isRunning && duration ? (
         <span data-slot="tool-duration">{duration}</span>
       ) : null}
     </div>
   )
+}
+
+function shouldInlineToolDetails(item: ToolRowItem) {
+  return INLINE_DETAIL_TOOLS.has(normalizeToolName(item.toolName))
+}
+
+function shouldShowToolRowCaret(item: ToolRowItem, hasDetails: boolean) {
+  if (!hasDetails) return false
+  return normalizeToolName(item.toolName) !== "edit"
 }
 
 function renderToolDetailsPanel(item: ToolRowItem) {
@@ -279,8 +296,19 @@ function ToolRow({ item }: { item: ToolRowItem }) {
   const duration = formatDurationMs(item.startedAtMs, item.finishedAtMs, {
     live: isRunning,
   })
-  const detailsContent = renderToolDetailsPanel(item)
+  const renderData = {
+    toolName: item.toolName,
+    arguments: item.arguments,
+    details: item.details,
+    outputContent: item.outputContent,
+    succeeded: item.succeeded,
+  }
+  const inlineDetails = shouldInlineToolDetails(item)
+    ? toolRendererRegistry.renderDetails(renderData)
+    : null
+  const detailsContent = inlineDetails ? null : renderToolDetailsPanel(item)
   const hasDetails = detailsContent != null
+  const showCaret = shouldShowToolRowCaret(item, hasDetails)
   const detailsId = `tool-details-${item.id}`
 
   return (
@@ -305,7 +333,7 @@ function ToolRow({ item }: { item: ToolRowItem }) {
           <div data-slot="tool-row-main">
             <ToolTrigger item={item} duration={duration} />
           </div>
-          {hasDetails ? (
+          {showCaret ? (
             <span data-slot="tool-row-caret">
               {showDetails ? (
                 <ChevronDown className="size-3.5" />
@@ -316,6 +344,9 @@ function ToolRow({ item }: { item: ToolRowItem }) {
           ) : null}
         </div>
       </button>
+      {inlineDetails ? (
+        <div data-slot="tool-row-inline-details">{inlineDetails}</div>
+      ) : null}
       <AnimatePresence initial={false}>
         {showDetails && detailsContent && (
           <motion.div
@@ -325,7 +356,7 @@ function ToolRow({ item }: { item: ToolRowItem }) {
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ type: "spring", stiffness: 500, damping: 35 }}
+            transition={TOOL_DETAILS_TRANSITION}
             style={{ overflow: "hidden" }}
           >
             <div>{detailsContent}</div>
@@ -461,7 +492,7 @@ export function ToolGroup({
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ type: "spring", stiffness: 500, damping: 35 }}
+            transition={TOOL_DETAILS_TRANSITION}
             style={{ overflow: "hidden" }}
           >
             <div data-slot="context-tool-group-list-inner">

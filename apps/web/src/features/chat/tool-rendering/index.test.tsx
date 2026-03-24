@@ -352,6 +352,30 @@ describe("tool renderer registry", () => {
     expect(html).toContain("text-red-400")
   })
 
+  test("renders edit tool details from old and new strings when diff is missing", () => {
+    const details = toolRendererRegistry.renderDetails({
+      toolName: "functions.edit",
+      arguments: {
+        file_path: "apps/web/src/index.css",
+        old_string: "old value\nline 2",
+        new_string: "new value\nline 2\nline 3",
+      },
+      details: {
+        added: 3,
+        removed: 2,
+      },
+      outputContent: "Edited apps/web/src/index.css",
+      succeeded: true,
+    })
+
+    const html = renderToStaticMarkup(<>{details}</>)
+    expect(html).toContain("-old value")
+    expect(html).toContain("-line 2")
+    expect(html).toContain("+new value")
+    expect(html).toContain("+line 3")
+    expect(html).not.toContain("Edited apps/web/src/index.css")
+  })
+
   test("renders edit tool failure title from file path", () => {
     const title = toolRendererRegistry.renderTitle({
       toolName: "functions.edit",
@@ -398,6 +422,45 @@ describe("tool renderer registry", () => {
     })
 
     expect(title).toBe("Patch — apps/web/src/components/chat-messages.tsx")
+  })
+
+  test("renders write tool meta with green additions", () => {
+    const meta = toolRendererRegistry.renderMeta({
+      toolName: "functions.write",
+      arguments: {
+        file_path: "apps/web/src/index.css",
+      },
+      details: {
+        lines: 12,
+      },
+      outputContent: "",
+      succeeded: true,
+    })
+
+    expect(meta).not.toBe(null)
+    const html = renderToStaticMarkup(<>{meta}</>)
+    expect(html).toContain("+12")
+    expect(html).toContain("text-emerald-400")
+  })
+
+  test("renders apply_patch meta with green additions and red removals", () => {
+    const meta = toolRendererRegistry.renderMeta({
+      toolName: "functions.apply_patch",
+      arguments: {
+        patch: "*** Begin Patch\n*** End Patch",
+      },
+      details: {
+        lines_added: 4,
+        lines_removed: 2,
+      },
+      outputContent: "",
+      succeeded: true,
+    })
+
+    expect(meta).not.toBe(null)
+    const html = renderToStaticMarkup(<>{meta}</>)
+    expect(html).toContain("+4")
+    expect(html).toContain("-2")
   })
 
   test("renders question tool summary and ignored semantics", () => {

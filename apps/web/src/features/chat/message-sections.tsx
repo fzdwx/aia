@@ -1,7 +1,9 @@
-import { memo, useState } from "react"
+import { Check, Copy } from "lucide-react"
+import { memo, useEffect, useRef, useState } from "react"
 
 import { Shimmer } from "@/components/ai-elements/shimmer"
 import { MarkdownContent } from "@/components/markdown-content"
+import { copyTextToClipboard } from "@/lib/clipboard"
 import type {
   StreamingToolOutput,
   StreamingTurn,
@@ -9,6 +11,7 @@ import type {
   TurnLifecycle,
   TurnUsage,
 } from "@/lib/types"
+import { cn } from "@/lib/utils"
 
 import { MemoizedStreamingToolGroup, MemoizedToolGroup } from "./tool-timeline"
 import {
@@ -17,8 +20,8 @@ import {
   isContextExplorationTool,
 } from "@/features/chat/tool-timeline-helpers.ts"
 
-const CHAT_TURN_LABEL = "workspace-section-label text-foreground/70"
-const CHAT_TURN_META = "workspace-section-label text-muted-foreground"
+const COPY_RESET_DELAY_MS = 1500
+const MESSAGE_READING_MEASURE = "w-full"
 
 type BlockGroup =
   | { type: "single"; block: TurnBlock }
@@ -84,6 +87,98 @@ function groupStreamingBlocks(blocks: StreamingTurn["blocks"]) {
   return groups
 }
 
+function MessageCopyButton({
+  content,
+  copyLabel,
+  copiedLabel,
+  className,
+}: {
+  content: string
+  copyLabel: string
+  copiedLabel: string
+  className?: string
+}) {
+  const [copied, setCopied] = useState(false)
+  const resetTimerRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current !== null) {
+        window.clearTimeout(resetTimerRef.current)
+      }
+    }
+  }, [])
+
+  const handleCopy = async () => {
+    if (!content.trim()) return
+
+    const success = await copyTextToClipboard(content)
+    if (!success) return
+
+    setCopied(true)
+
+    if (resetTimerRef.current !== null) {
+      window.clearTimeout(resetTimerRef.current)
+    }
+
+    resetTimerRef.current = window.setTimeout(() => {
+      setCopied(false)
+      resetTimerRef.current = null
+    }, COPY_RESET_DELAY_MS)
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void handleCopy()
+      }}
+      data-slot="message-copy-button"
+      aria-label={copied ? copiedLabel : copyLabel}
+      title={copied ? copiedLabel : copyLabel}
+      className={cn(
+        "inline-flex items-center justify-center rounded-md border border-border/35 bg-background/88 p-1 text-muted-foreground shadow-none transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none",
+        className
+      )}
+    >
+      {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+    </button>
+  )
+}
+
+function AssistantTextBlock({
+  content,
+  streaming = false,
+}: {
+  content: string
+  streaming?: boolean
+}) {
+  return (
+    <div data-component="text-part" className="group/text-part mt-5 first:mt-0">
+      <div
+        data-slot="text-part-body"
+        className={`${MESSAGE_READING_MEASURE} group/text-part-body relative`}
+      >
+        <div
+          data-slot="text-part-copy-wrapper"
+          className="pointer-events-none absolute top-0 right-0 z-10 opacity-0 transition-opacity duration-150 group-focus-within/text-part-body:pointer-events-auto group-focus-within/text-part-body:opacity-100 group-hover/text-part-body:pointer-events-auto group-hover/text-part-body:opacity-100"
+        >
+          <MessageCopyButton
+            content={content}
+            copyLabel="Copy response"
+            copiedLabel="Copied"
+          />
+        </div>
+        <MarkdownContent
+          content={content}
+          streaming={streaming}
+          className="text-body-sm leading-body-sm pr-10 text-pretty text-foreground/92"
+        />
+      </div>
+    </div>
+  )
+}
+
 function ThinkingBlock({
   content,
   isStreaming = false,
@@ -94,9 +189,20 @@ function ThinkingBlock({
   const [open, setOpen] = useState(isStreaming)
   const lastLine = content.trim().split("\n").pop() ?? ""
 
+  useEffect(() => {
+    if (isStreaming) {
+      setOpen(true)
+    }
+  }, [isStreaming])
+
   return (
-    <div className="mb-2">
+    <div
+      data-component="reasoning-part"
+      className={`${MESSAGE_READING_MEASURE} mb-2`}
+    >
       <button
+        type="button"
+        aria-expanded={open}
         onClick={() => setOpen(!open)}
         className="text-body-sm flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
       >
@@ -114,8 +220,8 @@ function ThinkingBlock({
         )}
       </button>
       {open && (
-        <div className="text-body-sm leading-body-sm mt-1.5 border-l-2 border-border/30 pl-3 text-muted-foreground/80">
-          <MarkdownContent content={content} />
+        <div className="text-body-sm leading-body-sm mt-1.5 border-l-2 border-border/30 pl-3">
+          <MarkdownContent content={content} className="opacity-50" />
         </div>
       )}
     </div>
@@ -127,21 +233,20 @@ function BlockRenderer({ block }: { block: TurnBlock }) {
     case "thinking":
       return <ThinkingBlock content={block.content} />
     case "assistant":
-      return (
-        <MarkdownContent
-          content={block.content}
-          className="text-body-sm leading-body-sm max-w-[66ch] text-pretty"
-        />
-      )
+      return <AssistantTextBlock content={block.content} />
     case "failure":
       return (
-        <div className="text-caption mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 font-medium text-destructive">
+        <div
+          className={`${MESSAGE_READING_MEASURE} text-caption mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 font-medium text-destructive`}
+        >
           {block.message}
         </div>
       )
     case "cancelled":
       return (
-        <div className="text-caption mb-3 rounded-lg border border-border/40 bg-muted/40 px-3 py-2 font-medium text-muted-foreground">
+        <div
+          className={`${MESSAGE_READING_MEASURE} text-caption mb-3 rounded-lg border border-border/40 bg-muted/40 px-3 py-2 font-medium text-muted-foreground`}
+        >
           {block.message}
         </div>
       )
@@ -166,7 +271,7 @@ export function StatusIndicator({
 }) {
   return (
     <div className="py-2" role="status" aria-live="polite" aria-atomic="true">
-      <Shimmer as="span" duration={4} spread={6}>
+      <Shimmer as="span" duration={1} spread={3}>
         {STATUS_LABELS[status]}
       </Shimmer>
     </div>
@@ -217,9 +322,32 @@ function TurnMeta({ turn }: { turn: TurnLifecycle }) {
 
 export function UserMessageBlock({ content }: { content: string }) {
   return (
-    <div className="border-l border-foreground/14 pl-4">
-      <div className="text-body-sm leading-body-sm max-w-[66ch] text-pretty text-foreground/90">
-        <MarkdownContent content={content} />
+    <div
+      data-component="user-message"
+      className="group/user-message flex w-full justify-start"
+    >
+      <div className="flex max-w-full flex-col items-start">
+        <div
+          data-slot="user-message-body"
+          className="group/user-message-body relative w-full max-w-full rounded-md border border-border/45 bg-background/88 px-3 py-2.5"
+        >
+          <div
+            data-slot="user-message-copy-wrapper"
+            className="pointer-events-none absolute top-2 right-2 z-10 opacity-0 transition-opacity duration-150 group-focus-within/user-message-body:pointer-events-auto group-focus-within/user-message-body:opacity-100 group-hover/user-message-body:pointer-events-auto group-hover/user-message-body:opacity-100"
+          >
+            <MessageCopyButton
+              content={content}
+              copyLabel="Copy message"
+              copiedLabel="Copied"
+            />
+          </div>
+          <div
+            data-slot="user-message-text"
+            className="text-body-sm leading-body-sm max-w-full pr-10 text-pretty text-foreground/92"
+          >
+            <MarkdownContent content={content} />
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -230,21 +358,14 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
 
   return (
     <div className="mb-8 animate-[message-in_250ms_ease-out_both] last:mb-0">
-      <div className="mb-6">
-        <div className="mb-2 flex items-baseline gap-2.5">
-          <span className="workspace-section-label text-foreground/70">
-            You
-          </span>
-        </div>
+      <div className="mb-5">
         <UserMessageBlock content={turn.user_message} />
       </div>
 
-      <div className="group/turn">
-        <div className="mb-2 flex items-baseline gap-2.5">
-          <span className="workspace-section-label text-muted-foreground">
-            aia
-          </span>
-        </div>
+      <div
+        data-component="assistant-message"
+        className="group/turn flex w-full flex-col"
+      >
         {grouped.map((group, i) => {
           if (group.type === "tools") {
             return (
@@ -268,18 +389,12 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
   return (
     <div className="mb-8 animate-[message-in_250ms_ease-out_both]">
       {streaming.userMessage && (
-        <div className="mb-6">
-          <div className="mb-2 flex items-baseline gap-2.5">
-            <span className={CHAT_TURN_LABEL}>You</span>
-          </div>
+        <div className="mb-5">
           <UserMessageBlock content={streaming.userMessage} />
         </div>
       )}
 
-      <div>
-        <div className="mb-2 flex items-baseline gap-2.5">
-          <span className={CHAT_TURN_META}>aia</span>
-        </div>
+      <div data-component="assistant-message" className="flex w-full flex-col">
         {groups.map((group, i) => {
           if (group.type === "thinking") {
             const isLast =
@@ -298,12 +413,7 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
             )
           }
           return (
-            <MarkdownContent
-              key={i}
-              content={group.content}
-              streaming
-              className="text-body-sm leading-body-sm max-w-[66ch] text-pretty"
-            />
+            <AssistantTextBlock key={i} content={group.content} streaming />
           )
         })}
       </div>

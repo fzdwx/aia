@@ -35,6 +35,7 @@ import {
   extractTraceText,
   type JsonRecord,
 } from "@/lib/trace-inspection"
+import { copyTextToClipboard } from "@/lib/clipboard"
 import { getToolDisplayName } from "@/lib/tool-display"
 import type { TraceRecord } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -77,19 +78,6 @@ function formatPrimitive(value: unknown) {
     return value.length === 0 ? "-" : `${value.length} items`
   if (typeof value === "object") return JSON.stringify(value)
   return String(value)
-}
-
-async function copyText(value: string): Promise<boolean> {
-  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(value)
-      return true
-    } catch {
-      return false
-    }
-  }
-
-  return false
 }
 
 function payloadCopyText(value: unknown) {
@@ -1401,7 +1389,7 @@ export function TraceDetailModal({
     value: unknown,
     action: "active" | "request" | "response"
   ) => {
-    const success = await copyText(payloadCopyText(value))
+    const success = await copyTextToClipboard(payloadCopyText(value))
     if (!success) return
 
     if (copyTimerRef.current !== null) {
