@@ -25,12 +25,13 @@ function loadToolTimelineSource() {
 
 describe("tool timeline", () => {
   test("normalizes names when classifying context exploration tools", () => {
-    expect(isContextExplorationTool("functions.read")).toBe(true)
-    expect(isContextExplorationTool("grep")).toBe(true)
+    expect(isContextExplorationTool("Read")).toBe(true)
+    expect(isContextExplorationTool("Grep")).toBe(true)
     expect(isContextExplorationTool("list")).toBe(true)
-    expect(isContextExplorationTool("codesearch")).toBe(true)
-    expect(isContextExplorationTool("websearch")).toBe(true)
-    expect(isContextExplorationTool("shell")).toBe(false)
+    expect(isContextExplorationTool("CodeSearch")).toBe(true)
+    expect(isContextExplorationTool("CodeSearch")).toBe(true)
+    expect(isContextExplorationTool("WebSearch")).toBe(true)
+    expect(isContextExplorationTool("Shell")).toBe(false)
   })
 
   test("builds compact request and result entries for structured tool details", () => {
@@ -67,7 +68,7 @@ describe("tool timeline", () => {
         toolOutputs={[
           {
             invocationId: "streaming-1",
-            toolName: "grep",
+            toolName: "Grep",
             arguments: {
               pattern: "renderDetails",
               path: "apps/web/src",
@@ -81,7 +82,7 @@ describe("tool timeline", () => {
     )
 
     expect(html).toContain("Exploring")
-    expect(html).toContain("grep")
+    expect(html).toContain("Grep")
     expect(html).toContain("renderDetails")
     expect(html).toContain('data-component="context-tool-trigger-row"')
     expect(html).toContain('data-slot="tool-title"')
@@ -113,7 +114,7 @@ describe("tool timeline", () => {
           },
           {
             id: "tool-grep-1",
-            toolName: "grep",
+            toolName: "Grep",
             arguments: {
               pattern: "renderDetails",
               path: "apps/web/src",
@@ -128,7 +129,7 @@ describe("tool timeline", () => {
           },
           {
             id: "tool-read-1",
-            toolName: "read",
+            toolName: "Read",
             arguments: {
               file_path: "apps/web/src/components/chat-messages.tsx",
               offset: 120,
@@ -178,7 +179,7 @@ describe("tool timeline", () => {
         items={[
           {
             id: "tool-shell-1",
-            toolName: "shell",
+            toolName: "Shell",
             arguments: {
               command: "cargo check",
             },
@@ -196,7 +197,7 @@ describe("tool timeline", () => {
         toolOutputs={[
           {
             invocationId: "streaming-shell-1",
-            toolName: "shell",
+            toolName: "Shell",
             arguments: {
               command: "cargo check",
             },
@@ -208,11 +209,11 @@ describe("tool timeline", () => {
       />
     )
 
-    expect(completedHtml).toContain("shell")
+    expect(completedHtml).toContain("Shell")
     expect(completedHtml).not.toContain("Explored")
     expect(completedHtml).not.toContain("Exploring")
 
-    expect(runningHtml).toContain("shell")
+    expect(runningHtml).toContain("Shell")
     expect(runningHtml).not.toContain("Explored")
     expect(runningHtml).not.toContain("Exploring")
     expect(runningHtml).not.toContain("Running tools")
@@ -246,7 +247,7 @@ describe("tool timeline", () => {
         items={[
           {
             id: "tool-shell-empty",
-            toolName: "shell",
+            toolName: "Shell",
             arguments: {},
             startedAtMs: 100,
             finishedAtMs: 140,
@@ -255,7 +256,7 @@ describe("tool timeline", () => {
           },
           {
             id: "tool-shell-failed-empty",
-            toolName: "shell",
+            toolName: "Shell",
             arguments: {},
             startedAtMs: 150,
             finishedAtMs: 190,
@@ -286,7 +287,7 @@ describe("tool timeline", () => {
           },
           {
             invocationId: "streaming-out-of-order-1",
-            toolName: "shell",
+            toolName: "Shell",
             arguments: {
               command: "cargo check",
             },
@@ -337,7 +338,7 @@ describe("tool timeline", () => {
         items={[
           {
             id: "tool-edit-inline",
-            toolName: "edit",
+            toolName: "Edit",
             arguments: {
               file_path: "apps/web/src/index.css",
             },
@@ -363,13 +364,61 @@ describe("tool timeline", () => {
     expect(html).not.toContain('data-slot="tool-row-inline-details"')
   })
 
-  test("keeps write and apply_patch tools on the inline detail path", () => {
+  test("renders write and apply_patch as caretless expandable rows", () => {
+    const html = renderWithTheme(
+      <ToolGroup
+        items={[
+          {
+            id: "tool-write-1",
+            toolName: "Write",
+            arguments: {
+              file_path: "apps/web/src/index.css",
+            },
+            startedAtMs: 100,
+            finishedAtMs: 220,
+            succeeded: true,
+            outputContent: "Wrote 28 bytes to apps/web/src/index.css",
+            details: {
+              lines: 1,
+            },
+          },
+          {
+            id: "tool-patch-1",
+            toolName: "ApplyPatch",
+            arguments: {
+              patch:
+                "*** Begin Patch\n*** Update File: apps/web/src/index.css\n@@\n-old\n+new\n*** End Patch",
+            },
+            startedAtMs: 221,
+            finishedAtMs: 260,
+            succeeded: true,
+            outputContent:
+              "*** Begin Patch\n*** Update File: apps/web/src/index.css\n@@\n-old\n+new\n*** End Patch",
+            details: {
+              lines_added: 1,
+              lines_removed: 1,
+            },
+          },
+        ]}
+      />
+    )
+
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).not.toContain('data-slot="tool-row-caret"')
+    expect(html).not.toContain('data-slot="tool-row-inline-details"')
+  })
+
+  test("keeps edit write and apply_patch on the caretless expandable path", () => {
     const source = loadToolTimelineSource()
 
+    expect(source).toContain("const INLINE_DETAIL_TOOLS = new Set<string>()")
     expect(source).toContain(
-      'const INLINE_DETAIL_TOOLS = new Set(["write", "apply_patch"])'
+      'const CARETLESS_EXPANDABLE_TOOLS = new Set(["Edit", "Write", "ApplyPatch"])'
     )
     expect(source).toContain("shouldShowToolRowCaret(item, hasDetails)")
+    expect(source).toContain(
+      "CARETLESS_EXPANDABLE_TOOLS.has(normalizeToolName(item.toolName))"
+    )
   })
 
   test("renders semantic containers for output, failure, and patch sections", () => {

@@ -25,20 +25,11 @@ fn registry_exposes_only_new_tool_names() {
         .map(|definition| definition.name)
         .collect::<BTreeSet<_>>();
 
-    let expected = [
-        "shell",
-        "read",
-        "write",
-        "edit",
-        "apply_patch",
-        "glob",
-        "grep",
-        "codesearch",
-        "websearch",
-    ]
-    .into_iter()
-    .map(str::to_owned)
-    .collect::<BTreeSet<_>>();
+    let expected =
+        ["Shell", "Read", "Write", "Edit", "ApplyPatch", "Glob", "Grep", "CodeSearch", "WebSearch"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<BTreeSet<_>>();
 
     assert_eq!(names, expected);
     assert!(!names.contains("bash"));
@@ -51,7 +42,7 @@ fn registry_exposes_only_new_tool_names() {
 fn shell_tool_definition_uses_shell_name_and_brush_runtime() {
     let definition = ShellTool.definition();
 
-    assert_eq!(definition.name, "shell");
+    assert_eq!(definition.name, "Shell");
     assert_eq!(definition.description, shell_tool_description());
     assert_eq!(
         definition.parameters["properties"]["command"]["description"],
@@ -64,7 +55,7 @@ fn builtin_tool_definitions_match_derive_schema_output() {
     let shell = ShellTool.definition();
     assert_eq!(
         shell.parameters,
-        ToolDefinition::new("shell", "ignored")
+        ToolDefinition::new("Shell", "ignored")
             .with_parameters_schema::<ShellToolArgs>()
             .parameters
     );
@@ -72,7 +63,7 @@ fn builtin_tool_definitions_match_derive_schema_output() {
     let read = ReadTool.definition();
     assert_eq!(
         read.parameters,
-        ToolDefinition::new("read", "ignored").with_parameters_schema::<ReadToolArgs>().parameters
+        ToolDefinition::new("Read", "ignored").with_parameters_schema::<ReadToolArgs>().parameters
     );
     assert!(read.parameters.get("title").is_none());
     assert_eq!(read.parameters["properties"]["offset"]["type"], "integer");
@@ -81,7 +72,7 @@ fn builtin_tool_definitions_match_derive_schema_output() {
     let write = WriteTool.definition();
     assert_eq!(
         write.parameters,
-        ToolDefinition::new("write", "ignored")
+        ToolDefinition::new("Write", "ignored")
             .with_parameters_schema::<WriteToolArgs>()
             .parameters
     );
@@ -89,13 +80,13 @@ fn builtin_tool_definitions_match_derive_schema_output() {
     let edit = EditTool.definition();
     assert_eq!(
         edit.parameters,
-        ToolDefinition::new("edit", "ignored").with_parameters_schema::<EditToolArgs>().parameters
+        ToolDefinition::new("Edit", "ignored").with_parameters_schema::<EditToolArgs>().parameters
     );
 
     let apply_patch = ApplyPatchTool.definition();
     assert_eq!(
         apply_patch.parameters,
-        ToolDefinition::new("apply_patch", "ignored")
+        ToolDefinition::new("ApplyPatch", "ignored")
             .with_parameters_schema::<ApplyPatchToolArgs>()
             .parameters
     );
@@ -103,7 +94,7 @@ fn builtin_tool_definitions_match_derive_schema_output() {
     let glob = GlobTool.definition();
     assert_eq!(
         glob.parameters,
-        ToolDefinition::new("glob", "ignored").with_parameters_schema::<GlobToolArgs>().parameters
+        ToolDefinition::new("Glob", "ignored").with_parameters_schema::<GlobToolArgs>().parameters
     );
     assert!(glob.parameters.get("title").is_none());
     assert_eq!(glob.parameters["properties"]["path"]["type"], "string");
@@ -112,7 +103,7 @@ fn builtin_tool_definitions_match_derive_schema_output() {
     let grep = GrepTool.definition();
     assert_eq!(
         grep.parameters,
-        ToolDefinition::new("grep", "ignored").with_parameters_schema::<GrepToolArgs>().parameters
+        ToolDefinition::new("Grep", "ignored").with_parameters_schema::<GrepToolArgs>().parameters
     );
     assert!(grep.parameters.get("title").is_none());
     assert_eq!(grep.parameters["properties"]["path"]["type"], "string");
@@ -120,7 +111,7 @@ fn builtin_tool_definitions_match_derive_schema_output() {
     assert_eq!(grep.parameters["properties"]["limit"]["type"], "integer");
 
     let codesearch = CodeSearchTool.definition();
-    assert_eq!(codesearch.name, "codesearch");
+    assert_eq!(codesearch.name, "CodeSearch");
     assert_eq!(codesearch.parameters["type"], "object");
     assert_eq!(codesearch.parameters["additionalProperties"], false);
     assert_eq!(codesearch.parameters["properties"]["query"]["type"], "string");
@@ -137,7 +128,7 @@ fn builtin_tool_definitions_match_derive_schema_output() {
     assert_eq!(parsed.tokens_num, 6000);
 
     let websearch = WebSearchTool.definition();
-    assert_eq!(websearch.name, "websearch");
+    assert_eq!(websearch.name, "WebSearch");
     assert!(websearch.description.contains("2026"));
     assert_eq!(websearch.parameters["properties"]["numResults"]["default"], 8);
     assert_eq!(websearch.parameters["properties"]["livecrawl"]["type"], "string");

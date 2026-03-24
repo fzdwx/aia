@@ -302,8 +302,8 @@ describe("chat store submitTurn", () => {
         session_id: "session-1",
         turn_id: "turn-1",
         kind: "tool_call_started",
-        invocation_id: "functions.read:27",
-        tool_name: "functions.read",
+        invocation_id: "Read:27",
+        tool_name: "Read",
         arguments: {
           file_path: "/home/like/projects/aia/AGENTS.md",
         },
@@ -319,8 +319,8 @@ describe("chat store submitTurn", () => {
     if (state?.blocks[0]?.type !== "tool") {
       throw new Error("expected tool block")
     }
-    expect(state.blocks[0].tool.invocationId).toBe("functions.read:27")
-    expect(state.blocks[0].tool.toolName).toBe("functions.read")
+    expect(state.blocks[0].tool.invocationId).toBe("Read:27")
+    expect(state.blocks[0].tool.toolName).toBe("Read")
     assert.deepEqual(state.blocks[0].tool.arguments, {
       file_path: "/home/like/projects/aia/AGENTS.md",
     })
@@ -344,8 +344,8 @@ describe("chat store submitTurn", () => {
         session_id: "session-1",
         turn_id: "turn-1",
         kind: "tool_call_detected",
-        invocation_id: "functions.websearch:1",
-        tool_name: "functions.websearch",
+        invocation_id: "WebSearch:1",
+        tool_name: "WebSearch",
         arguments: { q: "agent runtime timestamps" },
         detected_at_ms: 1000,
       },
@@ -357,8 +357,8 @@ describe("chat store submitTurn", () => {
         session_id: "session-1",
         turn_id: "turn-1",
         kind: "tool_call_started",
-        invocation_id: "functions.websearch:1",
-        tool_name: "functions.websearch",
+        invocation_id: "WebSearch:1",
+        tool_name: "WebSearch",
         arguments: { q: "agent runtime timestamps" },
         started_at_ms: 2200,
       },
@@ -370,8 +370,8 @@ describe("chat store submitTurn", () => {
         session_id: "session-1",
         turn_id: "turn-1",
         kind: "tool_call_completed",
-        invocation_id: "functions.websearch:1",
-        tool_name: "functions.websearch",
+        invocation_id: "WebSearch:1",
+        tool_name: "WebSearch",
         content: "done",
         failed: false,
         finished_at_ms: 14350,

@@ -28,7 +28,7 @@ pub(crate) struct EditToolArgs {
 #[async_trait]
 impl Tool for EditTool {
     fn name(&self) -> &str {
-        "edit"
+        "Edit"
     }
 
     fn definition(&self) -> ToolDefinition {

@@ -9,11 +9,11 @@ import {
   getStringValue,
   truncateInline,
 } from "../helpers"
-import { ExpandableOutput, ToolDetailSection } from "../ui"
+import { ExpandableOutput } from "../ui"
 
 export function createApplyPatchRenderer(): ToolRenderer {
   return {
-    matches: (toolName) => toolName === "apply_patch",
+    matches: (toolName) => toolName === "ApplyPatch",
     renderTitle(data) {
       const args = normalizeToolArguments(data.arguments)
       const patch = getStringValue(args, "patch", "patchText")
@@ -60,18 +60,7 @@ export function createApplyPatchRenderer(): ToolRenderer {
       if (!data.outputContent) return null
 
       return (
-        <ToolDetailSection
-          title={
-            data.succeeded
-              ? toolTimelineCopy.section.patch
-              : toolTimelineCopy.section.failure
-          }
-        >
-          <ExpandableOutput
-            value={data.outputContent}
-            failed={!data.succeeded}
-          />
-        </ToolDetailSection>
+        <ExpandableOutput value={data.outputContent} failed={!data.succeeded} />
       )
     },
   }

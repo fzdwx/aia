@@ -50,7 +50,7 @@ describe("chat message status surfaces", () => {
               invocation: {
                 call: {
                   invocation_id: "tool-read",
-                  tool_name: "read",
+                  tool_name: "Read",
                   arguments: { file_path: "docs/status.md" },
                 },
                 started_at_ms: 110,
@@ -59,7 +59,7 @@ describe("chat message status surfaces", () => {
                   status: "succeeded",
                   result: {
                     invocation_id: "tool-read",
-                    tool_name: "read",
+                    tool_name: "Read",
                     content: "status",
                     details: {},
                   },
@@ -71,7 +71,7 @@ describe("chat message status surfaces", () => {
               invocation: {
                 call: {
                   invocation_id: "tool-grep",
-                  tool_name: "functions.grep",
+                  tool_name: "Grep",
                   arguments: { pattern: "phase", path: "docs" },
                 },
                 started_at_ms: 121,
@@ -80,7 +80,7 @@ describe("chat message status surfaces", () => {
                   status: "succeeded",
                   result: {
                     invocation_id: "tool-grep",
-                    tool_name: "functions.grep",
+                    tool_name: "Grep",
                     content: "phase",
                     details: {},
                   },
@@ -118,7 +118,7 @@ describe("chat message status surfaces", () => {
               invocation: {
                 call: {
                   invocation_id: "tool-read-1",
-                  tool_name: "read",
+                  tool_name: "Read",
                   arguments: { file_path: "docs/status.md" },
                 },
                 started_at_ms: 110,
@@ -127,7 +127,7 @@ describe("chat message status surfaces", () => {
                   status: "succeeded",
                   result: {
                     invocation_id: "tool-read-1",
-                    tool_name: "read",
+                    tool_name: "Read",
                     content: "status",
                     details: {},
                   },
@@ -139,7 +139,7 @@ describe("chat message status surfaces", () => {
               invocation: {
                 call: {
                   invocation_id: "tool-shell",
-                  tool_name: "shell",
+                  tool_name: "Shell",
                   arguments: { command: "cargo check" },
                 },
                 started_at_ms: 121,
@@ -148,7 +148,7 @@ describe("chat message status surfaces", () => {
                   status: "succeeded",
                   result: {
                     invocation_id: "tool-shell",
-                    tool_name: "shell",
+                    tool_name: "Shell",
                     content: "ok",
                     details: {},
                   },
@@ -160,7 +160,7 @@ describe("chat message status surfaces", () => {
               invocation: {
                 call: {
                   invocation_id: "tool-glob",
-                  tool_name: "glob",
+                  tool_name: "Glob",
                   arguments: { pattern: "src/**/*.ts" },
                 },
                 started_at_ms: 141,
@@ -169,7 +169,7 @@ describe("chat message status surfaces", () => {
                   status: "succeeded",
                   result: {
                     invocation_id: "tool-glob",
-                    tool_name: "glob",
+                    tool_name: "Glob",
                     content: "matches",
                     details: {},
                   },
@@ -213,7 +213,7 @@ describe("chat message status surfaces", () => {
     expect(html.match(/1 search/g)).toHaveLength(1)
     expect(html).toContain("1 read")
     expect(html).toContain("1 list")
-    expect(html).toContain("shell")
+    expect(html).toContain("Shell")
     expect(html).toContain("Done searching.")
   })
 

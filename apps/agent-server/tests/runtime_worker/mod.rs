@@ -10,7 +10,7 @@ fn rebuild_turn_history_from_tape_restores_completed_turns() {
     let turn_id = "turn-1";
     let user = Message::new(Role::User, "你好");
     let assistant = Message::new(Role::Assistant, "已完成");
-    let call = ToolCall::new("read").with_invocation_id("call-1");
+    let call = ToolCall::new("Read").with_invocation_id("call-1");
     let result = ToolResult::from_call(&call, "内容");
 
     tape.append_entry(TapeEntry::message(&user).with_run_id(turn_id));
@@ -128,7 +128,7 @@ fn rebuild_session_snapshots_from_tape_projects_completed_tool_block() {
     let mut tape = SessionTape::new();
     let turn_id = "turn-tool";
     let call =
-        ToolCall::new("read").with_invocation_id("call-1").with_argument("file_path", "Cargo.toml");
+        ToolCall::new("Read").with_invocation_id("call-1").with_argument("file_path", "Cargo.toml");
     let result =
         ToolResult::from_call(&call, "内容").with_details(serde_json::json!({ "lines": [1, 2] }));
 
@@ -145,7 +145,7 @@ fn rebuild_session_snapshots_from_tape_projects_completed_tool_block() {
         vec![CurrentTurnBlock::Tool {
             tool: CurrentToolOutput {
                 invocation_id: "call-1".to_string(),
-                tool_name: "read".to_string(),
+                tool_name: "Read".to_string(),
                 arguments: serde_json::json!({ "file_path": "Cargo.toml" }),
                 detected_at_ms: current.started_at_ms,
                 started_at_ms: Some(current.started_at_ms),

@@ -226,7 +226,7 @@ function renderSearchDetails(data: {
 
 export function createGlobRenderer(): ToolRenderer {
   return {
-    matches: (toolName) => toolName === "glob",
+    matches: (toolName) => toolName === "Glob",
     renderTitle(data) {
       const args = normalizeToolArguments(data.arguments)
       const pattern = getStringValue(args, "pattern")
@@ -253,7 +253,7 @@ export function createGlobRenderer(): ToolRenderer {
 
 export function createGrepRenderer(): ToolRenderer {
   return {
-    matches: (toolName) => toolName === "grep",
+    matches: (toolName) => toolName === "Grep",
     renderTitle(data) {
       const args = normalizeToolArguments(data.arguments)
       const pattern = getStringValue(args, "pattern")
@@ -279,7 +279,7 @@ export function createGrepRenderer(): ToolRenderer {
 
 export function createCodeSearchRenderer(): ToolRenderer {
   return {
-    matches: (toolName) => toolName === "codesearch",
+    matches: (toolName) => toolName === "CodeSearch",
     renderTitle(data) {
       const args = normalizeToolArguments(data.arguments)
       const query = getStringValue(args, "query")
@@ -296,7 +296,7 @@ export function createCodeSearchRenderer(): ToolRenderer {
 
 export function createWebSearchRenderer(): ToolRenderer {
   return {
-    matches: (toolName) => toolName === "websearch",
+    matches: (toolName) => toolName === "WebSearch",
     renderTitle(data) {
       const args = normalizeToolArguments(data.arguments)
       const query = getStringValue(args, "query")

@@ -24,7 +24,7 @@ pub(crate) struct ReadToolArgs {
 #[async_trait]
 impl Tool for ReadTool {
     fn name(&self) -> &str {
-        "read"
+        "Read"
     }
 
     fn definition(&self) -> ToolDefinition {

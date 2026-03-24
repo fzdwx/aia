@@ -95,7 +95,7 @@ fn websearch_description() -> String {
 #[async_trait]
 impl Tool for WebSearchTool {
     fn name(&self) -> &str {
-        "websearch"
+        "WebSearch"
     }
 
     fn definition(&self) -> ToolDefinition {

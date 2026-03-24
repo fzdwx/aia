@@ -1379,6 +1379,7 @@ fn responses_下一轮请求会重放结构化上下文() {
         model: "gpt-4.1-mini".into(),
         base_url: "https://api.openai.com/v1".into(),
         protocol: "openai-responses".into(),
+        reasoning_effort: None,
     });
     let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape);
 

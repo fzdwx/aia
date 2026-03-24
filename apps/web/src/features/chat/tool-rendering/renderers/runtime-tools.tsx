@@ -6,7 +6,7 @@ import { ExpandableOutput, ToolDetailSection } from "../ui"
 
 export function createTapeInfoRenderer(): ToolRenderer {
   return {
-    matches: (toolName) => toolName === "tape_info",
+    matches: (toolName) => toolName === "TapeInfo",
     renderTitle(data) {
       const pressureRatio = getNumberValue(data.details, "pressure_ratio")
       return pressureRatio != null
@@ -30,7 +30,7 @@ export function createTapeInfoRenderer(): ToolRenderer {
 
 export function createTapeHandoffRenderer(): ToolRenderer {
   return {
-    matches: (toolName) => toolName === "tape_handoff",
+    matches: (toolName) => toolName === "TapeHandoff",
     renderTitle(data) {
       const args = normalizeToolArguments(data.arguments)
       const summary = getStringValue(args, "summary")

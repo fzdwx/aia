@@ -4,12 +4,12 @@ import type {
   ToolRendererRegistry,
 } from "./types"
 
-function normalizeToolName(toolName: string): string {
-  const lower = toolName.toLowerCase()
-  const segments = lower.split(".")
-  return segments[segments.length - 1] ?? lower
+function getToolNameSegment(toolName: string): string {
+  const trimmed = toolName.trim()
+  if (!trimmed) return toolName
+  const segments = trimmed.split(".")
+  return segments[segments.length - 1] ?? trimmed
 }
-
 export function createToolRendererRegistry(
   defaultRenderer: ToolRenderer,
   initialRenderers: ToolRenderer[] = []
@@ -21,7 +21,7 @@ export function createToolRendererRegistry(
       renderers.unshift(renderer)
     },
     resolve(toolName) {
-      const normalizedToolName = normalizeToolName(toolName)
+      const normalizedToolName = getToolNameSegment(toolName)
       return (
         renderers.find((renderer) => renderer.matches(normalizedToolName)) ??
         defaultRenderer

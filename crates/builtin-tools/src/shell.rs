@@ -27,7 +27,7 @@ pub(crate) struct ShellToolArgs {
 #[async_trait]
 impl Tool for ShellTool {
     fn name(&self) -> &str {
-        "shell"
+        "Shell"
     }
 
     fn definition(&self) -> ToolDefinition {

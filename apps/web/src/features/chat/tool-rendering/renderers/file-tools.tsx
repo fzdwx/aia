@@ -31,7 +31,7 @@ function buildEditDiffFromArguments(
 
 export function createReadRenderer(): ToolRenderer {
   return {
-    matches: (toolName) => toolName === "read",
+    matches: (toolName) => toolName === "Read",
     renderTitle(data) {
       const args = normalizeToolArguments(data.arguments)
       const path = getToolDisplayPath(data.toolName, data.details, args)
@@ -77,7 +77,7 @@ export function createReadRenderer(): ToolRenderer {
 
 export function createWriteRenderer(): ToolRenderer {
   return {
-    matches: (toolName) => toolName === "write",
+    matches: (toolName) => toolName === "Write",
     renderTitle(data) {
       const args = normalizeToolArguments(data.arguments)
       const path = getToolDisplayPath(data.toolName, data.details, args)
@@ -90,29 +90,21 @@ export function createWriteRenderer(): ToolRenderer {
         : null
     },
     renderDetails(data) {
-      if (!data.outputContent) return null
+      const args = normalizeToolArguments(data.arguments)
+      const content =
+        getStringValue(args, "content", "contents", "text", "value") ??
+        data.outputContent
 
-      return (
-        <ToolDetailSection
-          title={
-            data.succeeded
-              ? toolTimelineCopy.section.result
-              : toolTimelineCopy.section.failure
-          }
-        >
-          <ExpandableOutput
-            value={data.outputContent}
-            failed={!data.succeeded}
-          />
-        </ToolDetailSection>
-      )
+      if (!content) return null
+
+      return <ExpandableOutput value={content} failed={!data.succeeded} />
     },
   }
 }
 
 export function createEditRenderer(): ToolRenderer {
   return {
-    matches: (toolName) => toolName === "edit",
+    matches: (toolName) => toolName === "Edit",
     renderTitle(data) {
       const args = normalizeToolArguments(data.arguments)
       const path = getToolDisplayPath(data.toolName, data.details, args)
@@ -141,17 +133,7 @@ export function createEditRenderer(): ToolRenderer {
 
       if (!content) return null
 
-      return (
-        <ToolDetailSection
-          title={
-            data.succeeded
-              ? toolTimelineCopy.section.patch
-              : toolTimelineCopy.section.failure
-          }
-        >
-          <ExpandableOutput value={content} failed={!data.succeeded} />
-        </ToolDetailSection>
-      )
+      return <ExpandableOutput value={content} failed={!data.succeeded} />
     },
   }
 }

@@ -8,7 +8,7 @@ import { ExpandableOutput, ToolDetailSection } from "../ui"
 
 export function createShellRenderer(): ToolRenderer {
   return {
-    matches: (toolName) => toolName === "shell",
+    matches: (toolName) => toolName === "Shell",
     renderTitle(data) {
       const args = normalizeToolArguments(data.arguments)
       const command = truncateInline(

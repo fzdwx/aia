@@ -42,7 +42,7 @@ pub(crate) struct GrepToolArgs {
 #[async_trait]
 impl Tool for GrepTool {
     fn name(&self) -> &str {
-        "grep"
+        "Grep"
     }
 
     fn definition(&self) -> ToolDefinition {

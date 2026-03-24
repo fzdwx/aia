@@ -124,9 +124,9 @@ README 里真正难的是这些能力：
 - `agent-runtime::runtime::tool_calls` 现也已按职责拆为 `tool_calls::{execute,lifecycle,types}`：工具调用主流程、生命周期落盘/事件发布与共享上下文类型分离，`ExecuteToolCallContext::new(...)` / `lifecycle_context(...)` 负责收口重复的 started event 与 lifecycle context 样板，避免 runtime tool / 普通 tool 分支继续在单文件里来回复制上下文拼装
 - `agent-runtime` 在原有 `RuntimeEvent` 订阅流之外，现已额外暴露 `RuntimeHooks` 作为“驱动面”而不是“回放面”：`before_agent_start`、`input`、`before_provider_request`、`tool_call`、`tool_result`、`turn_start/turn_end` 这组 hook 用于外部 client 在不重写 agent loop 的前提下覆写 system prompt、注入 provider request 上下文、短路工具执行或改写工具结果；原 `RuntimeEvent` 继续只承担已发生事实的投影/订阅职责
 - 时间辅助函数不假设系统时间恒定晚于 `UNIX_EPOCH`，异常场景下会安全回退
-- `tape_info` / `tape_handoff` 已通过真正的 runtime tool registry 暴露，而不是字符串特判
+- `TapeInfo` / `TapeHandoff` 已通过真正的 runtime tool registry 暴露，而不是字符串特判
 
-当前内建编码工具契约维持短名集合：`shell`、`read`、`write`、`edit`、`apply_patch`、`glob`、`grep`。其中 `shell` 是模型可见的稳定工具名，底层执行器可在边缘实现中替换；当前实现使用 `brush` 作为 shell 运行时，而不是把具体 shell 名称泄漏进统一工具协议。`edit` 继续只承担“精确唯一字符串替换”这一单文件编辑语义，而多文件补丁编辑则由独立的 `apply_patch` 工具承接，支持 `apply_patch` 风格的 `Update File` / `Add File` / `Delete File`，让外部 Codex/Claude 风格补丁映射不必再借道 shell。
+当前内建编码工具契约维持统一 PascalCase 集合：`Shell`、`Read`、`Write`、`Edit`、`ApplyPatch`、`Glob`、`Grep`、`CodeSearch`、`WebSearch`，运行时工具为 `TapeInfo`、`TapeHandoff`。其中 `Shell` 是模型可见的稳定工具名，底层执行器可在边缘实现中替换；当前实现使用 `brush` 作为 shell 运行时，而不是把具体 shell 名称泄漏进统一工具协议。`Edit` 继续只承担“精确唯一字符串替换”这一单文件编辑语义，而多文件补丁编辑则由独立的 `ApplyPatch` 工具承接，支持 `apply_patch` 风格的 `Update File` / `Add File` / `Delete File`，让外部 Codex/Claude 风格补丁映射不必再借道 shell。
 
 `builtin-tools::shell` 内部也已进一步按职责拆分：根模块只保留 `ShellTool` 契约与结果组装，capture 文件/事件泵与 embedded brush 执行主流程分别下沉到 `shell::{capture,execution}`，避免异步执行细节继续堆在单个超大文件里。
 

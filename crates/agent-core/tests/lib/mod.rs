@@ -17,6 +17,7 @@ fn 工具定义用_json_schema_构建参数() {
         .with_parameter("query", "要搜索的关键字", true)
         .with_parameter("path", "限定路径", false);
 
+    assert_eq!(definition.name, "search");
     assert_eq!(definition.parameters["properties"]["query"]["type"], "string");
     assert_eq!(definition.parameters["properties"]["path"]["description"], "限定路径");
     assert_eq!(definition.parameters["required"], serde_json::json!(["query"]));
@@ -321,11 +322,11 @@ struct EchoTool;
 #[async_trait]
 impl Tool for EchoTool {
     fn name(&self) -> &str {
-        "echo"
+        "Echo"
     }
 
     fn definition(&self) -> ToolDefinition {
-        ToolDefinition::new("echo", "回显输入").with_parameter("text", "要回显的文本", true)
+        ToolDefinition::new("Echo", "回显输入").with_parameter("text", "要回显的文本", true)
     }
 
     async fn call(
@@ -345,7 +346,7 @@ fn 注册表收集工具定义() {
     registry.register(Box::new(EchoTool));
     let defs = registry.definitions();
     assert_eq!(defs.len(), 1);
-    assert_eq!(defs[0].name, "echo");
+    assert_eq!(defs[0].name, "Echo");
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -353,7 +354,7 @@ async fn 注册表按名称分派工具调用() {
     let mut registry = ToolRegistry::new();
     registry.register(Box::new(EchoTool));
 
-    let call = ToolCall::new("echo").with_argument("text", "你好");
+    let call = ToolCall::new("Echo").with_argument("text", "你好");
     let ctx = ToolExecutionContext {
         run_id: "r1".into(),
         workspace_root: None,

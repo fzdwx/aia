@@ -36,7 +36,8 @@ const TOOL_DETAILS_TRANSITION = {
   height: { duration: 0.18, ease: [0.16, 1, 0.3, 1] },
   opacity: { duration: 0.12, ease: "linear" },
 } as const
-const INLINE_DETAIL_TOOLS = new Set(["write", "apply_patch"])
+const INLINE_DETAIL_TOOLS = new Set<string>()
+const CARETLESS_EXPANDABLE_TOOLS = new Set(["Edit", "Write", "ApplyPatch"])
 const OMITTED_ARGUMENT_KEYS = new Set([
   "content",
   "patch",
@@ -238,7 +239,7 @@ function shouldInlineToolDetails(item: ToolRowItem) {
 
 function shouldShowToolRowCaret(item: ToolRowItem, hasDetails: boolean) {
   if (!hasDetails) return false
-  return normalizeToolName(item.toolName) !== "edit"
+  return !CARETLESS_EXPANDABLE_TOOLS.has(normalizeToolName(item.toolName))
 }
 
 function renderToolDetailsPanel(item: ToolRowItem) {
@@ -256,6 +257,13 @@ function renderToolDetailsPanel(item: ToolRowItem) {
   const resultEntries = buildDetailEntries(item.details, {
     omitKeys: OMITTED_DETAIL_KEYS,
   })
+
+  if (
+    CARETLESS_EXPANDABLE_TOOLS.has(normalizeToolName(item.toolName)) &&
+    detailsContent != null
+  ) {
+    return <ToolDetailSurface>{detailsContent}</ToolDetailSurface>
+  }
 
   if (
     requestEntries.length === 0 &&

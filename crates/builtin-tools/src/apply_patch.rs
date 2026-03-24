@@ -100,7 +100,7 @@ enum PatchFileKind {
 #[async_trait]
 impl Tool for ApplyPatchTool {
     fn name(&self) -> &str {
-        "apply_patch"
+        "ApplyPatch"
     }
 
     fn definition(&self) -> ToolDefinition {

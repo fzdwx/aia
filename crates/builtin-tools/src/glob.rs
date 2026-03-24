@@ -41,7 +41,7 @@ pub(crate) struct GlobToolArgs {
 #[async_trait]
 impl Tool for GlobTool {
     fn name(&self) -> &str {
-        "glob"
+        "Glob"
     }
 
     fn definition(&self) -> ToolDefinition {

@@ -134,7 +134,7 @@ async fn get_trace_dashboard_returns_metrics_trend_and_activity() {
         state.as_ref(),
         "trace-dashboard-a",
         now_ms.saturating_sub(3 * 60 * 60 * 1000).saturating_add(50),
-        "apply_patch",
+        "ApplyPatch",
         7,
         3,
     );

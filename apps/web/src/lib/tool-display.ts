@@ -7,15 +7,16 @@ export function normalizeToolArguments(
   return args
 }
 
-function normalizeToolName(toolName: string | undefined): string | undefined {
+function getToolNameSegment(toolName: string | undefined): string | undefined {
   if (!toolName) return undefined
-  const lower = toolName.toLowerCase()
-  const segments = lower.split(".")
+  const trimmed = toolName.trim()
+  if (!trimmed) return undefined
+  const segments = trimmed.split(".")
   return segments[segments.length - 1]
 }
 
 export function getToolDisplayName(toolName: string | undefined): string {
-  return normalizeToolName(toolName) ?? (toolName?.trim() || "tool")
+  return getToolNameSegment(toolName) ?? (toolName?.trim() || "tool")
 }
 
 function stringArg(
@@ -44,27 +45,27 @@ export function getToolDisplayPath(
   }
 
   const normalizedArgs = normalizeToolArguments(args)
-  const normalizedToolName = normalizeToolName(toolName)
+  const realToolName = getToolNameSegment(toolName)
 
-  if (normalizedToolName === "glob") {
+  if (realToolName === "Glob") {
     return stringArg(normalizedArgs, "pattern", "path", "file_path") ?? ""
   }
-  if (normalizedToolName === "grep") {
+  if (realToolName === "Grep") {
     return stringArg(normalizedArgs, "pattern", "path", "file_path") ?? ""
   }
-  if (normalizedToolName === "codesearch") {
+  if (realToolName === "CodeSearch") {
     return stringArg(normalizedArgs, "query") ?? ""
   }
-  if (normalizedToolName === "websearch") {
+  if (realToolName === "WebSearch") {
     return stringArg(normalizedArgs, "query") ?? ""
   }
-  if (normalizedToolName === "shell") {
+  if (realToolName === "Shell") {
     return stringArg(normalizedArgs, "command", "cmd") ?? ""
   }
   if (
-    normalizedToolName === "read" ||
-    normalizedToolName === "write" ||
-    normalizedToolName === "edit"
+    realToolName === "Read" ||
+    realToolName === "Write" ||
+    realToolName === "Edit"
   ) {
     return stringArg(normalizedArgs, "path", "file_path") ?? ""
   }

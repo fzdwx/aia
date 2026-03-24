@@ -271,3 +271,4 @@
 
 - `apps/web` 的 Channels CRUD 前端链路当前无新增硬阻塞
 - 当前无硬阻塞；已知非阻断事项主要是前端生产包体积提示偏大，以及 `shell` 的中断能力与长任务取消语义仍可继续增强
+- 最新后端工具命名收口：模型可见工具名已从下划线/小写风格统一改为 PascalCase，当前稳定集合为 `Shell`、`Read`、`Write`、`Edit`、`ApplyPatch`、`Glob`、`Grep`、`CodeSearch`、`WebSearch`、`TapeInfo`、`TapeHandoff`；`apps/web` 的工具时间线、渲染器与状态仓库也已直接切到这套真实名字。

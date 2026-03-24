@@ -66,7 +66,7 @@ fn default_tokens_num() -> usize {
 #[async_trait]
 impl Tool for CodeSearchTool {
     fn name(&self) -> &str {
-        "codesearch"
+        "CodeSearch"
     }
 
     fn definition(&self) -> ToolDefinition {

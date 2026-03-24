@@ -19,7 +19,7 @@ type ElementWithChildren = {
 describe("tool renderer registry", () => {
   test("renders read tool title as file path only", () => {
     const title = toolRendererRegistry.renderTitle({
-      toolName: "functions.read",
+      toolName: "Read",
       arguments: {
         file_path: "apps/web/src/components/chat-messages.tsx",
         offset: 120,
@@ -34,7 +34,7 @@ describe("tool renderer registry", () => {
 
   test("renders read tool meta as requested range and actual line count", () => {
     const meta = toolRendererRegistry.renderMeta({
-      toolName: "functions.read",
+      toolName: "Read",
       arguments: {
         file_path: "apps/web/src/components/chat-messages.tsx",
         offset: 120,
@@ -67,7 +67,7 @@ describe("tool renderer registry", () => {
 
   test("renders grep tool title as pattern only", () => {
     const title = toolRendererRegistry.renderTitle({
-      toolName: "functions.grep",
+      toolName: "Grep",
       arguments: {
         pattern: "renderMeta",
         path: "apps/web/src",
@@ -82,7 +82,7 @@ describe("tool renderer registry", () => {
 
   test("renders grep tool meta from details", () => {
     const meta = toolRendererRegistry.renderMeta({
-      toolName: "functions.grep",
+      toolName: "Grep",
       arguments: {
         pattern: "renderMeta",
       },
@@ -100,7 +100,7 @@ describe("tool renderer registry", () => {
 
   test("renders codesearch tool title from query", () => {
     const title = toolRendererRegistry.renderTitle({
-      toolName: "functions.codesearch",
+      toolName: "CodeSearch",
       arguments: {
         query: "React useState hook examples",
         tokensNum: 5000,
@@ -114,7 +114,7 @@ describe("tool renderer registry", () => {
 
   test("renders codesearch tool meta from tokens and result status", () => {
     const meta = toolRendererRegistry.renderMeta({
-      toolName: "functions.codesearch",
+      toolName: "CodeSearch",
       arguments: {
         query: "Express.js middleware",
         tokensNum: 3000,
@@ -152,7 +152,7 @@ describe("tool renderer registry", () => {
 
   test("renders codesearch details with top result card", () => {
     const details = toolRendererRegistry.renderDetails({
-      toolName: "functions.codesearch",
+      toolName: "CodeSearch",
       arguments: {
         query: "React useState hook examples",
         tokensNum: 5000,
@@ -177,7 +177,7 @@ describe("tool renderer registry", () => {
 
   test("renders websearch tool title and meta from query and options", () => {
     const title = toolRendererRegistry.renderTitle({
-      toolName: "functions.websearch",
+      toolName: "WebSearch",
       arguments: {
         query: "AI news 2026",
         numResults: 5,
@@ -187,7 +187,7 @@ describe("tool renderer registry", () => {
       succeeded: true,
     })
     const meta = toolRendererRegistry.renderMeta({
-      toolName: "functions.websearch",
+      toolName: "WebSearch",
       arguments: {
         query: "AI news 2026",
         numResults: 5,
@@ -227,7 +227,7 @@ describe("tool renderer registry", () => {
 
   test("renders websearch details with top result card", () => {
     const details = toolRendererRegistry.renderDetails({
-      toolName: "functions.websearch",
+      toolName: "WebSearch",
       arguments: {
         query: "AI news 2026",
         numResults: 8,
@@ -252,7 +252,7 @@ describe("tool renderer registry", () => {
 
   test("renders websearch preferred livecrawl badge", () => {
     const meta = toolRendererRegistry.renderMeta({
-      toolName: "functions.websearch",
+      toolName: "WebSearch",
       arguments: {
         query: "AI news 2026",
         numResults: 5,
@@ -286,7 +286,7 @@ describe("tool renderer registry", () => {
 
   test("renders write tool title with compacted path", () => {
     const title = toolRendererRegistry.renderTitle({
-      toolName: "functions.write",
+      toolName: "Write",
       arguments: {
         file_path:
           "apps/web/src/features/chat/tool-rendering/renderers/file-tools.tsx",
@@ -308,7 +308,7 @@ describe("tool renderer registry", () => {
 
   test("renders edit tool title with compacted path", () => {
     const title = toolRendererRegistry.renderTitle({
-      toolName: "functions.edit",
+      toolName: "Edit",
       arguments: {
         file_path:
           "apps/web/src/features/chat/tool-rendering/renderers/file-tools.tsx",
@@ -331,7 +331,7 @@ describe("tool renderer registry", () => {
 
   test("renders edit tool meta with green additions and red removals", () => {
     const meta = toolRendererRegistry.renderMeta({
-      toolName: "functions.edit",
+      toolName: "Edit",
       arguments: {
         file_path:
           "apps/web/src/features/chat/tool-rendering/renderers/file-tools.tsx",
@@ -354,7 +354,7 @@ describe("tool renderer registry", () => {
 
   test("renders edit tool details from old and new strings when diff is missing", () => {
     const details = toolRendererRegistry.renderDetails({
-      toolName: "functions.edit",
+      toolName: "Edit",
       arguments: {
         file_path: "apps/web/src/index.css",
         old_string: "old value\nline 2",
@@ -376,9 +376,33 @@ describe("tool renderer registry", () => {
     expect(html).not.toContain("Edited apps/web/src/index.css")
   })
 
+  test("renders edit tool details from explicit diff before falling back to output text", () => {
+    const details = toolRendererRegistry.renderDetails({
+      toolName: "Edit",
+      arguments: {
+        file_path: "apps/web/src/index.css",
+        old_string: "old value",
+        new_string: "new value",
+      },
+      details: {
+        added: 1,
+        removed: 1,
+        diff: "@@\n-old value\n+newer value",
+      },
+      outputContent: "Edited apps/web/src/index.css",
+      succeeded: true,
+    })
+
+    const html = renderToStaticMarkup(<>{details}</>)
+    expect(html).toContain("@@")
+    expect(html).toContain("-old value")
+    expect(html).toContain("+newer value")
+    expect(html).not.toContain("Edited apps/web/src/index.css")
+  })
+
   test("renders edit tool failure title from file path", () => {
     const title = toolRendererRegistry.renderTitle({
-      toolName: "functions.edit",
+      toolName: "Edit",
       arguments: {
         file_path: "apps/web/src/lib/tool-display.ts",
         old_string: "missing",
@@ -393,7 +417,7 @@ describe("tool renderer registry", () => {
 
   test("renders shell tool title from command", () => {
     const title = toolRendererRegistry.renderTitle({
-      toolName: "functions.shell",
+      toolName: "Shell",
       arguments: {
         command: "cargo check -p agent-runtime",
       },
@@ -406,7 +430,7 @@ describe("tool renderer registry", () => {
 
   test("renders apply_patch title from first patch operation", () => {
     const title = toolRendererRegistry.renderTitle({
-      toolName: "functions.apply_patch",
+      toolName: "ApplyPatch",
       arguments: {
         patch: [
           "*** Begin Patch",
@@ -426,7 +450,7 @@ describe("tool renderer registry", () => {
 
   test("renders write tool meta with green additions", () => {
     const meta = toolRendererRegistry.renderMeta({
-      toolName: "functions.write",
+      toolName: "Write",
       arguments: {
         file_path: "apps/web/src/index.css",
       },
@@ -443,9 +467,30 @@ describe("tool renderer registry", () => {
     expect(html).toContain("text-emerald-400")
   })
 
+  test("renders write tool details without a result section title", () => {
+    const details = toolRendererRegistry.renderDetails({
+      toolName: "Write",
+      arguments: {
+        file_path: "apps/web/src/index.css",
+        content: "first line\nsecond line",
+      },
+      details: {
+        lines: 1,
+      },
+      outputContent: "Wrote 28 bytes to apps/web/src/index.css",
+      succeeded: true,
+    })
+
+    const html = renderToStaticMarkup(<>{details}</>)
+    expect(html).toContain("first line")
+    expect(html).toContain("second line")
+    expect(html).not.toContain("Wrote 28 bytes to apps/web/src/index.css")
+    expect(html).not.toContain("Result")
+  })
+
   test("renders apply_patch meta with green additions and red removals", () => {
     const meta = toolRendererRegistry.renderMeta({
-      toolName: "functions.apply_patch",
+      toolName: "ApplyPatch",
       arguments: {
         patch: "*** Begin Patch\n*** End Patch",
       },
@@ -461,6 +506,22 @@ describe("tool renderer registry", () => {
     const html = renderToStaticMarkup(<>{meta}</>)
     expect(html).toContain("+4")
     expect(html).toContain("-2")
+  })
+
+  test("renders ApplyPatch details without a patch section title", () => {
+    const details = toolRendererRegistry.renderDetails({
+      toolName: "ApplyPatch",
+      arguments: {
+        patch: "*** Begin Patch\n*** End Patch",
+      },
+      outputContent: "*** Begin Patch\n*** End Patch",
+      succeeded: true,
+    })
+
+    const html = renderToStaticMarkup(<>{details}</>)
+    expect(html).toContain("*** Begin Patch")
+    expect(html).not.toContain("tool-timeline-detail-title")
+    expect(html).not.toContain('data-tool-detail-kind="patch"')
   })
 
   test("renders question tool summary and ignored semantics", () => {
@@ -493,9 +554,9 @@ describe("tool renderer registry", () => {
     expect(html).toContain("Issue Ignored")
   })
 
-  test("renders tape_handoff title from name and summary", () => {
+  test("renders TapeHandoff title from name and summary", () => {
     const title = toolRendererRegistry.renderTitle({
-      toolName: "tape_handoff",
+      toolName: "TapeHandoff",
       arguments: {
         name: "session-cut",
         summary: "Condensed handoff summary for the next wake.",

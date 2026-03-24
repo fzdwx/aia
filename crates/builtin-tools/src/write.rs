@@ -20,7 +20,7 @@ pub(crate) struct WriteToolArgs {
 #[async_trait]
 impl Tool for WriteTool {
     fn name(&self) -> &str {
-        "write"
+        "Write"
     }
 
     fn definition(&self) -> ToolDefinition {

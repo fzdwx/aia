@@ -14,30 +14,30 @@ export type ToolRowItem = {
 type ToolCategory = "read" | "search" | "edit" | "other"
 
 const CONTEXT_EXPLORATION_TOOLS = new Set([
-  "read",
-  "glob",
-  "grep",
+  "Read",
+  "Glob",
+  "Grep",
   "list",
-  "codesearch",
-  "websearch",
+  "CodeSearch",
+  "WebSearch",
 ])
 
 const TOOL_CATEGORIES: Record<string, ToolCategory> = {
-  read: "read",
+  Read: "read",
   cat: "read",
   head: "read",
   tail: "read",
-  grep: "search",
-  codesearch: "search",
-  websearch: "search",
+  Grep: "search",
+  CodeSearch: "search",
+  WebSearch: "search",
   search: "search",
   find: "search",
-  glob: "search",
+  Glob: "search",
   ripgrep: "search",
-  shell: "other",
-  edit: "edit",
-  write: "edit",
-  apply_patch: "edit",
+  Shell: "other",
+  Edit: "edit",
+  Write: "edit",
+  ApplyPatch: "edit",
   replace: "edit",
   sed: "edit",
 }
@@ -54,9 +54,10 @@ function categorize(toolName: string): ToolCategory {
 }
 
 export function normalizeToolName(toolName: string): string {
-  const lower = toolName.toLowerCase()
-  const segments = lower.split(".")
-  return segments[segments.length - 1] ?? lower
+  const trimmed = toolName.trim()
+  if (!trimmed) return ""
+  const segments = trimmed.split(".")
+  return segments[segments.length - 1] ?? trimmed
 }
 
 export function isContextExplorationTool(toolName: string): boolean {
@@ -213,16 +214,16 @@ export function contextToolTrigger(item: ToolRowItem): ContextToolTriggerInfo {
   let subtitle = ""
   const triggerArgs: { key: string; value: string }[] = []
 
-  if (name === "read") {
+  if (name === "Read") {
     subtitle =
       typeof args.file_path === "string"
         ? args.file_path
         : typeof args.path === "string"
           ? args.path
           : ""
-  } else if (name === "grep") {
+  } else if (name === "Grep") {
     subtitle = typeof args.pattern === "string" ? args.pattern : ""
-  } else if (name === "glob") {
+  } else if (name === "Glob") {
     subtitle = typeof args.pattern === "string" ? args.pattern : ""
   } else if (name === "list") {
     subtitle = typeof args.path === "string" ? args.path : ""

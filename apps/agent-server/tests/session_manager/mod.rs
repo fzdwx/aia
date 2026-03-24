@@ -210,7 +210,7 @@ fn tool_call_detected_projects_live_tool_block_before_start_event() {
         &snapshot,
         &StreamEvent::ToolCallDetected {
             invocation_id: "call-1".into(),
-            tool_name: "codesearch".into(),
+            tool_name: "CodeSearch".into(),
             arguments: serde_json::json!({
                 "query": "OpenAI Codex CLI apply_patch tool",
                 "tokensNum": 5000,
@@ -228,7 +228,7 @@ fn tool_call_detected_projects_live_tool_block_before_start_event() {
     };
 
     assert_eq!(tool.invocation_id, "call-1");
-    assert_eq!(tool.tool_name, "codesearch");
+    assert_eq!(tool.tool_name, "CodeSearch");
     assert_eq!(
         tool.arguments,
         serde_json::json!({
@@ -256,7 +256,7 @@ fn tool_call_started_upgrades_existing_detected_tool_block() {
         &snapshot,
         &StreamEvent::ToolCallDetected {
             invocation_id: "call-1".into(),
-            tool_name: "codesearch".into(),
+            tool_name: "CodeSearch".into(),
             arguments: serde_json::json!({ "query": "Codex" }),
             detected_at_ms: 200,
         },
@@ -265,7 +265,7 @@ fn tool_call_started_upgrades_existing_detected_tool_block() {
         &snapshot,
         &StreamEvent::ToolCallStarted {
             invocation_id: "call-1".into(),
-            tool_name: "codesearch".into(),
+            tool_name: "CodeSearch".into(),
             arguments: serde_json::json!({ "query": "Codex", "tokensNum": 5000 }),
             started_at_ms: 260,
         },
@@ -280,7 +280,7 @@ fn tool_call_started_upgrades_existing_detected_tool_block() {
     };
 
     assert_eq!(tool.invocation_id, "call-1");
-    assert_eq!(tool.tool_name, "codesearch");
+    assert_eq!(tool.tool_name, "CodeSearch");
     assert_eq!(tool.arguments, serde_json::json!({ "query": "Codex", "tokensNum": 5000 }));
     assert_eq!(tool.started_at_ms, Some(260));
 }

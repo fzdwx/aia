@@ -243,7 +243,7 @@ fn streaming_card_payload_renders_reasoning_answer_and_tool_status() {
         completed_segments: vec!["最终回答内容".into()],
         tools: vec![FeishuStreamingToolState {
             invocation_id: "tool-1".into(),
-            tool_name: "grep".into(),
+            tool_name: "Grep".into(),
             status: FeishuStreamingToolStatus::Completed,
             output: "匹配到结果".into(),
             failed: false,
@@ -270,7 +270,7 @@ fn streaming_card_payload_renders_reasoning_answer_and_tool_status() {
     }));
     assert!(elements.iter().any(|element| {
         element["tag"] == "markdown"
-            && element["content"].as_str().is_some_and(|content| content.contains("grep"))
+            && element["content"].as_str().is_some_and(|content| content.contains("Grep"))
     }));
 }
 
@@ -357,7 +357,7 @@ fn streaming_card_state_applies_stream_events_incrementally() {
         &mut state,
         &agent_core::StreamEvent::ToolCallStarted {
             invocation_id: "tool-1".into(),
-            tool_name: "grep".into(),
+            tool_name: "Grep".into(),
             arguments: json!({ "pattern": "feishu" }),
             started_at_ms: 12,
         },
@@ -374,7 +374,7 @@ fn streaming_card_state_applies_stream_events_incrementally() {
         &mut state,
         &agent_core::StreamEvent::ToolCallCompleted {
             invocation_id: "tool-1".into(),
-            tool_name: "grep".into(),
+            tool_name: "Grep".into(),
             content: "完成".into(),
             details: None,
             failed: false,
@@ -389,7 +389,7 @@ fn streaming_card_state_applies_stream_events_incrementally() {
     assert_eq!(state.reasoning, "分析中");
     assert_eq!(state.streaming_text, "最终回答");
     assert_eq!(state.tools.len(), 1);
-    assert_eq!(state.tools[0].tool_name, "grep");
+    assert_eq!(state.tools[0].tool_name, "Grep");
     assert_eq!(state.tools[0].status, FeishuStreamingToolStatus::Completed);
     assert!(state.tools[0].output.contains("匹配内容"));
 }
