@@ -145,7 +145,7 @@ function renderSearchResultCard({
     <div className="overflow-hidden rounded-lg border border-border/35 bg-gradient-to-br from-background via-background to-muted/20 shadow-sm">
       <div className="flex items-start justify-between gap-3 border-b border-border/20 px-3 py-2.5">
         <div className="min-w-0 space-y-1">
-          <div className="flex items-center gap-2 text-[11px] text-muted-foreground/80">
+          <div className="text-meta flex items-center gap-2 text-muted-foreground/80">
             <span
               className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-medium ${
                 isCode
@@ -161,13 +161,13 @@ function renderSearchResultCard({
               {isCode ? "Code match" : "Web result"}
             </span>
             {hostname ? (
-              <span className="truncate rounded-full border border-border/30 px-2 py-0.5 text-[10px] tracking-wide text-muted-foreground/70 uppercase">
+              <span className="text-micro truncate rounded-full border border-border/30 px-2 py-0.5 tracking-wide text-muted-foreground/70 uppercase">
                 {hostname}
               </span>
             ) : null}
           </div>
           {preview.title ? (
-            <div className="text-[13px] leading-5 font-medium text-foreground/90">
+            <div className="text-ui font-medium text-foreground/90">
               {preview.title}
             </div>
           ) : null}
@@ -186,12 +186,12 @@ function renderSearchResultCard({
       </div>
       <div className="space-y-2 px-3 py-2.5">
         {preview.url ? (
-          <div className="truncate text-[11px] leading-4 text-muted-foreground/75">
+          <div className="text-meta truncate text-muted-foreground/75">
             {preview.url}
           </div>
         ) : null}
         {preview.snippet ? (
-          <p className="text-[12px] leading-5 whitespace-pre-wrap text-foreground/75">
+          <p className="text-caption whitespace-pre-wrap text-foreground/75">
             {preview.snippet}
           </p>
         ) : null}

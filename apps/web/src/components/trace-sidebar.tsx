@@ -12,9 +12,10 @@ import {
 import { useChatStore } from "@/stores/chat-store"
 import { useTraceStore } from "@/stores/trace-store"
 
-const TRACE_NAV_TEXT_META = "text-[11px]"
-const TRACE_NAV_DETAIL = "text-[11px] text-muted-foreground/80"
-const TRACE_META_CAPTION = "text-[px] text-muted-foreground/65"
+const TRACE_NAV_TEXT_PRIMARY = "sidebar-nav-primary"
+const TRACE_NAV_TEXT_SECONDARY = "sidebar-nav-secondary"
+const TRACE_NAV_DETAIL = "text-meta text-muted-foreground/80"
+const TRACE_META_CAPTION = "text-micro text-muted-foreground/65"
 
 function formatCompactDateTime(value: number) {
   return new Date(value).toLocaleString("zh-CN", {
@@ -74,7 +75,7 @@ export function TraceSidebar() {
     <>
       <div className="px-2 pt-2">
         <div className="rounded-lg border border-border/30 bg-muted/20 px-2 py-2">
-          <p className="px-1 py-1 text-[11px] font-medium text-foreground/80">
+          <p className="workspace-section-label px-1 py-1 text-muted-foreground/70">
             Trace
           </p>
           <div className="mt-1 space-y-1">
@@ -89,7 +90,9 @@ export function TraceSidebar() {
               )}
             >
               <Waypoints className="mt-0.5 size-3.5 shrink-0 opacity-70" />
-              <span className={`min-w-0 ${TRACE_NAV_TEXT_META}`}>Overview</span>
+              <span className={`min-w-0 ${TRACE_NAV_TEXT_PRIMARY}`}>
+                Overview
+              </span>
             </button>
             <button
               type="button"
@@ -102,7 +105,7 @@ export function TraceSidebar() {
               )}
             >
               <Bot className="mt-0.5 size-3.5 shrink-0 opacity-70" />
-              <span className={`min-w-0 ${TRACE_NAV_TEXT_META}`}>
+              <span className={`min-w-0 ${TRACE_NAV_TEXT_PRIMARY}`}>
                 Conversation
               </span>
             </button>
@@ -117,7 +120,7 @@ export function TraceSidebar() {
               )}
             >
               <Layers3 className="mt-0.5 size-3.5 shrink-0 opacity-70" />
-              <span className={`min-w-0 ${TRACE_NAV_TEXT_META}`}>
+              <span className={`min-w-0 ${TRACE_NAV_TEXT_PRIMARY}`}>
                 Compression
               </span>
             </button>
@@ -130,19 +133,19 @@ export function TraceSidebar() {
       ) : (
         <div className="flex-1 overflow-y-auto px-2 pt-2 pb-2">
           {traceError && visibleLoopGroups.length === 0 ? (
-            <p className="px-2.5 py-2 text-[12px] leading-5 text-destructive">
+            <p className="text-caption px-2.5 py-2 text-destructive">
               {traceError}
             </p>
           ) : null}
 
           {traceLoading && visibleLoopGroups.length === 0 ? (
-            <p className="px-2.5 py-2 text-[12px] text-muted-foreground">
+            <p className="text-caption px-2.5 py-2 text-muted-foreground">
               Loading traces...
             </p>
           ) : null}
 
           {!traceLoading && visibleLoopGroups.length === 0 ? (
-            <p className="px-2.5 py-2 text-[12px] text-muted-foreground">
+            <p className="text-caption px-2.5 py-2 text-muted-foreground">
               {traceView === "compression"
                 ? "No compression logs available."
                 : "No traces available."}
@@ -173,9 +176,7 @@ export function TraceSidebar() {
                   )}
                 />
                 <span className="min-w-0 flex-1">
-                  <span
-                    className={`line-clamp-2 ${TRACE_NAV_TEXT_META} leading-4`}
-                  >
+                  <span className={`line-clamp-2 ${TRACE_NAV_TEXT_PRIMARY}`}>
                     {formatTraceLoopHeadline(group, { maxLength: 64 })}
                   </span>
                   <span className={`mt-1 block ${TRACE_NAV_DETAIL}`}>
@@ -199,18 +200,20 @@ export function TraceSidebar() {
               type="button"
               onClick={() => refreshTraces({ page: tracePage - 1 })}
               disabled={tracePage <= 1 || traceLoading}
-              className="text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              className={`${TRACE_NAV_TEXT_SECONDARY} text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40`}
             >
               Prev
             </button>
-            <span className="text-[11px] text-muted-foreground">
+            <span
+              className={`${TRACE_NAV_TEXT_SECONDARY} text-muted-foreground`}
+            >
               {tracePage}/{pageCount}
             </span>
             <button
               type="button"
               onClick={() => refreshTraces({ page: tracePage + 1 })}
               disabled={tracePage >= pageCount || traceLoading}
-              className="text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              className={`${TRACE_NAV_TEXT_SECONDARY} text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40`}
             >
               Next
             </button>

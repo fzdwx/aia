@@ -1,10 +1,12 @@
 import { Plus, X } from "lucide-react"
 
-import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat-store"
 
 const SIDEBAR_ACTION_BUTTON =
-  "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-ui-xs font-medium tracking-[0.016em] text-muted-foreground transition-colors duration-150 hover:bg-muted/55 hover:text-foreground/80"
+  "sidebar-nav-secondary flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-muted-foreground transition-colors duration-150 hover:bg-muted/55 hover:text-foreground/80"
+
+const SIDEBAR_SESSION_ITEM =
+  "sidebar-session-item group flex w-full items-center gap-1 rounded-lg"
 
 export function SidebarSessionsView() {
   const sessions = useChatStore((s) => s.sessions)
@@ -27,55 +29,55 @@ export function SidebarSessionsView() {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-2 pt-1 pb-2">
-        {sessions.map((session) => {
-          const isActive = session.id === activeSessionId
-          const isSwitchingTo = isActive && sessionHydrating
-          const sessionLabel = session.title || session.id
+      <div className="flex-1 overflow-y-auto px-2 pt-1.5 pb-2">
+        <div className="space-y-1">
+          {sessions.map((session) => {
+            const isActive = session.id === activeSessionId
+            const isSwitchingTo = isActive && sessionHydrating
+            const sessionLabel = session.title || session.id
 
-          return (
-            <div
-              key={session.id}
-              className={cn(
-                "group flex w-full items-center rounded-lg px-2.5 py-1 transition-colors duration-150",
-                isActive
-                  ? "bg-muted text-foreground"
-                  : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
-              )}
-            >
-              <button
-                type="button"
-                className="min-w-0 flex-1 truncate text-left font-medium tracking-[0.012em] disabled:cursor-default"
-                onClick={() => void switchSession(session.id)}
-                disabled={isSwitchingTo}
-                aria-current={isActive ? "page" : undefined}
-                aria-busy={isSwitchingTo}
+            return (
+              <div
+                key={session.id}
+                data-selected={isActive ? "true" : "false"}
+                className={SIDEBAR_SESSION_ITEM}
               >
-                {isActive && (
-                  <span className="mr-1.5 inline-block size-1.5 rounded-full bg-foreground/50" />
-                )}
-                <span className="text-ui">{sessionLabel}</span>
-                {isSwitchingTo && (
-                  <span className="text-meta ml-2 text-muted-foreground/70">
-                    Loading…
+                <button
+                  type="button"
+                  className="sidebar-nav-primary flex min-w-0 flex-1 items-center gap-1.5 px-2.5 py-2 text-left disabled:cursor-default"
+                  onClick={() => void switchSession(session.id)}
+                  disabled={isSwitchingTo}
+                  aria-current={isActive ? "page" : undefined}
+                  aria-busy={isSwitchingTo}
+                >
+                  {isActive ? (
+                    <span className="inline-block size-1.5 shrink-0 rounded-full bg-foreground/60" />
+                  ) : null}
+                  <span className="min-w-0 flex-1 truncate">
+                    {sessionLabel}
                   </span>
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  void deleteSession(session.id)
-                }}
-                disabled={isSwitchingTo}
-                aria-label={`Delete session ${sessionLabel}`}
-                className="ml-1 hidden shrink-0 rounded p-0.5 text-muted-foreground/50 group-hover:block hover:text-foreground/80 disabled:opacity-30"
-              >
-                <X className="size-3" />
-              </button>
-            </div>
-          )
-        })}
+                  {isSwitchingTo ? (
+                    <span className="text-meta shrink-0 text-muted-foreground/72">
+                      Loading…
+                    </span>
+                  ) : null}
+                </button>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    void deleteSession(session.id)
+                  }}
+                  disabled={isSwitchingTo}
+                  aria-label={`Delete session ${sessionLabel}`}
+                  className="sidebar-session-delete mr-1 shrink-0 disabled:opacity-30"
+                >
+                  <X className="size-3" />
+                </button>
+              </div>
+            )
+          })}
+        </div>
       </div>
     </>
   )

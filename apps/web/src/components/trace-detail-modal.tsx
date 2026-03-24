@@ -270,7 +270,7 @@ function TextBlock({
   return (
     <pre
       className={cn(
-        "text-caption overflow-x-auto rounded-lg bg-muted/40 p-3 whitespace-pre-wrap text-foreground",
+        "workspace-code overflow-x-auto rounded-lg bg-muted/40 px-3 py-2.5 whitespace-pre-wrap text-foreground",
         className
       )}
     >
@@ -742,9 +742,7 @@ function ResponsesRequestContextCard({
       <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left">
         <div className="space-y-0.5">
           <div className="flex items-center gap-2">
-            <h3 className="text-sm font-semibold text-foreground">
-              Provider request
-            </h3>
+            <h3 className="workspace-panel-title">Provider request</h3>
             <Badge variant="outline" className="text-ui-xs">
               responses
             </Badge>
@@ -834,7 +832,7 @@ function ChatCompletionsRequestContextCard({
       <CardHeader>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="space-y-1">
-            <CardTitle className="text-sm">Provider request</CardTitle>
+            <CardTitle>Provider request</CardTitle>
             <CardDescription>
               Request summary and prompt context.
             </CardDescription>
@@ -922,7 +920,7 @@ function ProviderRequestContextCard({
   return (
     <Card size="sm">
       <CardHeader>
-        <CardTitle className="text-sm">Provider request</CardTitle>
+        <CardTitle>Provider request</CardTitle>
         <CardDescription>
           No protocol-specific parser available.
         </CardDescription>
@@ -953,7 +951,7 @@ function ProviderRequestMessagesPanel({
   return (
     <Card size="sm">
       <CardHeader>
-        <CardTitle className="text-sm">Messages</CardTitle>
+        <CardTitle>Messages</CardTitle>
         <CardDescription>
           No structured message extraction available.
         </CardDescription>
@@ -1200,7 +1198,7 @@ function TraceSummaryBar({ trace }: { trace: TraceRecord }) {
     >
       <CardHeader className="gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <CardTitle className="text-sm">Trace overview</CardTitle>
+          <CardTitle>Trace overview</CardTitle>
         </div>
         <CardDescription>Execution summary.</CardDescription>
       </CardHeader>
@@ -1274,13 +1272,13 @@ function ResultSection({ trace }: { trace: TraceRecord }) {
   return (
     <Card size="sm">
       <CardHeader>
-        <CardTitle className="text-sm">Result</CardTitle>
+        <CardTitle>Result</CardTitle>
         <CardDescription>Outcome and failure details.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {failed ? (
           <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
-            <div className="mb-2 flex items-center gap-2 text-sm font-medium text-destructive">
+            <div className="text-title mb-2 flex items-center gap-2 font-medium text-destructive">
               <AlertTriangle className="size-4" />
               Failure detail
             </div>
@@ -1303,7 +1301,7 @@ function ResultSection({ trace }: { trace: TraceRecord }) {
           </div>
         ) : (
           <div className="trace-accent-surface rounded-xl p-4">
-            <div className="mb-2 flex items-center gap-2 text-sm font-medium text-foreground">
+            <div className="text-title mb-2 flex items-center gap-2 font-medium text-foreground">
               <CheckCircle2 className="size-4 text-foreground/55" />
               Assistant text
             </div>
@@ -1328,7 +1326,7 @@ function RawPayloadsCard({ trace }: { trace: TraceRecord }) {
   return (
     <Card size="sm">
       <CardHeader>
-        <CardTitle className="text-sm">Payload snapshots</CardTitle>
+        <CardTitle>Payload snapshots</CardTitle>
         <CardDescription>Raw request/response blocks.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -1338,9 +1336,9 @@ function RawPayloadsCard({ trace }: { trace: TraceRecord }) {
         />
         {trace.response_body ? (
           <Collapsible className="rounded-lg border border-border/50 bg-muted/15 px-3 py-2">
-            <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 text-left text-sm font-medium text-foreground">
+            <CollapsibleTrigger className="text-title flex w-full items-center justify-between gap-3 text-left font-medium text-foreground">
               <span>Response body</span>
-              <span className="text-xs text-muted-foreground">Raw text</span>
+              <span className="text-meta text-muted-foreground">Raw text</span>
             </CollapsibleTrigger>
             <CollapsibleContent className="pt-3">
               <TextBlock
@@ -1424,7 +1422,7 @@ export function TraceDetailModal({
         <DialogPopup className="w-[min(1280px,calc(100vw-2rem))] max-w-[1280px]">
           <DialogHeader>
             <div className="min-w-0 space-y-2">
-              <DialogTitle className="text-title">
+              <DialogTitle>
                 {trace ? `${trace.model} · payload workbench` : "Trace detail"}
               </DialogTitle>
               <DialogDescription className="workspace-panel-copy mt-0">
@@ -1511,14 +1509,14 @@ export function TraceDetailModal({
           <DialogBody>
             <ScrollArea className="h-[min(82vh,920px)] pr-4">
               {loading ? (
-                <div className="flex min-h-[240px] items-center gap-2 text-sm text-muted-foreground">
+                <div className="workspace-panel-copy flex min-h-[240px] items-center gap-2 text-muted-foreground">
                   <Loader2 className="size-4 animate-spin" />
                   Loading trace…
                 </div>
               ) : null}
 
               {!loading && !trace ? (
-                <div className="min-h-[240px] text-sm text-muted-foreground">
+                <div className="workspace-panel-copy min-h-[240px] text-muted-foreground">
                   No trace selected.
                 </div>
               ) : null}

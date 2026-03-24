@@ -602,7 +602,7 @@ function TabButton({
       tabIndex={active ? 0 : -1}
       onClick={onClick}
       className={cn(
-        "text-caption min-h-10 border-b-2 px-1 pb-2 font-medium transition-colors",
+        "text-ui-xs min-h-9 border-b-2 px-1 pb-2 font-medium tracking-[0.01em] transition-colors",
         active
           ? "border-foreground text-foreground"
           : "border-transparent text-muted-foreground hover:text-foreground"
@@ -642,7 +642,7 @@ function TextBlock({
   return (
     <pre
       className={cn(
-        "text-caption overflow-x-auto rounded-lg border border-border/20 bg-background px-3 py-2.5 whitespace-pre-wrap text-foreground",
+        "workspace-code text-ui-sm overflow-x-auto rounded-lg border border-border/20 bg-background px-3 py-2.5 whitespace-pre-wrap text-foreground",
         className
       )}
     >
@@ -1120,6 +1120,7 @@ function LlmInspector({
               size="sm"
               onClick={onOpenPayload}
               disabled={loading}
+              className="text-ui-sm h-7 px-2.5"
             >
               {loading ? (
                 <Loader2 className="size-3.5 animate-spin" />
@@ -1450,7 +1451,7 @@ export function TracePanel() {
         },
         {
           label: "sessions",
-          value: formatCount(overviewDashboard.overall_summary.total_sessions),
+          value: formatCount(overviewDashboard.current.total_sessions),
         },
         {
           label: "models",
@@ -1490,7 +1491,7 @@ export function TracePanel() {
             </button>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-1.5">
-                <h1 className="text-sm font-semibold tracking-tight">Trace</h1>
+                <h1 className="workspace-panel-title">Trace</h1>
                 <Badge variant="secondary" className="text-ui-xs">
                   {traceSurface === "overview" ? "overview" : traceView}
                 </Badge>
@@ -1578,12 +1579,12 @@ export function TracePanel() {
             {visibleLoopGroups.length === 0 && !traceLoading ? (
               <section className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-2xl border border-border/30 bg-card/70 px-6 py-16 text-center shadow-[var(--workspace-shadow)]">
                 <Waypoints className="size-10 text-muted-foreground/30" />
-                <p className="mt-4 text-sm font-medium text-foreground/70">
+                <p className="workspace-panel-title mt-4 text-foreground/70">
                   {traceView === "compression"
                     ? "No compression logs yet"
                     : "No traces yet"}
                 </p>
-                <p className="text-ui mt-1 text-muted-foreground">
+                <p className="workspace-panel-copy mx-auto mt-1 text-muted-foreground">
                   {traceView === "compression"
                     ? "Trigger context compression to inspect compression calls and summaries here."
                     : "Start a conversation to see agent loops and LLM spans here."}
@@ -1653,7 +1654,7 @@ export function TracePanel() {
                             </span>
                           </div>
                           <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                            <h3 className="text-heading-sm font-semibold text-foreground">
+                            <h3 className="text-body-sm font-semibold text-foreground">
                               {nodeTitle(activeNode)}
                             </h3>
                             <span className="text-caption text-muted-foreground tabular-nums">
@@ -1732,7 +1733,7 @@ export function TracePanel() {
                         />
                       )
                     ) : (
-                      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                      <div className="workspace-panel-copy flex h-full items-center justify-center text-muted-foreground">
                         Select a span.
                       </div>
                     )}

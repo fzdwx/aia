@@ -238,15 +238,11 @@ function OverviewSignalStat({
           : "border-border/16 bg-muted/[0.04]"
       )}
     >
-      <p className="text-[11px] tracking-[0.12em] text-muted-foreground uppercase">
-        {label}
-      </p>
-      <p className="mt-1 text-[16px] font-semibold tracking-[-0.03em] text-foreground tabular-nums">
+      <p className="text-label text-muted-foreground">{label}</p>
+      <p className="text-body mt-1 leading-tight font-semibold tracking-[-0.03em] text-foreground tabular-nums">
         {value}
       </p>
-      <p className="mt-1 truncate text-[11px] text-muted-foreground">
-        {detail}
-      </p>
+      <p className="text-meta mt-1 truncate text-muted-foreground">{detail}</p>
     </div>
   )
 }
@@ -272,14 +268,14 @@ function WorkspaceDrillButton({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[12px] font-medium text-foreground">{title}</p>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">{detail}</p>
+          <p className="text-ui-sm font-medium text-foreground">{title}</p>
+          <p className="text-meta mt-0.5 text-muted-foreground">{detail}</p>
         </div>
         <span className="rounded-full border border-border/24 bg-background/70 p-1.5 text-muted-foreground">
           {icon}
         </span>
       </div>
-      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
+      <div className="text-micro mt-2 flex flex-wrap items-center gap-1.5 text-muted-foreground">
         <span>{formatCount(summary.total_requests)} req</span>
         <span>·</span>
         <span>{formatPercent(healthRate(summary))} healthy</span>
@@ -339,14 +335,14 @@ function OverviewHeroCard({
 
         <section className="trace-overview-drill rounded-[16px] border border-border/20 bg-muted/[0.045] px-3 py-2.5">
           <div className="flex items-center justify-between gap-2">
-            <p className="text-[11px] tracking-[0.14em] text-muted-foreground uppercase">
+            <p className="text-label text-muted-foreground">
               Drill into workspace
             </p>
-            <span className="text-[11px] text-muted-foreground">
+            <span className="text-meta text-muted-foreground">
               Primary tasks
             </span>
           </div>
-          <p className="mt-1 text-[10px] leading-4 text-muted-foreground">
+          <p className="text-micro mt-1 text-muted-foreground">
             Pick a slice for span-level inspection.
           </p>
           <div className="mt-2 space-y-2">
@@ -386,14 +382,12 @@ function TrendSignalBlock({
 }) {
   return (
     <div className="min-w-0 border-l border-border/18 pl-3 first:border-l-0 first:pl-0">
-      <p className="text-[10px] tracking-[0.14em] text-muted-foreground uppercase">
-        {label}
-      </p>
-      <p className="mt-1.5 flex items-center gap-1.5 text-[14px] font-semibold text-foreground tabular-nums">
+      <p className="text-label text-muted-foreground">{label}</p>
+      <p className="text-body-sm mt-1.5 flex items-center gap-1.5 font-semibold text-foreground tabular-nums">
         {icon}
         {value}
       </p>
-      <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
+      <p className="text-micro mt-0.5 truncate text-muted-foreground">
         {detail}
       </p>
       {metrics && metrics.length > 0 ? (
@@ -401,7 +395,7 @@ function TrendSignalBlock({
           {metrics.map((metric) => (
             <span
               key={metric.label}
-              className="inline-flex items-center gap-1 rounded-full border border-border/18 bg-background/55 px-1.5 py-0.5 text-[9px] text-muted-foreground"
+              className="text-micro inline-flex items-center gap-1 rounded-full border border-border/18 bg-background/55 px-1.5 py-0.5 text-muted-foreground"
             >
               <span className="uppercase">{metric.label}</span>
               <span className="font-medium text-foreground tabular-nums">
@@ -487,13 +481,13 @@ function TrendChartBlock({ dashboard }: { dashboard: TraceDashboard }) {
     <section className="space-y-3">
       <div className="flex flex-col gap-2.5 xl:flex-row xl:items-start xl:justify-between">
         <div className="max-w-[760px]">
-          <p className="text-[11px] tracking-[0.16em] text-muted-foreground uppercase">
+          <p className="text-kicker text-muted-foreground">
             Recent throughput & anomalies
           </p>
-          <p className="mt-1.5 text-[20px] font-semibold tracking-[-0.04em] text-foreground tabular-nums">
+          <p className="text-heading-sm mt-1.5 font-semibold tracking-[-0.04em] text-foreground tabular-nums">
             {formatCompactCount(dashboard.current.total_tokens)} tokens in range
           </p>
-          <p className="mt-0.5 text-[10px] leading-4 text-muted-foreground">
+          <p className="text-micro mt-0.5 text-muted-foreground">
             Prioritize the latest buckets before year-scale context. Net input
             removes cached tokens so trend changes map to fresh context demand.
           </p>
@@ -618,7 +612,7 @@ function TrendChartBlock({ dashboard }: { dashboard: TraceDashboard }) {
           </defs>
         </svg>
 
-        <div className="mt-2 flex flex-wrap items-center gap-2.5 text-[11px] text-muted-foreground">
+        <div className="text-meta mt-2 flex flex-wrap items-center gap-2.5 text-muted-foreground">
           <span className="font-medium text-foreground">Series</span>
           <span className="flex items-center gap-2">
             <SeriesMarker color="var(--trace-chart-input)" shape="circle" />
@@ -809,19 +803,19 @@ function ActivityHeatmapBlock({
     <section className={cn("space-y-3", compact && "space-y-2")}>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-[11px] tracking-[0.16em] text-muted-foreground uppercase">
+          <p className="text-kicker text-muted-foreground">
             Yearly activity context
           </p>
           <p
             className={cn(
               "font-semibold tracking-[-0.04em] text-foreground",
-              compact ? "mt-1 text-[14px]" : "mt-1.5 text-[18px]"
+              compact ? "text-body-sm mt-1" : "text-heading-md mt-1.5"
             )}
           >
             {formatCount(activeDays.length)} active days in 12 months
           </p>
           {!compact ? (
-            <p className="mt-1 text-[11px] text-muted-foreground">
+            <p className="text-meta mt-1 text-muted-foreground">
               Secondary context for seasonality; keep recent throughput and
               workspace drilldown as primary signals.
             </p>
@@ -831,7 +825,7 @@ function ActivityHeatmapBlock({
         <div
           className={cn(
             "flex items-center text-muted-foreground",
-            compact ? "gap-1.5 text-[10px]" : "gap-2 text-[11px]"
+            compact ? "text-micro gap-1.5" : "text-meta gap-2"
           )}
         >
           <span>Less</span>
@@ -872,10 +866,7 @@ function ActivityHeatmapBlock({
                 x={month.x}
                 y={heatmap.monthLabelY}
                 fill="currentColor"
-                className={cn(
-                  "text-muted-foreground",
-                  compact ? "text-[9px]" : "text-[10px]"
-                )}
+                className="text-micro text-muted-foreground"
               >
                 {month.label}
               </text>
@@ -891,10 +882,7 @@ function ActivityHeatmapBlock({
                   heatmap.weekdayLabelOffset
                 }
                 fill="currentColor"
-                className={cn(
-                  "text-muted-foreground",
-                  compact ? "text-[9px]" : "text-[10px]"
-                )}
+                className="text-micro text-muted-foreground"
               >
                 {weekday.label}
               </text>
@@ -945,7 +933,7 @@ function ActivityHeatmapBlock({
         <div
           className={cn(
             "flex flex-wrap items-center gap-x-3 gap-y-1.5",
-            compact ? "text-[9px]" : "text-[11px]"
+            compact ? "text-micro" : "text-meta"
           )}
         >
           <span className="font-medium text-foreground">
@@ -1008,7 +996,7 @@ export function TraceOverviewPanel() {
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-[1480px] flex-col gap-2">
           {error ? (
-            <div className="rounded-2xl border border-destructive/20 bg-destructive/[0.05] px-4 py-3 text-[12px] text-destructive">
+            <div className="text-caption rounded-2xl border border-destructive/20 bg-destructive/[0.05] px-4 py-3 text-destructive">
               {error}
             </div>
           ) : null}
@@ -1028,14 +1016,14 @@ export function TraceOverviewPanel() {
           ) : null}
 
           {loading && !dashboard ? (
-            <div className="trace-overview-card rounded-2xl border border-border/25 bg-card px-4 py-6 text-[12px] text-muted-foreground">
+            <div className="trace-overview-card text-caption rounded-2xl border border-border/25 bg-card px-4 py-6 text-muted-foreground">
               Loading dashboard analytics...
             </div>
           ) : null}
 
           {!loading && !dashboard && !error ? (
             <section className="trace-overview-card rounded-[28px] border border-border/25 bg-card/95 px-5 py-6">
-              <p className="text-[12px] text-muted-foreground">
+              <p className="text-caption text-muted-foreground">
                 No dashboard data available yet.
               </p>
             </section>

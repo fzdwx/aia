@@ -20,7 +20,7 @@ export function Sidebar() {
     <aside className="flex h-full w-[280px] shrink-0 flex-col border-r border-border/50 bg-sidebar">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3">
-        <span className="workspace-brand">aia</span>
+        <span className="workspace-brand sidebar-brand-mark">aia</span>
       </div>
 
       <Separator className="opacity-30" />

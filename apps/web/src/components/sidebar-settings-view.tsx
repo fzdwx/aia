@@ -43,7 +43,7 @@ export function SidebarSettingsView() {
               onClick={() => setSettingsSection(id)}
               aria-current={isActive ? "page" : undefined}
               className={cn(
-                "text-ui-sm flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[4px] font-medium tracking-[0.02em] transition-colors duration-150",
+                "sidebar-nav-primary flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors duration-150",
                 isActive
                   ? "bg-muted/65 text-foreground/82"
                   : "text-muted-foreground hover:bg-muted/45 hover:text-foreground/80"

@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat-store"
 
 const SIDEBAR_FOOTER_BUTTON =
-  "mb-1 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-ui-xs font-medium tracking-[0.016em] text-muted-foreground transition-colors duration-150 hover:bg-muted/55 hover:text-foreground/80"
+  "sidebar-nav-secondary mb-1 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-muted-foreground transition-colors duration-150 hover:bg-muted/55 hover:text-foreground/80"
 
 export function SidebarFooter() {
   const view = useChatStore((s) => s.view)
