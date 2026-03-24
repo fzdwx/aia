@@ -87,7 +87,7 @@ struct TapeInfoToolArgs {}
 #[async_trait]
 impl Tool for TapeInfoTool {
     fn name(&self) -> &str {
-        "TapeInfo"
+        "tape_info"
     }
 
     fn definition(&self) -> ToolDefinition {
@@ -136,7 +136,7 @@ struct TapeHandoffToolArgs {
 #[async_trait]
 impl Tool for TapeHandoffTool {
     fn name(&self) -> &str {
-        "TapeHandoff"
+        "tape_handoff"
     }
 
     fn definition(&self) -> ToolDefinition {

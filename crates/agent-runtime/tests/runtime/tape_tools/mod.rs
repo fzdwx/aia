@@ -13,19 +13,19 @@ fn runtime_tool_definitions_match_derive_schema_output() {
     assert!(definitions.iter().any(|definition| definition == &tape_info));
     assert_eq!(
         tape_info.parameters,
-        ToolDefinition::new("TapeInfo", "ignored")
+        ToolDefinition::new("tape_info", "ignored")
             .with_parameters_schema::<TapeInfoToolArgs>()
             .parameters
     );
-    assert_eq!(tape_info.name, "TapeInfo");
+    assert_eq!(tape_info.name, "tape_info");
 
     let tape_handoff = TapeHandoffTool.definition();
     assert!(definitions.iter().any(|definition| definition == &tape_handoff));
     assert_eq!(
         tape_handoff.parameters,
-        ToolDefinition::new("TapeHandoff", "ignored")
+        ToolDefinition::new("tape_handoff", "ignored")
             .with_parameters_schema::<TapeHandoffToolArgs>()
             .parameters
     );
-    assert_eq!(tape_handoff.name, "TapeHandoff");
+    assert_eq!(tape_handoff.name, "tape_handoff");
 }
