@@ -222,6 +222,7 @@ function buildSearchContextMeta(item: ToolRowItem): string[] {
 const CONTEXT_TRIGGER_ARG_OMIT = new Set([
   "offset",
   "limit",
+  "glob",
   "content",
   "patch",
   "patchText",

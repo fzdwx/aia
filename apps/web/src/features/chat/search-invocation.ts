@@ -14,9 +14,11 @@ export function formatSearchInvocation(
   const args = normalizeToolArguments(rawArguments)
   const pattern = typeof args.pattern === "string" ? args.pattern.trim() : ""
   const path = typeof args.path === "string" ? args.path.trim() : ""
+  const glob = typeof args.glob === "string" ? args.glob.trim() : ""
 
   const parts: string[] = []
   if (pattern) parts.push(quoteShellLike(pattern))
+  if (glob) parts.push(`--glob ${quoteShellLike(glob)}`)
   if (path) parts.push(path)
 
   return truncateInline(parts.join(" "), maxLength)

@@ -739,7 +739,7 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 1rem;
+    font-size: var(--font-size-title);
     line-height: var(--font-line-height-title);
     font-weight: 500;
     color: var(--text-strong);
