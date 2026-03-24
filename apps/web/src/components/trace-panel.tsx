@@ -1442,6 +1442,38 @@ export function TracePanel() {
     traceView === "compression"
       ? "Review compression runs, loop timing, and payload details without mixing them into the main conversation trace stream."
       : "Inspect conversation loops, waterfall timing, and span payloads from the current workspace."
+  const overviewSummaryMetrics = overviewDashboard
+    ? [
+        {
+          label: "requests",
+          value: formatCount(overviewDashboard.overall_summary.total_requests),
+        },
+        {
+          label: "sessions",
+          value: formatCount(overviewDashboard.overall_summary.total_sessions),
+        },
+        {
+          label: "models",
+          value: formatCount(overviewDashboard.overall_summary.unique_models),
+        },
+        {
+          label: "LLM spans",
+          value: formatCount(overviewDashboard.overall_summary.total_llm_spans),
+        },
+        {
+          label: "tool spans",
+          value: formatCount(
+            overviewDashboard.overall_summary.total_tool_spans
+          ),
+        },
+        {
+          label: "tool req",
+          value: formatCount(
+            overviewDashboard.overall_summary.requests_with_tools
+          ),
+        },
+      ]
+    : []
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -1465,23 +1497,20 @@ export function TracePanel() {
               </div>
               {traceSurface === "overview" ? (
                 <div className="text-meta mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground">
-                  <span className="tracking-[0.15em] uppercase">Overview</span>
                   <span className="rounded-full border border-border/16 bg-background/60 px-2 py-0.5">
                     {formatOverviewRangeLabel(overviewRange)}
                   </span>
-                  <span>
-                    {formatCount(
-                      overviewDashboard?.overall_summary.unique_models
-                    )}{" "}
-                    models
-                  </span>
-                  <span>·</span>
-                  <span>
-                    {formatCount(
-                      overviewDashboard?.overall_summary.total_tool_spans
-                    )}{" "}
-                    tool spans
-                  </span>
+                  {overviewSummaryMetrics.map((metric) => (
+                    <span
+                      key={metric.label}
+                      className="rounded-full border border-border/16 bg-background/45 px-2 py-0.5"
+                    >
+                      <span className="text-foreground tabular-nums">
+                        {metric.value}
+                      </span>{" "}
+                      {metric.label}
+                    </span>
+                  ))}
                 </div>
               ) : traceDescription ? (
                 <p className="workspace-panel-copy mt-0.5 text-muted-foreground">

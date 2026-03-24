@@ -14,7 +14,7 @@ import { useTraceStore } from "@/stores/trace-store"
 
 const TRACE_NAV_TEXT_META = "text-[11px]"
 const TRACE_NAV_DETAIL = "text-[11px] text-muted-foreground/80"
-const TRACE_META_CAPTION = "text-[11px] text-muted-foreground/65"
+const TRACE_META_CAPTION = "text-[px] text-muted-foreground/65"
 
 function formatCompactDateTime(value: number) {
   return new Date(value).toLocaleString("zh-CN", {
