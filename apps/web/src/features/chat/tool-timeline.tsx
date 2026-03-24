@@ -35,6 +35,9 @@ const TOOL_DETAILS_TRANSITION = {
   height: { duration: 0.18, ease: [0.16, 1, 0.3, 1] },
   opacity: { duration: 0.12, ease: "linear" },
 } as const
+const CONTEXT_GROUP_TRANSITION = {
+  height: { duration: 0.18, ease: [0.16, 1, 0.3, 1] },
+} as const
 const INLINE_DETAIL_TOOLS = new Set<string>()
 const FLAT_DETAIL_SURFACE_TOOLS = new Set(["Edit", "Write", "ApplyPatch"])
 const OMITTED_ARGUMENT_KEYS = new Set([
@@ -242,6 +245,11 @@ function shouldShowToolRowCaret() {
 
 function renderToolDetailsPanel(item: ToolRowItem) {
   const normalizedToolName = normalizeToolName(item.toolName)
+
+  if (normalizedToolName === "TapeInfo") {
+    return null
+  }
+
   const requestOmitKeys =
     normalizedToolName === "Shell"
       ? new Set([...OMITTED_ARGUMENT_KEYS, "command", "description"])
@@ -392,6 +400,13 @@ function ContextToolTriggerRow({ item }: { item: ToolRowItem }) {
       {trigger.subtitle ? (
         <span data-slot="tool-subtitle">{trigger.subtitle}</span>
       ) : null}
+      {trigger.meta.length > 0 ? (
+        <span data-slot="tool-meta">
+          {trigger.meta.map((entry) => (
+            <span key={entry}>{entry}</span>
+          ))}
+        </span>
+      ) : null}
       {trigger.args.map((arg) => (
         <span key={arg.key} data-slot="tool-arg">
           {arg.key}={arg.value}
@@ -414,10 +429,10 @@ function ContextToolGroupList({ items }: { items: ToolRowItem[] }) {
     <motion.div
       key="list"
       data-component="context-tool-group-list"
-      initial={{ height: 0, opacity: 0 }}
-      animate={{ height, opacity: 1 }}
-      exit={{ height: 0, opacity: 0 }}
-      transition={TOOL_DETAILS_TRANSITION}
+      initial={{ height: 0 }}
+      animate={{ height }}
+      exit={{ height: 0 }}
+      transition={CONTEXT_GROUP_TRANSITION}
       style={{ overflow: "hidden" }}
     >
       <div ref={contentRef} data-slot="context-tool-group-list-inner">
@@ -462,23 +477,36 @@ function buildCountItems(items: ToolRowItem[]): CountItem[] {
 export function ToolGroup({
   items,
   status = "completed",
+  keepContextGroupsOpen = false,
 }: {
   items: ToolRowItem[]
   status?: "running" | "completed"
+  keepContextGroupsOpen?: boolean
 }) {
   const visibleItems = items.filter(shouldRenderToolItem)
   const isContextGroup = visibleItems.every((item) =>
     isContextExplorationTool(item.toolName)
   )
   const isRunning = status === "running"
-  const [open, setOpen] = useState(isRunning)
+  const shouldKeepOpen = isContextGroup && (isRunning || keepContextGroupsOpen)
+  const [open, setOpen] = useState(shouldKeepOpen)
+  const wasOpenRef = useRef(shouldKeepOpen)
   const countItems = isContextGroup ? buildCountItems(visibleItems) : []
 
   useEffect(() => {
-    if (isRunning && isContextGroup) {
-      setOpen(true)
+    if (!isContextGroup) {
+      wasOpenRef.current = shouldKeepOpen
+      return
     }
-  }, [isContextGroup, isRunning])
+
+    if (shouldKeepOpen) {
+      setOpen(true)
+    } else if (wasOpenRef.current) {
+      setOpen(false)
+    }
+
+    wasOpenRef.current = shouldKeepOpen
+  }, [isContextGroup, shouldKeepOpen])
 
   if (visibleItems.length === 0) return null
 
@@ -536,8 +564,10 @@ export function ToolGroup({
 
 export function StreamingToolGroup({
   toolOutputs,
+  keepContextGroupsOpen = false,
 }: {
   toolOutputs: StreamingToolOutput[]
+  keepContextGroupsOpen?: boolean
 }) {
   const coalescedToolOutputs = coalesceStreamingToolOutputs(toolOutputs)
   const completed = coalescedToolOutputs.filter((t) => t.completed)
@@ -549,11 +579,18 @@ export function StreamingToolGroup({
   return (
     <div data-component="tool-timeline-stream">
       {completed.length > 0 && (
-        <ToolGroup items={completed.map(fromStreamingTool)} />
+        <ToolGroup
+          items={completed.map(fromStreamingTool)}
+          keepContextGroupsOpen={keepContextGroupsOpen}
+        />
       )}
 
       {active.length > 0 && (
-        <ToolGroup items={active.map(fromStreamingTool)} status="running" />
+        <ToolGroup
+          items={active.map(fromStreamingTool)}
+          status="running"
+          keepContextGroupsOpen={keepContextGroupsOpen}
+        />
       )}
     </div>
   )

@@ -72,7 +72,7 @@ export function getArrayValue(
 
 export function createMetaBadge(
   content: ReactNode,
-  className = "text-muted-foreground/50"
+  className = "text-current"
 ): ReactNode {
   return createElement("span", { className: `shrink-0 ${className}` }, content)
 }

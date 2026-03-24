@@ -1,7 +1,12 @@
 import { normalizeToolArguments } from "@/lib/tool-display"
 
 import type { ToolRenderer } from "../types"
-import { getNumberValue, getStringValue, truncateInline } from "../helpers"
+import {
+  createMetaBadge,
+  getNumberValue,
+  getStringValue,
+  truncateInline,
+} from "../helpers"
 import { ExpandableOutput, ToolDetailSection } from "../ui"
 
 export function createTapeInfoRenderer(): ToolRenderer {
@@ -13,17 +18,42 @@ export function createTapeInfoRenderer(): ToolRenderer {
         ? `pressure ${(pressureRatio * 100).toFixed(1)}%`
         : "context usage"
     },
-    renderDetails(data) {
-      if (!data.outputContent) return null
+    renderMeta(data) {
+      const totalEntries = getNumberValue(data.details, "total_entries")
+      const anchorCount = getNumberValue(data.details, "anchor_count")
+      const entriesSinceLastAnchor = getNumberValue(
+        data.details,
+        "entries_since_last_anchor"
+      )
+
+      if (
+        totalEntries == null &&
+        anchorCount == null &&
+        entriesSinceLastAnchor == null
+      ) {
+        return null
+      }
 
       return (
-        <ToolDetailSection title={data.succeeded ? "Content" : "Failure"}>
-          <ExpandableOutput
-            value={data.outputContent}
-            failed={!data.succeeded}
-          />
-        </ToolDetailSection>
+        <>
+          {totalEntries != null
+            ? createMetaBadge(
+                `${totalEntries} entr${totalEntries === 1 ? "y" : "ies"}`
+              )
+            : null}
+          {anchorCount != null
+            ? createMetaBadge(
+                `${anchorCount} anchor${anchorCount === 1 ? "" : "s"}`
+              )
+            : null}
+          {entriesSinceLastAnchor != null
+            ? createMetaBadge(`+${entriesSinceLastAnchor} since anchor`)
+            : null}
+        </>
       )
+    },
+    renderDetails() {
+      return null
     },
   }
 }

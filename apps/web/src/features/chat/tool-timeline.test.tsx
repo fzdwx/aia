@@ -72,6 +72,7 @@ describe("tool timeline", () => {
   test("renders running context groups with status title and context trigger rows", () => {
     const html = renderWithTheme(
       <StreamingToolGroup
+        keepContextGroupsOpen
         toolOutputs={[
           {
             invocationId: "streaming-1",
@@ -90,7 +91,7 @@ describe("tool timeline", () => {
 
     expect(html).toContain("Exploring")
     expect(html).toContain("Grep")
-    expect(html).toContain("renderDetails")
+    expect(html).toContain("&quot;renderDetails&quot; apps/web/src")
     expect(html).toContain('data-component="context-tool-trigger-row"')
     expect(html).toContain('data-slot="tool-title"')
     expect(html).toContain('data-slot="tool-subtitle"')
@@ -98,6 +99,148 @@ describe("tool timeline", () => {
       /data-component="tool-group"[\s\S]*data-component="context-tool-group-trigger"[\s\S]*Exploring/
     )
     expect(html).not.toContain("Running tools")
+  })
+
+  test("keeps completed explored groups expanded while the turn is still streaming", () => {
+    const html = renderWithTheme(
+      <StreamingToolGroup
+        keepContextGroupsOpen
+        toolOutputs={[
+          {
+            invocationId: "completed-list-1",
+            toolName: "list",
+            arguments: {
+              path: "apps/web/src/components",
+            },
+            detectedAtMs: 80,
+            output: "component-a\ncomponent-b",
+            completed: true,
+            finishedAtMs: 90,
+            resultContent: "component-a\ncomponent-b",
+          },
+          {
+            invocationId: "active-grep-1",
+            toolName: "Grep",
+            arguments: {
+              pattern: "renderDetails",
+              path: "apps/web/src",
+            },
+            detectedAtMs: 100,
+            output: "",
+            completed: false,
+          },
+        ]}
+      />
+    )
+
+    expect(html).toContain('aria-expanded="true"')
+    expect(html).toContain('data-component="context-tool-group-list"')
+    expect(html).toContain("apps/web/src/components")
+    expect(html).toContain("renderDetails")
+  })
+
+  test("renders read and grep context meta in explored groups", () => {
+    const html = renderWithTheme(
+      <StreamingToolGroup
+        keepContextGroupsOpen
+        toolOutputs={[
+          {
+            invocationId: "completed-read-1",
+            toolName: "Read",
+            arguments: {
+              file_path: "apps/web/src/components/chat-messages.tsx",
+              offset: 120,
+              limit: 40,
+            },
+            detectedAtMs: 80,
+            output: "line 121\nline 122",
+            completed: true,
+            finishedAtMs: 90,
+            resultContent: "line 121\nline 122",
+            resultDetails: {
+              lines_read: 40,
+              total_lines: 240,
+            },
+          },
+          {
+            invocationId: "completed-grep-1",
+            toolName: "Grep",
+            arguments: {
+              pattern: "renderDetails",
+              path: "apps/web/src",
+            },
+            detectedAtMs: 100,
+            output: "renderDetails",
+            completed: true,
+            finishedAtMs: 110,
+            resultContent: "renderDetails",
+            resultDetails: {
+              matches: 12,
+              returned: 5,
+              truncated: true,
+            },
+          },
+          {
+            invocationId: "active-list-1",
+            toolName: "list",
+            arguments: {
+              path: "apps/web/src/components",
+            },
+            detectedAtMs: 120,
+            output: "",
+            completed: false,
+          },
+        ]}
+      />
+    )
+
+    expect(html).toContain('data-slot="tool-meta"')
+    expect(html).toContain("L121~160")
+    expect(html).toContain("&quot;renderDetails&quot; apps/web/src")
+    expect(html).toContain("12 matches")
+    expect(html).toContain("showing 5")
+  })
+
+  test("renders read context range from total lines without raw offset and limit args", () => {
+    const html = renderWithTheme(
+      <StreamingToolGroup
+        keepContextGroupsOpen
+        toolOutputs={[
+          {
+            invocationId: "completed-read-range-1",
+            toolName: "Read",
+            arguments: {
+              file_path: "apps/web/src/components/chat-messages.tsx",
+              offset: 0,
+              limit: 220,
+            },
+            detectedAtMs: 80,
+            output: "line 1\nline 2",
+            completed: true,
+            finishedAtMs: 90,
+            resultContent: "line 1\nline 2",
+            resultDetails: {
+              total_lines: 240,
+            },
+          },
+          {
+            invocationId: "active-grep-range-1",
+            toolName: "Grep",
+            arguments: {
+              pattern: "renderDetails",
+              path: "apps/web/src",
+            },
+            detectedAtMs: 100,
+            output: "",
+            completed: false,
+          },
+        ]}
+      />
+    )
+
+    expect(html).toContain("L1~240")
+    expect(html).not.toContain("offset=0")
+    expect(html).not.toContain("limit=220")
   })
 
   test("renders completed context groups with status and summary counts", () => {
@@ -163,7 +306,8 @@ describe("tool timeline", () => {
     expect(html).toContain("1 read")
     expect(html).toContain("1 search")
     expect(html).toContain("1 list")
-    expect(html).not.toContain('data-slot="context-group-caret"')
+    expect(html).toContain('data-state="visible"')
+    expect(html).not.toContain('data-component="context-tool-group-list"')
     expect(html).not.toContain("Running")
   })
 
@@ -231,7 +375,40 @@ describe("tool timeline", () => {
     expect(runningHtml).not.toContain("Running tools")
   })
 
-  test("keeps explored list spacing inside the animated panel", () => {
+  test("renders TapeInfo as a non-expandable inline summary row", () => {
+    const html = renderWithTheme(
+      <ToolGroup
+        items={[
+          {
+            id: "tool-tape-info-1",
+            toolName: "TapeInfo",
+            arguments: {},
+            startedAtMs: 100,
+            finishedAtMs: 140,
+            succeeded: true,
+            outputContent:
+              '{"total_entries":12,"anchor_count":1,"entries_since_last_anchor":4,"pressure_ratio":0.7}',
+            details: {
+              total_entries: 12,
+              anchor_count: 1,
+              entries_since_last_anchor: 4,
+              pressure_ratio: 0.7,
+            },
+          },
+        ]}
+      />
+    )
+
+    expect(html).toContain("TapeInfo")
+    expect(html).toContain("pressure 70.0%")
+    expect(html).toContain("12 entries")
+    expect(html).toContain("1 anchor")
+    expect(html).toContain("+4 since anchor")
+    expect(html).not.toContain("aria-expanded")
+    expect(html).not.toContain('data-slot="tool-row-details"')
+  })
+
+  test("keeps explored list spacing inside the measured inner content", () => {
     const source = loadWebCssSource()
 
     expect(source).toContain('[data-component="tool-group"]')
@@ -242,8 +419,32 @@ describe("tool timeline", () => {
     )
     expect(source).toContain("gap: 0.25rem")
     expect(source).toContain('[data-component="context-tool-group-list"]')
-    expect(source).toContain("padding-top: 0.375rem")
+    expect(source).toContain("padding-top: 0;")
     expect(source).toContain('[data-slot="context-tool-group-list-inner"]')
+    expect(source).toContain("padding-top: 0.375rem")
+  })
+
+  test("uses the same subdued color for tool meta and subtitles", () => {
+    const source = loadWebCssSource()
+
+    expect(source).toContain('[data-slot="tool-subtitle"]')
+    expect(source).toContain('[data-slot="tool-meta"]')
+    expect(source).toContain(
+      "color: oklch(from var(--muted-foreground) l c h / 0.5);"
+    )
+  })
+
+  test("uses default cursor for timeline tool triggers", () => {
+    const source = loadWebCssSource()
+
+    expect(source).toContain(
+      'button[data-component="context-tool-group-trigger"]'
+    )
+    expect(source).toContain('[data-component="tool-row-trigger"]')
+    expect(source).toContain(".tool-timeline-output-toggle")
+    expect(source).toContain(".tool-timeline-info-trigger,")
+    expect(source).toContain(".tool-timeline-json-trigger {")
+    expect(source).toContain("cursor: default;")
   })
 
   test("hides pending question tools until they have a stable outcome", () => {
@@ -339,7 +540,6 @@ describe("tool timeline", () => {
     )
     expect(source).toContain("isContextExplorationTool(item.toolName)")
     expect(source).toContain('const isRunning = status === "running"')
-    expect(source).toContain("const [open, setOpen] = useState(isRunning)")
     expect(source).toContain(
       'data-component="tool-group" data-variant="standalone"'
     )
@@ -348,6 +548,14 @@ describe("tool timeline", () => {
     expect(source).toContain('status="running"')
     expect(source).toContain('data-slot="context-group-counts-shell"')
     expect(source).toContain('data-state={open ? "hidden" : "visible"}')
+    expect(source).toContain("keepContextGroupsOpen = false")
+    expect(source).toContain(
+      "const shouldKeepOpen = isContextGroup && (isRunning || keepContextGroupsOpen)"
+    )
+    expect(source).toContain("if (!isContextGroup) {")
+    expect(source).toContain("} else if (wasOpenRef.current) {")
+    expect(source).toContain("setOpen(false)")
+    expect(source).toContain("keepContextGroupsOpen?: boolean")
     expect(source).toContain("function ContextToolGroupList(")
     expect(source).toContain(
       "const contentRef = useRef<HTMLDivElement | null>(null)"
@@ -356,7 +564,8 @@ describe("tool timeline", () => {
     expect(source).toContain(
       "const nextHeight = contentRef.current?.scrollHeight ?? 0"
     )
-    expect(source).toContain("animate={{ height, opacity: 1 }}")
+    expect(source).toContain("const CONTEXT_GROUP_TRANSITION =")
+    expect(source).toContain("animate={{ height }}")
   })
 
   test("renders shell details on the flat path without generic request or result sections", () => {

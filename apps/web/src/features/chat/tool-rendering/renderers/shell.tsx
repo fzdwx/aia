@@ -4,7 +4,23 @@ import { toolTimelineCopy } from "../../tool-timeline-copy"
 
 import type { ToolRenderer } from "../types"
 import { getStringValue, truncateInline } from "../helpers"
-import { ExpandableOutput } from "../ui"
+
+function buildShellOutput(data: {
+  details?: Record<string, unknown>
+  outputContent: string
+}): string | null {
+  if (data.outputContent.trim().length > 0) {
+    return data.outputContent
+  }
+
+  const stdout = getStringValue(data.details, "stdout")
+  const stderr = getStringValue(data.details, "stderr")
+  const parts = [stdout, stderr].filter(
+    (value): value is string => typeof value === "string" && value.length > 0
+  )
+
+  return parts.length > 0 ? parts.join("\n") : null
+}
 
 export function createShellRenderer(): ToolRenderer {
   return {
@@ -31,14 +47,17 @@ export function createShellRenderer(): ToolRenderer {
 
       if (!command) return null
 
+      const output = buildShellOutput(data)
+      const value = output ? `$ ${command}\n\n${output}` : `$ ${command}`
+
       return (
         <section
-          className="tool-timeline-detail-section"
+          className="tool-timeline-detail-section tool-timeline-shell-detail"
           data-tool-detail-kind="content"
           data-tool-detail-tone="output"
         >
-          <div className="tool-timeline-detail-body">
-            <ExpandableOutput value={`$ ${command}`} failed={false} />
+          <div className="tool-timeline-detail-body tool-timeline-shell-body">
+            <pre className="tool-timeline-shell-pre">{value}</pre>
           </div>
         </section>
       )
