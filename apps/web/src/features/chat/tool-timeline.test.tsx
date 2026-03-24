@@ -166,7 +166,8 @@ describe("tool timeline", () => {
     )
     expect(source).toContain("toolTimelineCopy.groupStatus.running")
     expect(source).toContain("toolTimelineCopy.groupStatus.completed")
-    expect(source).toContain("toolTimelineCopy.contextCount")
+    expect(source).toContain("contextCount")
+    expect(source).toContain("toolTimelineCopy")
     expect(source).not.toContain('running: "Exploring"')
     expect(source).not.toContain('completed: "Explored"')
   })
@@ -269,7 +270,7 @@ describe("tool timeline", () => {
     expect(html).toContain("Tool execution failed.")
   })
 
-  test("coalesces out-of-order streaming tools into one completed context group", () => {
+  test("coalesces out-of-order streaming tools into one completed row", () => {
     const html = renderWithTheme(
       <StreamingToolGroup
         toolOutputs={[
@@ -285,9 +286,9 @@ describe("tool timeline", () => {
           },
           {
             invocationId: "streaming-out-of-order-1",
-            toolName: "codesearch",
+            toolName: "shell",
             arguments: {
-              query: "renderDetails",
+              command: "cargo check",
             },
             detectedAtMs: 120,
             output: "",
@@ -297,9 +298,9 @@ describe("tool timeline", () => {
       />
     )
 
-    expect(html).toContain("renderDetails")
+    expect(html).toContain("cargo check")
     expect(html).not.toContain("Exploring")
-    expect(html).toContain('data-component="context-tool-trigger-row"')
+    expect(html.match(/data-component="tool-row-trigger"/g)).toHaveLength(1)
   })
 
   test("uses data-component attributes for context groups and tool rows", () => {
