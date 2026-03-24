@@ -27,6 +27,11 @@ type BlockGroup =
   | { type: "single"; block: TurnBlock }
   | { type: "tools"; invocations: TurnLifecycle["tool_invocations"] }
 
+type StreamingBlockGroup =
+  | { type: "thinking"; content: string }
+  | { type: "text"; content: string }
+  | { type: "tools"; tools: StreamingToolOutput[] }
+
 function groupBlocks(blocks: TurnBlock[]): BlockGroup[] {
   const result: BlockGroup[] = []
 
@@ -58,11 +63,7 @@ function groupBlocks(blocks: TurnBlock[]): BlockGroup[] {
 }
 
 function groupStreamingBlocks(blocks: StreamingTurn["blocks"]) {
-  const groups: Array<
-    | { type: "thinking"; content: string }
-    | { type: "text"; content: string }
-    | { type: "tools"; tools: StreamingToolOutput[] }
-  > = []
+  const groups: StreamingBlockGroup[] = []
 
   for (const block of blocks) {
     if (block.type === "tool") {
@@ -154,7 +155,7 @@ function AssistantTextBlock({
   streaming?: boolean
 }) {
   return (
-    <div data-component="text-part" className="group/text-part mt-5 first:mt-0">
+    <div data-component="text-part" className="group/text-part">
       <div
         data-slot="text-part-body"
         className={`${MESSAGE_READING_MEASURE} group/text-part-body relative`}
@@ -196,10 +197,7 @@ function ThinkingBlock({
   }, [isStreaming])
 
   return (
-    <div
-      data-component="reasoning-part"
-      className={`${MESSAGE_READING_MEASURE} mb-2`}
-    >
+    <div data-component="reasoning-part" className={MESSAGE_READING_MEASURE}>
       <button
         type="button"
         aria-expanded={open}
@@ -237,7 +235,7 @@ function BlockRenderer({ block }: { block: TurnBlock }) {
     case "failure":
       return (
         <div
-          className={`${MESSAGE_READING_MEASURE} text-caption mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 font-medium text-destructive`}
+          className={`${MESSAGE_READING_MEASURE} text-caption rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 font-medium text-destructive`}
         >
           {block.message}
         </div>
@@ -245,7 +243,7 @@ function BlockRenderer({ block }: { block: TurnBlock }) {
     case "cancelled":
       return (
         <div
-          className={`${MESSAGE_READING_MEASURE} text-caption mb-3 rounded-lg border border-border/40 bg-muted/40 px-3 py-2 font-medium text-muted-foreground`}
+          className={`${MESSAGE_READING_MEASURE} text-caption rounded-lg border border-border/40 bg-muted/40 px-3 py-2 font-medium text-muted-foreground`}
         >
           {block.message}
         </div>
@@ -364,7 +362,7 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
 
       <div
         data-component="assistant-message"
-        className="group/turn flex w-full flex-col"
+        className="group/turn flex w-full flex-col gap-2"
       >
         {grouped.map((group, i) => {
           if (group.type === "tools") {
@@ -394,7 +392,10 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
         </div>
       )}
 
-      <div data-component="assistant-message" className="flex w-full flex-col">
+      <div
+        data-component="assistant-message"
+        className="flex w-full flex-col gap-2"
+      >
         {groups.map((group, i) => {
           if (group.type === "thinking") {
             const isLast =

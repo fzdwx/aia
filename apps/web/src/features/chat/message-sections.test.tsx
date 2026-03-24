@@ -24,9 +24,14 @@ const CHAT_MESSAGES_TSX = new URL(
   "../../components/chat-messages.tsx",
   import.meta.url
 )
+const MESSAGE_SECTIONS_TSX = new URL("./message-sections.tsx", import.meta.url)
 
 function loadChatMessagesSource() {
   return readFileSync(CHAT_MESSAGES_TSX, "utf8").replace(/\s+/g, " ")
+}
+
+function loadMessageSectionsSource() {
+  return readFileSync(MESSAGE_SECTIONS_TSX, "utf8").replace(/\s+/g, " ")
 }
 
 describe("chat message status surfaces", () => {
@@ -280,6 +285,13 @@ describe("chat message status surfaces", () => {
     expect(turnHtml).toContain("text-label rounded-full")
     expect(compressionHtml).toContain("text-caption")
     expect(compressionHtml).toContain("workspace-section-label")
+  })
+
+  test("does not add extra tool-group spacing wrappers in message sections", () => {
+    const source = loadMessageSectionsSource()
+
+    expect(source).not.toContain("toolGroupSpacingClass")
+    expect(source).not.toContain("style={toolGroupSpacingClass")
   })
 
   test("uses shared auxiliary scale for history hint in message list", () => {
