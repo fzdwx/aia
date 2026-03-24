@@ -254,6 +254,24 @@ describe("chat message status surfaces", () => {
     expect(html).not.toContain("text-[13px]")
   })
 
+  test("adds a touch more vertical breathing room to reasoning blocks", () => {
+    const source = loadMessageSectionsSource()
+
+    expect(source).toContain("className={`${MESSAGE_READING_MEASURE} py-1`}")
+    expect(source).toContain(
+      'className="text-body-sm leading-body-sm mt-2.5 border-l-2 border-border/30 pl-3"'
+    )
+  })
+
+  test("uses a roomier stack gap between text and auxiliary blocks", () => {
+    const source = loadMessageSectionsSource()
+
+    expect(source).toContain(
+      'className="group/turn flex w-full flex-col gap-4"'
+    )
+    expect(source).toContain('className="flex w-full flex-col gap-4"')
+  })
+
   test("uses shared auxiliary scale for turn meta and compression notice", () => {
     const turnHtml = renderWithTheme(
       <MemoizedTurnView

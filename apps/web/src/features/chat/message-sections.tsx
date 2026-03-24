@@ -197,7 +197,10 @@ function ThinkingBlock({
   }, [isStreaming])
 
   return (
-    <div data-component="reasoning-part" className={MESSAGE_READING_MEASURE}>
+    <div
+      data-component="reasoning-part"
+      className={`${MESSAGE_READING_MEASURE} py-1`}
+    >
       <button
         type="button"
         aria-expanded={open}
@@ -221,7 +224,7 @@ function ThinkingBlock({
         )}
       </button>
       {open && (
-        <div className="text-body-sm leading-body-sm mt-1.5 border-l-2 border-border/30 pl-3">
+        <div className="text-body-sm leading-body-sm mt-2.5 border-l-2 border-border/30 pl-3">
           <MarkdownContent content={content} className="opacity-50" />
         </div>
       )}
@@ -365,7 +368,7 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
 
       <div
         data-component="assistant-message"
-        className="group/turn flex w-full flex-col gap-2"
+        className="group/turn flex w-full flex-col gap-4"
       >
         {grouped.map((group, i) => {
           if (group.type === "tools") {
@@ -397,7 +400,7 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
 
       <div
         data-component="assistant-message"
-        className="flex w-full flex-col gap-2"
+        className="flex w-full flex-col gap-4"
       >
         {groups.map((group, i) => {
           if (group.type === "thinking") {
