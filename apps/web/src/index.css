@@ -385,7 +385,6 @@ textarea {
     line-height: var(--font-line-height-kicker);
     font-weight: 600;
     letter-spacing: 0.14em;
-    text-transform: uppercase;
   }
 
   .workspace-panel-title {
