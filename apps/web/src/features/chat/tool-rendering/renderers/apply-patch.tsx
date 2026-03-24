@@ -33,7 +33,7 @@ export function createApplyPatchRenderer(): ToolRenderer {
       return (
         <>
           {linesAdded != null
-            ? createMetaBadge(`+${linesAdded}`, "text-foreground/70")
+            ? createMetaBadge(`+${linesAdded}`, "text-emerald-400")
             : null}
           {linesRemoved != null
             ? createMetaBadge(`-${linesRemoved}`, "text-red-400")

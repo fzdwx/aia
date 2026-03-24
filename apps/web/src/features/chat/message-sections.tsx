@@ -16,6 +16,9 @@ import {
   fromInvocation,
 } from "@/features/chat/tool-timeline-helpers.ts"
 
+const CHAT_TURN_LABEL = "workspace-section-label text-foreground/70"
+const CHAT_TURN_META = "workspace-section-label text-muted-foreground"
+
 type BlockGroup =
   | { type: "single"; block: TurnBlock }
   | { type: "tools"; invocations: TurnLifecycle["tool_invocations"] }
@@ -74,7 +77,7 @@ function ThinkingBlock({
     <div className="mb-2">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        className="text-caption flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
       >
         {isStreaming ? (
           <span className="font-medium">Thinking</span>
@@ -90,7 +93,7 @@ function ThinkingBlock({
         )}
       </button>
       {open && (
-        <div className="mt-1.5 border-l-2 border-border/30 pl-3 text-xs leading-relaxed text-muted-foreground/80">
+        <div className="text-body-sm leading-body-sm mt-1.5 border-l-2 border-border/30 pl-3 text-muted-foreground/80">
           <MarkdownContent content={content} />
         </div>
       )}
@@ -106,18 +109,18 @@ function BlockRenderer({ block }: { block: TurnBlock }) {
       return (
         <MarkdownContent
           content={block.content}
-          className="max-w-[66ch] text-sm leading-[1.75] text-pretty"
+          className="text-body-sm leading-body-sm max-w-[66ch] text-pretty"
         />
       )
     case "failure":
       return (
-        <div className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs leading-relaxed font-medium text-destructive">
+        <div className="text-caption mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 font-medium text-destructive">
           {block.message}
         </div>
       )
     case "cancelled":
       return (
-        <div className="mb-3 rounded-lg border border-border/40 bg-muted/40 px-3 py-2 text-xs leading-relaxed font-medium text-muted-foreground">
+        <div className="text-caption mb-3 rounded-lg border border-border/40 bg-muted/40 px-3 py-2 font-medium text-muted-foreground">
           {block.message}
         </div>
       )
@@ -142,7 +145,7 @@ export function StatusIndicator({
 }) {
   return (
     <div className="py-2" role="status" aria-live="polite" aria-atomic="true">
-      <Shimmer as="span" className="text-sm font-medium" duration={2}>
+      <Shimmer as="span" className="text-body-sm font-medium" duration={2}>
         {STATUS_LABELS[status]}
       </Shimmer>
     </div>
@@ -155,7 +158,7 @@ function TurnUsageBadge({ usage }: { usage: TurnUsage }) {
       ? ` · ${usage.cached_tokens.toLocaleString()} cached`
       : ""
   return (
-    <span className="text-xs font-normal tracking-normal text-muted-foreground/70 normal-case">
+    <span className="text-caption font-normal tracking-normal text-muted-foreground/70 normal-case">
       {`${usage.input_tokens.toLocaleString()} in · ${usage.output_tokens.toLocaleString()} out · ${usage.total_tokens.toLocaleString()} total tok${cachedSuffix}`}
     </span>
   )
@@ -173,12 +176,12 @@ function TurnMeta({ turn }: { turn: TurnLifecycle }) {
   if (!duration && !turn.usage && !statusLabel) return null
 
   return (
-    <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground/55 opacity-0 transition-opacity duration-150 group-focus-within/turn:opacity-100 group-hover/turn:opacity-100">
+    <div className="text-caption mt-2 flex items-center gap-3 text-muted-foreground/55 opacity-0 transition-opacity duration-150 group-focus-within/turn:opacity-100 group-hover/turn:opacity-100">
       {duration && (
         <span className="text-muted-foreground/65 tabular-nums">{`latency ${duration}`}</span>
       )}
       {statusLabel && (
-        <span className="rounded-full border border-border/40 px-2 py-0.5 text-[0.6875rem] font-medium tracking-[0.08em] text-muted-foreground/80 uppercase">
+        <span className="text-label rounded-full border border-border/40 px-2 py-0.5 font-medium tracking-[0.08em] text-muted-foreground/80">
           {statusLabel}
         </span>
       )}
@@ -194,7 +197,7 @@ function TurnMeta({ turn }: { turn: TurnLifecycle }) {
 export function UserMessageBlock({ content }: { content: string }) {
   return (
     <div className="border-l border-foreground/14 pl-4">
-      <div className="max-w-[66ch] text-sm leading-[1.8] text-pretty text-foreground/90">
+      <div className="text-body-sm leading-body-sm max-w-[66ch] text-pretty text-foreground/90">
         <MarkdownContent content={content} />
       </div>
     </div>
@@ -208,7 +211,7 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
     <div className="mb-8 animate-[message-in_250ms_ease-out_both] last:mb-0">
       <div className="mb-6">
         <div className="mb-2 flex items-baseline gap-2.5">
-          <span className="text-[0.6875rem] font-semibold tracking-[0.1em] text-foreground/70 uppercase">
+          <span className="workspace-section-label text-foreground/70">
             You
           </span>
         </div>
@@ -217,7 +220,7 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
 
       <div className="group/turn">
         <div className="mb-2 flex items-baseline gap-2.5">
-          <span className="text-[0.6875rem] font-semibold tracking-[0.1em] text-muted-foreground uppercase">
+          <span className="workspace-section-label text-muted-foreground">
             aia
           </span>
         </div>
@@ -246,9 +249,7 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
       {streaming.userMessage && (
         <div className="mb-6">
           <div className="mb-2 flex items-baseline gap-2.5">
-            <span className="text-[0.6875rem] font-semibold tracking-[0.1em] text-foreground/70 uppercase">
-              You
-            </span>
+            <span className={CHAT_TURN_LABEL}>You</span>
           </div>
           <UserMessageBlock content={streaming.userMessage} />
         </div>
@@ -256,9 +257,7 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
 
       <div>
         <div className="mb-2 flex items-baseline gap-2.5">
-          <span className="text-[0.6875rem] font-semibold tracking-[0.1em] text-muted-foreground uppercase">
-            aia
-          </span>
+          <span className={CHAT_TURN_META}>aia</span>
         </div>
         {groups.map((group, i) => {
           if (group.type === "thinking") {
@@ -282,7 +281,7 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
               key={i}
               content={group.content}
               streaming
-              className="max-w-[66ch] text-sm leading-[1.75] text-pretty"
+              className="text-body-sm leading-body-sm max-w-[66ch] text-pretty"
             />
           )
         })}
@@ -303,8 +302,8 @@ export const MemoizedStreamingView = memo(
 
 export function CompressionNotice({ summary }: { summary: string }) {
   return (
-    <div className="mb-4 rounded-lg border border-border/30 bg-muted/25 px-3 py-2 text-xs text-muted-foreground">
-      <div className="mb-1 text-[0.6875rem] font-semibold tracking-[0.08em] text-foreground/60 uppercase">
+    <div className="text-caption mb-4 rounded-lg border border-border/30 bg-muted/25 px-3 py-2 text-muted-foreground">
+      <div className="workspace-section-label mb-1 text-foreground/60">
         Context compressed
       </div>
       <p className="line-clamp-3 whitespace-pre-wrap">{summary}</p>
@@ -320,7 +319,7 @@ export function SessionHydratingIndicator({
   return (
     <div className="pointer-events-none sticky top-0 z-10 mb-3">
       <div
-        className="mx-auto flex w-fit max-w-full items-center gap-2 rounded-full border border-border/35 bg-background/88 px-3 py-1.5 text-xs text-muted-foreground/80 shadow-none"
+        className="text-caption mx-auto flex w-fit max-w-full items-center gap-2 rounded-full border border-border/35 bg-background/88 px-3 py-1.5 text-muted-foreground/80 shadow-none"
         role="status"
         aria-live="polite"
         aria-atomic="true"

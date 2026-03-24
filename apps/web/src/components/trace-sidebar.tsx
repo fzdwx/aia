@@ -12,6 +12,10 @@ import {
 import { useChatStore } from "@/stores/chat-store"
 import { useTraceStore } from "@/stores/trace-store"
 
+const TRACE_NAV_TEXT_META = "text-[11px]"
+const TRACE_NAV_DETAIL = "text-[11px] text-muted-foreground/80"
+const TRACE_META_CAPTION = "text-[11px] text-muted-foreground/65"
+
 function formatCompactDateTime(value: number) {
   return new Date(value).toLocaleString("zh-CN", {
     hour12: false,
@@ -70,7 +74,7 @@ export function TraceSidebar() {
     <>
       <div className="px-2 pt-2">
         <div className="rounded-lg border border-border/30 bg-muted/20 px-2 py-2">
-          <p className="px-1 py-1 text-[13px] font-medium text-foreground/80">
+          <p className="px-1 py-1 text-[11px] font-medium text-foreground/80">
             Trace
           </p>
           <div className="mt-1 space-y-1">
@@ -85,7 +89,7 @@ export function TraceSidebar() {
               )}
             >
               <Waypoints className="mt-0.5 size-3.5 shrink-0 opacity-70" />
-              <span className="min-w-0 text-[12px]">Overview</span>
+              <span className={`min-w-0 ${TRACE_NAV_TEXT_META}`}>Overview</span>
             </button>
             <button
               type="button"
@@ -98,7 +102,9 @@ export function TraceSidebar() {
               )}
             >
               <Bot className="mt-0.5 size-3.5 shrink-0 opacity-70" />
-              <span className="min-w-0 text-[12px]">Conversation</span>
+              <span className={`min-w-0 ${TRACE_NAV_TEXT_META}`}>
+                Conversation
+              </span>
             </button>
             <button
               type="button"
@@ -111,7 +117,9 @@ export function TraceSidebar() {
               )}
             >
               <Layers3 className="mt-0.5 size-3.5 shrink-0 opacity-70" />
-              <span className="min-w-0 text-[12px]">Compression</span>
+              <span className={`min-w-0 ${TRACE_NAV_TEXT_META}`}>
+                Compression
+              </span>
             </button>
           </div>
         </div>
@@ -165,14 +173,16 @@ export function TraceSidebar() {
                   )}
                 />
                 <span className="min-w-0 flex-1">
-                  <span className="line-clamp-2 text-[12px] leading-4">
+                  <span
+                    className={`line-clamp-2 ${TRACE_NAV_TEXT_META} leading-4`}
+                  >
                     {formatTraceLoopHeadline(group, { maxLength: 64 })}
                   </span>
-                  <span className="mt-1 block text-[11px] text-muted-foreground/80">
+                  <span className={`mt-1 block ${TRACE_NAV_DETAIL}`}>
                     {formatCompactDateTime(group.latestStartedAtMs)} ·{" "}
                     {formatTraceDuration(group.totalDurationMs)}
                   </span>
-                  <span className="mt-0.5 block text-[11px] text-muted-foreground/65">
+                  <span className={`mt-0.5 block ${TRACE_META_CAPTION}`}>
                     {group.stepCount} llm · {group.toolCount} tool
                   </span>
                 </span>

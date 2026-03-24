@@ -31,6 +31,10 @@ import { Switch } from "@/components/ui/switch"
 import { useChannelsStore } from "@/stores/channels-store"
 import { useChatStore } from "@/stores/chat-store"
 
+const CHANNEL_META_LABEL = "workspace-section-label text-muted-foreground"
+const CHANNEL_BODY_TEXT = "workspace-panel-copy text-muted-foreground"
+const CHANNEL_SUBHEADING = "workspace-panel-title"
+
 const WEIXIN_POLL_INTERVAL_MS = 1800
 const WEIXIN_POLL_MAX_ATTEMPTS = 120
 const WEIXIN_QR_RENDER_SIZE = 288
@@ -726,11 +730,11 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
           </Button>
 
           <div>
-            <p className="text-[10px] font-medium tracking-[0.14em] text-muted-foreground uppercase">
+            <p className="workspace-section-label text-muted-foreground">
               Channel workspace
             </p>
-            <h1 className="mt-0.5 text-sm font-semibold">Settings Workbench</h1>
-            <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+            <h1 className="workspace-panel-title mt-0.5">Settings Workbench</h1>
+            <p className="workspace-panel-copy mt-1 text-muted-foreground">
               Configure the selected transport, then save a runnable profile.
             </p>
           </div>
@@ -745,11 +749,11 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
               : "rounded-2xl border border-border/30 bg-card/70 px-5 py-6 shadow-[var(--workspace-shadow)]"
           }
         >
-          <p className="text-sm font-medium text-foreground">
+          <p className="workspace-panel-title text-foreground">
             No configurable channels available.
           </p>
           <p
-            className="mt-2 text-[12px] leading-6 text-muted-foreground"
+            className="workspace-panel-copy mt-2 text-muted-foreground"
             role="status"
             aria-live="polite"
           >
@@ -783,21 +787,19 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
           >
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
-                <p className="text-[10px] font-medium tracking-[0.14em] text-muted-foreground uppercase">
-                  Channel control plane
-                </p>
+                <p className={CHANNEL_META_LABEL}>Channel control plane</p>
                 <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="truncate text-[15px] font-semibold">
+                  <h2 className="workspace-panel-title truncate">
                     {targetSummary.transportLabel}
                   </h2>
-                  <Badge variant="outline" className="text-[10px]">
+                  <Badge variant="outline" className="text-ui-xs">
                     {targetSummary.transportKey}
                   </Badge>
-                  <Badge variant="outline" className="text-[10px]">
+                  <Badge variant="outline" className="text-ui-xs">
                     {targetSummary.profileState}
                   </Badge>
                 </div>
-                <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                <p className={`mt-1 ${CHANNEL_BODY_TEXT}`}>
                   {selectedDefinition.description ??
                     "This transport bridges external messages into the runtime. Fill the required fields, then save a runnable profile."}
                 </p>
@@ -805,15 +807,13 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
 
               <div className="flex min-w-[220px] flex-col items-start gap-2 rounded-lg border border-border/25 bg-muted/[0.16] px-3 py-2.5 sm:items-end">
                 <div className="text-left sm:text-right">
-                  <p className="text-[10px] font-medium tracking-[0.12em] text-muted-foreground uppercase">
-                    Current target
-                  </p>
-                  <p className="mt-1 text-[13px] font-medium text-foreground">
+                  <p className={CHANNEL_META_LABEL}>Current target</p>
+                  <p className={`mt-1 ${CHANNEL_SUBHEADING}`}>
                     {targetSummary.profileState === "saved"
                       ? `Editing ${targetSummary.profileLabel}`
                       : `Create first profile for ${targetSummary.transportKey}`}
                   </p>
-                  <p className="mt-1 text-[11px] text-muted-foreground">
+                  <p className="workspace-meta mt-1 text-muted-foreground">
                     {missingFieldCount > 0
                       ? `${missingFieldCount} required field${missingFieldCount === 1 ? " is" : "s are"} still missing`
                       : configuredChannel
@@ -825,7 +825,7 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
                 <div className="flex flex-wrap items-center gap-2">
                   <label
                     htmlFor={`${panelScopeId}-channel-enabled`}
-                    className="text-[11px] font-medium text-foreground"
+                    className="text-ui-sm font-medium text-foreground"
                   >
                     Runtime enabled
                   </label>
@@ -842,7 +842,7 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
               </div>
             </div>
 
-            <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
+            <div className="text-ui-xs mt-2.5 flex flex-wrap items-center gap-1.5 text-muted-foreground">
               <span className="rounded-sm border border-border/30 px-1.5 py-0.5 tabular-nums">
                 {configFieldCount(selectedDefinition)} fields
               </span>
@@ -862,7 +862,7 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
             </div>
 
             {matchingChannels.length > 1 ? (
-              <div className="mt-2.5 rounded-lg border border-border/30 bg-muted/35 px-3 py-2.5 text-[12px] leading-5 text-foreground/85">
+              <div className="text-caption mt-2.5 rounded-lg border border-border/30 bg-muted/35 px-3 py-2.5 text-foreground/85">
                 This transport has multiple saved profiles. The panel is
                 currently editing the first stored profile:
                 <span className="ml-1 font-medium">
@@ -873,7 +873,7 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
 
             <p
               id={`${panelScopeId}-channel-enabled-description`}
-              className="mt-2.5 text-[11px] text-muted-foreground"
+              className="workspace-meta mt-2.5 text-muted-foreground"
             >
               Turning runtime off keeps the saved profile but prevents the
               transport worker from starting.
@@ -881,7 +881,7 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
 
             {submitAttempted && missingFieldCount > 0 ? (
               <p
-                className="mt-2 text-[12px] font-medium text-destructive"
+                className="text-caption mt-2 font-medium text-destructive"
                 role="status"
                 aria-live="polite"
               >
@@ -891,7 +891,7 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
 
             {submitError ? (
               <p
-                className="mt-2 text-[12px] font-medium text-destructive"
+                className="text-caption mt-2 font-medium text-destructive"
                 role="status"
                 aria-live="polite"
               >
@@ -910,19 +910,19 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
             >
               <div className="mb-2.5">
                 <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-[11px] font-medium tracking-[0.12em] text-foreground uppercase">
+                  <p className="workspace-section-label text-foreground">
                     Weixin QR Login
                   </p>
-                  <Badge variant="outline" className="text-[10px]">
+                  <Badge variant="outline" className="text-ui-xs">
                     {weixinPollingState.replaceAll("_", " ")}
                   </Badge>
                   {weixinRawStatus ? (
-                    <Badge variant="outline" className="text-[10px]">
+                    <Badge variant="outline" className="text-ui-xs">
                       status: {weixinRawStatus}
                     </Badge>
                   ) : null}
                 </div>
-                <p className="mt-1 text-[11px] text-muted-foreground">
+                <p className="workspace-panel-copy mt-1 text-muted-foreground">
                   Start Weixin QR login directly from this workbench. Once the
                   scan succeeds, the form is filled with the returned token and
                   saved automatically.
@@ -961,12 +961,12 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
               {weixinQrPanelState === "loading" ? (
                 <div className="mt-3 rounded-lg border border-border/25 bg-muted/[0.16] p-3">
                   <p
-                    className="text-[12px] font-medium text-foreground"
+                    className="workspace-panel-title text-foreground"
                     role="status"
                   >
                     Requesting Weixin login QR code...
                   </p>
-                  <p className="mt-1 text-[11px] text-muted-foreground">
+                  <p className="workspace-panel-copy mt-1 text-muted-foreground">
                     This usually takes a moment. The QR ticket and image will
                     appear here when ready.
                   </p>
@@ -976,10 +976,10 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
 
               {weixinQrPanelState === "empty" ? (
                 <div className="mt-3 rounded-lg border border-border/25 bg-muted/[0.16] p-3">
-                  <p className="text-[12px] font-medium text-foreground">
+                  <p className="workspace-panel-title text-foreground">
                     No QR code yet.
                   </p>
-                  <p className="mt-1 text-[11px] text-muted-foreground">
+                  <p className="workspace-panel-copy mt-1 text-muted-foreground">
                     Click <span className="font-medium">Get QR code</span> to
                     start Weixin login.
                   </p>
@@ -989,13 +989,13 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
               {weixinQrPanelState === "error" ? (
                 <div className="mt-3 rounded-lg border border-destructive/30 bg-destructive/[0.04] p-3">
                   <p
-                    className="text-[12px] font-medium text-destructive"
+                    className="workspace-panel-title text-destructive"
                     role="status"
                     aria-live="polite"
                   >
                     Unable to get a login QR code.
                   </p>
-                  <p className="mt-1 text-[11px] text-muted-foreground">
+                  <p className="workspace-panel-copy mt-1 text-muted-foreground">
                     Check connectivity and request a new QR code.
                   </p>
                 </div>
@@ -1006,14 +1006,14 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
                   {weixinPollingState === "success" ? (
                     <div className="rounded-lg border border-border/30 bg-muted/35 px-3 py-3">
                       <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="outline" className="text-[10px]">
+                        <Badge variant="outline" className="text-ui-xs">
                           confirmed
                         </Badge>
-                        <p className="text-[12px] font-medium text-foreground">
+                        <p className="workspace-panel-title text-foreground">
                           Weixin login confirmed and the profile is active.
                         </p>
                       </div>
-                      <p className="mt-1.5 text-[11px] leading-5 text-muted-foreground">
+                      <p className="workspace-panel-copy mt-1.5 text-muted-foreground">
                         The login was saved automatically. You can continue from
                         this profile without any extra save step.
                       </p>
@@ -1029,27 +1029,27 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
                       />
                     ) : (
                       <div className="flex size-36 items-center justify-center rounded-md border border-dashed border-border/40 bg-background px-3 text-center">
-                        <p className="text-[11px] text-muted-foreground">
+                        <p className="workspace-meta text-muted-foreground">
                           QR image unavailable
                         </p>
                       </div>
                     )}
                     <div className="min-w-0 flex-1 space-y-1.5">
-                      <p className="text-[11px] text-muted-foreground">
+                      <p className="workspace-meta text-muted-foreground">
                         {weixinPollingState === "success"
                           ? "Login details"
                           : "QR login details"}
                       </p>
                       {weixinQrCode ? (
-                        <p className="rounded-sm border border-border/30 px-2 py-1 font-mono text-[11px] break-all">
+                        <p className="workspace-code rounded-sm border border-border/30 px-2 py-1 break-all">
                           {weixinQrCode}
                         </p>
                       ) : null}
-                      <p className="text-[11px] text-muted-foreground">
+                      <p className="workspace-meta text-muted-foreground">
                         Polling attempts: {weixinPollingAttempts}
                       </p>
                       {!weixinQrImageSrc ? (
-                        <p className="text-[11px] text-muted-foreground">
+                        <p className="workspace-meta text-muted-foreground">
                           The server returned a login link but no directly
                           renderable image. The QR is generated locally in the
                           browser.
@@ -1061,7 +1061,7 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
               ) : null}
 
               <p
-                className="mt-2.5 text-[12px] text-muted-foreground"
+                className="workspace-panel-copy mt-2.5 text-muted-foreground"
                 role="status"
               >
                 {weixinPollingStatus}
@@ -1069,7 +1069,7 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
 
               {weixinSaveHint ? (
                 <p
-                  className="mt-1.5 text-[12px] font-medium text-foreground"
+                  className="text-caption mt-1.5 font-medium text-foreground"
                   role="status"
                   aria-live="polite"
                 >
@@ -1079,7 +1079,7 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
 
               {weixinScanError ? (
                 <p
-                  className="mt-1.5 text-[12px] font-medium text-destructive"
+                  className="text-caption mt-1.5 font-medium text-destructive"
                   role="status"
                   aria-live="polite"
                 >
@@ -1097,10 +1097,10 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
             }
           >
             <div className="mb-2.5">
-              <p className="text-[11px] font-medium tracking-[0.12em] text-foreground uppercase">
+              <p className="workspace-section-label text-foreground">
                 Configuration Fields
               </p>
-              <p className="mt-1 text-[11px] text-muted-foreground">
+              <p className="workspace-panel-copy mt-1 text-muted-foreground">
                 Fill in the connection fields and runtime switches for this
                 transport. Saved values become the active transport
                 configuration.
@@ -1120,7 +1120,7 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
                       value={weixinLinkedAccountId}
                       readOnly
                       disabled
-                      className="h-9 text-[13px]"
+                      className="h-8"
                     />
                   </div>
                 ) : null}
@@ -1134,7 +1134,7 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
                       value={weixinLinkedUserId}
                       readOnly
                       disabled
-                      className="h-9 text-[13px]"
+                      className="h-8"
                     />
                   </div>
                 ) : null}
@@ -1198,7 +1198,7 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
                               {label}
                             </label>
                             {required ? (
-                              <span className="text-[10px] text-muted-foreground">
+                              <span className="text-ui-xs text-muted-foreground">
                                 required
                               </span>
                             ) : null}
@@ -1232,13 +1232,13 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
                             }
                             aria-describedby={describedBy || undefined}
                             aria-invalid={fieldIssues[key] ? true : undefined}
-                            className="h-9 text-[13px]"
+                            className="h-8"
                           />
 
                           {fieldIssues[key] ? (
                             <p
                               id={issueId}
-                              className="text-[12px] font-medium text-destructive"
+                              className="text-caption font-medium text-destructive"
                             >
                               {fieldIssues[key]}
                             </p>
@@ -1291,7 +1291,7 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
                                 {label}
                               </label>
                               {required ? (
-                                <span className="text-[10px] text-muted-foreground">
+                                <span className="text-ui-xs text-muted-foreground">
                                   required
                                 </span>
                               ) : null}
@@ -1305,7 +1305,7 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
                             {fieldIssues[key] ? (
                               <p
                                 id={issueId}
-                                className="text-[12px] font-medium text-destructive"
+                                className="text-caption font-medium text-destructive"
                               >
                                 {fieldIssues[key]}
                               </p>
@@ -1328,7 +1328,7 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
                 ) : null}
               </div>
             ) : (
-              <p className="text-[12px] leading-5 text-muted-foreground">
+              <p className="workspace-panel-copy text-muted-foreground">
                 This transport exposes no editable fields. You can still control
                 its runtime state with the switch below.
               </p>
@@ -1345,10 +1345,10 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <p className="text-[11px] font-medium tracking-[0.12em] text-destructive uppercase">
+                  <p className="workspace-section-label text-destructive">
                     Danger Zone
                   </p>
-                  <p className="mt-1 text-[12px] leading-5 text-destructive/85">
+                  <p className="workspace-panel-copy mt-1 text-destructive/85">
                     Remove the saved profile for this transport. You will need
                     to recreate it before the worker can run again.
                   </p>
@@ -1356,7 +1356,7 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
 
                 {deleteConfirming ? (
                   <div className="flex flex-wrap items-center justify-end gap-2">
-                    <p className="text-[12px] font-medium text-destructive">
+                    <p className="text-caption font-medium text-destructive">
                       {buildDeleteConfirmationCopy(targetSummary)}
                     </p>
                     <Button
@@ -1396,7 +1396,7 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
 
               {deleteError ? (
                 <p
-                  className="mt-3 text-[12px] font-medium text-destructive"
+                  className="text-caption mt-3 font-medium text-destructive"
                   role="status"
                   aria-live="polite"
                 >
@@ -1414,7 +1414,7 @@ export function ChannelsPanel({ embedded = false }: { embedded?: boolean }) {
             }
           >
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-[11px] text-muted-foreground">
+              <p className="workspace-meta text-muted-foreground">
                 {missingFieldCount > 0
                   ? `${missingFieldCount} required field${missingFieldCount === 1 ? " is" : "s are"} still missing`
                   : configuredChannel

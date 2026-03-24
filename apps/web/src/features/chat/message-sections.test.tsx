@@ -36,7 +36,7 @@ describe("chat message status surfaces", () => {
     expect(html).toContain('role="status"')
     expect(html).toContain('aria-live="polite"')
     expect(html).toContain("Working")
-    expect(html).toContain("text-sm font-medium")
+    expect(html).toContain("text-body-sm font-medium")
   })
 
   test("removes motion-heavy hydration decoration when reduced motion is preferred", () => {
@@ -47,7 +47,7 @@ describe("chat message status surfaces", () => {
     expect(html).toContain('role="status"')
     expect(html).toContain("Loading session")
     expect(html).not.toContain("animate-pulse")
-    expect(html).toContain("text-xs text-muted-foreground/80")
+    expect(html).toContain("text-caption")
   })
 
   test("uses shared auxiliary scale for thinking toggle and expanded content", () => {
@@ -61,8 +61,8 @@ describe("chat message status surfaces", () => {
       />
     )
 
-    expect(html).toContain("text-xs text-muted-foreground")
-    expect(html).toContain("text-xs leading-relaxed text-muted-foreground/80")
+    expect(html).toContain("text-caption flex items-center")
+    expect(html).toContain("text-body-sm leading-body-sm")
     expect(html).not.toContain("text-[13px]")
   })
 
@@ -94,11 +94,11 @@ describe("chat message status surfaces", () => {
       <CompressionNotice summary="trimmed context" />
     )
 
-    expect(turnHtml).toContain("text-xs text-muted-foreground/55")
-    expect(turnHtml).toContain("text-xs font-normal")
-    expect(turnHtml).toContain("text-[0.6875rem] font-medium")
-    expect(compressionHtml).toContain("text-xs text-muted-foreground")
-    expect(compressionHtml).toContain("text-[0.6875rem] font-semibold")
+    expect(turnHtml).toContain("text-caption mt-2 flex items-center")
+    expect(turnHtml).toContain("text-caption font-normal")
+    expect(turnHtml).toContain("text-label rounded-full")
+    expect(compressionHtml).toContain("text-caption")
+    expect(compressionHtml).toContain("workspace-section-label")
   })
 
   test("uses shared auxiliary scale for history hint in message list", () => {
@@ -172,10 +172,10 @@ describe("chat message status surfaces", () => {
     )
 
     expect(html).toContain(
-      "text-xs leading-relaxed font-medium text-destructive"
+      "text-caption mb-3 rounded-lg border border-destructive/30"
     )
     expect(html).toContain(
-      "text-xs leading-relaxed font-medium text-muted-foreground"
+      "text-caption mb-3 rounded-lg border border-border/40"
     )
     expect(html).not.toContain("text-[13px]")
   })
@@ -194,7 +194,7 @@ describe("chat message status surfaces", () => {
     )
 
     expect(html).toContain("max-w-[66ch]")
-    expect(html).toContain("text-sm")
+    expect(html).toContain("text-body-sm")
   })
 
   test("keeps assistant markdown constrained in completed turns", () => {

@@ -321,6 +321,29 @@ describe("tool renderer registry", () => {
     )
   })
 
+  test("renders edit tool meta with green additions and red removals", () => {
+    const meta = toolRendererRegistry.renderMeta({
+      toolName: "functions.edit",
+      arguments: {
+        file_path:
+          "apps/web/src/features/chat/tool-rendering/renderers/file-tools.tsx",
+      },
+      details: {
+        added: 5,
+        removed: 14,
+      },
+      outputContent: "",
+      succeeded: true,
+    })
+
+    expect(meta).not.toBe(null)
+    const html = renderToStaticMarkup(<>{meta}</>)
+    expect(html).toContain("+5")
+    expect(html).toContain("text-emerald-400")
+    expect(html).toContain("-14")
+    expect(html).toContain("text-red-400")
+  })
+
   test("renders edit tool failure title from file path", () => {
     const title = toolRendererRegistry.renderTitle({
       toolName: "functions.edit",

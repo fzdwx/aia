@@ -64,8 +64,17 @@ describe("tool timeline", () => {
     expect(html).toContain("Running tools")
     expect(html).toContain("grep")
     expect(html).toContain("renderDetails")
+    expect(html).toContain("w-full px-0 py-1.5 text-left")
+    expect(html).toContain("flex min-w-0 items-baseline justify-between gap-3")
     expect(html).toContain(
-      "grid-cols-[minmax(58px,max-content)_minmax(0,1fr)_auto]"
+      "text-body-sm shrink-0 font-semibold text-foreground/94"
+    )
+    expect(html).toContain(
+      "min-w-0 truncate text-left text-muted-foreground/82"
+    )
+    expect(html).toContain("text-meta shrink-0 text-muted-foreground/56")
+    expect(html).not.toContain(
+      "rounded-md border border-border/20 bg-background/25"
     )
     expect(html).not.toContain("mt-2 truncate text-[13px] font-medium")
   })

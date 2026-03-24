@@ -18,6 +18,10 @@ import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat-store"
 import { useSessionSettingsStore } from "@/stores/session-settings-store"
 
+const CHAT_CONTROL_TEXT = "text-ui"
+const CHAT_MICRO_TEXT = "text-meta"
+const CHAT_INPUT_HELP = "text-muted-foreground/30"
+
 function ContextPressure() {
   const pressure = useChatStore((s) => s.contextPressure)
   if (pressure == null || pressure <= 0.6) return <span />
@@ -77,7 +81,7 @@ export function ChatInput() {
       <div className="pointer-events-none absolute -top-10 right-0 left-0 h-10 bg-gradient-to-t from-background to-transparent" />
 
       <div className="mx-auto max-w-[720px]">
-        <div className="mb-1.5 flex items-center justify-start gap-2 text-[10px]">
+        <div className="mb-1.5 flex items-center justify-start gap-2">
           <ModelSelector />
           {supportsReasoning && (
             <Select
@@ -92,9 +96,9 @@ export function ChatInput() {
             >
               <SelectTrigger
                 size="sm"
-                className="h-8 border-0 bg-transparent px-2 py-1 text-[11px] leading-[1.2] font-medium text-muted-foreground/90 shadow-none hover:bg-muted/60 hover:text-foreground/80 disabled:opacity-50 [&_svg:not([class*='size-'])]:size-3"
+                className={`h-8 border-0 bg-transparent px-2 py-1 font-medium text-muted-foreground/90 shadow-none hover:bg-muted/60 hover:text-foreground/80 disabled:opacity-50 [&_svg:not([class*='size-'])]:size-3 ${CHAT_CONTROL_TEXT}`}
               >
-                <SelectValue className="text-[11px] leading-[1.15]">
+                <SelectValue className={CHAT_CONTROL_TEXT}>
                   {getThinkingLevelLabel({
                     reasoningValue,
                     sessionSettingsHydrating,
@@ -107,7 +111,7 @@ export function ChatInput() {
                   <SelectItem
                     key={option.value}
                     value={option.value}
-                    className="text-[11px]"
+                    className={CHAT_CONTROL_TEXT}
                   >
                     {option.label}
                   </SelectItem>
@@ -117,7 +121,7 @@ export function ChatInput() {
           )}
         </div>
         {sessionSettingsError && (
-          <div className="mb-2 text-[11px] text-destructive/80">
+          <div className={`mb-2 ${CHAT_MICRO_TEXT} text-destructive/80`}>
             {sessionSettingsError}
           </div>
         )}
@@ -129,7 +133,7 @@ export function ChatInput() {
             onKeyDown={handleKeyDown}
             placeholder="Message aia..."
             rows={1}
-            className="max-h-[160px] min-h-[24px] flex-1 resize-none bg-transparent text-[14px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/40"
+            className="text-body-sm leading-body-sm max-h-[160px] min-h-[24px] flex-1 resize-none bg-transparent text-foreground outline-none placeholder:text-muted-foreground/40"
             style={{ fieldSizing: "content" } as React.CSSProperties}
           />
           <button
@@ -152,9 +156,11 @@ export function ChatInput() {
             )}
           </button>
         </div>
-        <div className="mt-2 flex items-center justify-between text-[11px]">
+        <div
+          className={`mt-2 flex items-center justify-between ${CHAT_MICRO_TEXT}`}
+        >
           <ContextPressure />
-          <p className="text-muted-foreground/30">
+          <p className={CHAT_INPUT_HELP}>
             aia may produce inaccurate responses.
           </p>
         </div>

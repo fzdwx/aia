@@ -57,7 +57,7 @@ export function createWriteRenderer(): ToolRenderer {
     renderMeta(data) {
       const lines = getNumberValue(data.details, "lines")
       return lines != null
-        ? createMetaBadge(`+${lines}`, "text-foreground/70")
+        ? createMetaBadge(`+${lines}`, "text-emerald-400")
         : null
     },
     renderDetails(data) {
@@ -90,7 +90,7 @@ export function createEditRenderer(): ToolRenderer {
       return (
         <>
           {added != null
-            ? createMetaBadge(`+${added}`, "text-foreground/70")
+            ? createMetaBadge(`+${added}`, "text-emerald-400")
             : null}
           {removed != null
             ? createMetaBadge(`-${removed}`, "text-red-400")

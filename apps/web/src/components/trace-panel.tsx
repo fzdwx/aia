@@ -545,10 +545,10 @@ function DetailList({
           key={item.label}
           className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1 px-3 py-2"
         >
-          <dt className="text-[10px] font-medium text-muted-foreground uppercase">
+          <dt className="workspace-section-label text-muted-foreground">
             {item.label}
           </dt>
-          <dd className="max-w-[70%] min-w-0 text-right text-[12px] leading-5 text-foreground">
+          <dd className="text-caption max-w-[70%] min-w-0 text-right text-foreground">
             {item.value}
           </dd>
         </div>
@@ -569,7 +569,7 @@ function Section({
   return (
     <section className="overflow-hidden rounded-xl border border-border/20 bg-background/85">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/20 bg-muted/[0.12] px-3 py-2.5">
-        <h3 className="text-[11px] font-medium text-muted-foreground uppercase">
+        <h3 className="workspace-section-label text-muted-foreground">
           {title}
         </h3>
         {action}
@@ -602,7 +602,7 @@ function TabButton({
       tabIndex={active ? 0 : -1}
       onClick={onClick}
       className={cn(
-        "min-h-10 border-b-2 px-1 pb-2 text-[12px] font-medium transition-colors",
+        "text-caption min-h-10 border-b-2 px-1 pb-2 font-medium transition-colors",
         active
           ? "border-foreground text-foreground"
           : "border-transparent text-muted-foreground hover:text-foreground"
@@ -622,9 +622,7 @@ function FieldBlock({
 }) {
   return (
     <div className="space-y-1.5">
-      <p className="text-[10px] font-medium text-muted-foreground uppercase">
-        {label}
-      </p>
+      <p className="workspace-section-label text-muted-foreground">{label}</p>
       {children}
     </div>
   )
@@ -638,13 +636,13 @@ function TextBlock({
   className?: string
 }) {
   if (!value) {
-    return <p className="text-[12px] text-muted-foreground">-</p>
+    return <p className="text-caption text-muted-foreground">-</p>
   }
 
   return (
     <pre
       className={cn(
-        "overflow-x-auto rounded-lg border border-border/20 bg-background px-3 py-2.5 text-[12px] leading-5 whitespace-pre-wrap text-foreground",
+        "text-caption overflow-x-auto rounded-lg border border-border/20 bg-background px-3 py-2.5 whitespace-pre-wrap text-foreground",
         className
       )}
     >
@@ -674,7 +672,7 @@ function StructuredArguments({ value }: { value: unknown }) {
   const record = asRecord(value)
 
   if (!record || Object.keys(record).length === 0) {
-    return <p className="text-[12px] text-muted-foreground">No arguments.</p>
+    return <p className="text-caption text-muted-foreground">No arguments.</p>
   }
 
   const scalarEntries = Object.entries(record).filter(([, entry]) => {
@@ -721,7 +719,7 @@ function ExpandableTextBlock({
   const [open, setOpen] = useState(false)
 
   if (!value) {
-    return <p className="text-[12px] text-muted-foreground">-</p>
+    return <p className="text-caption text-muted-foreground">-</p>
   }
 
   const needsCollapse = value.length > 320 || value.split("\n").length > 10
@@ -730,7 +728,7 @@ function ExpandableTextBlock({
     <div className="space-y-2">
       <pre
         className={cn(
-          "overflow-auto rounded-lg border border-border/20 bg-background px-3 py-2.5 text-[12px] leading-5 whitespace-pre-wrap text-foreground",
+          "text-caption overflow-auto rounded-lg border border-border/20 bg-background px-3 py-2.5 whitespace-pre-wrap text-foreground",
           !open && needsCollapse && "max-h-48",
           tone === "danger" &&
             "border-destructive/20 bg-destructive/[0.04] text-destructive"
@@ -741,7 +739,7 @@ function ExpandableTextBlock({
       {needsCollapse ? (
         <button
           onClick={() => setOpen((current) => !current)}
-          className="text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+          className="text-meta font-medium text-muted-foreground transition-colors hover:text-foreground"
         >
           {open ? "Collapse" : "Expand"}
         </button>
@@ -754,13 +752,13 @@ function RawJson({ title, value }: { title: string; value: unknown }) {
   return (
     <Collapsible className="overflow-hidden rounded-xl border border-border/20 bg-background">
       <CollapsibleTrigger className="flex w-full items-center justify-between border-b border-border/20 bg-muted/[0.12] px-3 py-2.5 text-left">
-        <span className="text-[11px] font-medium text-muted-foreground uppercase">
+        <span className="workspace-section-label text-muted-foreground">
           {title}
         </span>
-        <span className="text-[11px] text-muted-foreground">JSON</span>
+        <span className="text-meta text-muted-foreground">JSON</span>
       </CollapsibleTrigger>
       <CollapsibleContent className="p-3">
-        <pre className="overflow-x-auto rounded-lg border border-border/20 bg-background px-3 py-2.5 text-[11px] leading-5 text-foreground">
+        <pre className="text-meta overflow-x-auto rounded-lg border border-border/20 bg-background px-3 py-2.5 text-foreground">
           {JSON.stringify(value, null, 2)}
         </pre>
       </CollapsibleContent>
@@ -782,7 +780,7 @@ function EventTimeline({
   emptyLabel: string
 }) {
   if (events.length === 0) {
-    return <p className="text-[12px] text-muted-foreground">{emptyLabel}</p>
+    return <p className="text-caption text-muted-foreground">{emptyLabel}</p>
   }
 
   return (
@@ -795,15 +793,15 @@ function EventTimeline({
           <CollapsibleTrigger className="flex w-full items-start justify-between gap-3 px-3 py-2.5 text-left">
             <div className="min-w-0 space-y-0.5">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[12px] font-medium text-foreground">
+                <span className="text-ui font-medium text-foreground">
                   {event.name}
                 </span>
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-meta text-muted-foreground">
                   {formatDateTime(event.at_ms)}
                 </span>
               </div>
               {event.summary ? (
-                <p className="text-[11px] leading-4 text-muted-foreground">
+                <p className="text-meta leading-4 text-muted-foreground">
                   {event.summary}
                 </p>
               ) : null}
@@ -811,7 +809,7 @@ function EventTimeline({
           </CollapsibleTrigger>
           {event.attributes && Object.keys(event.attributes).length > 0 ? (
             <CollapsibleContent className="border-t border-border/20 px-3 py-3">
-              <pre className="overflow-x-auto rounded-lg border border-border/20 bg-background px-3 py-2.5 text-[11px] leading-5 text-foreground">
+              <pre className="text-meta overflow-x-auto rounded-lg border border-border/20 bg-background px-3 py-2.5 text-foreground">
                 {JSON.stringify(event.attributes, null, 2)}
               </pre>
             </CollapsibleContent>
@@ -831,8 +829,8 @@ function TraceSummaryMetric({
 }) {
   return (
     <div className="min-w-0">
-      <p className="text-[11px] font-medium text-muted-foreground">{label}</p>
-      <div className="mt-1 text-[14px] font-medium text-foreground tabular-nums">
+      <p className="text-meta font-medium text-muted-foreground">{label}</p>
+      <div className="text-title mt-1 font-medium text-foreground tabular-nums">
         {value}
       </div>
     </div>
@@ -846,24 +844,24 @@ function TraceActiveStrip({ group }: { group: TraceLoopGroup }) {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-[24px] font-semibold text-foreground tabular-nums">
+              <h2 className="text-heading-lg font-semibold text-foreground tabular-nums">
                 {formatDateTime(group.startedAtMs)}
               </h2>
               <Badge
                 variant={loopBadgeVariant(group.finalStatus)}
-                className="text-[10px]"
+                className="text-ui-xs"
               >
                 {group.finalStatus}
               </Badge>
             </div>
-            <p className="mt-1 truncate text-[12px] text-muted-foreground">
+            <p className="text-caption mt-1 truncate text-muted-foreground">
               {formatTraceLoopHeadline(group, {
                 compressionLabel: "Context compression log",
                 maxLength: 220,
               })}
             </p>
           </div>
-          <div className="text-[11px] text-muted-foreground">
+          <div className="text-meta text-muted-foreground">
             run {compactId(group.runId, 10, 8)}
           </div>
         </div>
@@ -872,7 +870,7 @@ function TraceActiveStrip({ group }: { group: TraceLoopGroup }) {
         <TraceSummaryMetric
           label="Trace ID"
           value={
-            <span className="font-mono text-[13px] text-foreground">
+            <span className="workspace-code text-foreground">
               {compactId(group.key, 18, 12)}
             </span>
           }
@@ -972,15 +970,15 @@ function WaterfallRow({
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="truncate text-[13px] font-medium text-foreground">
+            <span className="text-ui truncate font-medium text-foreground">
               {nodeTitle(node)}
             </span>
-            <span className="text-[12px] text-muted-foreground tabular-nums">
+            <span className="text-caption text-muted-foreground tabular-nums">
               {formatTraceDuration(node.durationMs)}
             </span>
             <span
               className={cn(
-                "rounded-sm border px-1.5 py-0.5 text-[10px] font-medium uppercase",
+                "text-ui-xs rounded-sm border px-1.5 py-0.5 font-medium uppercase",
                 tone.badge
               )}
             >
@@ -989,7 +987,7 @@ function WaterfallRow({
             {node.kind !== "agent_root" &&
             "status" in node &&
             node.status === "error" ? (
-              <span className="rounded-sm border border-destructive/30 bg-destructive/[0.08] px-1.5 py-0.5 text-[10px] font-medium text-destructive uppercase">
+              <span className="text-ui-xs rounded-sm border border-destructive/30 bg-destructive/[0.08] px-1.5 py-0.5 font-medium text-destructive uppercase">
                 err
               </span>
             ) : null}
@@ -997,7 +995,7 @@ function WaterfallRow({
               <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
             ) : null}
           </div>
-          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+          <div className="text-meta mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
             <span>{nodeSubtitle(node)}</span>
             <span>·</span>
             <span className="tabular-nums">
@@ -1007,7 +1005,7 @@ function WaterfallRow({
         </div>
 
         <div className="shrink-0 pt-0.5 text-right">
-          <div className="font-mono text-[11px] text-foreground">
+          <div className="workspace-code text-foreground">
             {node.kind === "llm_span"
               ? `${node.toolCount} tool`
               : node.kind === "tool_span"
@@ -1135,7 +1133,7 @@ function LlmInspector({
           <div className="space-y-3">
             <FieldBlock label="System prompts">
               {systemPrompts.length === 0 ? (
-                <p className="text-[12px] text-muted-foreground">-</p>
+                <p className="text-caption text-muted-foreground">-</p>
               ) : (
                 <div className="space-y-2">
                   {systemPrompts.map((prompt, index) => (
@@ -1155,14 +1153,14 @@ function LlmInspector({
 
             <FieldBlock label="Enabled tools">
               {toolNames.length === 0 ? (
-                <p className="text-[12px] text-muted-foreground">-</p>
+                <p className="text-caption text-muted-foreground">-</p>
               ) : (
                 <div className="flex flex-wrap gap-1.5">
                   {toolNames.map((tool) => (
                     <Badge
                       key={tool}
                       variant="secondary"
-                      className="text-[10px]"
+                      className="text-ui-xs"
                     >
                       {tool}
                     </Badge>
@@ -1461,12 +1459,12 @@ export function TracePanel() {
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-1.5">
                 <h1 className="text-sm font-semibold tracking-tight">Trace</h1>
-                <Badge variant="secondary" className="text-[10px]">
+                <Badge variant="secondary" className="text-ui-xs">
                   {traceSurface === "overview" ? "overview" : traceView}
                 </Badge>
               </div>
               {traceSurface === "overview" ? (
-                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+                <div className="text-meta mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground">
                   <span className="tracking-[0.15em] uppercase">Overview</span>
                   <span className="rounded-full border border-border/16 bg-background/60 px-2 py-0.5">
                     {formatOverviewRangeLabel(overviewRange)}
@@ -1486,7 +1484,7 @@ export function TracePanel() {
                   </span>
                 </div>
               ) : traceDescription ? (
-                <p className="mt-0.5 text-[12px] leading-4 text-muted-foreground">
+                <p className="workspace-panel-copy mt-0.5 text-muted-foreground">
                   {traceDescription}
                 </p>
               ) : null}
@@ -1509,7 +1507,7 @@ export function TracePanel() {
                     }
                     aria-pressed={option.value === overviewRange}
                     className={cn(
-                      "min-h-9 rounded-full px-2.5 py-1 text-[12px] transition-colors",
+                      "text-ui-xs min-h-7 rounded-full px-2.5 py-1 font-medium tracking-[0.01em] transition-colors",
                       option.value === overviewRange
                         ? "bg-foreground text-background"
                         : "text-muted-foreground hover:text-foreground"
@@ -1528,7 +1526,7 @@ export function TracePanel() {
                   ? refreshOverview().catch(() => {})
                   : refreshTraces({ page: tracePage, view: traceView })
               }
-              className="h-9 px-2.5"
+              className="text-ui-xs h-7 px-2.5 tracking-[0.07em]"
             >
               <RefreshCw className="size-3" />
               Refresh
@@ -1543,7 +1541,7 @@ export function TracePanel() {
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-3">
           <div className="mx-auto flex min-h-0 w-full max-w-[1440px] flex-1 flex-col gap-2">
             {traceError ? (
-              <div className="shrink-0 rounded-xl border border-destructive/25 bg-destructive/[0.05] px-4 py-3 text-[12px] text-destructive">
+              <div className="text-caption shrink-0 rounded-xl border border-destructive/25 bg-destructive/[0.05] px-4 py-3 text-destructive">
                 {traceError}
               </div>
             ) : null}
@@ -1556,7 +1554,7 @@ export function TracePanel() {
                     ? "No compression logs yet"
                     : "No traces yet"}
                 </p>
-                <p className="mt-1 text-[13px] text-muted-foreground">
+                <p className="text-ui mt-1 text-muted-foreground">
                   {traceView === "compression"
                     ? "Trigger context compression to inspect compression calls and summaries here."
                     : "Start a conversation to see agent loops and LLM spans here."}
@@ -1575,11 +1573,11 @@ export function TracePanel() {
                 <div className="flex min-h-0 flex-col overflow-hidden">
                   <div className="shrink-0 border-b border-border/20 bg-muted/[0.08] px-3 py-2.5">
                     <div className="flex items-center justify-between gap-2">
-                      <p className="text-[11px] font-medium text-muted-foreground uppercase">
+                      <p className="workspace-section-label text-muted-foreground">
                         Waterfall
                       </p>
                       {activeGroup ? (
-                        <span className="text-[11px] text-muted-foreground">
+                        <span className="text-meta text-muted-foreground">
                           {treeRows.length} spans
                         </span>
                       ) : null}
@@ -1615,10 +1613,10 @@ export function TracePanel() {
                     <div className="px-4 py-3">
                       {activeNode ? (
                         <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
+                          <div className="text-ui flex flex-wrap items-center gap-2 text-muted-foreground">
                             <span
                               className={cn(
-                                "inline-flex items-center rounded-sm border px-1.5 py-0.5 text-[10px] font-medium uppercase",
+                                "text-ui-xs inline-flex items-center rounded-sm border px-1.5 py-0.5 font-medium uppercase",
                                 nodeTone(activeNode).badge
                               )}
                             >
@@ -1626,22 +1624,22 @@ export function TracePanel() {
                             </span>
                           </div>
                           <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                            <h3 className="text-[18px] font-semibold text-foreground">
+                            <h3 className="text-heading-sm font-semibold text-foreground">
                               {nodeTitle(activeNode)}
                             </h3>
-                            <span className="text-[12px] text-muted-foreground tabular-nums">
+                            <span className="text-caption text-muted-foreground tabular-nums">
                               {formatTraceDuration(activeNode.durationMs)}
                             </span>
-                            <span className="text-[12px] text-muted-foreground">
+                            <span className="text-caption text-muted-foreground">
                               {formatDateTime(activeNode.startedAtMs)}
                             </span>
                           </div>
-                          <p className="mt-1 text-[12px] text-muted-foreground">
+                          <p className="text-caption mt-1 text-muted-foreground">
                             {nodeSubtitle(activeNode)}
                           </p>
                         </div>
                       ) : (
-                        <p className="text-[13px] text-muted-foreground">
+                        <p className="text-ui text-muted-foreground">
                           Select a span.
                         </p>
                       )}

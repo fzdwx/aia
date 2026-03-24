@@ -138,7 +138,7 @@ function renderToolBadges(toolNames: string[]) {
   return (
     <div className="flex flex-wrap gap-1.5">
       {toolNames.map((tool) => (
-        <Badge key={tool} variant="secondary" className="text-[11px]">
+        <Badge key={tool} variant="secondary" className="text-ui-xs">
           {tool}
         </Badge>
       ))}
@@ -220,10 +220,10 @@ function DetailList({
           key={item.label}
           className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 px-3 py-2"
         >
-          <dt className="shrink-0 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+          <dt className="workspace-section-label shrink-0 text-muted-foreground">
             {item.label}
           </dt>
-          <dd className="min-w-0 text-[13px] text-foreground sm:text-right [&>div]:justify-end">
+          <dd className="text-ui min-w-0 text-foreground sm:text-right [&>div]:justify-end">
             {item.value}
           </dd>
         </div>
@@ -244,10 +244,10 @@ function CompactDetailList({
           key={item.label}
           className="flex flex-wrap items-baseline gap-x-2 gap-y-1"
         >
-          <dt className="shrink-0 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+          <dt className="workspace-section-label shrink-0 text-muted-foreground">
             {item.label}
           </dt>
-          <dd className="min-w-0 text-[12px] break-all text-foreground/90">
+          <dd className="text-caption min-w-0 break-all text-foreground/90">
             {item.value}
           </dd>
         </div>
@@ -264,13 +264,13 @@ function TextBlock({
   className?: string
 }) {
   if (!value) {
-    return <p className="text-[13px] text-muted-foreground">-</p>
+    return <p className="text-ui text-muted-foreground">-</p>
   }
 
   return (
     <pre
       className={cn(
-        "overflow-x-auto rounded-lg bg-muted/40 p-3 text-[12px] leading-6 whitespace-pre-wrap text-foreground",
+        "text-caption overflow-x-auto rounded-lg bg-muted/40 p-3 whitespace-pre-wrap text-foreground",
         className
       )}
     >
@@ -282,12 +282,12 @@ function TextBlock({
 function RawJsonSection({ title, value }: { title: string; value: unknown }) {
   return (
     <Collapsible className="rounded-lg border border-border/50 bg-muted/15 px-3 py-2">
-      <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 text-left text-sm font-medium text-foreground">
+      <CollapsibleTrigger className="text-body-sm flex w-full items-center justify-between gap-3 text-left font-medium text-foreground">
         <span>{title}</span>
-        <span className="text-xs text-muted-foreground">Raw JSON</span>
+        <span className="text-meta text-muted-foreground">Raw JSON</span>
       </CollapsibleTrigger>
       <CollapsibleContent className="pt-3">
-        <pre className="overflow-x-auto rounded-lg bg-muted/40 p-3 text-[12px] leading-6 text-foreground">
+        <pre className="text-caption overflow-x-auto rounded-lg bg-muted/40 p-3 text-foreground">
           {formatJson(value)}
         </pre>
       </CollapsibleContent>
@@ -317,9 +317,11 @@ function SectionPanel({
     >
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/40 px-4 py-3">
         <div className="space-y-1">
-          <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+          <h3 className="workspace-panel-title">{title}</h3>
           {description ? (
-            <p className="text-[12px] text-muted-foreground">{description}</p>
+            <p className="workspace-panel-copy text-muted-foreground">
+              {description}
+            </p>
           ) : null}
         </div>
         {meta ? <div className="flex flex-wrap gap-1.5">{meta}</div> : null}
@@ -333,7 +335,7 @@ function ParameterSchemaTable({ schema }: { schema: JsonRecord }) {
   const properties = asRecord(schema.properties)
   if (!properties) {
     return (
-      <pre className="overflow-x-auto rounded-lg bg-muted/40 p-3 text-[12px] leading-6 text-foreground">
+      <pre className="text-caption overflow-x-auto rounded-lg bg-muted/40 p-3 text-foreground">
         {formatJson(schema)}
       </pre>
     )
@@ -348,7 +350,7 @@ function ParameterSchemaTable({ schema }: { schema: JsonRecord }) {
 
   if (entries.length === 0) {
     return (
-      <p className="text-[12px] text-muted-foreground">
+      <p className="text-caption text-muted-foreground">
         No properties defined.
       </p>
     )
@@ -356,9 +358,9 @@ function ParameterSchemaTable({ schema }: { schema: JsonRecord }) {
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-[12px]">
+      <table className="text-caption w-full">
         <thead>
-          <tr className="border-b border-border/40 text-left text-[11px] text-muted-foreground uppercase">
+          <tr className="workspace-section-label border-b border-border/40 text-left text-muted-foreground">
             <th className="pr-3 pb-2 font-medium">Name</th>
             <th className="pr-3 pb-2 font-medium">Type</th>
             <th className="pr-3 pb-2 font-medium">Required</th>
@@ -376,13 +378,13 @@ function ParameterSchemaTable({ schema }: { schema: JsonRecord }) {
               <tr key={name} className="border-b border-border/20 align-top">
                 <td className="py-2 pr-3 font-mono text-foreground">{name}</td>
                 <td className="py-2 pr-3">
-                  <Badge variant="outline" className="text-[10px]">
+                  <Badge variant="outline" className="text-ui-xs">
                     {type}
                   </Badge>
                 </td>
                 <td className="py-2 pr-3">
                   {isRequired ? (
-                    <Badge variant="destructive" className="text-[10px]">
+                    <Badge variant="destructive" className="text-ui-xs">
                       required
                     </Badge>
                   ) : (
@@ -414,17 +416,17 @@ function SystemPromptSection({ prompts }: { prompts: PromptEntry[] }) {
       className="trace-accent-surface"
       meta={
         <>
-          <Badge variant="outline" className="text-[11px]">
+          <Badge variant="outline" className="text-ui-xs">
             {prompts.length}
           </Badge>
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-meta text-muted-foreground">
             {totalCharacters} chars
           </span>
         </>
       }
     >
       {prompts.length === 0 ? (
-        <p className="text-[13px] text-muted-foreground">
+        <p className="text-ui text-muted-foreground">
           No system prompt was captured in the provider request.
         </p>
       ) : (
@@ -435,10 +437,10 @@ function SystemPromptSection({ prompts }: { prompts: PromptEntry[] }) {
               className="trace-accent-surface rounded-xl p-3"
             >
               <div className="mb-2 flex flex-wrap items-center gap-2">
-                <Badge variant="outline" className="text-[11px]">
+                <Badge variant="outline" className="text-ui-xs">
                   {prompt.label}
                 </Badge>
-                <span className="text-[11px] text-muted-foreground">
+                <span className="text-meta text-muted-foreground">
                   {prompt.source}
                 </span>
               </div>
@@ -465,14 +467,14 @@ function ToolListSection({ tools }: { tools: unknown[] }) {
       description="Schemas sent upstream."
       meta={
         <>
-          <Badge variant="outline" className="text-[11px]">
+          <Badge variant="outline" className="text-ui-xs">
             {normalized.length} tool{normalized.length === 1 ? "" : "s"}
           </Badge>
         </>
       }
     >
       {normalized.length === 0 ? (
-        <p className="text-[13px] text-muted-foreground">No tools defined.</p>
+        <p className="text-ui text-muted-foreground">No tools defined.</p>
       ) : (
         <div className="space-y-2">
           {normalized.map((tool, index) => {
@@ -489,21 +491,21 @@ function ToolListSection({ tools }: { tools: unknown[] }) {
                 <CollapsibleTrigger className="flex w-full flex-wrap items-start justify-between gap-3 px-4 py-3 text-left">
                   <div className="min-w-0 space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="secondary" className="text-[11px]">
+                      <Badge variant="secondary" className="text-ui-xs">
                         {tool.name}
                       </Badge>
-                      <Badge variant="outline" className="text-[10px]">
+                      <Badge variant="outline" className="text-ui-xs">
                         {propertyCount} field{propertyCount === 1 ? "" : "s"}
                       </Badge>
-                      <Badge variant="outline" className="text-[10px]">
+                      <Badge variant="outline" className="text-ui-xs">
                         {requiredCount} required
                       </Badge>
                     </div>
-                    <p className="text-[12px] text-muted-foreground">
+                    <p className="workspace-panel-copy text-muted-foreground">
                       {tool.description ?? "No tool description provided."}
                     </p>
                   </div>
-                  <span className="text-[11px] text-muted-foreground">
+                  <span className="text-meta text-muted-foreground">
                     schema
                   </span>
                 </CollapsibleTrigger>
@@ -517,7 +519,7 @@ function ToolListSection({ tools }: { tools: unknown[] }) {
                       />
                     </div>
                   ) : (
-                    <p className="text-[12px] text-muted-foreground">
+                    <p className="text-caption text-muted-foreground">
                       No parameter schema.
                     </p>
                   )}
@@ -550,7 +552,7 @@ function MessageListSection({
       title={title}
       description={description}
       meta={
-        <span className="text-[11px] text-muted-foreground">
+        <span className="text-meta text-muted-foreground">
           {countSummary || "No items"}
         </span>
       }
@@ -573,15 +575,15 @@ function MessageTimelineList({
   const countSummary = counts.map(([kind, count]) => `${kind} ${count}`)
 
   if (items.length === 0) {
-    return <p className="text-[13px] text-muted-foreground">No items.</p>
+    return <p className="text-ui text-muted-foreground">No items.</p>
   }
 
   return (
     <div className="space-y-2">
       {compact && countSummary.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+        <div className="text-meta flex flex-wrap items-center gap-1.5 text-muted-foreground">
           {countSummary.map((item) => (
-            <Badge key={item} variant="outline" className="text-[10px]">
+            <Badge key={item} variant="outline" className="text-ui-xs">
               {item}
             </Badge>
           ))}
@@ -633,33 +635,33 @@ function MessageTimelineList({
               <CollapsibleTrigger className="flex w-full flex-wrap items-start justify-between gap-3 px-3 py-2.5 text-left">
                 <div className="min-w-0 space-y-1.5">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[10px] text-muted-foreground">
+                    <span className="text-meta text-muted-foreground">
                       #{index + 1}
                     </span>
                     <Badge
                       variant={roleBadgeVariant(kind)}
-                      className="h-4 px-1.5 text-[10px]"
+                      className="text-ui-xs h-4 px-1.5"
                     >
                       {kind}
                     </Badge>
                   </div>
-                  <p className="text-[12px] leading-5 text-foreground/85">
+                  <p className="text-caption text-foreground/85">
                     {preview
                       ? truncate(preview, compact ? 260 : 220)
                       : "No preview available."}
                   </p>
                   {detailText ? (
-                    <p className="text-[11px] text-muted-foreground/80">
+                    <p className="text-meta text-muted-foreground/80">
                       {detailText}
                     </p>
                   ) : null}
                 </div>
-                <span className="text-[10px] text-muted-foreground">raw</span>
+                <span className="text-meta text-muted-foreground">raw</span>
               </CollapsibleTrigger>
               <CollapsibleContent className="border-t border-border/30 px-3 py-3">
                 <pre
                   className={cn(
-                    "overflow-auto rounded-lg bg-muted/35 p-3 text-[12px] leading-6 whitespace-pre-wrap text-foreground",
+                    "text-caption overflow-auto rounded-lg bg-muted/35 p-3 whitespace-pre-wrap text-foreground",
                     compact ? "max-h-[420px]" : "max-h-[360px]"
                   )}
                 >
@@ -743,11 +745,11 @@ function ResponsesRequestContextCard({
             <h3 className="text-sm font-semibold text-foreground">
               Provider request
             </h3>
-            <Badge variant="outline" className="text-[10px]">
+            <Badge variant="outline" className="text-ui-xs">
               responses
             </Badge>
           </div>
-          <p className="text-[12px] text-muted-foreground">
+          <p className="workspace-panel-copy text-muted-foreground">
             {input.length} items · {prompts.length} system
           </p>
         </div>
@@ -837,7 +839,7 @@ function ChatCompletionsRequestContextCard({
               Request summary and prompt context.
             </CardDescription>
           </div>
-          <Badge variant="outline" className="text-[11px]">
+          <Badge variant="outline" className="text-ui-xs">
             chat completions
           </Badge>
         </div>
@@ -1088,7 +1090,7 @@ function PayloadWorkbench({
   if (!active) {
     return (
       <section className="rounded-xl border border-border/50 bg-background/85 p-4">
-        <p className="text-[12px] text-muted-foreground">
+        <p className="text-caption text-muted-foreground">
           No payload available.
         </p>
       </section>
@@ -1108,7 +1110,7 @@ function PayloadWorkbench({
                 onClick={() => onTabChange(tab.key)}
                 aria-pressed={activeTone}
                 className={cn(
-                  "inline-flex min-h-8 items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-medium transition-colors",
+                  "text-ui-xs inline-flex min-h-8 items-center gap-1.5 rounded-md border px-2.5 font-medium transition-colors",
                   activeTone
                     ? "border-foreground/20 bg-foreground text-background"
                     : "border-border/45 bg-background text-muted-foreground hover:text-foreground"
@@ -1118,7 +1120,7 @@ function PayloadWorkbench({
                 {tab.badge ? (
                   <span
                     className={cn(
-                      "rounded-sm px-1 py-0.5 text-[10px]",
+                      "text-ui-xs rounded-sm px-1 py-0.5",
                       activeTone
                         ? "bg-background/20 text-background"
                         : "bg-muted/45 text-muted-foreground"
@@ -1136,7 +1138,7 @@ function PayloadWorkbench({
           size="sm"
           variant="outline"
           onClick={onCopyActive}
-          className="h-8 px-2.5 text-[11px]"
+          className="text-ui-xs h-8 px-2.5"
         >
           {copied ? (
             <Check className="size-3.5" />
@@ -1147,7 +1149,7 @@ function PayloadWorkbench({
         </Button>
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border/30 bg-muted/[0.09] px-3 py-1.5 text-[11px] text-muted-foreground">
+      <div className="text-meta flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border/30 bg-muted/[0.09] px-3 py-1.5 text-muted-foreground">
         <span className="font-medium text-foreground">{active.label}</span>
         {active.meta ? <span>{active.meta}</span> : null}
       </div>
@@ -1160,11 +1162,11 @@ function PayloadWorkbench({
             defaultOpenSystem={false}
           />
         ) : active.kind === "text" ? (
-          <pre className="max-h-[min(70vh,740px)] overflow-auto rounded-lg border border-border/40 bg-background px-3 py-3 text-[12px] leading-5 whitespace-pre-wrap text-foreground">
+          <pre className="text-caption max-h-[min(70vh,740px)] overflow-auto rounded-lg border border-border/40 bg-background px-3 py-3 whitespace-pre-wrap text-foreground">
             {payloadCopyText(active.value)}
           </pre>
         ) : (
-          <pre className="max-h-[min(70vh,740px)] overflow-auto rounded-lg border border-border/40 bg-background px-3 py-3 text-[12px] leading-5 text-foreground">
+          <pre className="text-caption max-h-[min(70vh,740px)] overflow-auto rounded-lg border border-border/40 bg-background px-3 py-3 text-foreground">
             {formatJson(active.value)}
           </pre>
         )}
@@ -1175,7 +1177,7 @@ function PayloadWorkbench({
 
 function SummaryBadge({ label, value }: { label: string; value: string }) {
   return (
-    <div className="inline-flex items-center gap-1.5 rounded-md bg-muted/30 px-2.5 py-1 text-[11px]">
+    <div className="text-meta inline-flex items-center gap-1.5 rounded-md bg-muted/30 px-2.5 py-1">
       <span className="text-muted-foreground">{label}</span>
       <span className="font-medium text-foreground">{value}</span>
     </div>
@@ -1220,17 +1222,17 @@ function TraceSummaryBar({ trace }: { trace: TraceRecord }) {
           <SummaryBadge label="Time" value={time} />
         </div>
 
-        <div className="text-[11px] text-muted-foreground">
+        <div className="text-meta text-muted-foreground">
           {trace.provider} · {trace.protocol} · {trace.request_kind} · step{" "}
           {trace.step_index}
         </div>
 
         <Collapsible className="rounded-lg border border-border/35 bg-muted/10 px-3 py-2">
           <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 text-left">
-            <span className="text-[12px] font-medium text-foreground">
+            <span className="text-caption font-medium text-foreground">
               Details
             </span>
-            <span className="text-[11px] text-muted-foreground">
+            <span className="text-meta text-muted-foreground">
               IDs & transport
             </span>
           </CollapsibleTrigger>
@@ -1242,7 +1244,7 @@ function TraceSummaryBar({ trace }: { trace: TraceRecord }) {
                 { label: "Run ID", value: trace.run_id },
               ]}
             />
-            <div className="mt-2 space-y-1 text-[11px] text-muted-foreground">
+            <div className="text-meta mt-2 space-y-1 text-muted-foreground">
               <p>
                 HTTP{" "}
                 {trace.status_code != null ? String(trace.status_code) : "—"}
@@ -1289,7 +1291,7 @@ function ResultSection({ trace }: { trace: TraceRecord }) {
             {trace.response_body ? (
               <>
                 <Separator className="my-3 opacity-40" />
-                <p className="mb-2 text-[11px] font-medium tracking-wide text-destructive/75 uppercase">
+                <p className="workspace-section-label mb-2 text-destructive/75">
                   Upstream response body
                 </p>
                 <TextBlock
@@ -1422,21 +1424,21 @@ export function TraceDetailModal({
         <DialogPopup className="w-[min(1280px,calc(100vw-2rem))] max-w-[1280px]">
           <DialogHeader>
             <div className="min-w-0 space-y-2">
-              <DialogTitle className="text-[15px]">
+              <DialogTitle className="text-title">
                 {trace ? `${trace.model} · payload workbench` : "Trace detail"}
               </DialogTitle>
-              <DialogDescription className="mt-0 text-[12px]">
+              <DialogDescription className="workspace-panel-copy mt-0">
                 Payload-first diagnostics.
               </DialogDescription>
               {trace ? (
-                <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-                  <Badge variant="outline" className="text-[10px]">
+                <div className="text-meta flex flex-wrap items-center gap-1.5">
+                  <Badge variant="outline" className="text-ui-xs">
                     {trace.protocol}
                   </Badge>
                   <Badge
                     variant="outline"
                     className={cn(
-                      "text-[10px]",
+                      "text-ui-xs",
                       trace.status === "failed"
                         ? "border-destructive/40 text-destructive"
                         : "border-border/40 text-muted-foreground"
@@ -1444,7 +1446,7 @@ export function TraceDetailModal({
                   >
                     {trace.status}
                   </Badge>
-                  <Badge variant="outline" className="text-[10px]">
+                  <Badge variant="outline" className="text-ui-xs">
                     step {trace.step_index}
                   </Badge>
                   <span className="text-muted-foreground">
@@ -1471,7 +1473,7 @@ export function TraceDetailModal({
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="h-8 px-2.5 text-[11px]"
+                    className="text-ui-xs h-8 px-2.5"
                     onClick={() => {
                       if (!requestPayload) return
                       void handleCopyPayload(requestPayload.value, "request")
@@ -1488,7 +1490,7 @@ export function TraceDetailModal({
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="h-8 px-2.5 text-[11px]"
+                    className="text-ui-xs h-8 px-2.5"
                     onClick={() => {
                       if (!responsePayload) return
                       void handleCopyPayload(responsePayload.value, "response")

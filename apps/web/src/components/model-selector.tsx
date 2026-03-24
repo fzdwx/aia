@@ -13,6 +13,10 @@ import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat-store"
 import { useSessionSettingsStore } from "@/stores/session-settings-store"
 
+const MODEL_SELECTOR_LABEL =
+  "workspace-section-label px-2.5 pt-2 pb-1 text-muted-foreground/50"
+const MODEL_SELECTOR_ITEM = "text-ui px-2.5 py-1.5"
+
 export function ModelSelector() {
   const providerList = useChatStore((s) => s.providerList)
   const chatState = useChatStore((s) => s.chatState)
@@ -49,11 +53,9 @@ export function ModelSelector() {
       >
         <SelectTrigger
           size="sm"
-          className="h-8 max-w-[240px] border-0 bg-transparent px-2 py-1 text-[11px] leading-[1.2] font-medium text-muted-foreground/90 shadow-none hover:bg-muted/60 hover:text-foreground/80 disabled:opacity-50 [&_svg:not([class*='size-'])]:size-3"
+          className="text-ui h-8 max-w-[240px] border-0 bg-transparent px-2 py-1 font-medium text-muted-foreground/90 shadow-none hover:bg-muted/60 hover:text-foreground/80 disabled:opacity-50 [&_svg:not([class*='size-'])]:size-3"
         >
-          <SelectValue className="text-[11px] leading-[1.15]">
-            {displayLabel}
-          </SelectValue>
+          <SelectValue className="text-ui">{displayLabel}</SelectValue>
         </SelectTrigger>
         <SelectContent
           align="start"
@@ -62,7 +64,7 @@ export function ModelSelector() {
         >
           {providerList.map((provider) => (
             <SelectGroup key={provider.name}>
-              <SelectLabel className="px-2.5 pt-2 pb-1 text-[10px] font-semibold tracking-wider text-muted-foreground/50 uppercase">
+              <SelectLabel className={MODEL_SELECTOR_LABEL}>
                 {provider.name}
               </SelectLabel>
               {provider.models.map((model) => {
@@ -74,7 +76,7 @@ export function ModelSelector() {
                     key={`${provider.name}-${model.id}`}
                     value={`${provider.name}::${model.id}`}
                     className={cn(
-                      "px-2.5 py-1.5 text-[11px]",
+                      MODEL_SELECTOR_ITEM,
                       !isActive && "text-muted-foreground"
                     )}
                   >

@@ -232,19 +232,19 @@ function OverviewSignalStat({
   return (
     <div
       className={cn(
-        "min-w-0 rounded-[16px] border px-3 py-2.5",
+        "min-w-0 rounded-[16px] border px-3 py-2.5 md:px-4 md:py-3",
         tone === "alert"
           ? "border-destructive/28 bg-destructive/[0.06]"
           : "border-border/16 bg-muted/[0.04]"
       )}
     >
-      <p className="text-[10px] tracking-[0.14em] text-muted-foreground uppercase">
+      <p className="text-[11px] tracking-[0.12em] text-muted-foreground uppercase">
         {label}
       </p>
       <p className="mt-1 text-[16px] font-semibold tracking-[-0.03em] text-foreground tabular-nums">
         {value}
       </p>
-      <p className="mt-1 truncate text-[10px] text-muted-foreground">
+      <p className="mt-1 truncate text-[11px] text-muted-foreground">
         {detail}
       </p>
     </div>
@@ -272,8 +272,8 @@ function WorkspaceDrillButton({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[11px] font-medium text-foreground">{title}</p>
-          <p className="mt-0.5 text-[10px] text-muted-foreground">{detail}</p>
+          <p className="text-[12px] font-medium text-foreground">{title}</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">{detail}</p>
         </div>
         <span className="rounded-full border border-border/24 bg-background/70 p-1.5 text-muted-foreground">
           {icon}

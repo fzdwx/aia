@@ -22,6 +22,13 @@ import { cn } from "@/lib/utils"
 import { useChannelsStore } from "@/stores/channels-store"
 import { NEW_PROVIDER_SETTINGS_KEY, useChatStore } from "@/stores/chat-store"
 
+const SETTINGS_META_LABEL_FOREGROUND = "workspace-section-label text-foreground"
+const SETTINGS_PANEL_HELP_TEXT = "workspace-panel-copy"
+const SETTINGS_BADGE =
+  "text-ui-xs rounded-sm border border-border/30 px-1.5 py-0.5 font-medium"
+const SETTINGS_INFO_TEXT = "workspace-meta"
+const SETTINGS_MONO_COUNT = "workspace-code text-muted-foreground"
+
 type ModelFormRow = {
   id: string
   display_name: string
@@ -285,10 +292,10 @@ export function SettingsPanel() {
             <ArrowLeft className="size-3" />
           </button>
           <div className="min-w-0">
-            <h1 className="mt-0.5 text-sm font-semibold tracking-tight">
+            <h1 className="text-ui-xs mt-0.5 font-semibold tracking-tight text-foreground">
               Settings Workbench
             </h1>
-            <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+            <p className="workspace-panel-copy mt-1 text-muted-foreground">
               {workspaceDescription}
             </p>
           </div>
@@ -309,7 +316,7 @@ export function SettingsPanel() {
                   ? "Filter providers by name or protocol"
                   : "Filter channels by label or transport"
               }
-              className="h-9 pl-9 text-[13px]"
+              className="h-8 pl-9"
             />
           </div>
 
@@ -318,7 +325,7 @@ export function SettingsPanel() {
               type="button"
               size="sm"
               onClick={() => selectProviderName(NEW_PROVIDER_SETTINGS_KEY)}
-              className="h-9 px-3"
+              className="text-ui-xs h-8 bg-foreground px-3 tracking-[0.04em] text-background normal-case hover:bg-foreground/92"
             >
               <Plus className="size-3.5" />
               New Provider
@@ -334,16 +341,16 @@ export function SettingsPanel() {
               <div className="shrink-0 border-b border-border/25 px-3 py-2.5">
                 <div className="flex items-center justify-between gap-2">
                   <div>
-                    <p className="text-[11px] font-medium tracking-[0.12em] text-foreground uppercase">
+                    <p className={SETTINGS_META_LABEL_FOREGROUND}>
                       {isProvidersSection ? "Registry" : "Channel Catalog"}
                     </p>
-                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                    <p className={`mt-0.5 ${SETTINGS_PANEL_HELP_TEXT}`}>
                       {isProvidersSection
                         ? "按可用性与连接信息快速判断目标 Provider"
                         : "按接入状态与字段规模判断下一步配置成本"}
                     </p>
                   </div>
-                  <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
+                  <span className={SETTINGS_MONO_COUNT}>
                     {isProvidersSection
                       ? filteredProviders.length
                       : filteredChannels.length}
@@ -352,10 +359,10 @@ export function SettingsPanel() {
               </div>
 
               <div className="min-h-0 flex-1 overflow-y-auto p-2.5">
-                <div className="space-y-1">
+                <div className="space-y-1.5">
                   {isProvidersSection ? (
                     filteredProviders.length === 0 ? (
-                      <p className="px-3 py-4 text-[12px] text-muted-foreground">
+                      <p className="workspace-panel-copy px-3 py-4 text-muted-foreground">
                         {providerList.length === 0 && !normalizedItemQuery
                           ? "No providers yet. Start with New Provider in the top-right corner."
                           : "No matches found. Try filtering by name or protocol."}
@@ -374,7 +381,7 @@ export function SettingsPanel() {
                               selectProviderName(providerItem.name)
                             }
                             className={cn(
-                              "flex w-full flex-col gap-1 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                              "flex w-full flex-col gap-1.5 rounded-lg border px-3 py-3 text-left transition-colors",
                               isActive
                                 ? "border-border/55 bg-muted/65 text-foreground"
                                 : "border-transparent text-muted-foreground hover:border-border/30 hover:bg-muted/45 hover:text-foreground"
@@ -383,25 +390,27 @@ export function SettingsPanel() {
                           >
                             <span className="flex items-start justify-between gap-2">
                               <span className="min-w-0">
-                                <span className="block truncate text-[12px] font-medium">
+                                <span className="text-ui-sm block truncate font-medium tracking-[0.01em] text-foreground">
                                   {providerItem.name}
                                 </span>
-                                <span className="mt-0.5 block truncate text-[11px] text-muted-foreground/90">
+                                <span
+                                  className={`mt-0.5 block ${SETTINGS_INFO_TEXT}`}
+                                >
                                   {providerHost(providerItem.base_url)}
                                 </span>
                               </span>
                               <span
                                 className={cn(
-                                  "mt-0.5 rounded-sm border px-1.5 py-0.5 text-[10px] font-medium",
+                                  SETTINGS_BADGE,
                                   providerItem.active
                                     ? "border-border/40 bg-muted/55 text-foreground/80"
-                                    : "border-border/30 text-muted-foreground"
+                                    : "text-muted-foreground"
                                 )}
                               >
                                 {providerItem.active ? "in use" : "standby"}
                               </span>
                             </span>
-                            <span className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground/85">
+                            <span className="text-ui-xs flex flex-wrap items-center gap-1.5 text-muted-foreground/85">
                               <span className="rounded-sm border border-border/30 px-1.5 py-0.5">
                                 {providerProtocolLabel(providerItem.kind)}
                               </span>
@@ -415,11 +424,11 @@ export function SettingsPanel() {
                       })
                     )
                   ) : channelsLoading && supportedChannels.length === 0 ? (
-                    <p className="px-3 py-4 text-[12px] text-muted-foreground">
+                    <p className="workspace-panel-copy px-3 py-4 text-muted-foreground">
                       Loading channel transports...
                     </p>
                   ) : filteredChannels.length === 0 ? (
-                    <p className="px-3 py-4 text-[12px] text-muted-foreground">
+                    <p className="workspace-panel-copy px-3 py-4 text-muted-foreground">
                       {supportedChannels.length === 0 && !normalizedItemQuery
                         ? "The server has not returned any configurable channels yet."
                         : "No matches found. Try filtering by transport or label."}
@@ -439,7 +448,7 @@ export function SettingsPanel() {
                           type="button"
                           onClick={() => selectTransport(channel.transport)}
                           className={cn(
-                            "flex w-full flex-col gap-1 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                            "flex w-full flex-col gap-1.5 rounded-lg border px-3 py-3 text-left transition-colors",
                             isActive
                               ? "border-border/55 bg-muted/65 text-foreground"
                               : "border-transparent text-muted-foreground hover:border-border/30 hover:bg-muted/45 hover:text-foreground"
@@ -448,21 +457,21 @@ export function SettingsPanel() {
                         >
                           <span className="flex items-start justify-between gap-2">
                             <span className="min-w-0">
-                              <span className="block truncate text-[12px] font-medium">
+                              <span className="text-ui-sm block truncate font-medium tracking-[0.01em] text-foreground">
                                 {channel.label}
                               </span>
-                              <span className="mt-0.5 block truncate text-[11px] text-muted-foreground/90">
+                              <span className="workspace-meta mt-0.5 block truncate text-muted-foreground/90">
                                 {channel.transport}
                               </span>
                             </span>
                             <span
                               className={cn(
-                                "mt-0.5 rounded-sm border px-1.5 py-0.5 text-[10px] font-medium",
+                                SETTINGS_BADGE,
                                 configured?.enabled
                                   ? "border-border/40 bg-muted/55 text-foreground/80"
                                   : configured
                                     ? "border-amber-500/40 bg-amber-500/10 text-amber-600"
-                                    : "border-border/30 text-muted-foreground"
+                                    : "text-muted-foreground"
                               )}
                             >
                               {configured
@@ -472,7 +481,7 @@ export function SettingsPanel() {
                                 : "setup"}
                             </span>
                           </span>
-                          <span className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground/85">
+                          <span className="text-ui-xs flex flex-wrap items-center gap-1.5 text-muted-foreground/85">
                             <span className="rounded-sm border border-border/30 px-1.5 py-0.5 tabular-nums">
                               {fieldCount} field{fieldCount === 1 ? "" : "s"}
                             </span>
@@ -495,25 +504,25 @@ export function SettingsPanel() {
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <h2 className="truncate text-[15px] font-semibold">
+                          <h2 className="text-ui-xs truncate font-semibold text-foreground">
                             {selectedProvider
                               ? selectedProvider.name
                               : "新建 Provider"}
                           </h2>
-                          <Badge variant="outline" className="text-[10px]">
+                          <Badge variant="outline" className="text-ui-xs">
                             {selectedProvider
                               ? selectedProvider.active
                                 ? "in use"
                                 : "standby"
                               : "draft"}
                           </Badge>
-                          <Badge variant="outline" className="text-[10px]">
+                          <Badge variant="outline" className="text-ui-xs">
                             {selectedProvider
                               ? providerProtocolLabel(selectedProvider.kind)
                               : providerProtocolLabel(kind)}
                           </Badge>
                         </div>
-                        <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                        <p className="workspace-panel-copy mt-1 text-muted-foreground">
                           {selectedProvider
                             ? `Host ${providerHost(selectedProvider.base_url)} · ${selectedProvider.models.length} models registered.`
                             : "Submit the connection settings to register this provider and make it available to sessions immediately."}
@@ -542,10 +551,10 @@ export function SettingsPanel() {
                     <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
                       <section className="rounded-xl border border-border/30 bg-card/70 p-3">
                         <div className="mb-2.5">
-                          <p className="text-[11px] font-medium tracking-[0.12em] text-foreground uppercase">
+                          <p className="workspace-section-label text-foreground">
                             Connection
                           </p>
-                          <p className="mt-1 text-[11px] text-muted-foreground">
+                          <p className="workspace-panel-copy mt-1 text-muted-foreground">
                             Name is the registry key and must be unique.
                             Protocol controls request mapping.
                           </p>
@@ -564,7 +573,7 @@ export function SettingsPanel() {
                               value={name}
                               onChange={(event) => setName(event.target.value)}
                               placeholder="e.g. openai-main"
-                              className="h-9 text-[13px]"
+                              className="h-8"
                               disabled={selectedProvider != null}
                             />
                           </div>
@@ -584,7 +593,7 @@ export function SettingsPanel() {
                               <SelectTrigger
                                 id={providerProtocolInputId}
                                 aria-labelledby={providerProtocolLabelId}
-                                className="h-9 w-full text-[13px]"
+                                className="h-8 w-full"
                               >
                                 <SelectValue />
                               </SelectTrigger>
@@ -603,10 +612,10 @@ export function SettingsPanel() {
 
                       <section className="rounded-xl border border-border/30 bg-card/70 p-3">
                         <div className="mb-2.5">
-                          <p className="text-[11px] font-medium tracking-[0.12em] text-foreground uppercase">
+                          <p className="workspace-section-label text-foreground">
                             Authentication
                           </p>
-                          <p className="mt-1 text-[11px] text-muted-foreground">
+                          <p className="workspace-panel-copy mt-1 text-muted-foreground">
                             Required when creating a provider. Leave it blank
                             while editing to keep the current key.
                           </p>
@@ -626,7 +635,7 @@ export function SettingsPanel() {
                               onChange={(event) =>
                                 setBaseUrl(event.target.value)
                               }
-                              className="h-9 text-[13px]"
+                              className="h-8"
                             />
                             <p className="workspace-form-note">
                               This URL defines the request host and path prefix,
@@ -662,7 +671,7 @@ export function SettingsPanel() {
                                   ? providerApiKeyHintId
                                   : undefined
                               }
-                              className="h-9 text-[13px]"
+                              className="h-8"
                             />
                           </div>
                         </div>
@@ -671,10 +680,10 @@ export function SettingsPanel() {
                       <section className="rounded-xl border border-border/30 bg-card/70 p-3">
                         <div className="mb-2.5 flex flex-wrap items-start justify-between gap-2">
                           <div>
-                            <p className="text-[11px] font-medium tracking-[0.12em] text-foreground uppercase">
+                            <p className="workspace-section-label text-foreground">
                               Model Catalog
                             </p>
-                            <p className="mt-1 text-[11px] text-muted-foreground">
+                            <p className="workspace-panel-copy mt-1 text-muted-foreground">
                               At least one valid Model ID is required. Context
                               and output limits fall back to backend defaults
                               when left blank.
@@ -682,7 +691,7 @@ export function SettingsPanel() {
                           </div>
 
                           <div className="flex items-center gap-2">
-                            <span className="rounded-sm border border-border/30 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground tabular-nums">
+                            <span className="workspace-code rounded-sm border border-border/30 px-1.5 py-0.5 text-muted-foreground">
                               {modelRowsWithId.length} active
                             </span>
                             <Button
@@ -702,7 +711,7 @@ export function SettingsPanel() {
 
                         <div className="overflow-x-auto rounded-lg border border-border/25">
                           <div className="min-w-[840px]">
-                            <div className="grid grid-cols-[minmax(220px,2fr)_minmax(170px,1.4fr)_110px_110px_120px_44px] gap-2 border-b border-border/20 bg-muted/[0.12] px-2.5 py-2 text-[10px] font-medium tracking-[0.08em] text-muted-foreground uppercase">
+                            <div className="workspace-section-label grid grid-cols-[minmax(220px,2fr)_minmax(170px,1.4fr)_110px_110px_120px_44px] gap-2 border-b border-border/20 bg-muted/[0.12] px-2.5 py-2 text-muted-foreground">
                               <span>Model ID</span>
                               <span>Display Name</span>
                               <span>Context</span>
@@ -726,7 +735,7 @@ export function SettingsPanel() {
                                       })
                                     }
                                     placeholder="gpt-5.4"
-                                    className="h-9 text-[12px]"
+                                    className="h-8"
                                     aria-label={`Model ${index + 1} ID`}
                                   />
 
@@ -739,7 +748,7 @@ export function SettingsPanel() {
                                       })
                                     }
                                     placeholder="Optional display name"
-                                    className="h-9 text-[12px]"
+                                    className="h-8"
                                     aria-label={`Model ${index + 1} display name`}
                                   />
 
@@ -752,7 +761,7 @@ export function SettingsPanel() {
                                       })
                                     }
                                     placeholder="ctx"
-                                    className="h-9 text-[12px]"
+                                    className="h-8"
                                     inputMode="numeric"
                                     aria-label={`Model ${index + 1} context limit`}
                                   />
@@ -766,7 +775,7 @@ export function SettingsPanel() {
                                       })
                                     }
                                     placeholder="out"
-                                    className="h-9 text-[12px]"
+                                    className="h-8"
                                     inputMode="numeric"
                                     aria-label={`Model ${index + 1} output limit`}
                                   />
@@ -804,7 +813,7 @@ export function SettingsPanel() {
                           </div>
                         </div>
 
-                        <p className="mt-2 text-[11px] text-muted-foreground">
+                        <p className="workspace-meta mt-2 text-muted-foreground">
                           The Reasoning switch indicates whether this model
                           supports session-level thinking controls.
                         </p>
@@ -813,7 +822,7 @@ export function SettingsPanel() {
 
                     <div className="shrink-0 border-t border-border/20 px-3 py-2.5">
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <p className="text-[11px] text-muted-foreground">
+                        <p className="workspace-meta text-muted-foreground">
                           {!hasValidModel
                             ? "Enter at least one Model ID before saving."
                             : selectedProvider
