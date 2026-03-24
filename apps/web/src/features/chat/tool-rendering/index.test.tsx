@@ -369,6 +369,8 @@ describe("tool renderer registry", () => {
     })
 
     const html = renderToStaticMarkup(<>{details}</>)
+    expect(html).toContain('data-diff-view="unified"')
+    expect(html).toContain('data-diff-line-kind="hunk"')
     expect(html).toContain("-old value")
     expect(html).toContain("-line 2")
     expect(html).toContain("+new value")
@@ -394,6 +396,7 @@ describe("tool renderer registry", () => {
     })
 
     const html = renderToStaticMarkup(<>{details}</>)
+    expect(html).toContain('data-diff-view="unified"')
     expect(html).toContain("@@")
     expect(html).toContain("-old value")
     expect(html).toContain("+newer value")
@@ -442,7 +445,7 @@ describe("tool renderer registry", () => {
     expect(title).toBe("Run runtime crate checks")
   })
 
-  test("renders shell tool details with command block and result", () => {
+  test("renders shell tool details with command block only", () => {
     const details = toolRendererRegistry.renderDetails({
       toolName: "Shell",
       arguments: {
@@ -459,11 +462,11 @@ describe("tool renderer registry", () => {
 
     const html = renderToStaticMarkup(<>{details}</>)
     expect(html).toContain("$ cargo check -p agent-runtime")
-    expect(html).toContain("Result")
-    expect(html).toContain("Finished dev [unoptimized] target(s)")
+    expect(html).not.toContain("Result")
+    expect(html).not.toContain("Finished dev [unoptimized] target(s)")
   })
 
-  test("renders shell tool details with mixed stdout and stderr streams", () => {
+  test("renders shell tool details without stdout or stderr regions", () => {
     const details = toolRendererRegistry.renderDetails({
       toolName: "Shell",
       arguments: {
@@ -480,10 +483,10 @@ describe("tool renderer registry", () => {
 
     const html = renderToStaticMarkup(<>{details}</>)
     expect(html).toContain("$ cargo check -p agent-runtime")
-    expect(html).toContain("Result")
-    expect(html).toContain("warning summary")
-    expect(html).toContain("Failure")
-    expect(html).toContain("warning: unused import")
+    expect(html).not.toContain("Result")
+    expect(html).not.toContain("warning summary")
+    expect(html).not.toContain("Failure")
+    expect(html).not.toContain("warning: unused import")
   })
 
   test("renders apply_patch title from first patch operation", () => {
@@ -540,6 +543,8 @@ describe("tool renderer registry", () => {
     })
 
     const html = renderToStaticMarkup(<>{details}</>)
+    expect(html).toContain('data-diff-view="unified"')
+    expect(html).toContain('data-diff-line-kind="added"')
     expect(html).toContain("first line")
     expect(html).toContain("second line")
     expect(html).not.toContain("Wrote 28 bytes to apps/web/src/index.css")
@@ -577,9 +582,12 @@ describe("tool renderer registry", () => {
     })
 
     const html = renderToStaticMarkup(<>{details}</>)
-    expect(html).toContain("*** Begin Patch")
+    expect(html).toContain('data-diff-view="unified"')
+    expect(html).toContain('data-diff-line-kind="meta"')
+    expect(html).toContain("*** Update File")
     expect(html).not.toContain("tool-timeline-detail-title")
     expect(html).not.toContain('data-tool-detail-kind="patch"')
+    expect(html).not.toContain("*** Begin Patch")
   })
 
   test("renders question tool summary and ignored semantics", () => {
@@ -673,6 +681,8 @@ describe("tool renderer registry", () => {
     expect(source).toContain("toolTimelineCopy.action.expand")
     expect(source).toContain("toolTimelineCopy.action.collapse")
     expect(source).toContain("toolTimelineCopy.section.content")
+    expect(source).toContain('data-diff-view="unified"')
+    expect(source).toContain("data-diff-line-kind")
     expect(source).not.toContain('"Collapse"')
     expect(source).not.toContain('"Expand"')
     expect(source).not.toContain('"JSON"')

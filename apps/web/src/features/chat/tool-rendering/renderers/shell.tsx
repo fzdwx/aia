@@ -4,7 +4,7 @@ import { toolTimelineCopy } from "../../tool-timeline-copy"
 
 import type { ToolRenderer } from "../types"
 import { getStringValue, truncateInline } from "../helpers"
-import { ExpandableOutput, ToolDetailSection } from "../ui"
+import { ExpandableOutput } from "../ui"
 
 export function createShellRenderer(): ToolRenderer {
   return {
@@ -28,51 +28,19 @@ export function createShellRenderer(): ToolRenderer {
       const command =
         getStringValue(data.details, "command") ??
         getStringValue(args, "command", "cmd")
-      const stdout = getStringValue(data.details, "stdout")
-      const stderr = getStringValue(data.details, "stderr")
-      const fallbackContent =
-        !stdout && !stderr && data.outputContent ? data.outputContent : null
 
-      if (!command && !stdout && !stderr && !fallbackContent) return null
+      if (!command) return null
 
       return (
-        <>
-          {command ? (
-            <section
-              className="tool-timeline-detail-section"
-              data-tool-detail-kind="content"
-              data-tool-detail-tone="output"
-            >
-              <div className="tool-timeline-detail-body">
-                <ExpandableOutput value={`$ ${command}`} failed={false} />
-              </div>
-            </section>
-          ) : null}
-          {stdout ? (
-            <ToolDetailSection title={toolTimelineCopy.section.result}>
-              <ExpandableOutput value={stdout} failed={false} />
-            </ToolDetailSection>
-          ) : null}
-          {stderr ? (
-            <ToolDetailSection title={toolTimelineCopy.section.failure}>
-              <ExpandableOutput value={stderr} failed />
-            </ToolDetailSection>
-          ) : null}
-          {fallbackContent ? (
-            <ToolDetailSection
-              title={
-                data.succeeded
-                  ? toolTimelineCopy.section.result
-                  : toolTimelineCopy.section.failure
-              }
-            >
-              <ExpandableOutput
-                value={fallbackContent}
-                failed={!data.succeeded}
-              />
-            </ToolDetailSection>
-          ) : null}
-        </>
+        <section
+          className="tool-timeline-detail-section"
+          data-tool-detail-kind="content"
+          data-tool-detail-tone="output"
+        >
+          <div className="tool-timeline-detail-body">
+            <ExpandableOutput value={`$ ${command}`} failed={false} />
+          </div>
+        </section>
       )
     },
   }
