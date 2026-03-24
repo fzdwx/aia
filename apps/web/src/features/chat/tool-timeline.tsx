@@ -1,5 +1,4 @@
-import { ChevronDown, ChevronRight } from "lucide-react"
-import { memo, useEffect, useState } from "react"
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { AnimatePresence, motion } from "motion/react"
 
 import { TextShimmer } from "@/components/ai-elements/text-shimmer"
@@ -37,7 +36,7 @@ const TOOL_DETAILS_TRANSITION = {
   opacity: { duration: 0.12, ease: "linear" },
 } as const
 const INLINE_DETAIL_TOOLS = new Set<string>()
-const CARETLESS_EXPANDABLE_TOOLS = new Set(["Edit", "Write", "ApplyPatch"])
+const FLAT_DETAIL_SURFACE_TOOLS = new Set(["Edit", "Write", "ApplyPatch"])
 const OMITTED_ARGUMENT_KEYS = new Set([
   "content",
   "patch",
@@ -237,14 +236,12 @@ function shouldInlineToolDetails(item: ToolRowItem) {
   return INLINE_DETAIL_TOOLS.has(normalizeToolName(item.toolName))
 }
 
-function shouldShowToolRowCaret(item: ToolRowItem, hasDetails: boolean) {
-  if (!hasDetails) return false
-  return !CARETLESS_EXPANDABLE_TOOLS.has(normalizeToolName(item.toolName))
+function shouldShowToolRowCaret() {
+  return false
 }
 
 function renderToolDetailsPanel(item: ToolRowItem) {
   const normalizedToolName = normalizeToolName(item.toolName)
-  const detailsFirst = normalizedToolName === "Shell"
   const requestOmitKeys =
     normalizedToolName === "Shell"
       ? new Set([...OMITTED_ARGUMENT_KEYS, "command", "description"])
@@ -264,11 +261,25 @@ function renderToolDetailsPanel(item: ToolRowItem) {
     omitKeys: OMITTED_DETAIL_KEYS,
   })
 
+  if (normalizedToolName === "Shell") {
+    if (detailsContent == null) return null
+
+    return (
+      <ToolDetailSurface className="tool-timeline-detail-surface-flat">
+        {detailsContent}
+      </ToolDetailSurface>
+    )
+  }
+
   if (
-    CARETLESS_EXPANDABLE_TOOLS.has(normalizeToolName(item.toolName)) &&
+    FLAT_DETAIL_SURFACE_TOOLS.has(normalizeToolName(item.toolName)) &&
     detailsContent != null
   ) {
-    return <ToolDetailSurface>{detailsContent}</ToolDetailSurface>
+    return (
+      <ToolDetailSurface className="tool-timeline-detail-surface-flat">
+        {detailsContent}
+      </ToolDetailSurface>
+    )
   }
 
   if (
@@ -281,7 +292,6 @@ function renderToolDetailsPanel(item: ToolRowItem) {
 
   return (
     <ToolDetailSurface>
-      {detailsFirst && detailsContent ? detailsContent : null}
       {requestEntries.length > 0 ? (
         <ToolInfoSection
           title={toolTimelineCopy.section.request}
@@ -299,7 +309,7 @@ function renderToolDetailsPanel(item: ToolRowItem) {
           <DetailList entries={resultEntries} />
         </ToolInfoSection>
       ) : null}
-      {!detailsFirst && detailsContent ? detailsContent : null}
+      {detailsContent ? detailsContent : null}
     </ToolDetailSurface>
   )
 }
@@ -323,7 +333,6 @@ function ToolRow({ item }: { item: ToolRowItem }) {
     : null
   const detailsContent = inlineDetails ? null : renderToolDetailsPanel(item)
   const hasDetails = detailsContent != null
-  const showCaret = shouldShowToolRowCaret(item, hasDetails)
   const detailsId = `tool-details-${item.id}`
 
   return (
@@ -338,6 +347,7 @@ function ToolRow({ item }: { item: ToolRowItem }) {
         aria-controls={hasDetails ? detailsId : undefined}
         aria-disabled={!hasDetails}
         data-expandable={hasDetails}
+        data-show-caret={shouldShowToolRowCaret() || undefined}
         data-component="tool-row-trigger"
         className={cn(
           "focus-visible:outline-none",
@@ -348,15 +358,6 @@ function ToolRow({ item }: { item: ToolRowItem }) {
           <div data-slot="tool-row-main">
             <ToolTrigger item={item} duration={duration} />
           </div>
-          {showCaret ? (
-            <span data-slot="tool-row-caret">
-              {showDetails ? (
-                <ChevronDown className="size-3.5" />
-              ) : (
-                <ChevronRight className="size-3.5" />
-              )}
-            </span>
-          ) : null}
         </div>
       </button>
       {inlineDetails ? (
@@ -397,6 +398,34 @@ function ContextToolTriggerRow({ item }: { item: ToolRowItem }) {
         </span>
       ))}
     </div>
+  )
+}
+
+function ContextToolGroupList({ items }: { items: ToolRowItem[] }) {
+  const contentRef = useRef<HTMLDivElement | null>(null)
+  const [height, setHeight] = useState(0)
+
+  useLayoutEffect(() => {
+    const nextHeight = contentRef.current?.scrollHeight ?? 0
+    setHeight(nextHeight)
+  }, [items])
+
+  return (
+    <motion.div
+      key="list"
+      data-component="context-tool-group-list"
+      initial={{ height: 0, opacity: 0 }}
+      animate={{ height, opacity: 1 }}
+      exit={{ height: 0, opacity: 0 }}
+      transition={TOOL_DETAILS_TRANSITION}
+      style={{ overflow: "hidden" }}
+    >
+      <div ref={contentRef} data-slot="context-tool-group-list-inner">
+        {items.map((item) => (
+          <ContextToolTriggerRow key={item.id} item={item} />
+        ))}
+      </div>
+    </motion.div>
   )
 }
 
@@ -489,34 +518,17 @@ export function ToolGroup({
             activeText={toolTimelineCopy.groupStatus.running}
             doneText={toolTimelineCopy.groupStatus.completed}
           />
-          {!open ? <AnimatedCountList items={countItems} /> : null}
-          <span data-slot="context-group-caret">
-            {open ? (
-              <ChevronDown className="size-3" />
-            ) : (
-              <ChevronRight className="size-3" />
-            )}
+          <span
+            data-slot="context-group-counts-shell"
+            data-state={open ? "hidden" : "visible"}
+            aria-hidden={open}
+          >
+            <AnimatedCountList items={countItems} />
           </span>
         </button>
       )}
       <AnimatePresence initial={false}>
-        {open && (
-          <motion.div
-            key="list"
-            data-component="context-tool-group-list"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={TOOL_DETAILS_TRANSITION}
-            style={{ overflow: "hidden" }}
-          >
-            <div data-slot="context-tool-group-list-inner">
-              {visibleItems.map((item) => (
-                <ContextToolTriggerRow key={item.id} item={item} />
-              ))}
-            </div>
-          </motion.div>
-        )}
+        {open && <ContextToolGroupList items={visibleItems} />}
       </AnimatePresence>
     </div>
   )

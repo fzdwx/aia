@@ -163,6 +163,7 @@ describe("tool timeline", () => {
     expect(html).toContain("1 read")
     expect(html).toContain("1 search")
     expect(html).toContain("1 list")
+    expect(html).not.toContain('data-slot="context-group-caret"')
     expect(html).not.toContain("Running")
   })
 
@@ -220,6 +221,7 @@ describe("tool timeline", () => {
 
     expect(completedHtml).toContain("Shell")
     expect(completedHtml).toContain("Run workspace checks")
+    expect(completedHtml).not.toContain('data-slot="tool-row-caret"')
     expect(completedHtml).not.toContain("Explored")
     expect(completedHtml).not.toContain("Exploring")
 
@@ -344,22 +346,28 @@ describe("tool timeline", () => {
     expect(source).toContain('data-component="context-tool-group-trigger"')
     expect(source).toContain("setOpen((current) => !current)")
     expect(source).toContain('status="running"')
+    expect(source).toContain('data-slot="context-group-counts-shell"')
+    expect(source).toContain('data-state={open ? "hidden" : "visible"}')
+    expect(source).toContain("function ContextToolGroupList(")
+    expect(source).toContain(
+      "const contentRef = useRef<HTMLDivElement | null>(null)"
+    )
+    expect(source).toContain("const [height, setHeight] = useState(0)")
+    expect(source).toContain(
+      "const nextHeight = contentRef.current?.scrollHeight ?? 0"
+    )
+    expect(source).toContain("animate={{ height, opacity: 1 }}")
   })
 
-  test("prioritizes shell command details before generic request and result fields", () => {
+  test("renders shell details on the flat path without generic request or result sections", () => {
     const source = loadToolTimelineSource()
 
+    expect(source).toContain('if (normalizedToolName === "Shell")')
     expect(source).toContain(
+      '<ToolDetailSurface className="tool-timeline-detail-surface-flat">'
+    )
+    expect(source).not.toContain(
       'const detailsFirst = normalizedToolName === "Shell"'
-    )
-    expect(source).toContain(
-      "{detailsFirst && detailsContent ? detailsContent : null}"
-    )
-    expect(source).toContain(
-      "{!detailsFirst && detailsContent ? detailsContent : null}"
-    )
-    expect(source).toContain(
-      'new Set([...OMITTED_ARGUMENT_KEYS, "command", "description"])'
     )
   })
 
@@ -406,10 +414,42 @@ describe("tool timeline", () => {
     expect(html).not.toContain('data-slot="tool-row-inline-details"')
   })
 
-  test("renders write and apply_patch as caretless expandable rows", () => {
+  test("renders tool rows as expandable rows without a caret icon", () => {
     const html = renderWithTheme(
       <ToolGroup
         items={[
+          {
+            id: "tool-shell-caretless-1",
+            toolName: "Shell",
+            arguments: {
+              command: "cargo check",
+              description: "Run workspace checks",
+            },
+            startedAtMs: 80,
+            finishedAtMs: 99,
+            succeeded: true,
+            outputContent: "ok",
+            details: {
+              command: "cargo check",
+              stdout: "ok",
+            },
+          },
+          {
+            id: "tool-edit-caretless-1",
+            toolName: "Edit",
+            arguments: {
+              file_path: "apps/web/src/index.css",
+            },
+            startedAtMs: 99,
+            finishedAtMs: 100,
+            succeeded: true,
+            outputContent: "@@\n-old\n+new",
+            details: {
+              added: 1,
+              removed: 1,
+              diff: "@@\n-old\n+new",
+            },
+          },
           {
             id: "tool-write-1",
             toolName: "Write",
@@ -450,26 +490,19 @@ describe("tool timeline", () => {
     expect(html).not.toContain('data-slot="tool-row-inline-details"')
   })
 
-  test("keeps edit write and apply_patch on the caretless expandable path", () => {
+  test("keeps all tool rows on the caretless expandable path", () => {
     const source = loadToolTimelineSource()
 
     expect(source).toContain("const INLINE_DETAIL_TOOLS = new Set<string>()")
-    expect(source).toContain(
-      'const CARETLESS_EXPANDABLE_TOOLS = new Set(["Edit", "Write", "ApplyPatch"])'
-    )
-    expect(source).toContain("shouldShowToolRowCaret(item, hasDetails)")
-    expect(source).toContain(
-      "CARETLESS_EXPANDABLE_TOOLS.has(normalizeToolName(item.toolName))"
-    )
+    expect(source).toContain("function shouldShowToolRowCaret()")
+    expect(source).toContain("return false")
   })
 
-  test("treats caret icons as decorative so expansion stays on the row trigger", () => {
+  test("does not render caret containers for tool rows or context groups", () => {
     const source = loadToolTimelineSource()
 
-    expect(source).toContain('data-slot="tool-row-caret"')
-    expect(source).toContain('data-slot="context-group-caret"')
-    expect(source).toContain('aria-hidden="true"')
-    expect(source).toContain('className="pointer-events-none"')
+    expect(source).not.toContain('data-slot="tool-row-caret"')
+    expect(source).not.toContain('data-slot="context-group-caret"')
   })
 
   test("renders semantic containers for output, failure, and patch sections", () => {
