@@ -202,15 +202,18 @@ function ThinkingBlock({
         type="button"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className="text-body-sm flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
+        className="text-body-sm leading-body-sm flex w-full items-baseline gap-2 text-left"
       >
         {isStreaming ? (
-          <span className="font-semibold">Thinking</span>
+          <span data-slot="tool-title">Thinking</span>
         ) : (
           <>
-            <span className="font-semibold">Thought</span>
+            <span data-slot="tool-title">Thought</span>
             {!open && lastLine && (
-              <span className="ml-1 max-w-[400px] truncate text-muted-foreground/50">
+              <span
+                data-slot="tool-subtitle"
+                className="max-w-[400px] truncate"
+              >
                 {lastLine}
               </span>
             )}

@@ -674,9 +674,12 @@ body {
   }
 
   [data-slot="context-group-counts"] {
+    min-width: 0;
     font-weight: 400;
-    font-size: var(--font-size-ui);
-    color: var(--text-weak);
+    font-size: var(--font-size-body-sm);
+    line-height: var(--font-line-height-body-sm);
+    color: oklch(from var(--muted-foreground) l c h / 0.5);
+    white-space: nowrap;
   }
 
   [data-slot="context-group-caret"] {
@@ -721,6 +724,8 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-size: var(--font-size-title);
+    line-height: var(--font-line-height-title);
     font-weight: 600;
     color: var(--text-strong);
   }
@@ -730,6 +735,8 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-size: var(--font-size-title);
+    line-height: var(--font-line-height-title);
     font-weight: 400;
     color: oklch(from var(--muted-foreground) l c h / 0.5);
     flex: 1 1 0;

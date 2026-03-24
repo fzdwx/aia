@@ -247,7 +247,9 @@ describe("chat message status surfaces", () => {
       />
     )
 
-    expect(html).toContain("text-body-sm flex items-center")
+    expect(html).toContain(
+      "text-body-sm leading-body-sm flex w-full items-baseline"
+    )
     expect(html).toContain("text-body-sm leading-body-sm")
     expect(html).not.toContain("text-[13px]")
   })
@@ -365,11 +367,9 @@ describe("chat message status surfaces", () => {
     )
 
     expect(html).toContain(
-      "text-caption mb-3 rounded-lg border border-destructive/30"
+      "text-caption rounded-lg border border-destructive/30"
     )
-    expect(html).toContain(
-      "text-caption mb-3 rounded-lg border border-border/40"
-    )
+    expect(html).toContain("text-caption rounded-lg border border-border/40")
     expect(html).not.toContain("text-[13px]")
   })
 
