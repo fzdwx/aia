@@ -669,7 +669,7 @@ body {
   }
 
   button[data-component="context-tool-group-trigger"] {
-    cursor: pointer;
+    cursor: default;
   }
 
   [data-component="context-tool-group-trigger"] > [class*="animate-pulse"] {
@@ -685,6 +685,17 @@ body {
     white-space: nowrap;
   }
 
+  [data-slot="context-group-counts-shell"] {
+    min-width: 0;
+    opacity: 1;
+    transition: opacity 150ms ease;
+  }
+
+  [data-slot="context-group-counts-shell"][data-state="hidden"] {
+    visibility: hidden;
+    opacity: 0;
+  }
+
   [data-slot="context-group-caret"] {
     margin-left: auto;
     align-self: center;
@@ -692,13 +703,14 @@ body {
   }
 
   [data-component="context-tool-group-list"] {
-    padding-top: 0.375rem;
+    padding-top: 0;
   }
 
   [data-slot="context-tool-group-list-inner"] {
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
+    padding-top: 0.375rem;
   }
 
   /* Tool trigger — inline layout */
@@ -753,6 +765,7 @@ body {
     flex: none;
     font-size: var(--font-size-meta);
     line-height: var(--font-line-height-meta);
+    color: oklch(from var(--muted-foreground) l c h / 0.5);
   }
 
   [data-slot="tool-subtitle"][data-state="failure"] {
@@ -791,6 +804,7 @@ body {
     padding: 0;
     text-align: left;
     color: inherit;
+    cursor: default;
     transition: color 150ms ease;
   }
 
@@ -836,6 +850,145 @@ body {
     padding-left: 0.875rem;
   }
 
+  .tool-timeline-detail-surface-flat {
+    border-left: 0;
+    padding-left: 0;
+  }
+
+  .tool-timeline-patch-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin-top: 0.375rem;
+  }
+
+  .tool-timeline-patch-item {
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .tool-timeline-patch-item + .tool-timeline-patch-item {
+    margin-top: -1px;
+  }
+
+  .tool-timeline-patch-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    min-height: 2rem;
+    padding: 0.5rem 0.75rem;
+    cursor: pointer;
+    list-style: none;
+    border: 1px solid color-mix(in oklch, var(--border) 58%, transparent);
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .tool-timeline-patch-summary:hover {
+    background: transparent;
+  }
+
+  .tool-timeline-patch-item:first-child .tool-timeline-patch-summary {
+    border-top-left-radius: 0.875rem;
+    border-top-right-radius: 0.875rem;
+  }
+
+  .tool-timeline-patch-item:not([open]):last-child
+    .tool-timeline-patch-summary {
+    border-bottom-left-radius: 0.875rem;
+    border-bottom-right-radius: 0.875rem;
+  }
+
+  .tool-timeline-patch-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .tool-timeline-patch-path {
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    overflow: hidden;
+    white-space: nowrap;
+    font-size: var(--font-size-meta);
+    line-height: var(--font-line-height-meta);
+  }
+
+  .tool-timeline-patch-directory {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    direction: rtl;
+    text-align: left;
+    color: var(--text-weak);
+  }
+
+  .tool-timeline-patch-filename {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-strong);
+  }
+
+  .tool-timeline-patch-stats {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex: none;
+    font-family: var(--font-mono);
+    font-size: var(--font-size-meta);
+    line-height: var(--font-line-height-meta);
+  }
+
+  .tool-timeline-patch-summary-meta {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.625rem;
+    flex: none;
+  }
+
+  .tool-timeline-patch-stat-add {
+    color: color-mix(in oklch, oklch(0.82 0.11 155) 84%, var(--text-strong));
+  }
+
+  .tool-timeline-patch-stat-remove {
+    color: color-mix(in oklch, var(--destructive) 86%, var(--text-strong));
+  }
+
+  .tool-timeline-patch-chevron {
+    color: color-mix(in oklch, var(--text-weak) 82%, transparent);
+    font-size: 0.95rem;
+    line-height: 1;
+    transform: rotate(0deg);
+    transition: transform 150ms ease;
+  }
+
+  .tool-timeline-patch-item[open] .tool-timeline-patch-chevron {
+    transform: rotate(90deg);
+  }
+
+  .tool-timeline-patch-body {
+    border: 1px solid color-mix(in oklch, var(--border) 58%, transparent);
+    border-top: 0;
+    border-bottom-left-radius: 0.875rem;
+    border-bottom-right-radius: 0.875rem;
+    background: transparent;
+    overflow: hidden;
+  }
+
+  .tool-timeline-patch-body > .tool-timeline-pierre-root {
+    border: 0;
+    border-radius: inherit;
+  }
+
+  .tool-timeline-patch-item[open] .tool-timeline-patch-summary {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+
   .tool-timeline-detail-section,
   .tool-timeline-info-section,
   .tool-timeline-json {
@@ -862,6 +1015,7 @@ body {
     border: 0;
     background: transparent;
     color: inherit;
+    cursor: default;
   }
 
   .tool-timeline-info-hint,
@@ -870,6 +1024,10 @@ body {
     font-size: var(--font-size-meta);
     line-height: var(--font-line-height-meta);
     color: color-mix(in oklch, var(--text-weak) 82%, transparent);
+  }
+
+  .tool-timeline-output-toggle {
+    cursor: default;
   }
 
   .tool-timeline-detail-body,
@@ -912,6 +1070,51 @@ body {
       var(--workspace-surface-soft) 82%,
       transparent
     );
+  }
+
+  .tool-timeline-shell-detail {
+    gap: 0;
+  }
+
+  .tool-timeline-shell-detail.tool-timeline-detail-section
+    .tool-timeline-shell-body.tool-timeline-detail-body {
+    border-color: color-mix(in oklch, var(--border) 58%, transparent);
+    background: transparent;
+    padding: 0.75rem 0.875rem;
+    max-height: 15rem;
+  }
+
+  .tool-timeline-shell-pre {
+    margin: 0;
+    display: block;
+    background: transparent;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    max-height: calc(15rem - 1.5rem);
+    overflow: auto;
+    overscroll-behavior: contain;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .tool-timeline-shell-detail .tool-timeline-shell-pre::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
+    appearance: none;
+  }
+
+  .tool-timeline-shell-detail .tool-timeline-shell-pre::-webkit-scrollbar-track,
+  .tool-timeline-shell-detail .tool-timeline-shell-pre::-webkit-scrollbar-thumb,
+  .tool-timeline-shell-detail
+    .tool-timeline-shell-pre::-webkit-scrollbar-corner {
+    background: transparent;
+    border: 0;
   }
 
   .tool-timeline-detail-section[data-tool-detail-tone="failure"]
@@ -990,6 +1193,15 @@ body {
 
   .tool-timeline-output-pre-clamped {
     max-height: 13rem;
+  }
+
+  .tool-timeline-pierre-root {
+    display: block;
+    width: 100%;
+    overflow: hidden;
+    border-radius: 0.875rem;
+    border: 1px solid color-mix(in oklch, var(--border) 58%, transparent);
+    background: transparent;
   }
 }
 

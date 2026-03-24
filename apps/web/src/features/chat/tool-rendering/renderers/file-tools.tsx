@@ -1,5 +1,6 @@
 import { getToolDisplayPath, normalizeToolArguments } from "@/lib/tool-display"
 
+import { formatReadLineRange } from "../../read-range"
 import { toolTimelineCopy } from "../../tool-timeline-copy"
 
 import type { ToolRenderer } from "../types"
@@ -9,9 +10,9 @@ import {
   getNumberValue,
   getStringValue,
 } from "../helpers"
-import { ExpandableOutput, ToolDetailSection } from "../ui"
+import { PierreMultiFileDiffOutput, ToolDetailSection } from "../ui"
 
-function buildEditDiffFromArguments(
+function buildEditContentsFromArguments(
   data: Parameters<ToolRenderer["renderDetails"]>[0]
 ) {
   const args = normalizeToolArguments(data.arguments)
@@ -20,13 +21,34 @@ function buildEditDiffFromArguments(
 
   if (!oldString && !newString) return null
 
-  const removed = oldString
-    ? oldString.split("\n").map((line) => `-${line}`)
-    : []
-  const added = newString ? newString.split("\n").map((line) => `+${line}`) : []
-  const lines = [...removed, ...added]
+  return {
+    oldContent: oldString ?? "",
+    newContent: newString ?? "",
+  }
+}
 
-  return lines.length > 0 ? lines.join("\n") : null
+function getToolFileName(data: Parameters<ToolRenderer["renderDetails"]>[0]) {
+  const args = normalizeToolArguments(data.arguments)
+
+  return (
+    getToolDisplayPath(data.toolName, data.details, args) ??
+    getStringValue(args, "file_path", "path") ??
+    `${data.toolName.toLowerCase()}.txt`
+  )
+}
+
+function buildWriteContentsFromArguments(
+  data: Parameters<ToolRenderer["renderDetails"]>[0]
+) {
+  const args = normalizeToolArguments(data.arguments)
+  const content = getStringValue(args, "content", "contents", "text", "value")
+
+  if (!content) return null
+
+  return {
+    oldContent: "",
+    newContent: content,
+  }
 }
 
 export function createReadRenderer(): ToolRenderer {
@@ -38,25 +60,17 @@ export function createReadRenderer(): ToolRenderer {
       return compactPath(path, 64)
     },
     renderMeta(data) {
-      const offset = getNumberValue(data.arguments, "offset") ?? 0
-      const linesRead = getNumberValue(data.details, "lines_read")
+      const range = formatReadLineRange({
+        offset: getNumberValue(data.arguments, "offset"),
+        limit: getNumberValue(data.arguments, "limit"),
+        linesRead: getNumberValue(data.details, "lines_read"),
+        totalLines: getNumberValue(data.details, "total_lines"),
+      })
 
-      if (linesRead == null) return null
-
-      if (linesRead <= 0) {
-        return <>{createMetaBadge("0L")}</>
-      }
-
-      const startLine = offset + 1
-      const endLine = offset + linesRead
-
-      return <>{createMetaBadge(`L${startLine}-${endLine}`)}</>
+      return range ? <>{createMetaBadge(range)}</> : null
     },
     renderDetails(data) {
-      const content =
-        getStringValue(data.details, "diff") ??
-        buildEditDiffFromArguments(data) ??
-        data.outputContent
+      const content = getStringValue(data.details, "diff") ?? data.outputContent
 
       if (!content) return null
 
@@ -68,7 +82,12 @@ export function createReadRenderer(): ToolRenderer {
               : toolTimelineCopy.section.failure
           }
         >
-          <ExpandableOutput value={content} failed={!data.succeeded} />
+          <pre
+            className="tool-timeline-output-pre"
+            data-failed={!data.succeeded || undefined}
+          >
+            {content}
+          </pre>
         </ToolDetailSection>
       )
     },
@@ -90,14 +109,19 @@ export function createWriteRenderer(): ToolRenderer {
         : null
     },
     renderDetails(data) {
-      const args = normalizeToolArguments(data.arguments)
-      const content =
-        getStringValue(args, "content", "contents", "text", "value") ??
-        data.outputContent
+      const fileName = getToolFileName(data)
+      const contents = buildWriteContentsFromArguments(data)
 
-      if (!content) return null
+      if (!contents) return null
 
-      return <ExpandableOutput value={content} failed={!data.succeeded} />
+      return (
+        <PierreMultiFileDiffOutput
+          fileName={fileName}
+          oldContent={contents.oldContent}
+          newContent={contents.newContent}
+          diffStyle="unified"
+        />
+      )
     },
   }
 }
@@ -126,14 +150,30 @@ export function createEditRenderer(): ToolRenderer {
       )
     },
     renderDetails(data) {
-      const content =
-        getStringValue(data.details, "diff") ??
-        buildEditDiffFromArguments(data) ??
-        data.outputContent
+      const fileName = getToolFileName(data)
+      const contents = buildEditContentsFromArguments(data)
 
-      if (!content) return null
+      if (contents) {
+        return (
+          <PierreMultiFileDiffOutput
+            fileName={fileName}
+            oldContent={contents.oldContent}
+            newContent={contents.newContent}
+            diffStyle="split"
+          />
+        )
+      }
 
-      return <ExpandableOutput value={content} failed={!data.succeeded} />
+      if (!data.outputContent) return null
+
+      return (
+        <pre
+          className="tool-timeline-output-pre"
+          data-failed={!data.succeeded || undefined}
+        >
+          {data.outputContent}
+        </pre>
+      )
     },
   }
 }

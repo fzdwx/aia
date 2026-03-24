@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, test } from "vite-plus/test"
 
+import { ThemeProvider } from "@/components/theme-provider"
+
 import { toolRendererRegistry } from "./index"
 
 function loadToolRenderingUiSource() {
@@ -14,6 +16,12 @@ function loadToolRenderingUiSource() {
 
 type ElementWithChildren = {
   children?: ReactNode
+}
+
+function renderWithTheme(content: ReactNode) {
+  return renderToStaticMarkup(
+    <ThemeProvider defaultTheme="dark">{content}</ThemeProvider>
+  )
 }
 
 describe("tool renderer registry", () => {
@@ -32,7 +40,7 @@ describe("tool renderer registry", () => {
     expect(title).toBe("apps/web/src/components/chat-messages.tsx")
   })
 
-  test("renders read tool meta as requested range and actual line count", () => {
+  test("renders read tool meta as a compact line range", () => {
     const meta = toolRendererRegistry.renderMeta({
       toolName: "Read",
       arguments: {
@@ -62,10 +70,42 @@ describe("tool renderer registry", () => {
       throw new Error("expected read meta badge to be a React element")
     }
 
-    expect(badge.props.children).toBe("L121-160")
+    expect(badge.props.children).toBe("L121~160")
   })
 
-  test("renders grep tool title as pattern only", () => {
+  test("falls back to total lines for read meta instead of raw offset and limit", () => {
+    const meta = toolRendererRegistry.renderMeta({
+      toolName: "Read",
+      arguments: {
+        file_path: "apps/web/src/components/chat-messages.tsx",
+        offset: 0,
+        limit: 220,
+      },
+      details: {
+        total_lines: 240,
+      },
+      outputContent: "",
+      succeeded: true,
+    })
+
+    expect(meta).not.toBe(null)
+    expect(isValidElement(meta)).toBe(true)
+    if (!isValidElement<ElementWithChildren>(meta)) {
+      throw new Error("expected read meta fallback badge to be a React element")
+    }
+
+    const badges = Children.toArray(meta.props.children)
+    expect(badges).toHaveLength(1)
+    const badge = badges[0]
+    expect(isValidElement(badge)).toBe(true)
+    if (!isValidElement<ElementWithChildren>(badge)) {
+      throw new Error("expected read meta fallback badge to be a React element")
+    }
+
+    expect(badge.props.children).toBe("L1~240")
+  })
+
+  test("renders grep tool title as invocation args without repeating tool name", () => {
     const title = toolRendererRegistry.renderTitle({
       toolName: "Grep",
       arguments: {
@@ -77,7 +117,7 @@ describe("tool renderer registry", () => {
       succeeded: true,
     })
 
-    expect(title).toBe("renderMeta")
+    expect(title).toBe('"renderMeta" apps/web/src')
   })
 
   test("renders grep tool meta from details", () => {
@@ -96,6 +136,42 @@ describe("tool renderer registry", () => {
     })
 
     expect(meta).not.toBe(null)
+  })
+
+  test("renders glob tool meta from details", () => {
+    const meta = toolRendererRegistry.renderMeta({
+      toolName: "Glob",
+      arguments: {
+        pattern: "src/**/*.ts",
+        path: "apps/web/src",
+      },
+      details: {
+        matches: 12,
+        returned: 5,
+        truncated: true,
+      },
+      outputContent: "",
+      succeeded: true,
+    })
+
+    expect(meta).not.toBe(null)
+    const html = renderToStaticMarkup(<>{meta}</>)
+    expect(html).toContain("12 matches")
+    expect(html).toContain("showing 5")
+  })
+
+  test("renders glob tool title like grep without repeating tool name", () => {
+    const title = toolRendererRegistry.renderTitle({
+      toolName: "Glob",
+      arguments: {
+        pattern: "src/**/*.ts",
+        path: "apps/web/src",
+      },
+      outputContent: "",
+      succeeded: true,
+    })
+
+    expect(title).toBe('"src/**/*.ts" apps/web/src')
   })
 
   test("renders codesearch tool title from query", () => {
@@ -167,7 +243,7 @@ describe("tool renderer registry", () => {
     })
 
     expect(details).not.toBe(null)
-    const html = renderToStaticMarkup(<>{details}</>)
+    const html = renderWithTheme(details)
     expect(html).toContain("Top Result")
     expect(html).toContain("Code match")
     expect(html).toContain("useState Explained with Simple Examples")
@@ -242,7 +318,7 @@ describe("tool renderer registry", () => {
     })
 
     expect(details).not.toBe(null)
-    const html = renderToStaticMarkup(<>{details}</>)
+    const html = renderWithTheme(details)
     expect(html).toContain("Top Result")
     expect(html).toContain("Web result")
     expect(html).toContain("Latest AI News Roundup")
@@ -368,13 +444,9 @@ describe("tool renderer registry", () => {
       succeeded: true,
     })
 
-    const html = renderToStaticMarkup(<>{details}</>)
-    expect(html).toContain('data-diff-view="unified"')
-    expect(html).toContain('data-diff-line-kind="hunk"')
-    expect(html).toContain("-old value")
-    expect(html).toContain("-line 2")
-    expect(html).toContain("+new value")
-    expect(html).toContain("+line 3")
+    const html = renderWithTheme(details)
+    expect(html).toContain("<diffs-container")
+    expect(html).toContain("tool-timeline-pierre-root")
     expect(html).not.toContain("Edited apps/web/src/index.css")
   })
 
@@ -395,11 +467,9 @@ describe("tool renderer registry", () => {
       succeeded: true,
     })
 
-    const html = renderToStaticMarkup(<>{details}</>)
-    expect(html).toContain('data-diff-view="unified"')
-    expect(html).toContain("@@")
-    expect(html).toContain("-old value")
-    expect(html).toContain("+newer value")
+    const html = renderWithTheme(details)
+    expect(html).toContain("<diffs-container")
+    expect(html).toContain("tool-timeline-pierre-root")
     expect(html).not.toContain("Edited apps/web/src/index.css")
   })
 
@@ -445,7 +515,7 @@ describe("tool renderer registry", () => {
     expect(title).toBe("Run runtime crate checks")
   })
 
-  test("renders shell tool details with command block only", () => {
+  test("renders shell tool details as command followed by output", () => {
     const details = toolRendererRegistry.renderDetails({
       toolName: "Shell",
       arguments: {
@@ -460,13 +530,18 @@ describe("tool renderer registry", () => {
       succeeded: true,
     })
 
-    const html = renderToStaticMarkup(<>{details}</>)
-    expect(html).toContain("$ cargo check -p agent-runtime")
+    const html = renderWithTheme(details)
+    expect(html).toContain("tool-timeline-shell-detail")
+    expect(html).toContain("tool-timeline-shell-body")
+    expect(html).toContain("tool-timeline-shell-pre")
+    expect(html).toContain(
+      "$ cargo check -p agent-runtime\n\nFinished dev [unoptimized] target(s)"
+    )
+    expect(html).toContain("Finished dev [unoptimized] target(s)")
     expect(html).not.toContain("Result")
-    expect(html).not.toContain("Finished dev [unoptimized] target(s)")
   })
 
-  test("renders shell tool details without stdout or stderr regions", () => {
+  test("renders shell tool details with mixed stdout and stderr in one frame", () => {
     const details = toolRendererRegistry.renderDetails({
       toolName: "Shell",
       arguments: {
@@ -481,12 +556,12 @@ describe("tool renderer registry", () => {
       succeeded: true,
     })
 
-    const html = renderToStaticMarkup(<>{details}</>)
-    expect(html).toContain("$ cargo check -p agent-runtime")
+    const html = renderWithTheme(details)
+    expect(html).toContain("$ cargo check -p agent-runtime\n\nwarning summary")
+    expect(html).toContain("warning summary")
+    expect(html).toContain("warning: unused import")
     expect(html).not.toContain("Result")
-    expect(html).not.toContain("warning summary")
     expect(html).not.toContain("Failure")
-    expect(html).not.toContain("warning: unused import")
   })
 
   test("renders apply_patch title from first patch operation", () => {
@@ -506,7 +581,7 @@ describe("tool renderer registry", () => {
       succeeded: true,
     })
 
-    expect(title).toBe("Patch — apps/web/src/components/chat-messages.tsx")
+    expect(title).toBe("apps/web/src/components/chat-messages.tsx")
   })
 
   test("renders write tool meta with green additions", () => {
@@ -542,11 +617,9 @@ describe("tool renderer registry", () => {
       succeeded: true,
     })
 
-    const html = renderToStaticMarkup(<>{details}</>)
-    expect(html).toContain('data-diff-view="unified"')
-    expect(html).toContain('data-diff-line-kind="added"')
-    expect(html).toContain("first line")
-    expect(html).toContain("second line")
+    const html = renderWithTheme(details)
+    expect(html).toContain("<diffs-container")
+    expect(html).toContain("tool-timeline-pierre-root")
     expect(html).not.toContain("Wrote 28 bytes to apps/web/src/index.css")
     expect(html).not.toContain("Result")
   })
@@ -555,7 +628,8 @@ describe("tool renderer registry", () => {
     const meta = toolRendererRegistry.renderMeta({
       toolName: "ApplyPatch",
       arguments: {
-        patch: "*** Begin Patch\n*** End Patch",
+        patch:
+          "*** Begin Patch\n*** Update File: apps/web/src/index.css\n@@\n-old\n+new\n*** End Patch",
       },
       details: {
         lines_added: 4,
@@ -575,19 +649,23 @@ describe("tool renderer registry", () => {
     const details = toolRendererRegistry.renderDetails({
       toolName: "ApplyPatch",
       arguments: {
-        patch: "*** Begin Patch\n*** End Patch",
+        patch:
+          "*** Begin Patch\n*** Update File: apps/web/src/index.css\n@@\n-old\n+new\n*** End Patch",
       },
-      outputContent: "*** Begin Patch\n*** End Patch",
+      outputContent:
+        "*** Begin Patch\n*** Update File: apps/web/src/index.css\n@@\n-old\n+new\n*** End Patch",
       succeeded: true,
     })
 
-    const html = renderToStaticMarkup(<>{details}</>)
-    expect(html).toContain('data-diff-view="unified"')
-    expect(html).toContain('data-diff-line-kind="meta"')
-    expect(html).toContain("*** Update File")
+    const html = renderWithTheme(details)
+    expect(html).toContain("tool-timeline-patch-list")
+    expect(html).toContain("tool-timeline-patch-item")
+    expect(html).toContain("apps/web/src/index.css")
+    expect(html).toContain(">+1<")
+    expect(html).toContain(">-1<")
+    expect(html).toContain("<diffs-container")
     expect(html).not.toContain("tool-timeline-detail-title")
     expect(html).not.toContain('data-tool-detail-kind="patch"')
-    expect(html).not.toContain("*** Begin Patch")
   })
 
   test("renders question tool summary and ignored semantics", () => {
@@ -636,6 +714,53 @@ describe("tool renderer registry", () => {
     )
   })
 
+  test("renders TapeInfo as inline summary metadata without details", () => {
+    const title = toolRendererRegistry.renderTitle({
+      toolName: "TapeInfo",
+      arguments: {},
+      details: {
+        total_entries: 12,
+        anchor_count: 1,
+        entries_since_last_anchor: 4,
+        pressure_ratio: 0.7,
+      },
+      outputContent: '{"pressure_ratio":0.7}',
+      succeeded: true,
+    })
+    const meta = toolRendererRegistry.renderMeta({
+      toolName: "TapeInfo",
+      arguments: {},
+      details: {
+        total_entries: 12,
+        anchor_count: 1,
+        entries_since_last_anchor: 4,
+        pressure_ratio: 0.7,
+      },
+      outputContent: '{"pressure_ratio":0.7}',
+      succeeded: true,
+    })
+    const details = toolRendererRegistry.renderDetails({
+      toolName: "TapeInfo",
+      arguments: {},
+      details: {
+        total_entries: 12,
+        anchor_count: 1,
+        entries_since_last_anchor: 4,
+        pressure_ratio: 0.7,
+      },
+      outputContent: '{"pressure_ratio":0.7}',
+      succeeded: true,
+    })
+
+    expect(title).toBe("pressure 70.0%")
+    expect(meta).not.toBe(null)
+    const html = renderToStaticMarkup(<>{meta}</>)
+    expect(html).toContain("12 entries")
+    expect(html).toContain("1 anchor")
+    expect(html).toContain("+4 since anchor")
+    expect(details).toBe(null)
+  })
+
   test("falls back to default renderer for unknown tools", () => {
     const title = toolRendererRegistry.renderTitle({
       toolName: "custom.tool",
@@ -678,11 +803,15 @@ describe("tool renderer registry", () => {
     expect(source).toContain(
       'import { toolTimelineCopy } from "../tool-timeline-copy"'
     )
+    expect(source).toContain("@pierre/diffs/react")
+    expect(source).toContain("MultiFileDiff")
+    expect(source).toContain("PatchDiff")
+    expect(source).toContain("useTheme")
+    expect(source).toContain("pierre-dark")
+    expect(source).toContain("pierre-light")
     expect(source).toContain("toolTimelineCopy.action.expand")
     expect(source).toContain("toolTimelineCopy.action.collapse")
     expect(source).toContain("toolTimelineCopy.section.content")
-    expect(source).toContain('data-diff-view="unified"')
-    expect(source).toContain("data-diff-line-kind")
     expect(source).not.toContain('"Collapse"')
     expect(source).not.toContain('"Expand"')
     expect(source).not.toContain('"JSON"')
