@@ -117,9 +117,22 @@ function convertApplyPatchBody(bodyLines: string[]) {
     currentLines.push(line)
   }
 
-  flushCurrentHunk()
+  if (currentHeader == null) {
+    if (currentLines.length > 0) {
+      output.push(buildHunkHeader("@@", currentLines), ...currentLines)
+    }
+  } else {
+    flushCurrentHunk()
+  }
 
   return output
+}
+
+function getPatchDisplayTitle(patch: string) {
+  const operations = toPatchOperations(patch)
+  const firstOperation = operations[0]
+
+  return firstOperation?.displayPath ?? null
 }
 
 function convertOperationToUnifiedDiff(
@@ -315,15 +328,7 @@ export function createApplyPatchRenderer(): ToolRenderer {
           ? truncateInline(fallbackPath, 96)
           : toolTimelineCopy.toolName.patch
       }
-      const firstOperation = patch
-        .split("\n")
-        .find(
-          (line) =>
-            line.startsWith("*** Update File:") ||
-            line.startsWith("*** Add File:") ||
-            line.startsWith("*** Delete File:")
-        )
-      const filePath = firstOperation?.split(":").slice(1).join(":").trim()
+      const filePath = getPatchDisplayTitle(patch)
 
       return filePath
         ? truncateInline(filePath, 96)

@@ -105,6 +105,24 @@ describe("tool renderer registry", () => {
     expect(badge.props.children).toBe("L1~240")
   })
 
+  test("renders read tool details with expandable output for long content", () => {
+    const details = toolRendererRegistry.renderDetails({
+      toolName: "Read",
+      arguments: {
+        file_path: "apps/web/src/components/chat-messages.tsx",
+      },
+      outputContent: Array.from(
+        { length: 12 },
+        (_, index) => `line ${index + 1}`
+      ).join("\n"),
+      succeeded: true,
+    })
+
+    const html = renderWithTheme(details)
+    expect(html).toContain("tool-timeline-output-toggle")
+    expect(html).toContain("12 lines")
+  })
+
   test("renders grep tool title as invocation args without repeating tool name", () => {
     const title = toolRendererRegistry.renderTitle({
       toolName: "Grep",
@@ -117,7 +135,7 @@ describe("tool renderer registry", () => {
       succeeded: true,
     })
 
-    expect(title).toBe('"renderMeta" apps/web/src')
+    expect(title).toBe('"renderMeta" --glob "*.ts" apps/web/src')
   })
 
   test("renders grep tool meta from details", () => {
@@ -469,7 +487,7 @@ describe("tool renderer registry", () => {
 
     const html = renderWithTheme(details)
     expect(html).toContain("<diffs-container")
-    expect(html).toContain("tool-timeline-pierre-root")
+    expect(html).toContain("tool-timeline-pierre-root-patch")
     expect(html).not.toContain("Edited apps/web/src/index.css")
   })
 
@@ -666,6 +684,40 @@ describe("tool renderer registry", () => {
     expect(html).toContain("<diffs-container")
     expect(html).not.toContain("tool-timeline-detail-title")
     expect(html).not.toContain('data-tool-detail-kind="patch"')
+  })
+
+  test("renders ApplyPatch add-file details with change counts", () => {
+    const details = toolRendererRegistry.renderDetails({
+      toolName: "ApplyPatch",
+      arguments: {
+        patch:
+          "*** Begin Patch\n*** Add File: .aia/note.txt\n+hello\n+world\n*** End Patch",
+      },
+      outputContent:
+        "*** Begin Patch\n*** Add File: .aia/note.txt\n+hello\n+world\n*** End Patch",
+      succeeded: true,
+    })
+
+    const html = renderWithTheme(details)
+    expect(html).toContain(".aia/")
+    expect(html).toContain("note.txt")
+    expect(html).toContain(">+2<")
+    expect(html).toContain(">-0<")
+    expect(html).toContain("tool-timeline-pierre-root-patch")
+  })
+
+  test("renders ApplyPatch move title with destination path", () => {
+    const title = toolRendererRegistry.renderTitle({
+      toolName: "ApplyPatch",
+      arguments: {
+        patch:
+          "*** Begin Patch\n*** Update File: old.txt\n*** Move to: nested/new.txt\n@@\n-old\n+new\n*** End Patch",
+      },
+      outputContent: "",
+      succeeded: true,
+    })
+
+    expect(title).toBe("old.txt → nested/new.txt")
   })
 
   test("renders question tool summary and ignored semantics", () => {

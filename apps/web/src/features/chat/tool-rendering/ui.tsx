@@ -182,7 +182,7 @@ export function PierrePatchDiffOutput({ patch }: { patch: string }) {
     <PatchDiff
       patch={patch}
       options={options}
-      className="tool-timeline-pierre-root"
+      className="tool-timeline-pierre-root tool-timeline-pierre-root-patch"
       style={PIERRE_DIFF_HOST_STYLE}
     />
   )
@@ -222,7 +222,7 @@ export function PierreMultiFileDiffOutput({
       oldFile={oldFile}
       newFile={newFile}
       options={options}
-      className="tool-timeline-pierre-root"
+      className="tool-timeline-pierre-root tool-timeline-pierre-root-multi"
       style={PIERRE_DIFF_HOST_STYLE}
     />
   )
