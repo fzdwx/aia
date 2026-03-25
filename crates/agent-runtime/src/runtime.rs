@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use agent_core::{
     AbortSignal, LanguageModel, ModelIdentity, PromptCacheConfig, RequestTimeoutConfig,
-    ToolDefinition, ToolExecutor,
+    SessionInteractionCapabilities, ToolDefinition, ToolExecutor,
 };
 use session_tape::{Handoff, SessionTape, SessionTapeError, TapeEntry};
 
@@ -48,6 +48,7 @@ pub struct AgentRuntime<M, T> {
     next_subscriber_id: RuntimeSubscriberId,
     prompt_cache: Option<PromptCacheConfig>,
     request_timeout: Option<RequestTimeoutConfig>,
+    interaction_capabilities: SessionInteractionCapabilities,
     last_input_tokens: Option<u64>,
     hooks: RuntimeHooks,
     agent_started: bool,
@@ -91,6 +92,7 @@ where
             next_subscriber_id: 1,
             prompt_cache: None,
             request_timeout: None,
+            interaction_capabilities: SessionInteractionCapabilities::interactive(),
             last_input_tokens,
             hooks: RuntimeHooks::default(),
             agent_started: false,
@@ -158,6 +160,22 @@ where
         self
     }
 
+    pub fn with_interaction_capabilities(
+        mut self,
+        capabilities: SessionInteractionCapabilities,
+    ) -> Self {
+        self.interaction_capabilities = capabilities;
+        self
+    }
+
+    pub fn set_interaction_capabilities(&mut self, capabilities: SessionInteractionCapabilities) {
+        self.interaction_capabilities = capabilities;
+    }
+
+    pub fn interaction_capabilities(&self) -> &SessionInteractionCapabilities {
+        &self.interaction_capabilities
+    }
+
     pub fn set_request_timeout(&mut self, timeout: Option<RequestTimeoutConfig>) {
         self.request_timeout = timeout;
     }
@@ -177,7 +195,9 @@ where
             .into_iter()
             .filter(|definition| !self.disabled_tools.contains(&definition.name))
             .collect();
-        tools.extend(tape_tools::runtime_tool_definitions());
+        tools.extend(tape_tools::runtime_tool_definitions_for(
+            &self.interaction_capabilities,
+        ));
         tools
     }
 

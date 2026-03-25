@@ -56,6 +56,19 @@ where
 }
 
 #[test]
+fn non_interactive_runtime_hides_question_tool_from_visible_tools() {
+    let runtime = AgentRuntime::new(
+        StubModel,
+        StubTools,
+        ModelIdentity::new("openai", "gpt-5", ModelDisposition::Balanced),
+    )
+    .with_interaction_capabilities(agent_core::SessionInteractionCapabilities::non_interactive());
+
+    let visible = runtime.visible_tools();
+    assert!(!visible.iter().any(|definition| definition.name == "Question"));
+}
+
+#[test]
 fn time_before_unix_epoch_falls_back_to_zero_duration() {
     let before_epoch = UNIX_EPOCH - Duration::from_secs(1);
 
@@ -855,7 +868,9 @@ fn 运行时会记录用户与助手消息() {
     assert_eq!(output.assistant_text, "已收到：你好");
     assert_eq!(runtime.tape().entries().len(), 7);
     assert_eq!(runtime.tape().entries()[6].event_name(), Some("turn_completed"));
-    assert_eq!(output.visible_tools.len(), 3);
+    assert!(output.visible_tools.iter().any(|definition| definition.name == "TapeInfo"));
+    assert!(output.visible_tools.iter().any(|definition| definition.name == "TapeHandoff"));
+    assert!(output.visible_tools.iter().any(|definition| definition.name == "Question"));
 }
 
 #[test]

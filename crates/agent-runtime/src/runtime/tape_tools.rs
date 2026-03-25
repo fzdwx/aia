@@ -1,21 +1,29 @@
 use std::sync::{Arc, Mutex};
 
 use agent_core::{
-    CoreError, LanguageModel, RuntimeToolContext, RuntimeToolContextStats, Tool, ToolCall,
-    ToolDefinition, ToolExecutionContext, ToolExecutor, ToolOutputDelta, ToolRegistry, ToolResult,
+    CoreError, LanguageModel, QuestionItem, QuestionRequest, RuntimeToolContext,
+    RuntimeToolContextStats, SessionInteractionCapabilities, Tool, ToolCall, ToolDefinition,
+    ToolExecutionContext, ToolExecutor, ToolOutputDelta, ToolRegistry, ToolResult,
 };
 use agent_core_macros::ToolArgsSchema as DeriveToolArgsSchema;
-use agent_prompts::tool_descriptions::{tape_handoff_tool_description, tape_info_tool_description};
+use agent_prompts::tool_descriptions::{
+    question_tool_description, tape_handoff_tool_description, tape_info_tool_description,
+};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::AgentRuntime;
 
-pub(super) fn build_runtime_tool_registry() -> ToolRegistry {
+pub(super) fn build_runtime_tool_registry(
+    capabilities: &SessionInteractionCapabilities,
+) -> ToolRegistry {
     let mut registry = ToolRegistry::new();
     registry.register(Box::new(TapeInfoTool));
     registry.register(Box::new(TapeHandoffTool));
+    if capabilities.can_use_question_tool() {
+        registry.register(Box::new(QuestionTool));
+    }
     registry
 }
 
@@ -124,6 +132,8 @@ impl Tool for TapeInfoTool {
 
 struct TapeHandoffTool;
 
+struct QuestionTool;
+
 #[derive(Serialize, Deserialize, DeriveToolArgsSchema)]
 #[serde(deny_unknown_fields)]
 struct TapeHandoffToolArgs {
@@ -131,6 +141,14 @@ struct TapeHandoffToolArgs {
     summary: String,
     #[tool_schema(description = "Optional name for the anchor (default: \"handoff\").")]
     name: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QuestionToolArgs {
+    request_id: String,
+    turn_id: String,
+    questions: Vec<QuestionItem>,
 }
 
 #[async_trait]
@@ -162,12 +180,73 @@ impl Tool for TapeHandoffTool {
     }
 }
 
+#[async_trait]
+impl Tool for QuestionTool {
+    fn name(&self) -> &str {
+        "Question"
+    }
+
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(self.name(), question_tool_description()).with_parameters_value(
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "request_id": {
+                        "type": "string",
+                        "description": "Stable request identifier for this question flow."
+                    },
+                    "turn_id": {
+                        "type": "string",
+                        "description": "Current turn identifier associated with this question flow."
+                    },
+                    "questions": {
+                        "type": "array",
+                        "description": "Structured questions to show to the user.",
+                        "items": {
+                            "type": "object"
+                        }
+                    }
+                },
+                "required": ["request_id", "turn_id", "questions"],
+                "additionalProperties": false
+            }),
+        )
+    }
+
+    async fn call(
+        &self,
+        tool_call: &ToolCall,
+        _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
+        _context: &ToolExecutionContext,
+    ) -> Result<ToolResult, CoreError> {
+        let args: QuestionToolArgs = tool_call.parse_arguments()?;
+        let request = QuestionRequest {
+            request_id: args.request_id,
+            invocation_id: tool_call.invocation_id.clone(),
+            turn_id: args.turn_id,
+            questions: args.questions,
+        };
+        let details = serde_json::to_value(&request).map_err(|error| {
+            CoreError::new(format!("failed to serialize QuestionRequest: {error}"))
+        })?;
+        let content = serde_json::to_string(&request)
+            .map_err(|error| CoreError::new(format!("failed to encode QuestionRequest: {error}")))?;
+        Ok(ToolResult::from_call(tool_call, content).with_details(details))
+    }
+}
+
 pub(super) fn runtime_tool_definitions() -> Vec<ToolDefinition> {
-    build_runtime_tool_registry().definitions()
+    runtime_tool_definitions_for(&SessionInteractionCapabilities::interactive())
 }
 
 pub(super) fn is_runtime_tool(name: &str) -> bool {
-    build_runtime_tool_registry().contains(name)
+    runtime_tool_definitions().iter().any(|definition| definition.name == name)
+}
+
+pub(super) fn runtime_tool_definitions_for(
+    capabilities: &SessionInteractionCapabilities,
+) -> Vec<ToolDefinition> {
+    build_runtime_tool_registry(capabilities).definitions()
 }
 
 #[cfg(test)]

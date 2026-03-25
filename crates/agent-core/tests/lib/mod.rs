@@ -222,6 +222,40 @@ fn 工具结果继承工具调用标识() {
 }
 
 #[test]
+fn session_interaction_capabilities_仅在交互式会话中允许_question_tool() {
+    assert!(SessionInteractionCapabilities::interactive().can_use_question_tool());
+    assert!(!SessionInteractionCapabilities::non_interactive().can_use_question_tool());
+    assert!(!SessionInteractionCapabilities {
+        supports_interactive_components: true,
+        supports_question_tool: false,
+    }
+    .can_use_question_tool());
+}
+
+#[test]
+fn question_result_保持稳定序列化形状() {
+    let result = QuestionResult {
+        status: QuestionResultStatus::Answered,
+        request_id: "qreq_123".into(),
+        answers: vec![QuestionAnswer {
+            question_id: "database".into(),
+            selected_option_ids: vec!["sqlite".into()],
+            text: None,
+        }],
+        reason: None,
+    };
+
+    let value = serde_json::to_value(&result).expect("question result should serialize");
+    assert_eq!(value["status"], serde_json::json!("answered"));
+    assert_eq!(value["request_id"], serde_json::json!("qreq_123"));
+    assert_eq!(value["answers"][0]["question_id"], serde_json::json!("database"));
+    assert_eq!(
+        serde_json::from_value::<QuestionResult>(value).expect("question result should deserialize"),
+        result
+    );
+}
+
+#[test]
 fn system_time_before_unix_epoch_falls_back_to_zero_duration() {
     let before_epoch = UNIX_EPOCH - Duration::from_secs(1);
 

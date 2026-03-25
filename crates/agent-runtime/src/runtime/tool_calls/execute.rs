@@ -171,7 +171,7 @@ where
         &mut self,
         context: &ExecuteToolCallContext<'_>,
     ) -> Result<ToolResult, RuntimeError> {
-        let runtime_tools = tape_tools::build_runtime_tool_registry();
+        let runtime_tools = tape_tools::build_runtime_tool_registry(self.interaction_capabilities());
         let runtime_bridge = tape_tools::RuntimeToolContextBridge::new(self);
         let runtime_context: Arc<dyn RuntimeToolContext> = runtime_bridge.clone();
         let result = runtime_tools

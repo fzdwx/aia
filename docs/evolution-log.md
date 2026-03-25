@@ -1,5 +1,54 @@
 # 演进日志
 
+## 2026-03-25 Session 110
+
+**Diagnosis**：`Question` runtime tool 的 RFC 已经收口到可以开工，但如果直接冲到 server control-plane 和 Web pending question UI，会把共享协议、runtime 可见工具面和 pending question 状态机一起掺进更大的改动里，验证成本偏高。当前最小且最高杠杆的一步，是先把共享 `Question` 协议类型和 session interaction capability 落在 `agent-core` / `agent-runtime`，并让 runtime 已经能按 capability gating 决定是否向模型暴露 `Question`。
+**Decision**：本轮先实现 `Question` 的共享底座，而不一次性做完完整 suspend/resume：`agent-core` 新增 `SessionInteractionCapabilities`、`QuestionRequest/Item/Option/Answer/Result` 这些共享结构；`agent-prompts` 新增 `question` 工具描述；`agent-runtime` 新增 `Question` runtime tool 定义与结构化 request 回显骨架，并让 `visible_tools()` 按 `SessionInteractionCapabilities` 决定是否暴露该工具。与此同时把 RFC 状态校准为 `Accepted`，明确“设计已定稿、实现在推进中”，而不是误写成“全部已实现”。
+**Changes**：
+- `crates/agent-core/src/{question.rs,lib.rs}`、`crates/agent-core/tests/lib/mod.rs`：新增 session interaction capability 与 `Question*` 共享类型，并补序列化与 capability 逻辑测试。
+- `crates/agent-prompts/src/tool_descriptions.rs`、`crates/agent-prompts/prompts/tool/question.md`：新增 `Question` 工具描述文本。
+- `crates/agent-runtime/src/runtime/{tape_tools.rs,tool_calls/execute.rs}`、`crates/agent-runtime/src/runtime.rs`、`crates/agent-runtime/tests/runtime/{mod.rs,tape_tools/mod.rs}`：新增 `Question` runtime tool 定义与结构化 `QuestionRequest` 回显骨架；`AgentRuntime` 新增 `interaction_capabilities` 字段与 setter/builder；runtime tool registry 和 `visible_tools()` 现在按 capability gating 暴露或隐藏 `Question`，并补对应测试。
+- `docs/rfc/0001-question-runtime-tool.md`：将 RFC 状态从 `Implemented` 校准为 `Accepted`，匹配当前“规格已定、实现中”的真实阶段。
+- `docs/evolution-log.md`：记录本轮从 RFC 进入首轮实现的结果。
+**Verification**：`cargo test -p agent-core -p agent-runtime`；`cargo check -p agent-core -p agent-runtime`。
+**Commit**：未提交。
+**Next direction**：下一轮优先继续把 `Question` 从“结构化 runtime tool + capability gating”推进到真正的 pending question 状态机：先补 `agent-server` / tape 的 `question_requested + question_resolved` 事实与恢复路径，再接 `GET/PUT/DELETE /api/session/question` 控制面，而不是先做 Web 交互样式。
+
+## 2026-03-25 Session 108
+
+**Diagnosis**：上一轮已经把 `Question` runtime tool 的设计提案收进 `docs/rfc/0001-question-runtime-tool.md`，并为 `docs/rfc` 建了基础编号规则；但用户继续明确希望 RFC 采用更接近 `---` frontmatter 的 formal 元数据格式，而不是保留列表式头部。若不统一 frontmatter 形态，后续 RFC 仍会在“文件名有编号、正文有标题，但头部元数据各写各的”之间摇摆，检索和规范化都不够稳定。
+**Decision**：把 `docs/rfc` 的推荐格式进一步收口到 frontmatter 方案，并补齐更接近模板化文档的 `name + description` 元数据字段：README 中的 RFC 模板改为 `---` 块示例，`0001-question-runtime-tool.md` 也同步改成同构头部，方便后续目录索引、脚本消费和文档一致性维护。
+**Changes**：
+- `docs/rfc/README.md`：RFC 模板改为 frontmatter 形式，并补充 `name`、`description` 字段说明。
+- `docs/rfc/0001-question-runtime-tool.md`：将 RFC 0001 头部改为 frontmatter，并补充 `name` 与 `description` 元数据。
+- `docs/evolution-log.md`：记录本轮 RFC frontmatter 规范化。
+**Verification**：人工核对 `docs/rfc/README.md` 模板与 `docs/rfc/0001-question-runtime-tool.md` 实例头部字段一致，确认两者都采用 `---` frontmatter，且 `rfc/name/title/description/status/date/authors/supersedes/superseded_by` 元数据齐全。
+**Commit**：未提交。
+**Next direction**：若后续继续完善 RFC 体系，优先考虑是否需要为 `docs/rfc` 增加目录索引页或生成脚本，基于 frontmatter 自动列出编号、状态和替代关系，而不是继续手工维护散落引用。
+
+## 2026-03-25 Session 109
+
+**Diagnosis**：`docs/rfc/0001-question-runtime-tool.md` 在上一轮已经完成了边界、状态机、append-only tape 和结构化 request/result 的大框架，但仍保留几个会直接影响实现拆分的关键空位：session capability 谁来产出、pending question 用什么主键匹配恢复和回答、server control-plane 的接口形状是否固定。如果这些点继续保持“建议但未定稿”，实现时很容易在 `agent-runtime`、`agent-server` 和 Web 三处重新长出不同理解。
+**Decision**：继续把 RFC 从“方向正确”收口到“可以直接开工”的程度：明确由 `apps/agent-server` 产出 `SessionInteractionCapabilities` 并作为 runtime 的唯一权威能力来源；明确 `request_id` 是 pending question 的唯一主键；明确 server control-plane 固定为 `GET/PUT/DELETE /api/session/question` 三个接口；同时补充“同一 session 只能有一个 pending question”“WaitingForQuestion 期间拒绝普通 turn”“Phase 1-3 不强制实现自动超时，`timed_out` 先作为协议预留值”等可执行约束。
+**Changes**：
+- `docs/rfc/0001-question-runtime-tool.md`：补充 `SessionInteractionCapabilities` 的权威来源与职责分工、`request_id` 唯一主键约束、`QuestionRequest/QuestionResult` 字段约束、`GET/PUT/DELETE /api/session/question` 固定控制面、恢复匹配规则、并发约束与 Phase 4 超时扩展位。
+- `docs/evolution-log.md`：记录本轮把 RFC 从设计草案推进到可实现规格的收口。
+**Verification**：人工核对 RFC 已明确以下实现关键点：capability 权威源、pending question 唯一主键、固定 control-plane 形状、同 session 单 pending question 约束、WaitingForQuestion 拒绝新 turn、`timed_out` 暂不进入首轮实现范围。
+**Commit**：未提交。
+**Next direction**：若下一轮开始真实实现，优先按 RFC 既定顺序推进：先落 `agent-core` 的共享类型与 `SessionInteractionCapabilities`，再落 runtime suspend/resume 与 tape 恢复，最后接 server control-plane 和 Web pending question UI。
+
+## 2026-03-25 Session 107
+
+**Diagnosis**：当前仓库虽然已经在 Web 聊天时间线里预留了 `question` 工具的渲染入口，但 runtime、server control-plane、session 恢复和 capability gating 还没有形成统一设计。与此同时，用户明确收紧了需求边界：本轮不做任何外部协议适配，只讨论 `aia` 自己的 `question` tool；并要求同时覆盖“部分 channel 不支持交互式组件”“停机后恢复 pending question”“AI 可为选项给出推荐项”，且强调不支持交互式组件的 session 不应注册该工具，返回给模型的结果也必须是结构化的。
+**Decision**：不把 `Question` 做成普通 builtin tool，而是定义为 `aia` 内部的 runtime tool，并在 `docs/rfc/0001-question-runtime-tool.md` 中形成首版 RFC：`Question` 的可见性由 session / channel interaction capability 控制；仅支持交互式组件的 session 才暴露该工具；问题请求与结果都采用结构化 JSON 协议，结果显式区分 `answered/cancelled/dismissed/timed_out/unavailable`；推荐项通过 `recommended_option_ids + recommendation_reason` 表达；pending question 通过 append-only tape 中的 `tool_call/tool_result + question_requested/question_resolved` 事实组合实现可恢复语义。
+**Changes**：
+- `docs/rfc/0001-question-runtime-tool.md`：新增 `Question` runtime tool RFC，定义 capability gating、结构化 request/result、pending question 状态机、session tape 恢复、server control-plane 建议和 Web/channel 承接边界。
+- `docs/rfc/README.md`：新增 RFC 目录约定，统一四位递增序号、kebab-case 文件名、推荐状态字段与维护规则，避免后续提案文档继续各自命名。
+- `docs/evolution-log.md`：记录本轮关于 `Question` tool 的设计决策与后续实现方向。
+**Verification**：人工核对 RFC 与用户新增约束的一致性，确认文档已覆盖“无需外部适配、无交互组件则不注册、停机恢复、推荐项结构化表达、结果结构化返回”五项关键要求。
+**Commit**：未提交。
+**Next direction**：若下一轮开始实现，优先先把 `agent-core` 的 `QuestionRequest/QuestionResult` 类型、runtime 的 `WaitingForQuestion` 语义和 session tape 的 pending question 恢复路径落地，再补 server/Web control-plane，而不是先做单独的 UI 样式或 channel 文本降级。
+
 ## 2026-03-23 Session 106
 
 **Diagnosis**：用户怀疑近期 Web Markdown 从 `streamdown` 切到 `markstream-react` 后引入了问题，并明确要求直接切回。沿提交历史排查后确认真正的切换提交是 `e6b6b85 feat(web): switch markdown renderer to markstream-react`；当前运行时已完全走 `markstream-react + stream-markdown-parser + 自定义 code block` 路径，而 `MarkdownContent` 门面本身保持稳定，因此最小风险回退点应收口在渲染器实现、依赖与样式入口，而不是扩散到聊天/推理调用方。
