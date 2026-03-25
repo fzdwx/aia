@@ -477,15 +477,59 @@ impl SessionManagerLoop {
             RuntimeWorkerError::internal(format!("session save failed: {error}"))
         })?;
 
-        let existing_stats = read_lock(&slot.context_stats).clone();
-        if let Some(runtime) = slot.runtime_mut() {
-            *runtime.tape_mut() = tape.clone();
-        }
         let snapshots = rebuild_session_snapshots_from_tape(&tape);
-        *write_lock(&slot.history) = snapshots.history;
-        *write_lock(&slot.current_turn) = snapshots.current_turn;
-        *write_lock(&slot.context_stats) =
-            slot.runtime().map(|runtime| runtime.context_stats()).unwrap_or(existing_stats);
+        *write_lock(&slot.history) = snapshots.history.clone();
+        *write_lock(&slot.current_turn) = snapshots.current_turn.clone();
+
+        let (mut runtime, subscriber, running_turn) = slot.begin_turn()?;
+        *runtime.tape_mut() = tape.clone();
+        let turn_id = pending_request.turn_id.clone();
+        let current_turn = crate::runtime_worker::CurrentTurnSnapshot {
+            turn_id: turn_id.clone(),
+            started_at_ms: now_timestamp_ms(),
+            user_message: snapshots
+                .current_turn
+                .as_ref()
+                .map(|turn| turn.user_message.clone())
+                .unwrap_or_default(),
+            status: crate::sse::TurnStatus::Waiting,
+            blocks: Vec::new(),
+        };
+        *write_lock(&slot.current_turn) = Some(current_turn.clone());
+
+        let session_id_owned = session_id.to_string();
+        let worker = turn_execution::TurnWorker::resume_question(
+            runtime,
+            subscriber,
+            turn_id.clone(),
+            result,
+            running_turn.control.clone(),
+            turn_execution::TurnWorkerContext {
+                broadcast_tx: self.config.broadcast_tx.clone(),
+                current_turn_snapshot: slot.current_turn.clone(),
+                history_snapshot: slot.history.clone(),
+                context_stats_snapshot: slot.context_stats.clone(),
+                trace_recorder: ToolTraceRecorder::new(self.config.store.clone()),
+                session_id: session_id_owned.clone(),
+                turn_id: turn_id.clone(),
+            },
+        );
+        let return_tx = self.return_tx.clone();
+
+        let _ = self.config.broadcast_tx.send(SsePayload::CurrentTurnStarted {
+            session_id: session_id_owned.clone(),
+            current_turn,
+        });
+        let _ = self.config.broadcast_tx.send(SsePayload::Status {
+            session_id: session_id_owned,
+            turn_id,
+            status: crate::sse::TurnStatus::Waiting,
+        });
+
+        tokio::spawn(async move {
+            let runtime_return = worker.run().await;
+            let _ = return_tx.send(runtime_return).await;
+        });
 
         Ok(())
     }
