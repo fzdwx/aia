@@ -421,7 +421,9 @@ describe("tool timeline", () => {
     expect(source).toContain(
       "if (usesDefaultRenderer && detailsContent != null)"
     )
-    expect(source).toContain("<ToolDetailSurface>{detailsContent}</ToolDetailSurface>")
+    expect(source).toContain(
+      "<ToolDetailSurface>{detailsContent}</ToolDetailSurface>"
+    )
   })
 
   test("keeps explored list spacing inside the measured inner content", () => {
@@ -444,8 +446,12 @@ describe("tool timeline", () => {
     const source = loadWebCssSource()
 
     expect(source).toContain('[data-slot="tool-subtitle"]')
-    expect(source).toContain('[data-slot="tool-subtitle"][data-kind="file-path"]')
-    expect(source).toContain('grid-template-columns: minmax(0, 15ch) minmax(0, 1fr);')
+    expect(source).toContain(
+      '[data-slot="tool-subtitle"][data-kind="file-path"]'
+    )
+    expect(source).toContain(
+      "grid-template-columns: minmax(0, 15ch) minmax(0, 1fr);"
+    )
     expect(source).toContain('[data-slot="tool-meta"]')
     expect(source).toContain(
       "color: oklch(from var(--muted-foreground) l c h / 0.5);"
@@ -460,7 +466,9 @@ describe("tool timeline", () => {
     expect(source).toContain(".tool-timeline-patch-filename")
     expect(source).toContain("font-weight: 500")
     expect(source).toContain(".tool-timeline-patch-directory")
-    expect(source).toContain("color: color-mix(in oklch, var(--text-weak) 82%, transparent);")
+    expect(source).toContain(
+      "color: color-mix(in oklch, var(--text-weak) 82%, transparent);"
+    )
     expect(source).toContain(".tool-timeline-patch-stat")
   })
 

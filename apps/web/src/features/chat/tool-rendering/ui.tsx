@@ -17,23 +17,69 @@ import { cn } from "@/lib/utils"
 import { toolTimelineCopy } from "../tool-timeline-copy"
 
 const PIERRE_DIFF_UNSAFE_CSS = `
+:host,
+:host [data-diff],
+:host [data-file],
+:host [data-diffs-header],
+:host [data-error-wrapper],
+:host [data-virtualizer-buffer] {
+  --diffs-bg: transparent;
+  --diffs-bg-buffer-override: transparent;
+  --diffs-bg-hover-override: transparent;
+  --diffs-bg-context-override: transparent;
+  --diffs-bg-context-number-override: transparent;
+  --diffs-bg-separator-override: transparent;
+}
+
 :host {
-  --diffs-bg: var(--aia-diff-surface);
+  overflow: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+:host pre,
+:host code {
+  background-color: transparent;
+}
+
+:host ::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+  appearance: none;
+}
+
+:host ::-webkit-scrollbar-track,
+:host ::-webkit-scrollbar-thumb,
+:host ::-webkit-scrollbar-corner {
+  background: transparent;
+  border: 0;
+}
+
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 `
 
 const PIERRE_DIFF_HOST_STYLE: CSSProperties & Record<`--${string}`, string> = {
-  background: "var(--aia-diff-surface)",
-  "--aia-diff-surface":
-    "color-mix(in oklch, var(--workspace-surface-soft) 84%, var(--background))",
-  "--diffs-bg": "var(--aia-diff-surface)",
-  "--diffs-bg-buffer-override": "var(--aia-diff-surface)",
-  "--diffs-bg-hover-override": "var(--aia-diff-surface)",
+  background: "transparent",
+  overflow: "hidden",
+  "--aia-diff-surface": "transparent",
+  "--diffs-bg": "transparent",
+  "--diffs-bg-buffer-override": "transparent",
+  "--diffs-bg-hover-override": "transparent",
   "--diffs-fg-number-override": "var(--text-weak)",
   "--diffs-fg-number-addition-override": "var(--text-weak)",
   "--diffs-fg-number-deletion-override": "var(--text-weak)",
   "--diffs-fg-conflict-marker-override": "var(--text-weak)",
-  "--shiki-background": "var(--aia-diff-surface)",
+  "--shiki-background": "transparent",
   "--diffs-font-family": "var(--font-mono)",
   "--diffs-font-size": "var(--font-size-meta)",
   "--diffs-line-height": "24px",

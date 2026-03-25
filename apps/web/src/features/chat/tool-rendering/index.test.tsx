@@ -993,4 +993,23 @@ describe("tool renderer registry", () => {
     expect(source).not.toContain('"Expand"')
     expect(source).not.toContain('"JSON"')
   })
+
+  test("keeps pierre diff host background transparent", () => {
+    const source = loadToolRenderingUiSource()
+
+    expect(source).toContain('background: "transparent"')
+    expect(source).toContain('"--aia-diff-surface": "transparent"')
+    expect(source).toContain('"--diffs-bg-buffer-override": "transparent"')
+    expect(source).toContain('"--diffs-bg-hover-override": "transparent"')
+  })
+
+  test("injects pierre diff scrollbar hiding hooks via unsafe css", () => {
+    const source = loadToolRenderingUiSource()
+
+    expect(source).toContain("scrollbar-width: none;")
+    expect(source).toContain("-ms-overflow-style: none;")
+    expect(source).toContain(":host ::-webkit-scrollbar {")
+    expect(source).toContain("height: 0;")
+    expect(source).toContain("display: none;")
+  })
 })

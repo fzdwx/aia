@@ -457,7 +457,9 @@ function ContextToolTriggerRow({ item }: { item: ToolRowItem }) {
       ? renderedTitle
       : trigger.subtitle)
   const isFileTool =
-    trigger.title === "Read" || trigger.title === "Write" || trigger.title === "Edit"
+    trigger.title === "Read" ||
+    trigger.title === "Write" ||
+    trigger.title === "Edit"
   const filePath = isFileTool
     ? getToolDisplayPath(item.toolName, item.details, item.arguments)
     : ""
