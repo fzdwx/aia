@@ -55,6 +55,8 @@ web-check:
 
 # 同时启动后端和前端
 dev: web-install
+	#!/usr/bin/env bash
+	set -e
 	cargo run -p agent-server &
 	SERVER_PID=$!
 	cd apps/web && pnpm run dev &
