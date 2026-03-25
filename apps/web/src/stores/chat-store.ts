@@ -14,20 +14,22 @@ import {
   type IdleCanceller,
   type IdleScheduler,
 } from "@/lib/idle"
-import {
-  normalizeToolArguments,
-  setActiveWorkspaceRoot,
-} from "@/lib/tool-display"
+import { setActiveWorkspaceRoot } from "@/lib/tool-display"
 import type {
   ChatState,
   ContextCompressionNotice,
-  CurrentTurnSnapshot,
   SessionListItem,
   SseEvent,
   StreamingTurn,
   TurnLifecycle,
   TurnStatus,
 } from "@/lib/types"
+import {
+  applyStreamEventToBlocks,
+  createPendingStreamingTurn,
+  currentTurnToStreamingTurn,
+  withStreamingStatus,
+} from "@/stores/chat-sse-projection"
 import { useProviderRegistryStore } from "@/stores/provider-registry-store"
 import {
   clearSessionSettingsState,
@@ -97,40 +99,6 @@ function mergeTurnsById(
   }
 
   return merged
-}
-
-function currentTurnToStreamingTurn(
-  current: CurrentTurnSnapshot
-): StreamingTurn {
-  return {
-    userMessage: current.user_message,
-    status: current.status,
-    blocks: current.blocks.map((block) => {
-      switch (block.kind) {
-        case "thinking":
-          return { type: "thinking", content: block.content } as const
-        case "text":
-          return { type: "text", content: block.content } as const
-        case "tool":
-          return {
-            type: "tool",
-            tool: {
-              invocationId: block.tool.invocation_id,
-              toolName: block.tool.tool_name,
-              arguments: normalizeToolArguments(block.tool.arguments),
-              detectedAtMs: block.tool.detected_at_ms,
-              startedAtMs: block.tool.started_at_ms ?? undefined,
-              finishedAtMs: block.tool.finished_at_ms ?? undefined,
-              output: block.tool.output,
-              completed: block.tool.completed,
-              resultContent: block.tool.result_content ?? undefined,
-              resultDetails: block.tool.result_details ?? undefined,
-              failed: block.tool.failed ?? undefined,
-            },
-          } as const
-      }
-    }),
-  }
 }
 
 function applySessionSnapshot(
@@ -433,6 +401,31 @@ export const useChatStore = create<ChatStore>((set, get) => {
     }
   }
 
+  function refreshActiveSessionPressure(sessionId: string | null) {
+    fetchSessionInfo(sessionId ?? undefined)
+      .then((info) =>
+        set((state) => {
+          const snapshot = state._sessionSnapshots[sessionId ?? ""]
+          if (!sessionId || !snapshot) {
+            return { contextPressure: info.pressure_ratio }
+          }
+          return {
+            contextPressure: info.pressure_ratio,
+            _sessionSnapshots: upsertSessionSnapshot(
+              state._sessionSnapshots,
+              sessionId,
+              {
+                ...snapshot,
+                contextPressure: info.pressure_ratio,
+              },
+              state.sessions
+            ),
+          }
+        })
+      )
+      .catch(() => {})
+  }
+
   return {
     sessions: [],
     activeSessionId: null,
@@ -466,22 +459,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
     handleSseEvent: (event: SseEvent) => {
       const activeId = get().activeSessionId
-
-      function findToolBlockIndex(
-        blocks: StreamingTurn["blocks"],
-        invocationId: string
-      ) {
-        for (let i = blocks.length - 1; i >= 0; i -= 1) {
-          const block = blocks[i]
-          if (
-            block?.type === "tool" &&
-            block.tool.invocationId === invocationId
-          ) {
-            return i
-          }
-        }
-        return -1
-      }
 
       function setStreamingTurnForActiveSession(
         updater: (streamingTurn: StreamingTurn) => StreamingTurn | null
@@ -536,10 +513,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             const prev = get().streamingTurn
             if (prev) {
               set((state) => {
-                const nextStreamingTurn = {
-                  ...prev,
-                  status: "waiting" as const,
-                }
+                const nextStreamingTurn = withStreamingStatus(prev, "waiting")
                 return {
                   _pendingPrompt: null,
                   chatState: "active",
@@ -561,11 +535,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
               const prompt = get()._pendingPrompt
               if (prompt) {
                 set((state) => {
-                  const nextStreamingTurn: StreamingTurn = {
-                    userMessage: prompt,
-                    status: "waiting",
-                    blocks: [],
-                  }
+                  const nextStreamingTurn = createPendingStreamingTurn(prompt)
                   return {
                     _pendingPrompt: null,
                     chatState: "active",
@@ -592,7 +562,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             const prev = get().streamingTurn
             if (prev) {
               set((state) => {
-                const nextStreamingTurn = { ...prev, status }
+                const nextStreamingTurn = withStreamingStatus(prev, status)
                 return {
                   streamingTurn: nextStreamingTurn,
                   _sessionSnapshots: upsertSessionSnapshot(
@@ -625,158 +595,11 @@ export const useChatStore = create<ChatStore>((set, get) => {
             break
           }
 
-          const blocks = [...prev.blocks]
-
-          if (data.kind === "thinking_delta") {
-            const last = blocks[blocks.length - 1]
-            if (last && last.type === "thinking") {
-              blocks[blocks.length - 1] = {
-                ...last,
-                content: last.content + data.text,
-              }
-            } else {
-              blocks.push({ type: "thinking", content: data.text })
-            }
-            setStreamingTurnForActiveSession((current) => ({
-              ...current,
-              blocks,
-            }))
-          } else if (data.kind === "text_delta") {
-            const last = blocks[blocks.length - 1]
-            if (last && last.type === "text") {
-              blocks[blocks.length - 1] = {
-                ...last,
-                content: last.content + data.text,
-              }
-            } else {
-              blocks.push({ type: "text", content: data.text })
-            }
-            setStreamingTurnForActiveSession((current) => ({
-              ...current,
-              blocks,
-            }))
-          } else if (data.kind === "tool_call_detected") {
-            const existingIdx = findToolBlockIndex(blocks, data.invocation_id)
-            if (existingIdx >= 0) {
-              const b = blocks[existingIdx] as Extract<
-                (typeof blocks)[number],
-                { type: "tool" }
-              >
-              blocks[existingIdx] = {
-                ...b,
-                tool: {
-                  ...b.tool,
-                  toolName: data.tool_name || b.tool.toolName,
-                  arguments: normalizeToolArguments(data.arguments),
-                },
-              }
-            } else {
-              blocks.push({
-                type: "tool",
-                tool: {
-                  invocationId: data.invocation_id,
-                  toolName: data.tool_name,
-                  arguments: normalizeToolArguments(data.arguments),
-                  detectedAtMs: data.detected_at_ms,
-                  output: "",
-                  completed: false,
-                },
-              })
-            }
-            setStreamingTurnForActiveSession((current) => ({
-              ...current,
-              blocks,
-            }))
-          } else if (data.kind === "tool_call_started") {
-            const existingIdx = findToolBlockIndex(blocks, data.invocation_id)
-            if (existingIdx >= 0) {
-              const b = blocks[existingIdx] as Extract<
-                (typeof blocks)[number],
-                { type: "tool" }
-              >
-              blocks[existingIdx] = {
-                ...b,
-                tool: {
-                  ...b.tool,
-                  toolName: data.tool_name || b.tool.toolName,
-                  arguments: normalizeToolArguments(data.arguments),
-                  startedAtMs: b.tool.startedAtMs ?? data.started_at_ms,
-                },
-              }
-            } else {
-              const startedAtMs = data.started_at_ms
-              blocks.push({
-                type: "tool",
-                tool: {
-                  invocationId: data.invocation_id,
-                  toolName: data.tool_name,
-                  arguments: normalizeToolArguments(data.arguments),
-                  detectedAtMs: startedAtMs,
-                  startedAtMs,
-                  output: "",
-                  completed: false,
-                },
-              })
-            }
-            setStreamingTurnForActiveSession((current) => ({
-              ...current,
-              blocks,
-            }))
-          } else if (data.kind === "tool_output_delta") {
-            const idx = findToolBlockIndex(blocks, data.invocation_id)
-            if (idx >= 0) {
-              const b = blocks[idx] as Extract<
-                (typeof blocks)[number],
-                { type: "tool" }
-              >
-              blocks[idx] = {
-                ...b,
-                tool: {
-                  ...b.tool,
-                  output: b.tool.output + data.text,
-                },
-              }
-            } else {
-              blocks.push({
-                type: "tool",
-                tool: {
-                  invocationId: data.invocation_id,
-                  toolName: "",
-                  arguments: {},
-                  detectedAtMs: 0,
-                  output: data.text,
-                  completed: false,
-                },
-              })
-            }
-            setStreamingTurnForActiveSession((current) => ({
-              ...current,
-              blocks,
-            }))
-          } else if (data.kind === "tool_call_completed") {
-            const idx = findToolBlockIndex(blocks, data.invocation_id)
-            if (idx >= 0) {
-              const b = blocks[idx] as Extract<
-                (typeof blocks)[number],
-                { type: "tool" }
-              >
-              blocks[idx] = {
-                ...b,
-                tool: {
-                  ...b.tool,
-                  finishedAtMs: data.finished_at_ms,
-                  completed: true,
-                  resultContent: data.content,
-                  resultDetails: data.details,
-                  failed: data.failed,
-                },
-              }
-              setStreamingTurnForActiveSession((current) => ({
-                ...current,
-                blocks,
-              }))
-            }
-          }
+          const blocks = applyStreamEventToBlocks(prev.blocks, data)
+          setStreamingTurnForActiveSession((current) => ({
+            ...current,
+            blocks,
+          }))
           break
         }
         case "turn_completed": {
@@ -805,28 +628,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
               ),
             }
           })
-          fetchSessionInfo(activeId ?? undefined)
-            .then((info) =>
-              set((state) => {
-                const snapshot = state._sessionSnapshots[activeId ?? ""]
-                if (!activeId || !snapshot) {
-                  return { contextPressure: info.pressure_ratio }
-                }
-                return {
-                  contextPressure: info.pressure_ratio,
-                  _sessionSnapshots: upsertSessionSnapshot(
-                    state._sessionSnapshots,
-                    activeId,
-                    {
-                      ...snapshot,
-                      contextPressure: info.pressure_ratio,
-                    },
-                    state.sessions
-                  ),
-                }
-              })
-            )
-            .catch(() => {})
+          refreshActiveSessionPressure(activeId)
           break
         }
         case "context_compressed": {
@@ -849,28 +651,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
                   : state._sessionSnapshots,
             }
           })
-          fetchSessionInfo(activeId ?? undefined)
-            .then((info) =>
-              set((state) => {
-                const snapshot = state._sessionSnapshots[activeId ?? ""]
-                if (!activeId || !snapshot) {
-                  return { contextPressure: info.pressure_ratio }
-                }
-                return {
-                  contextPressure: info.pressure_ratio,
-                  _sessionSnapshots: upsertSessionSnapshot(
-                    state._sessionSnapshots,
-                    activeId,
-                    {
-                      ...snapshot,
-                      contextPressure: info.pressure_ratio,
-                    },
-                    state.sessions
-                  ),
-                }
-              })
-            )
-            .catch(() => {})
+          refreshActiveSessionPressure(activeId)
           break
         }
         case "sync_required": {

@@ -11,8 +11,7 @@
 - `docs/rfc/0001-question-runtime-tool.md`：将 RFC 状态从 `Implemented` 校准为 `Accepted`，匹配当前“规格已定、实现中”的真实阶段。
 - `docs/evolution-log.md`：记录本轮从 RFC 进入首轮实现的结果。
 **Verification**：`cargo test -p agent-core -p agent-runtime`；`cargo check -p agent-core -p agent-runtime`。
-**Commit**：未提交。
-**Next direction**：下一轮优先继续把 `Question` 从“结构化 runtime tool + capability gating”推进到真正的 pending question 状态机：先补 `agent-server` / tape 的 `question_requested + question_resolved` 事实与恢复路径，再接 `GET/PUT/DELETE /api/session/question` 控制面，而不是先做 Web 交互样式。
+**Commit**：`317b58a feat(runtime): add question tool protocol foundation`。
 
 ## 2026-03-25 Session 108
 
