@@ -824,7 +824,24 @@ describe("tool renderer registry", () => {
       succeeded: true,
     })
 
-    expect(title).toBe("Unknown · custom.tool — src/main.rs")
+    expect(title).toBe("src/main.rs · Recursive yes")
+  })
+
+  test("builds smarter fallback titles from arguments and details", () => {
+    const title = toolRendererRegistry.renderTitle({
+      toolName: "custom.tool",
+      arguments: {
+        recursive: true,
+      },
+      details: {
+        attempts: 2,
+        exit_code: 1,
+      },
+      outputContent: "",
+      succeeded: false,
+    })
+
+    expect(title).toBe("Recursive yes · Attempts 2")
   })
 
   test("renders unknown tool details with chinese fallback sections", () => {

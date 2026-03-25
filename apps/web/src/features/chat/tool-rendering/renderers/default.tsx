@@ -1,5 +1,9 @@
 import type { ToolRenderer } from "../types"
-import { getToolDisplayPath, normalizeToolArguments } from "@/lib/tool-display"
+import {
+  getToolDisplayName,
+  getToolDisplayPath,
+  normalizeToolArguments,
+} from "@/lib/tool-display"
 import { toolTimelineCopy } from "../../tool-timeline-copy"
 import { buildDetailEntries, truncateInline } from "../helpers"
 import {
@@ -9,18 +13,38 @@ import {
   ToolInfoSection,
 } from "../ui"
 
+const PRIMARY_TITLE_KEYS = new Set([
+  "path",
+  "file_path",
+  "pattern",
+  "command",
+  "cmd",
+  "query",
+])
+
 function buildFallbackTitle(
   data: Parameters<ToolRenderer["renderTitle"]>[0]
 ): string {
+  const normalizedArgs = normalizeToolArguments(data.arguments)
   const primary = getToolDisplayPath(
     data.toolName,
     data.details,
-    data.arguments
+    normalizedArgs
   )
+  const titleSegments = [
+    primary ? truncateInline(primary, 64) : null,
+    ...buildDetailEntries(normalizedArgs, {
+      omitKeys: PRIMARY_TITLE_KEYS,
+      maxEntries: primary ? 1 : 2,
+    }).map((entry) => truncateInline(`${entry.label} ${entry.value}`, 40)),
+    ...buildDetailEntries(data.details, {
+      omitKeys: PRIMARY_TITLE_KEYS,
+      maxEntries: primary ? 1 : 2,
+    }).map((entry) => truncateInline(`${entry.label} ${entry.value}`, 40)),
+  ].filter((segment): segment is string => Boolean(segment))
+  const summary = titleSegments.slice(0, primary ? 3 : 2).join(" · ")
 
-  return primary
-    ? `Unknown · ${data.toolName} — ${truncateInline(primary, 64)}`
-    : `Unknown · ${data.toolName}`
+  return summary || getToolDisplayName(data.toolName)
 }
 
 export function createDefaultToolRenderer(): ToolRenderer {

@@ -87,7 +87,7 @@ struct TapeInfoToolArgs {}
 #[async_trait]
 impl Tool for TapeInfoTool {
     fn name(&self) -> &str {
-        "tape_info"
+        "TapeInfo"
     }
 
     fn definition(&self) -> ToolDefinition {
@@ -117,7 +117,7 @@ impl Tool for TapeInfoTool {
             "pressure_ratio": stats.pressure_ratio,
         });
         let content = serde_json::to_string_pretty(&details)
-            .map_err(|error| CoreError::new(format!("failed to serialize tape_info: {error}")))?;
+            .map_err(|error| CoreError::new(format!("failed to serialize TapeInfo: {error}")))?;
         Ok(ToolResult::from_call(tool_call, content).with_details(details))
     }
 }
@@ -136,7 +136,7 @@ struct TapeHandoffToolArgs {
 #[async_trait]
 impl Tool for TapeHandoffTool {
     fn name(&self) -> &str {
-        "tape_handoff"
+        "TapeHandoff"
     }
 
     fn definition(&self) -> ToolDefinition {

@@ -2145,7 +2145,7 @@ impl LanguageModel for TapeInfoModel {
         mutex_lock(&self.seen_requests).push(request.clone());
         if step == 0 {
             Ok(Completion {
-                segments: vec![CompletionSegment::ToolUse(ToolCall::new("tape_info"))],
+                segments: vec![CompletionSegment::ToolUse(ToolCall::new("TapeInfo"))],
                 stop_reason: CompletionStopReason::ToolUse,
                 usage: None,
                 response_body: None,
@@ -2161,7 +2161,7 @@ impl LanguageModel for TapeInfoModel {
             if saw_info {
                 Ok(Completion::text("已获取上下文统计信息"))
             } else {
-                Err(CoreError::new("未看到 tape_info 结果"))
+                Err(CoreError::new("未看到 TapeInfo 结果"))
             }
         }
     }
@@ -2194,7 +2194,7 @@ fn tape_info_结果包含结构化_details() {
         .entries()
         .iter()
         .find_map(|entry| entry.as_tool_result())
-        .expect("应记录 tape_info 工具结果");
+        .expect("应记录 TapeInfo 工具结果");
     let details = tool_result.details.as_ref().expect("应包含结构化 details");
 
     assert_eq!(details.get("entries").and_then(|value| value.as_u64()), Some(4));
@@ -2232,7 +2232,7 @@ impl LanguageModel for TapeHandoffModel {
         if step == 0 {
             Ok(Completion {
                 segments: vec![CompletionSegment::ToolUse(
-                    ToolCall::new("tape_handoff").with_arguments_value(
+                    ToolCall::new("TapeHandoff").with_arguments_value(
                         json!({"summary": "测试摘要：对话进行了多轮交互", "name": "test_anchor"}),
                     ),
                 )],
@@ -2259,7 +2259,7 @@ impl LanguageModel for TapeHandoffModel {
                 if saw_anchor {
                     Ok(Completion::text("已创建锚点"))
                 } else {
-                    Err(CoreError::new("未看到 tape_handoff 结果或 context summary"))
+                    Err(CoreError::new("未看到 TapeHandoff 结果或 context summary"))
                 }
             }
         }
@@ -2279,7 +2279,7 @@ fn tape_info_工具返回上下文统计() {
     // Verify the tool result was recorded
     assert!(runtime.tape().entries().iter().any(|entry| {
         entry.as_tool_result().is_some_and(|result| {
-            result.tool_name == "tape_info" && result.content.contains("\"entries\"")
+            result.tool_name == "TapeInfo" && result.content.contains("\"entries\"")
         })
     }));
 }
@@ -2321,7 +2321,7 @@ fn runtime_tool_bridge_创建锚点后后续请求会过滤孤立_tool_result() 
     let tool_result_index = entries
         .iter()
         .position(|entry| {
-            entry.as_tool_result().is_some_and(|result| result.tool_name == "tape_handoff")
+            entry.as_tool_result().is_some_and(|result| result.tool_name == "TapeHandoff")
         })
         .expect("应记录 runtime tool 结果");
     let anchor_index = entries
@@ -2332,7 +2332,7 @@ fn runtime_tool_bridge_创建锚点后后续请求会过滤孤立_tool_result() 
 
     assert!(tool_result_index > anchor_index);
     assert!(request.conversation.iter().all(|item| {
-        item.as_tool_result().is_none_or(|result| result.tool_name != "tape_handoff")
+        item.as_tool_result().is_none_or(|result| result.tool_name != "TapeHandoff")
     }));
 }
 
