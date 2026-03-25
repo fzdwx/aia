@@ -115,7 +115,6 @@ struct NestedQuestionOptionArgs {
 #[serde(deny_unknown_fields)]
 struct NestedQuestionItemArgs {
     id: String,
-    header: String,
     question: String,
     options: Vec<NestedQuestionOptionArgs>,
 }

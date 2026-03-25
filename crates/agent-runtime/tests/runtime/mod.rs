@@ -571,7 +571,6 @@ impl LanguageModel for QuestionToolModel {
                 ToolCall::new("Question").with_arguments_value(serde_json::json!({
                     "questions": [{
                         "id": "database",
-                        "header": "Database",
                         "question": "Use which database?",
                         "kind": "choice",
                         "required": true,
@@ -580,7 +579,7 @@ impl LanguageModel for QuestionToolModel {
                             { "id": "sqlite", "label": "SQLite" },
                             { "id": "postgres", "label": "Postgres" }
                         ],
-                        "recommended_option_ids": ["sqlite"],
+                        "recommended_option_id": "sqlite",
                         "recommendation_reason": "best local default"
                     }]
                 })),
@@ -622,7 +621,6 @@ impl LanguageModel for ResumeAfterQuestionModel {
                     ToolCall::new("Question").with_arguments_value(serde_json::json!({
                         "questions": [{
                             "id": "database",
-                            "header": "Database",
                             "question": "Use which database?",
                             "kind": "choice",
                             "required": true,
@@ -631,7 +629,7 @@ impl LanguageModel for ResumeAfterQuestionModel {
                                 { "id": "sqlite", "label": "SQLite" },
                                 { "id": "postgres", "label": "Postgres" }
                             ],
-                            "recommended_option_ids": ["sqlite"],
+                            "recommended_option_id": "sqlite",
                             "recommendation_reason": "best local default"
                         }]
                     })),

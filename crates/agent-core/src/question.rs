@@ -19,7 +19,6 @@ pub struct QuestionOption {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct QuestionItem {
     pub id: String,
-    pub header: String,
     pub question: String,
     pub kind: QuestionKind,
     #[serde(default)]
@@ -30,8 +29,8 @@ pub struct QuestionItem {
     pub options: Vec<QuestionOption>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub placeholder: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub recommended_option_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recommended_option_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recommendation_reason: Option<String>,
 }

@@ -275,14 +275,13 @@ export type QuestionOption = {
 
 export type QuestionItem = {
   id: string
-  header: string
   question: string
   kind: QuestionKind
   required: boolean
   multi_select: boolean
   options: QuestionOption[]
   placeholder?: string | null
-  recommended_option_ids: string[]
+  recommended_option_id?: string | null
   recommendation_reason?: string | null
 }
 

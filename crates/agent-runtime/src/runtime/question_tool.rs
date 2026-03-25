@@ -21,7 +21,6 @@ pub(super) struct QuestionToolArgs {
 #[serde(deny_unknown_fields)]
 pub(super) struct QuestionToolQuestionItemArgs {
     pub(super) id: String,
-    pub(super) header: String,
     pub(super) question: String,
     #[tool_schema(description = "Question kind: choice, text, or confirm.")]
     pub(super) kind: String,
@@ -29,7 +28,7 @@ pub(super) struct QuestionToolQuestionItemArgs {
     pub(super) multi_select: Option<bool>,
     pub(super) options: Option<Vec<QuestionToolQuestionOptionArgs>>,
     pub(super) placeholder: Option<String>,
-    pub(super) recommended_option_ids: Option<Vec<String>>,
+    pub(super) recommended_option_id: Option<String>,
     pub(super) recommendation_reason: Option<String>,
 }
 
@@ -66,7 +65,6 @@ impl TryFrom<QuestionToolQuestionItemArgs> for QuestionItem {
     fn try_from(value: QuestionToolQuestionItemArgs) -> Result<Self, Self::Error> {
         Ok(Self {
             id: value.id,
-            header: value.header,
             question: value.question,
             kind: parse_question_kind(&value.kind)?,
             required: value.required.unwrap_or(false),
@@ -78,7 +76,7 @@ impl TryFrom<QuestionToolQuestionItemArgs> for QuestionItem {
                 .map(QuestionOption::from)
                 .collect(),
             placeholder: value.placeholder,
-            recommended_option_ids: value.recommended_option_ids.unwrap_or_default(),
+            recommended_option_id: value.recommended_option_id,
             recommendation_reason: value.recommendation_reason,
         })
     }

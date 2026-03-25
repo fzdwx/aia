@@ -164,7 +164,6 @@ superseded_by: null
   "questions": [
     {
       "id": "database",
-      "header": "Database",
       "question": "要使用哪个数据库？",
       "kind": "choice",
       "required": true,
@@ -181,7 +180,7 @@ superseded_by: null
           "description": "部署最简单，适合单机场景"
         }
       ],
-      "recommended_option_ids": ["sqlite"],
+      "recommended_option_id": "sqlite",
       "recommendation_reason": "当前项目是单机 agent harness，本地部署与测试成本最低"
     }
   ]
@@ -198,14 +197,13 @@ superseded_by: null
 每个问题建议包含：
 
 - `id`: 问题 ID，供 answer 精确回填
-- `header`: 短标题，供 UI badge / tab / section 使用
 - `question`: 完整问题文本
 - `kind`: `choice | text | confirm`
 - `required`: 是否必须回答
 - `multi_select`: 多选开关，仅 `choice` 使用
 - `options[]`: 结构化候选项
 - `placeholder`: `text` 类型占位提示，可选
-- `recommended_option_ids[]`: AI 推荐项，可为空
+- `recommended_option_id`: AI 推荐项，可为空
 - `recommendation_reason`: 推荐理由，可为空
 
 字段约束建议：
@@ -213,8 +211,7 @@ superseded_by: null
 - `choice`：必须包含 `options[]`
 - `text`：默认不包含 `options[]`
 - `confirm`：Phase 1 统一视为受限的 `choice` 变体，允许实现侧固定为 `yes/no` 两项，不额外引入独立布尔 wire shape
-- `header` 应保持简短，适合 UI badge / tab / chip 展示
-- `recommended_option_ids[]` 必须是 `options[]` 中已存在的 option id 子集
+- `recommended_option_id` 必须是 `options[]` 中已存在的 option id
 - 对模型暴露的 `Question` tool 参数应只包含真正需要 AI 决策的字段，例如 `questions[]`；`request_id`、`turn_id` 这类运行时主键/上下文标识不应成为模型输入参数
 
 ### `QuestionOption`

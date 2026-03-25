@@ -21,7 +21,7 @@ function ChoiceQuestion({
   const selected = new Set(value?.selected_option_ids ?? [])
   const customText = value?.text ?? ""
   const [customInputFocused, setCustomInputFocused] = useState(false)
-  const recommendedOptionIds = item.recommended_option_ids ?? []
+  const recommendedOptionId = item.recommended_option_id ?? null
   const recommendationReason = item.recommendation_reason ?? null
   const customInputActive = customInputFocused || customText.trim().length > 0
 
@@ -29,7 +29,7 @@ function ChoiceQuestion({
     <div className="space-y-2">
       {item.options.map((option) => {
         const checked = selected.has(option.id)
-        const isRecommended = recommendedOptionIds.includes(option.id)
+        const isRecommended = recommendedOptionId === option.id
         return (
           <label
             key={option.id}
@@ -192,13 +192,13 @@ function questionValidationError(
   answer: QuestionAnswer | undefined
 ): string | null {
   if (!item || !item.required) return null
-  if (!answer) return `Please answer “${item.header}”.`
+  if (!answer) return `Please answer “${item.question}”.`
   const hasText = Boolean((answer.text ?? "").trim())
   if (item.kind === "text" && !hasText) {
-    return `Please answer “${item.header}”.`
+    return `Please answer “${item.question}”.`
   }
   if (item.kind !== "text" && answer.selected_option_ids.length === 0 && !hasText) {
-    return `Please answer “${item.header}”.`
+    return `Please answer “${item.question}”.`
   }
   return null
 }
@@ -224,13 +224,13 @@ export function PendingQuestionComposer() {
     for (const item of pendingQuestion.questions) {
       if (!item.required) continue
       const answer = answers[item.id]
-      if (!answer) return `Please answer “${item.header}”.`
+      if (!answer) return `Please answer “${item.question}”.`
       const hasText = Boolean((answer.text ?? "").trim())
       if (item.kind === "text" && !hasText) {
-        return `Please answer “${item.header}”.`
+        return `Please answer “${item.question}”.`
       }
       if (item.kind !== "text" && answer.selected_option_ids.length === 0 && !hasText) {
-        return `Please answer “${item.header}”.`
+        return `Please answer “${item.question}”.`
       }
     }
     return null
@@ -303,10 +303,7 @@ export function PendingQuestionComposer() {
         </div>
 
         <section key={currentItem.id} className="space-y-2.5">
-          <div className="space-y-0.5">
-            <div className="text-ui font-medium text-foreground/95">{currentItem.header}</div>
-            <p className="text-body-sm text-muted-foreground/70">{currentItem.question}</p>
-          </div>
+          <p className="text-body-sm text-foreground/90">{currentItem.question}</p>
 
           {currentItem.kind === "choice" ? (
             <ChoiceQuestion

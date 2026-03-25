@@ -225,7 +225,6 @@ fn rebuild_turn_history_from_tape_restores_waiting_for_question_outcome() {
                 serde_json::json!({
                     "questions": [{
                         "id": "database",
-                        "header": "Database",
                         "question": "Use which database?",
                         "kind": "choice"
                     }]
@@ -243,13 +242,12 @@ fn rebuild_turn_history_from_tape_restores_waiting_for_question_outcome() {
                 "turn_id": turn_id,
                 "questions": [{
                     "id": "database",
-                    "header": "Database",
                     "question": "Use which database?",
                     "kind": "choice",
                     "required": true,
                     "multi_select": false,
                     "options": [],
-                    "recommended_option_ids": [],
+                    "recommended_option_id": null,
                     "recommendation_reason": null
                 }]
             })),

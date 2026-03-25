@@ -93,7 +93,6 @@ fn try_pending_question_request_returns_latest_unresolved_request() {
         turn_id: "turn_old".into(),
         questions: vec![QuestionItem {
             id: "database".into(),
-            header: "Database".into(),
             question: "Use which database?".into(),
             kind: QuestionKind::Choice,
             required: true,
@@ -104,7 +103,7 @@ fn try_pending_question_request_returns_latest_unresolved_request() {
                 description: Some("simple".into()),
             }],
             placeholder: None,
-            recommended_option_ids: vec!["sqlite".into()],
+            recommended_option_id: Some("sqlite".into()),
             recommendation_reason: Some("single-machine setup".into()),
         }],
     };
@@ -114,7 +113,6 @@ fn try_pending_question_request_returns_latest_unresolved_request() {
         turn_id: "turn_new".into(),
         questions: vec![QuestionItem {
             id: "framework".into(),
-            header: "Framework".into(),
             question: "Use which framework?".into(),
             kind: QuestionKind::Choice,
             required: true,
@@ -125,7 +123,7 @@ fn try_pending_question_request_returns_latest_unresolved_request() {
                 description: None,
             }],
             placeholder: None,
-            recommended_option_ids: vec![],
+            recommended_option_id: None,
             recommendation_reason: None,
         }],
     };
@@ -158,14 +156,13 @@ fn try_pending_question_request_returns_none_when_latest_request_was_resolved() 
         turn_id: "turn_done".into(),
         questions: vec![QuestionItem {
             id: "confirm".into(),
-            header: "Confirm".into(),
             question: "Continue?".into(),
             kind: QuestionKind::Confirm,
             required: true,
             multi_select: false,
             options: vec![],
             placeholder: None,
-            recommended_option_ids: vec![],
+            recommended_option_id: None,
             recommendation_reason: None,
         }],
     };

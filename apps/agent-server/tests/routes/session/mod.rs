@@ -48,14 +48,13 @@ fn sample_question_request() -> QuestionRequest {
         turn_id: "turn_123".into(),
         questions: vec![QuestionItem {
             id: "database".into(),
-            header: "Database".into(),
             question: "Use which database?".into(),
             kind: QuestionKind::Choice,
             required: true,
             multi_select: false,
             options: Vec::new(),
             placeholder: None,
-            recommended_option_ids: Vec::new(),
+            recommended_option_id: None,
             recommendation_reason: None,
         }],
     }

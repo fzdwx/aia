@@ -57,14 +57,13 @@ async fn submit_turn_rejects_session_waiting_for_question_response() {
         turn_id: "turn_123".into(),
         questions: vec![agent_core::QuestionItem {
             id: "database".into(),
-            header: "Database".into(),
             question: "Use which database?".into(),
             kind: agent_core::QuestionKind::Choice,
             required: true,
             multi_select: false,
             options: Vec::new(),
             placeholder: None,
-            recommended_option_ids: Vec::new(),
+            recommended_option_id: None,
             recommendation_reason: None,
         }],
     });
