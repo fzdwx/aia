@@ -165,6 +165,11 @@
       "source": "pbakaus/impeccable",
       "sourceType": "github",
       "computedHash": "566473e23aa6230a40ddfad43e2da496e40314523bd20af8a677f0d40e1430f3"
+    },
+    "vercel-react-best-practices": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "computedHash": "bbc31a48537b473ff4feea6360ef0de3bfdcbef26c14f4967a5deefe8ca801d3"
     }
   }
 }
