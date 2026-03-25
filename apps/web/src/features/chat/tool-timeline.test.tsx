@@ -30,6 +30,10 @@ function loadWebCssSource() {
   ).replace(/\s+/g, " ")
 }
 
+function loadViteConfigSource() {
+  return readFileSync(new URL("../../../vite.config.ts", import.meta.url), "utf8")
+}
+
 describe("tool timeline", () => {
   test("normalizes names when classifying context exploration tools", () => {
     expect(isContextExplorationTool("Read")).toBe(true)
@@ -472,6 +476,24 @@ describe("tool timeline", () => {
     expect(source).toContain(".tool-timeline-patch-stat")
   })
 
+  test("styles pierre virtualizer as the scroll container", () => {
+    const source = loadWebCssSource()
+
+    expect(source).toContain(".tool-timeline-pierre-virtualizer")
+    expect(source).toContain("max-height: min(32rem, 70vh)")
+    expect(source).toContain("overflow: auto")
+    expect(source).toContain("overscroll-behavior: contain")
+    expect(source).toContain(".tool-timeline-pierre-virtualizer-content")
+    expect(source).toContain("min-width: 100%")
+  })
+
+  test("configures Vite workers for Pierre diff highlighting", () => {
+    const source = loadViteConfigSource()
+
+    expect(source).toContain("worker:")
+    expect(source).toContain('format: "es"')
+  })
+
   test("uses default cursor for timeline tool triggers", () => {
     const source = loadWebCssSource()
 
@@ -598,6 +620,12 @@ describe("tool timeline", () => {
     expect(source).toContain('animate={{ height: "auto" }}')
     expect(source).toContain("const CONTEXT_GROUP_TRANSITION =")
     expect(source).toContain('animate={{ height: "auto" }}')
+  })
+
+  test("keeps timeline groups free of the pierre provider wrapper", () => {
+    const source = loadToolTimelineSource()
+
+    expect(source).not.toContain("PierreDiffProvider")
   })
 
   test("renders shell details on the flat path without generic request or result sections", () => {

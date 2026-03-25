@@ -17,9 +17,9 @@ import {
 } from "../helpers"
 import {
   ExpandableOutput,
-  PierreMultiFileDiffOutput,
   ToolDetailSection,
 } from "../ui"
+import { PierreMultiFileDiffOutput } from "../../diff/pierre-diff"
 
 function getToolFileName(data: Parameters<ToolRenderer["renderDetails"]>[0]) {
   const args = normalizeToolArguments(data.arguments)

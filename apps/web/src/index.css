@@ -1222,6 +1222,17 @@ body {
     border-left: 0;
     background: transparent;
   }
+
+  .tool-timeline-pierre-virtualizer {
+    width: 100%;
+    max-height: min(32rem, 70vh);
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  .tool-timeline-pierre-virtualizer-content {
+    min-width: 100%;
+  }
 }
 
 /* Subtle grain texture for depth */

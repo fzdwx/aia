@@ -15,6 +15,27 @@ function loadToolRenderingUiSource() {
   )
 }
 
+function loadPierreDiffSource() {
+  return readFileSync(
+    new URL("../diff/pierre-diff.tsx", import.meta.url),
+    "utf8"
+  ).replace(/\s+/g, " ")
+}
+
+function loadPierreDiffProviderSource() {
+  return readFileSync(
+    new URL("../diff/pierre-diff-provider.tsx", import.meta.url),
+    "utf8"
+  ).replace(/\s+/g, " ")
+}
+
+function loadPierreConfigSource() {
+  return readFileSync(
+    new URL("../diff/pierre-config.ts", import.meta.url),
+    "utf8"
+  ).replace(/\s+/g, " ")
+}
+
 type ElementWithChildren = {
   children?: ReactNode
 }
@@ -980,12 +1001,6 @@ describe("tool renderer registry", () => {
     expect(source).toContain(
       'import { toolTimelineCopy } from "../tool-timeline-copy"'
     )
-    expect(source).toContain("@pierre/diffs/react")
-    expect(source).toContain("MultiFileDiff")
-    expect(source).toContain("PatchDiff")
-    expect(source).toContain("useTheme")
-    expect(source).toContain("pierre-dark")
-    expect(source).toContain("pierre-light")
     expect(source).toContain("toolTimelineCopy.action.expand")
     expect(source).toContain("toolTimelineCopy.action.collapse")
     expect(source).toContain("toolTimelineCopy.section.content")
@@ -995,7 +1010,7 @@ describe("tool renderer registry", () => {
   })
 
   test("keeps pierre diff host background transparent", () => {
-    const source = loadToolRenderingUiSource()
+    const source = loadPierreConfigSource()
 
     expect(source).toContain('background: "transparent"')
     expect(source).toContain('"--aia-diff-surface": "transparent"')
@@ -1003,8 +1018,34 @@ describe("tool renderer registry", () => {
     expect(source).toContain('"--diffs-bg-hover-override": "transparent"')
   })
 
+  test("keeps pierre virtualizer local to concrete diff renderers", () => {
+    const source = loadPierreDiffSource()
+    const configSource = loadPierreConfigSource()
+
+    expect(source).toContain("Virtualizer")
+    expect(source).toContain('className="tool-timeline-pierre-virtualizer"')
+    expect(source).toContain(
+      'contentClassName="tool-timeline-pierre-virtualizer-content"'
+    )
+    expect(configSource).toContain("overscrollSize: 1200")
+    expect(configSource).toContain("intersectionObserverMargin: 600")
+    expect(source).toContain("lineDiffType: \"none\"")
+    expect(source).not.toContain("WorkerPoolContextProvider")
+  })
+
+  test("keeps shared pierre worker pool configuration in a dedicated provider module", () => {
+    const source = loadPierreDiffProviderSource()
+
+    expect(source).toContain("WorkerPoolContextProvider")
+    expect(source).toContain("pierreWorkerPoolOptions")
+    expect(source).toContain('preferredHighlighter: "shiki-js"')
+    expect(source).toContain('lineDiffType: "none"')
+    expect(source).toContain("highlighterOptions")
+    expect(source).not.toContain("sharedRenderOptions")
+  })
+
   test("injects pierre diff scrollbar hiding hooks via unsafe css", () => {
-    const source = loadToolRenderingUiSource()
+    const source = loadPierreConfigSource()
 
     expect(source).toContain("scrollbar-width: none;")
     expect(source).toContain("-ms-overflow-style: none;")

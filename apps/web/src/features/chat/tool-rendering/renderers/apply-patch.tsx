@@ -9,7 +9,7 @@ import {
   getStringValue,
   truncateInline,
 } from "../helpers"
-import { PierrePatchDiffOutput } from "../ui"
+import { PierrePatchDiffOutput } from "../../diff/pierre-diff"
 
 type ApplyPatchOperation = {
   added: number

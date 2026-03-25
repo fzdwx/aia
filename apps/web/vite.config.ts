@@ -8,6 +8,9 @@ const currentFilePath = fileURLToPath(import.meta.url)
 const currentDirectoryPath = path.dirname(currentFilePath)
 
 export default defineConfig({
+  worker: {
+    format: "es",
+  },
   test: {
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
   },
