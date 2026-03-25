@@ -103,6 +103,29 @@ struct DecoratedArgsSchema {
     base_url: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, ToolArgsSchema)]
+#[serde(deny_unknown_fields)]
+struct NestedQuestionOptionArgs {
+    id: String,
+    label: String,
+    description: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, ToolArgsSchema)]
+#[serde(deny_unknown_fields)]
+struct NestedQuestionItemArgs {
+    id: String,
+    header: String,
+    question: String,
+    options: Vec<NestedQuestionOptionArgs>,
+}
+
+#[derive(Serialize, Deserialize, ToolArgsSchema)]
+#[serde(deny_unknown_fields)]
+struct NestedQuestionToolArgs {
+    questions: Vec<NestedQuestionItemArgs>,
+}
+
 #[test]
 fn 自研_schema_支持更多高频字段类型与数值约束() {
     let definition =
@@ -135,6 +158,33 @@ fn 自研_schema_可附加属性级扩展元信息() {
     assert_eq!(
         definition.parameters["properties"]["base_url"]["default"],
         "https://open.feishu.cn"
+    );
+}
+
+#[test]
+fn 自研_schema_支持嵌套_struct_与_struct_array() {
+    let definition =
+        ToolDefinition::new("question", "提问").with_parameters_schema::<NestedQuestionToolArgs>();
+
+    assert_eq!(definition.parameters["properties"]["questions"]["type"], "array");
+    assert_eq!(definition.parameters["properties"]["questions"]["items"]["type"], "object");
+    assert_eq!(
+        definition.parameters["properties"]["questions"]["items"]["properties"]["id"]["type"],
+        "string"
+    );
+    assert_eq!(
+        definition.parameters["properties"]["questions"]["items"]["properties"]["options"]["type"],
+        "array"
+    );
+    assert_eq!(
+        definition.parameters["properties"]["questions"]["items"]["properties"]["options"]["items"]
+            ["type"],
+        "object"
+    );
+    assert_eq!(
+        definition.parameters["properties"]["questions"]["items"]["properties"]["options"]["items"]
+            ["properties"]["label"]["type"],
+        "string"
     );
 }
 
@@ -225,11 +275,13 @@ fn 工具结果继承工具调用标识() {
 fn session_interaction_capabilities_仅在交互式会话中允许_question_tool() {
     assert!(SessionInteractionCapabilities::interactive().can_use_question_tool());
     assert!(!SessionInteractionCapabilities::non_interactive().can_use_question_tool());
-    assert!(!SessionInteractionCapabilities {
-        supports_interactive_components: true,
-        supports_question_tool: false,
-    }
-    .can_use_question_tool());
+    assert!(
+        !SessionInteractionCapabilities {
+            supports_interactive_components: true,
+            supports_question_tool: false,
+        }
+        .can_use_question_tool()
+    );
 }
 
 #[test]
@@ -250,7 +302,8 @@ fn question_result_保持稳定序列化形状() {
     assert_eq!(value["request_id"], serde_json::json!("qreq_123"));
     assert_eq!(value["answers"][0]["question_id"], serde_json::json!("database"));
     assert_eq!(
-        serde_json::from_value::<QuestionResult>(value).expect("question result should deserialize"),
+        serde_json::from_value::<QuestionResult>(value)
+            .expect("question result should deserialize"),
         result
     );
 }

@@ -43,6 +43,7 @@ fn map_current_turn_snapshot(snapshot: CurrentTurnSnapshot) -> ChannelCurrentTur
 fn map_turn_status(status: TurnStatus) -> ChannelTurnStatus {
     match status {
         TurnStatus::Waiting => ChannelTurnStatus::Waiting,
+        TurnStatus::WaitingForQuestion => ChannelTurnStatus::Waiting,
         TurnStatus::Thinking => ChannelTurnStatus::Thinking,
         TurnStatus::Working => ChannelTurnStatus::Working,
         TurnStatus::Generating => ChannelTurnStatus::Generating,

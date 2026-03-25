@@ -3,13 +3,16 @@ import type {
   CreateChannelRequest,
   CurrentTurnSnapshot,
   HistoryPage,
+  PendingQuestionResponse,
   ModelConfig,
   ProviderInfo,
+  QuestionResult,
   ProviderListItem,
   SessionSettings,
   SessionListItem,
   SseEvent,
   SupportedChannelDefinition,
+  ThinkingLevel,
   TraceDashboard,
   TraceDashboardRange,
   TraceDetailResponse,
@@ -101,6 +104,38 @@ export async function fetchSessionSettings(
   if (!res.ok)
     throw new Error(`GET /api/session/settings failed: ${res.status}`)
   return (await res.json()) as Promise<SessionSettings>
+}
+
+export async function fetchPendingQuestion(
+  sessionId?: string
+): Promise<PendingQuestionResponse> {
+  const params = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ""
+  const res = await fetch(`/api/session/question${params}`)
+  if (!res.ok)
+    throw new Error(`GET /api/session/question failed: ${res.status}`)
+  return (await res.json()) as Promise<PendingQuestionResponse>
+}
+
+export async function resolvePendingQuestion(body: {
+  session_id?: string
+  result: QuestionResult
+}): Promise<void> {
+  const res = await fetch("/api/session/question", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: body.session_id, ...body.result }),
+  })
+  if (!res.ok)
+    throw new Error(`PUT /api/session/question failed: ${res.status}`)
+}
+
+export async function cancelPendingQuestion(sessionId?: string): Promise<void> {
+  const params = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ""
+  const res = await fetch(`/api/session/question${params}`, {
+    method: "DELETE",
+  })
+  if (!res.ok)
+    throw new Error(`DELETE /api/session/question failed: ${res.status}`)
 }
 
 export async function updateSessionSettings(body: {
@@ -310,4 +345,3 @@ export function connectEvents(onEvent: (event: SseEvent) => void): () => void {
 
   return () => es.close()
 }
-import type { ThinkingLevel } from "@/lib/types"

@@ -1,5 +1,25 @@
 # 演进日志
 
+## 2026-03-25 Session 111
+
+**Diagnosis**：`Question` RFC 虽然已经把共享协议、runtime tool 和 capability gating 落进 `agent-core` / `agent-runtime`，但 `session-tape` 仍缺少对 `question_requested/question_resolved` 的一等恢复 helper。这样 server 进入 Phase 1 的 pending question 恢复时，仍得在 `apps/agent-server` 里手写一遍“倒序扫描 event、按 `request_id` 配对”的逻辑，不利于把 append-only tape 事实语义稳定地下沉到共享层。
+**Decision**：本轮先把 `Question` 的 pending 恢复基座补到 `session-tape`，并顺手让 `apps/agent-server` 开始真正消费它：共享层新增 `record_question_requested(...)`、`record_question_resolved(...)` 和 `try_pending_question_request()`；server 侧新增 `get_pending_question(...)` 查询链路与 `GET /api/session/question`，同时在普通 `POST /api/turn` 前显式拒绝“当前 session 正在等待 question 回答”的情况。这样下一轮继续做 `WaitingForQuestion` / `PUT|DELETE /api/session/question` 时，不需要再从零起控制面。
+**Changes**：
+- `crates/session-tape/src/tape.rs`：新增 `question_requested/question_resolved` 事件落盘 helper，以及按 `request_id` 匹配的 `try_pending_question_request()` 恢复入口。
+- `crates/session-tape/tests/lib/mod.rs`：补“返回最新未解决 request”“已 resolved 则返回空”“坏载荷显式报错”三条回归测试。
+ - `apps/agent-server/src/session_manager/{types.rs,handle.rs,mod.rs}`：新增 `GetPendingQuestion` command 与 `get_pending_question(...)`，session manager 现可从 idle runtime tape 或持久化 jsonl 读取 pending question。
+ - `apps/agent-server/src/routes/{common.rs,session/mod.rs,session/handlers.rs}`：新增 `GET /api/session/question`，返回 `{ pending, request? }`；普通 turn 提交前若存在 pending question，明确返回 `session is waiting for a question response`。
+ - `apps/agent-server/tests/routes/{session/mod.rs,turn/mod.rs}`：补“可读取 pending question”“等待 question 时拒绝普通新 turn”两条路由回归。
+**Verification**：`cargo test -p session-tape`；`cargo check -p session-tape`；待本轮执行 `cargo test -p agent-server get_pending_question_returns_request_from_session_tape submit_turn_rejects_session_waiting_for_question_response`。
+**Commit**：未提交。
+**Next direction**：下一轮优先让 `apps/agent-server` 的 session hydrate / control-plane 直接消费 `try_pending_question_request()`，补上 `WaitingForQuestion` 与 `/api/session/question`，而不是把恢复规则散落到 app 壳里重写。
+
+**Update**：同轮继续把 `Question` control-plane 与 Web 输入区承接补成更完整的小闭环：`apps/agent-server` 现已新增 `PUT /api/session/question` 与 `DELETE /api/session/question`，回答/取消都会统一写入 `question_resolved + tool_result(Question)`；`apps/web` 则新增独立 `pending-question-store` 与 `PendingQuestionComposer`，session 初始化/切换时会水合 `/api/session/question`，且一旦存在 pending question，就直接在原输入框位置渲染 question composer，替换普通消息输入框，而不是额外再弹一层独立面板。
+**Update**：同轮继续把“question 显示时直接替换输入框位置”的 UX 收稳：普通 turn 提交若被 server 以 `session is waiting for a question response` 拒绝，前端现在会立即补拉 `/api/session/question`，这样 pending question 能马上占据 composer 区域，不需要等用户手动刷新或切 session。
+**Update**：同轮又继续把 pending question 的刷新时机补齐到更稳妥的状态：前端现在不仅会在 submit 被拒绝时补拉 `/api/session/question`，也会在 `turn_completed` 和 `sync_required` 后同步重刷水合 pending question，减少未来 runtime 真正落 `question_requested` 后 UI 仍需依赖“再试着发一条消息”才能看到替位 composer 的窗口。
+**Update**：同轮继续把 `Question` 从“普通 runtime tool 回显”推进到真正的最小等待态：`agent-runtime` 现已把 `Question` 独立出 `tape_tools.rs`，并改成只让模型传 `questions`，`request_id/turn_id` 由 runtime 自己生成。completion 处理中一旦遇到 `Question`，runtime 会写入 `tool_call(Question)` + `question_requested`，随后以显式 `TurnOutcome::WaitingForQuestion` / `turn_waiting_for_question` 提前结束本轮，而不是继续下一轮 completion。与此同时，`ToolArgsSchema` 也补上了嵌套 struct / `Vec<struct>` 支持，让 `Question` definition 可以正式改用 derive schema，而不必继续手写裸 JSON schema。
+**Verification**：`cargo test -p agent-core 自研_schema_支持嵌套_struct_与_struct_array -- --nocapture`；`cargo test -p agent-runtime question_runtime_tool_会生成_pending_request_并以等待态结束轮次 -- --nocapture`；`cargo test -p agent-runtime runtime_tool_definitions_match_derive_schema_output -- --nocapture`；`cargo test -p agent-server rebuild_turn_history_from_tape_restores_waiting_for_question_outcome -- --nocapture`；`cargo test -p agent-server get_pending_question_returns_request_from_session_tape -- --nocapture`；`cargo test -p agent-server resolve_pending_question_appends_resolution_and_clears_pending_state -- --nocapture`。
+
 ## 2026-03-25 Session 110
 
 **Diagnosis**：`Question` runtime tool 的 RFC 已经收口到可以开工，但如果直接冲到 server control-plane 和 Web pending question UI，会把共享协议、runtime 可见工具面和 pending question 状态机一起掺进更大的改动里，验证成本偏高。当前最小且最高杠杆的一步，是先把共享 `Question` 协议类型和 session interaction capability 落在 `agent-core` / `agent-runtime`，并让 runtime 已经能按 capability gating 决定是否向模型暴露 `Question`。

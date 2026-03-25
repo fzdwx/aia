@@ -10,6 +10,7 @@ use crate::runtime_worker::CurrentTurnSnapshot;
 #[serde(rename_all = "snake_case")]
 pub enum TurnStatus {
     Waiting,
+    WaitingForQuestion,
     Thinking,
     Working,
     Generating,

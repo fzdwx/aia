@@ -554,6 +554,45 @@ impl LanguageModel for StopReasonDrivenModel {
     }
 }
 
+struct QuestionToolModel;
+
+#[async_trait]
+impl LanguageModel for QuestionToolModel {
+    type Error = CoreError;
+
+    async fn complete_streaming(
+        &self,
+        _request: CompletionRequest,
+        _abort: &AbortSignal,
+        _sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
+    ) -> Result<Completion, Self::Error> {
+        Ok(Completion {
+            segments: vec![CompletionSegment::ToolUse(
+                ToolCall::new("Question").with_arguments_value(serde_json::json!({
+                    "questions": [{
+                        "id": "database",
+                        "header": "Database",
+                        "question": "Use which database?",
+                        "kind": "choice",
+                        "required": true,
+                        "multi_select": false,
+                        "options": [
+                            { "id": "sqlite", "label": "SQLite" },
+                            { "id": "postgres", "label": "Postgres" }
+                        ],
+                        "recommended_option_ids": ["sqlite"],
+                        "recommendation_reason": "best local default"
+                    }]
+                })),
+            )],
+            stop_reason: CompletionStopReason::ToolUse,
+            usage: None,
+            response_body: None,
+            http_status_code: None,
+        })
+    }
+}
+
 struct StubTools;
 
 #[async_trait]
@@ -871,6 +910,57 @@ fn 运行时会记录用户与助手消息() {
     assert!(output.visible_tools.iter().any(|definition| definition.name == "TapeInfo"));
     assert!(output.visible_tools.iter().any(|definition| definition.name == "TapeHandoff"));
     assert!(output.visible_tools.iter().any(|definition| definition.name == "Question"));
+}
+
+#[test]
+fn question_runtime_tool_会生成_pending_request_并以等待态结束轮次() {
+    let identity = ModelIdentity::new("local", "question", ModelDisposition::Balanced);
+    let mut runtime = AgentRuntime::new(QuestionToolModel, StubTools, identity);
+    let subscriber = runtime.subscribe();
+
+    let output = run_turn(&mut runtime, "需要你决定数据库").expect("question turn should finish");
+
+    assert_eq!(output.assistant_text, "");
+    let pending = runtime
+        .tape()
+        .try_pending_question_request()
+        .expect("pending question should decode")
+        .expect("pending question should exist");
+    assert!(pending.request_id.starts_with("qreq_"));
+    assert_eq!(pending.turn_id, "turn-".to_string() + &pending.turn_id[5..]);
+    assert_eq!(pending.invocation_id.starts_with("tool-call-"), true);
+    assert_eq!(pending.questions.len(), 1);
+    assert!(
+        runtime
+            .tape()
+            .entries()
+            .iter()
+            .any(|entry| { entry.event_name() == Some("question_requested") })
+    );
+    assert!(
+        !runtime
+            .tape()
+            .entries()
+            .iter()
+            .any(|entry| { entry.event_name() == Some("turn_completed") })
+    );
+    assert!(
+        runtime
+            .tape()
+            .entries()
+            .iter()
+            .any(|entry| { entry.event_name() == Some("turn_waiting_for_question") })
+    );
+
+    let events = runtime.collect_events(subscriber).expect("events should collect");
+    let lifecycle = events
+        .into_iter()
+        .find_map(|event| match event {
+            RuntimeEvent::TurnLifecycle { turn } => Some(turn),
+            _ => None,
+        })
+        .expect("turn lifecycle should exist");
+    assert_eq!(lifecycle.outcome, TurnOutcome::WaitingForQuestion);
 }
 
 #[test]

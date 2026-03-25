@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
+use agent_core::{QuestionRequest, QuestionResult};
 use agent_core::{RequestTimeoutConfig, ToolRegistry};
 use agent_runtime::{AgentRuntime, ContextStats, RuntimeHooks, RuntimeSubscriberId, TurnLifecycle};
 use agent_store::{AiaStore, SessionRecord};
@@ -243,6 +244,19 @@ pub(crate) enum SessionCommand {
     GetSessionSettings {
         session_id: SessionId,
         reply: oneshot::Sender<Result<SessionProviderBinding, RuntimeWorkerError>>,
+    },
+    GetPendingQuestion {
+        session_id: SessionId,
+        reply: oneshot::Sender<Result<Option<QuestionRequest>, RuntimeWorkerError>>,
+    },
+    ResolvePendingQuestion {
+        session_id: SessionId,
+        result: QuestionResult,
+        reply: oneshot::Sender<Result<(), RuntimeWorkerError>>,
+    },
+    CancelPendingQuestion {
+        session_id: SessionId,
+        reply: oneshot::Sender<Result<(), RuntimeWorkerError>>,
     },
     UpdateSessionSettings {
         session_id: SessionId,

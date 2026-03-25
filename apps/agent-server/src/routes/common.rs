@@ -57,6 +57,10 @@ pub(crate) async fn prepare_session_for_turn(
     state: &AppState,
     session_id: &str,
 ) -> Result<(), RuntimeWorkerError> {
+    if state.session_manager.get_pending_question(session_id.to_string()).await?.is_some() {
+        return Err(RuntimeWorkerError::bad_request("session is waiting for a question response"));
+    }
+
     prepare_channel_session_for_turn(&state.session_manager, session_id)
         .await
         .map_err(|error| RuntimeWorkerError::internal(error.to_string()))

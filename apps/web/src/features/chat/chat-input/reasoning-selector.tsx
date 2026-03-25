@@ -26,7 +26,8 @@ export function ReasoningSelector() {
 
   if (!supportsReasoning) return null
 
-  const reasoningValue = sessionSettings?.reasoning_effort ?? "medium"
+  const reasoningValue: ThinkingLevel =
+    sessionSettings?.reasoning_effort ?? "medium"
 
   return (
     <div className="min-w-0">

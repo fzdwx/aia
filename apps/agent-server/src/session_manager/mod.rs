@@ -15,7 +15,7 @@ use std::sync::{Arc, RwLock};
 
 use agent_core::{
     ModelIdentity, PromptCacheConfig, PromptCacheRetention as RuntimePromptCacheRetention,
-    ReasoningEffort,
+    QuestionRequest, QuestionResult, QuestionResultStatus, ReasoningEffort, ToolCall, ToolResult,
 };
 use agent_runtime::AgentRuntime;
 use agent_store::{AiaStore, SessionRecord, generate_session_id};
@@ -167,6 +167,15 @@ impl SessionManagerLoop {
             }
             SessionCommand::GetSessionSettings { session_id, reply } => {
                 let _ = reply.send(self.get_session_settings(&session_id));
+            }
+            SessionCommand::GetPendingQuestion { session_id, reply } => {
+                let _ = reply.send(self.get_pending_question(&session_id));
+            }
+            SessionCommand::ResolvePendingQuestion { session_id, result, reply } => {
+                let _ = reply.send(self.resolve_pending_question(&session_id, result));
+            }
+            SessionCommand::CancelPendingQuestion { session_id, reply } => {
+                let _ = reply.send(self.cancel_pending_question(&session_id));
             }
             SessionCommand::UpdateSessionSettings { session_id, provider_binding, reply } => {
                 let mut provider_sync = ProviderSyncService::new(&mut self.slots, &mut self.config);
@@ -403,6 +412,97 @@ impl SessionManagerLoop {
         tape.try_latest_provider_binding()
             .map_err(|error| RuntimeWorkerError::internal(error.to_string()))
             .map(|binding| binding.unwrap_or(SessionProviderBinding::Bootstrap))
+    }
+
+    fn get_pending_question(
+        &mut self,
+        session_id: &str,
+    ) -> Result<Option<QuestionRequest>, RuntimeWorkerError> {
+        let slot = self.slots.get(session_id).ok_or_else(|| {
+            self.hydration_errors.get(session_id).cloned().unwrap_or_else(|| {
+                RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
+            })
+        })?;
+
+        let tape = SessionTape::load_jsonl_or_default(&slot.session_path)
+            .map_err(|error| RuntimeWorkerError::internal(format!("tape load failed: {error}")))?;
+
+        tape.try_pending_question_request()
+            .map_err(|error| RuntimeWorkerError::internal(error.to_string()))
+    }
+
+    fn resolve_pending_question(
+        &mut self,
+        session_id: &str,
+        result: QuestionResult,
+    ) -> Result<(), RuntimeWorkerError> {
+        let slot = self.slots.get_mut(session_id).ok_or_else(|| {
+            self.hydration_errors.get(session_id).cloned().unwrap_or_else(|| {
+                RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
+            })
+        })?;
+
+        let mut tape = SessionTape::load_jsonl_or_default(&slot.session_path)
+            .map_err(|error| RuntimeWorkerError::internal(format!("tape load failed: {error}")))?;
+        let pending_request = tape
+            .try_pending_question_request()
+            .map_err(|error| RuntimeWorkerError::internal(error.to_string()))?
+            .ok_or_else(|| RuntimeWorkerError::bad_request("session has no pending question"))?;
+
+        if pending_request.request_id != result.request_id {
+            return Err(RuntimeWorkerError::bad_request(
+                "question request_id does not match current pending question",
+            ));
+        }
+
+        tape.record_question_resolved(&result);
+        let call = ToolCall::new("Question")
+            .with_invocation_id(pending_request.invocation_id.clone())
+            .with_arguments_value(serde_json::json!({
+                "questions": pending_request.questions,
+            }));
+        let details = serde_json::to_value(&result).map_err(|error| {
+            RuntimeWorkerError::internal(format!("question result serialization failed: {error}"))
+        })?;
+        let content = serde_json::to_string(&result).map_err(|error| {
+            RuntimeWorkerError::internal(format!("question result encoding failed: {error}"))
+        })?;
+        tape.append_entry(
+            session_tape::TapeEntry::tool_result(
+                &ToolResult::from_call(&call, content).with_details(details),
+            )
+            .with_run_id(&pending_request.turn_id),
+        );
+        tape.save_jsonl(&slot.session_path).map_err(|error| {
+            RuntimeWorkerError::internal(format!("session save failed: {error}"))
+        })?;
+
+        let existing_stats = read_lock(&slot.context_stats).clone();
+        if let Some(runtime) = slot.runtime_mut() {
+            *runtime.tape_mut() = tape.clone();
+        }
+        let snapshots = rebuild_session_snapshots_from_tape(&tape);
+        *write_lock(&slot.history) = snapshots.history;
+        *write_lock(&slot.current_turn) = snapshots.current_turn;
+        *write_lock(&slot.context_stats) =
+            slot.runtime().map(|runtime| runtime.context_stats()).unwrap_or(existing_stats);
+
+        Ok(())
+    }
+
+    fn cancel_pending_question(&mut self, session_id: &str) -> Result<(), RuntimeWorkerError> {
+        let pending_request = self
+            .get_pending_question(session_id)?
+            .ok_or_else(|| RuntimeWorkerError::bad_request("session has no pending question"))?;
+        self.resolve_pending_question(
+            session_id,
+            QuestionResult {
+                status: QuestionResultStatus::Cancelled,
+                request_id: pending_request.request_id,
+                answers: Vec::new(),
+                reason: None,
+            },
+        )
     }
 }
 

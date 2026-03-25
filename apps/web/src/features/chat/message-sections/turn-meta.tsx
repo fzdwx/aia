@@ -20,6 +20,8 @@ export function TurnMeta({ turn }: { turn: TurnLifecycle }) {
   const statusLabel =
     turn.outcome === "cancelled"
       ? "cancelled"
+      : turn.outcome === "waiting_for_question"
+        ? "waiting for answer"
       : turn.outcome === "failed"
         ? "failed"
         : null

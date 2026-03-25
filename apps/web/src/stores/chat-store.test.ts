@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vite-plus/test"
 import assert from "node:assert/strict"
 
 import { __setIdleSchedulerForTests, useChatStore } from "./chat-store"
+import { usePendingQuestionStore } from "./pending-question-store"
 import { useProviderRegistryStore } from "./provider-registry-store"
 import { switchActiveSessionModel } from "./session-settings-runtime"
 import { useSessionSettingsStore } from "./session-settings-store"
@@ -41,6 +42,16 @@ describe("chat store submitTurn", () => {
 
   beforeEach(() => {
     useChatStore.setState(initialState)
+    usePendingQuestionStore.setState({
+      pendingQuestion: null,
+      hydrating: false,
+      submitting: false,
+      error: null,
+      hydrateForSession: async () => {},
+      clear: () => {},
+      submitResult: async () => {},
+      cancel: async () => {},
+    })
     useProviderRegistryStore.setState({ providerList: [] })
     __setIdleSchedulerForTests({
       schedule: (callback) => {
@@ -70,6 +81,69 @@ describe("chat store submitTurn", () => {
       blocks: [],
     })
     expect(state.error).toBe(null)
+  })
+
+  test("submit failure hydrates pending question for active session", async () => {
+    let hydratedSessionId: string | null = null
+    usePendingQuestionStore.setState({
+      hydrateForSession: async (sessionId: string) => {
+        hydratedSessionId = sessionId
+      },
+    })
+
+    globalThis.fetch = (async () =>
+      new Response(null, { status: 400 })) as FetchMock
+
+    useChatStore.getState().submitTurn("hello world")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(hydratedSessionId).toBe("session-1")
+  })
+
+  test("turn completed hydrates pending question for active session", () => {
+    let hydratedSessionId: string | null = null
+    usePendingQuestionStore.setState({
+      hydrateForSession: async (sessionId: string) => {
+        hydratedSessionId = sessionId
+      },
+    })
+
+    useChatStore.getState().handleSseEvent({
+      type: "turn_completed",
+      data: {
+        session_id: "session-1",
+        turn_id: "turn-1",
+        started_at_ms: 1,
+        finished_at_ms: 2,
+        source_entry_ids: [1, 2],
+        user_message: "hello",
+        blocks: [],
+        assistant_message: null,
+        thinking: null,
+        tool_invocations: [],
+        usage: null,
+        failure_message: null,
+        outcome: "succeeded",
+      },
+    })
+
+    expect(hydratedSessionId).toBe("session-1")
+  })
+
+  test("sync required hydrates pending question for active session", () => {
+    let hydratedSessionId: string | null = null
+    usePendingQuestionStore.setState({
+      hydrateForSession: async (sessionId: string) => {
+        hydratedSessionId = sessionId
+      },
+    })
+
+    useChatStore.getState().handleSseEvent({
+      type: "sync_required",
+      data: { reason: "lagged", skipped_messages: 3 },
+    })
+
+    expect(hydratedSessionId).toBe("session-1")
   })
 
   test("waiting status does not wipe optimistic streaming blocks", () => {

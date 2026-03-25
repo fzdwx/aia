@@ -6,7 +6,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::state::SharedState;
-use agent_core::ReasoningEffort;
+use agent_core::{QuestionRequest, QuestionResult, ReasoningEffort};
 use agent_runtime::ContextStats;
 use session_tape::SessionProviderBinding;
 
@@ -49,12 +49,26 @@ pub(crate) struct SessionInfoResponse {
     pub workspace_root: String,
 }
 
+#[derive(Serialize)]
+pub(crate) struct PendingQuestionResponse {
+    pub pending: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request: Option<QuestionRequest>,
+}
+
 #[derive(Deserialize)]
 pub(crate) struct UpdateSessionSettingsRequest {
     pub session_id: Option<String>,
     pub provider: Option<String>,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct ResolvePendingQuestionRequest {
+    pub session_id: Option<String>,
+    #[serde(flatten)]
+    pub result: QuestionResult,
 }
 
 impl SessionSettingsResponse {
@@ -93,6 +107,12 @@ pub(crate) fn router() -> Router<SharedState> {
         .route(
             "/api/session/settings",
             get(handlers::get_session_settings).put(handlers::update_session_settings),
+        )
+        .route(
+            "/api/session/question",
+            get(handlers::get_pending_question)
+                .put(handlers::resolve_pending_question)
+                .delete(handlers::cancel_pending_question),
         )
         .route("/api/session/handoff", post(handlers::create_handoff))
         .route("/api/session/auto-compress", post(handlers::auto_compress_session))

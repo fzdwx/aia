@@ -28,6 +28,10 @@ export function ModelSelector() {
 
   const activeProviderName = sessionSettings?.provider
   const activeModelId = sessionSettings?.model
+  const selectedValue =
+    activeProviderName && activeModelId
+      ? `${activeProviderName}::${activeModelId}`
+      : ""
   const activeProvider = providerList.find((p) => p.name === activeProviderName)
   const activeModel = activeProvider?.models.find((m) => m.id === activeModelId)
   const displayLabel = hydrating
@@ -40,11 +44,7 @@ export function ModelSelector() {
     <div className="min-w-0">
       <Select
         disabled={hydrating || updating || chatState === "active"}
-        value={
-          activeProviderName && activeModelId
-            ? `${activeProviderName}::${activeModelId}`
-            : undefined
-        }
+        value={selectedValue}
         onValueChange={(value) => {
           if (!value) return
           const [providerName, modelId] = value.split("::")

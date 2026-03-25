@@ -4,7 +4,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use agent_core::{ConversationItem, Message, Role, ToolCall, ToolResult};
+use agent_core::{
+    ConversationItem, Message, QuestionAnswer, QuestionItem, QuestionKind, QuestionOption,
+    QuestionRequest, QuestionResult, QuestionResultStatus, Role, ToolCall, ToolResult,
+};
 use serde_json::json;
 
 use crate::entry::{now_iso8601, serialize_payload};
@@ -79,6 +82,118 @@ fn try_latest_provider_binding_returns_none_when_binding_absent() {
         tape.try_latest_provider_binding().expect("missing binding should be allowed"),
         None
     );
+}
+
+#[test]
+fn try_pending_question_request_returns_latest_unresolved_request() {
+    let mut tape = SessionTape::new();
+    let older_request = QuestionRequest {
+        request_id: "qreq_old".into(),
+        invocation_id: "call_old".into(),
+        turn_id: "turn_old".into(),
+        questions: vec![QuestionItem {
+            id: "database".into(),
+            header: "Database".into(),
+            question: "Use which database?".into(),
+            kind: QuestionKind::Choice,
+            required: true,
+            multi_select: false,
+            options: vec![QuestionOption {
+                id: "sqlite".into(),
+                label: "SQLite".into(),
+                description: Some("simple".into()),
+            }],
+            placeholder: None,
+            recommended_option_ids: vec!["sqlite".into()],
+            recommendation_reason: Some("single-machine setup".into()),
+        }],
+    };
+    let latest_request = QuestionRequest {
+        request_id: "qreq_new".into(),
+        invocation_id: "call_new".into(),
+        turn_id: "turn_new".into(),
+        questions: vec![QuestionItem {
+            id: "framework".into(),
+            header: "Framework".into(),
+            question: "Use which framework?".into(),
+            kind: QuestionKind::Choice,
+            required: true,
+            multi_select: false,
+            options: vec![QuestionOption {
+                id: "axum".into(),
+                label: "Axum".into(),
+                description: None,
+            }],
+            placeholder: None,
+            recommended_option_ids: vec![],
+            recommendation_reason: None,
+        }],
+    };
+
+    tape.record_question_requested(&older_request);
+    tape.record_question_resolved(&QuestionResult {
+        status: QuestionResultStatus::Answered,
+        request_id: older_request.request_id.clone(),
+        answers: vec![QuestionAnswer {
+            question_id: "database".into(),
+            selected_option_ids: vec!["sqlite".into()],
+            text: None,
+        }],
+        reason: None,
+    });
+    tape.record_question_requested(&latest_request);
+
+    assert_eq!(
+        tape.try_pending_question_request().expect("pending request should decode"),
+        Some(latest_request)
+    );
+}
+
+#[test]
+fn try_pending_question_request_returns_none_when_latest_request_was_resolved() {
+    let mut tape = SessionTape::new();
+    let request = QuestionRequest {
+        request_id: "qreq_done".into(),
+        invocation_id: "call_done".into(),
+        turn_id: "turn_done".into(),
+        questions: vec![QuestionItem {
+            id: "confirm".into(),
+            header: "Confirm".into(),
+            question: "Continue?".into(),
+            kind: QuestionKind::Confirm,
+            required: true,
+            multi_select: false,
+            options: vec![],
+            placeholder: None,
+            recommended_option_ids: vec![],
+            recommendation_reason: None,
+        }],
+    };
+
+    tape.record_question_requested(&request);
+    tape.record_question_resolved(&QuestionResult {
+        status: QuestionResultStatus::Cancelled,
+        request_id: request.request_id.clone(),
+        answers: Vec::new(),
+        reason: None,
+    });
+
+    assert_eq!(tape.try_pending_question_request().expect("resolved request should decode"), None);
+}
+
+#[test]
+fn try_pending_question_request_fails_for_malformed_latest_question_requested() {
+    let mut tape = SessionTape::new();
+    tape.append_entry(TapeEntry::event(
+        "question_requested",
+        Some(serde_json::json!({ "broken": true })),
+    ));
+
+    let error = tape
+        .try_pending_question_request()
+        .expect_err("malformed question request should fail explicitly");
+
+    assert!(error.to_string().contains("question_requested"));
 }
 
 #[test]

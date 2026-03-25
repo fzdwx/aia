@@ -1,4 +1,4 @@
-use std::io::ErrorKind;
+use std::{io::ErrorKind, path::Path};
 
 use agent_core::{
     CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
@@ -6,6 +6,7 @@ use agent_core::{
 use agent_core_macros::ToolArgsSchema as DeriveToolArgsSchema;
 use agent_prompts::tool_descriptions::read_tool_description;
 use async_trait::async_trait;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use serde::{Deserialize, Serialize};
 
 pub struct ReadTool;
@@ -43,6 +44,24 @@ impl Tool for ReadTool {
         let limit = args.limit.unwrap_or(2000);
         let path = context.resolve_path(&args.file_path);
 
+        if let Some(mime_type) = detect_image_mime_type(&path) {
+            let bytes = tokio::fs::read(&path).await.map_err(|error| {
+                CoreError::new(format!("failed to read {}: {error}", path.display()))
+            })?;
+            let byte_len = bytes.len();
+            let data_url = format!("data:{mime_type};base64,{}", BASE64_STANDARD.encode(bytes));
+
+            return Ok(ToolResult::from_call(call, data_url.clone()).with_details(
+                serde_json::json!({
+                    "file_path": path.display().to_string(),
+                    "is_image": true,
+                    "mime_type": mime_type,
+                    "bytes": byte_len,
+                    "encoding": "data_url",
+                }),
+            ));
+        }
+
         let content =
             tokio::fs::read_to_string(&path).await.map_err(|error| match error.kind() {
                 ErrorKind::InvalidData => CoreError::new(format!(
@@ -67,9 +86,25 @@ impl Tool for ReadTool {
 
         Ok(ToolResult::from_call(call, selected).with_details(serde_json::json!({
             "file_path": path.display().to_string(),
+            "is_image": false,
             "lines_read": lines_read,
             "total_lines": total_lines,
         })))
+    }
+}
+
+fn detect_image_mime_type(path: &Path) -> Option<&'static str> {
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    match extension.as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        "svg" => Some("image/svg+xml"),
+        "bmp" => Some("image/bmp"),
+        "ico" => Some("image/x-icon"),
+        "avif" => Some("image/avif"),
+        _ => None,
     }
 }
 

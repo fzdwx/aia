@@ -11,10 +11,15 @@ use crate::{RuntimeEvent, TurnBlock};
 use super::super::{
     AgentRuntime, RuntimeError,
     helpers::{build_tool_trace_context, now_timestamp_ms},
-    tape_tools,
+    question_tool, tape_tools,
     tool_calls::{ExecuteToolCallContext, can_run_in_parallel},
 };
 use super::types::TurnBuffers;
+
+pub(super) enum CompletionProcessingResult {
+    Continue { saw_tool_calls: bool },
+    WaitingForQuestion,
+}
 
 impl<M, T> AgentRuntime<M, T>
 where
@@ -50,7 +55,7 @@ where
         buffers: &mut TurnBuffers,
         abort_signal: &AbortSignal,
         on_delta: &mut (dyn FnMut(StreamEvent) + Send),
-    ) -> Result<bool, RuntimeError> {
+    ) -> Result<CompletionProcessingResult, RuntimeError> {
         self.flush_streamed_partial_segments(turn_id, buffers)?;
         let mut assistant_entry_id = None;
         let mut saw_tool_calls = false;
@@ -105,6 +110,25 @@ where
                     let tool_call_entry_id =
                         self.append_tape_entry(TapeEntry::tool_call(call).with_run_id(turn_id))?;
                     buffers.source_entry_ids.push(tool_call_entry_id);
+
+                    if question_tool::is_question_tool_call(call) {
+                        let request = question_tool::question_request_from_call(call, turn_id)
+                            .map_err(RuntimeError::tool)?;
+                        let question_entry_id = self.append_tape_entry(
+                            TapeEntry::event(
+                                "question_requested",
+                                Some(serde_json::to_value(&request).map_err(|error| {
+                                    RuntimeError::session(format!(
+                                        "failed to serialize question request: {error}"
+                                    ))
+                                })?),
+                            )
+                            .with_run_id(turn_id)
+                            .with_meta("source_entry_ids", serde_json::json!([tool_call_entry_id])),
+                        )?;
+                        buffers.source_entry_ids.push(question_entry_id);
+                        return Ok(CompletionProcessingResult::WaitingForQuestion);
+                    }
 
                     if tool_calls_are_parallel {
                         parallel_calls.push((
@@ -321,7 +345,7 @@ where
             }
         }
 
-        Ok(saw_tool_calls)
+        Ok(CompletionProcessingResult::Continue { saw_tool_calls })
     }
 
     pub(super) fn flush_streamed_partial_segments(

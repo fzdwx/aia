@@ -1,7 +1,8 @@
 use super::{
-    TapeHandoffTool, TapeHandoffToolArgs, TapeInfoTool, TapeInfoToolArgs,
-    runtime_tool_definitions, runtime_tool_definitions_for,
+    TapeHandoffTool, TapeHandoffToolArgs, TapeInfoTool, TapeInfoToolArgs, runtime_tool_definitions,
+    runtime_tool_definitions_for,
 };
+use crate::runtime::question_tool::{QuestionTool, QuestionToolArgs};
 use crate::runtime::tape_tools::Tool;
 use agent_core::{SessionInteractionCapabilities, ToolDefinition};
 
@@ -30,7 +31,14 @@ fn runtime_tool_definitions_match_derive_schema_output() {
     );
     assert_eq!(tape_handoff.name, "TapeHandoff");
 
-    assert!(definitions.iter().any(|definition| definition.name == "Question"));
+    let question = QuestionTool.definition();
+    assert!(definitions.iter().any(|definition| definition == &question));
+    assert_eq!(
+        question.parameters,
+        ToolDefinition::new("Question", "ignored")
+            .with_parameters_schema::<QuestionToolArgs>()
+            .parameters
+    );
 }
 
 #[test]

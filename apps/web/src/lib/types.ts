@@ -87,7 +87,11 @@ export type TurnBlock =
   | { kind: "failure"; message: string }
   | { kind: "cancelled"; message: string }
 
-export type TurnOutcome = "succeeded" | "failed" | "cancelled"
+export type TurnOutcome =
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "waiting_for_question"
 
 export type TurnLifecycle = {
   turn_id: string
@@ -161,6 +165,7 @@ export type SseEvent =
 // Mirrors Rust TurnStatus
 export type TurnStatus =
   | "waiting"
+  | "waiting_for_question"
   | "thinking"
   | "working"
   | "generating"
@@ -258,6 +263,59 @@ export type SessionSettings = {
   model: string
   protocol: string
   reasoning_effort: ThinkingLevel | null
+}
+
+export type QuestionKind = "choice" | "text" | "confirm"
+
+export type QuestionOption = {
+  id: string
+  label: string
+  description?: string | null
+}
+
+export type QuestionItem = {
+  id: string
+  header: string
+  question: string
+  kind: QuestionKind
+  required: boolean
+  multi_select: boolean
+  options: QuestionOption[]
+  placeholder?: string | null
+  recommended_option_ids: string[]
+  recommendation_reason?: string | null
+}
+
+export type QuestionRequest = {
+  request_id: string
+  invocation_id: string
+  turn_id: string
+  questions: QuestionItem[]
+}
+
+export type QuestionAnswer = {
+  question_id: string
+  selected_option_ids: string[]
+  text?: string | null
+}
+
+export type QuestionResultStatus =
+  | "answered"
+  | "cancelled"
+  | "dismissed"
+  | "timed_out"
+  | "unavailable"
+
+export type QuestionResult = {
+  status: QuestionResultStatus
+  request_id: string
+  answers: QuestionAnswer[]
+  reason?: string | null
+}
+
+export type PendingQuestionResponse = {
+  pending: boolean
+  request?: QuestionRequest | null
 }
 
 export type ChannelTransport = string

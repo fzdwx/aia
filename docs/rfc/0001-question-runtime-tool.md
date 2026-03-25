@@ -190,9 +190,9 @@ superseded_by: null
 
 字段建议：
 
-- `request_id`: 一次 question 请求的稳定标识，用于恢复与答复提交，也是 pending question 的唯一主键
-- `invocation_id`: 对应的 tool invocation id
-- `turn_id`: 当前 turn
+- `request_id`: 一次 question 请求的稳定标识，用于恢复与答复提交，也是 pending question 的唯一主键；由 runtime 生成，而不是让模型传入
+- `invocation_id`: 对应的 tool invocation id；由 runtime 从实际 tool call 注入
+- `turn_id`: 当前 turn；由 runtime 注入，而不是让模型传入
 - `questions[]`: 1..N 个问题
 
 每个问题建议包含：
@@ -215,6 +215,7 @@ superseded_by: null
 - `confirm`：Phase 1 统一视为受限的 `choice` 变体，允许实现侧固定为 `yes/no` 两项，不额外引入独立布尔 wire shape
 - `header` 应保持简短，适合 UI badge / tab / chip 展示
 - `recommended_option_ids[]` 必须是 `options[]` 中已存在的 option id 子集
+- 对模型暴露的 `Question` tool 参数应只包含真正需要 AI 决策的字段，例如 `questions[]`；`request_id`、`turn_id` 这类运行时主键/上下文标识不应成为模型输入参数
 
 ### `QuestionOption`
 

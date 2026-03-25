@@ -161,6 +161,7 @@ fn render_status(status: TurnStatus, streamed_text: bool) -> Result<(), ServerIn
     }
     match status {
         TurnStatus::Waiting => println!("[status] waiting"),
+        TurnStatus::WaitingForQuestion => println!("[status] waiting for question response"),
         TurnStatus::Thinking => println!("[status] thinking"),
         TurnStatus::Working => println!("[status] working"),
         TurnStatus::Generating => {}

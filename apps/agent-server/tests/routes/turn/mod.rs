@@ -1,6 +1,27 @@
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
+use provider_registry::{ProviderProfile, ProviderRegistry};
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
-use super::{CancelTurnRequest, handlers::map_broadcast_result};
+use super::{CancelTurnRequest, TurnRequest, handlers, handlers::map_broadcast_result};
+use crate::routes::test_support::test_state_with_session_manager;
+
+fn sample_registry() -> ProviderRegistry {
+    let mut registry = ProviderRegistry::default();
+    registry.upsert(ProviderProfile::openai_responses(
+        "primary",
+        "https://primary.example.com",
+        "primary-key",
+        "model-primary",
+    ));
+    registry
+}
+
+async fn response_body_json(response: axum::response::Response) -> serde_json::Value {
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("response body should be readable");
+    serde_json::from_slice(&bytes).expect("response body should be valid json")
+}
 
 #[test]
 fn cancel_turn_request_deserializes_session_id() {
@@ -16,4 +37,52 @@ fn cancel_turn_request_deserializes_session_id() {
 fn lagged_broadcast_result_maps_to_sync_required_event() {
     let mapped = map_broadcast_result(Err(BroadcastStreamRecvError::Lagged(5)));
     assert!(mapped.is_some());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn submit_turn_rejects_session_waiting_for_question_response() {
+    let (state, root) = test_state_with_session_manager("turn-pending-question", sample_registry());
+    let session = state
+        .session_manager
+        .create_session(Some("Session One".into()))
+        .await
+        .expect("session should be created");
+
+    let session_path = root.join("sessions").join(format!("{}.jsonl", session.id));
+    let mut tape = session_tape::SessionTape::load_jsonl_or_default(&session_path)
+        .expect("session tape should load");
+    tape.record_question_requested(&agent_core::QuestionRequest {
+        request_id: "qreq_123".into(),
+        invocation_id: "call_123".into(),
+        turn_id: "turn_123".into(),
+        questions: vec![agent_core::QuestionItem {
+            id: "database".into(),
+            header: "Database".into(),
+            question: "Use which database?".into(),
+            kind: agent_core::QuestionKind::Choice,
+            required: true,
+            multi_select: false,
+            options: Vec::new(),
+            placeholder: None,
+            recommended_option_ids: Vec::new(),
+            recommendation_reason: None,
+        }],
+    });
+    tape.save_jsonl(&session_path).expect("session tape should save");
+
+    let response = handlers::submit_turn(
+        State(state.clone()),
+        Json(TurnRequest { prompt: "keep going".into(), session_id: Some(session.id) }),
+    )
+    .await
+    .into_response();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = response_body_json(response).await;
+    assert_eq!(
+        body.get("error"),
+        Some(&serde_json::json!("session is waiting for a question response"))
+    );
+
+    let _ = std::fs::remove_dir_all(root);
 }

@@ -2,9 +2,11 @@ import { useRef, useState } from "react"
 import { ArrowUp, Square } from "lucide-react"
 
 import { ModelSelector } from "./model-selector"
+import { PendingQuestionComposer } from "./pending-question-composer"
 import { ReasoningSelector } from "./reasoning-selector"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat-store"
+import { usePendingQuestionStore } from "@/stores/pending-question-store"
 import { useSessionSettingsStore } from "@/stores/session-settings-store"
 
 const CHAT_MICRO_TEXT = "text-meta"
@@ -29,11 +31,15 @@ export function ChatInput() {
   const submitTurn = useChatStore((s) => s.submitTurn)
   const cancelTurn = useChatStore((s) => s.cancelTurn)
   const chatState = useChatStore((s) => s.chatState)
+  const pendingQuestion = usePendingQuestionStore((s) => s.pendingQuestion)
   const sessionSettingsError = useSessionSettingsStore((s) => s.error)
-  const disabled = chatState === "active"
-
   const [value, setValue] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const disabled = chatState === "active"
+
+  if (pendingQuestion) {
+    return <PendingQuestionComposer />
+  }
 
   const canSend = value.trim().length > 0 && !disabled
 

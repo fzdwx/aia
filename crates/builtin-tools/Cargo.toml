@@ -9,6 +9,7 @@ agent-core = { path = "../agent-core" }
 agent-core-macros = { path = "../agent-core-macros" }
 agent-prompts = { path = "../agent-prompts" }
 async-trait = "0.1"
+base64 = "0.22"
 brush-builtins = "0.1"
 brush-core = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

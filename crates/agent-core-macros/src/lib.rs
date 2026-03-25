@@ -107,19 +107,34 @@ fn collect_struct_fields(data: &DataStruct) -> syn::Result<Vec<SchemaField>> {
 
 fn property_expr(ty: &Type, config: &FieldSchemaConfig) -> syn::Result<(TokenStream2, bool)> {
     let (inner_ty, required) = unwrap_option(ty).map_or((ty, true), |inner| (inner, false));
-    let primitive_kind = primitive_kind(inner_ty)?;
-    let mut expr = match primitive_kind {
-        PrimitiveKind::String => quote!(::agent_core::ToolSchemaProperty::string()),
-        PrimitiveKind::Boolean => quote!(::agent_core::ToolSchemaProperty::boolean()),
-        PrimitiveKind::StringArray => {
-            quote!(::agent_core::ToolSchemaProperty::array(
-                ::agent_core::ToolSchemaProperty::string()
-            ))
+    let primitive_kind = primitive_kind(inner_ty).ok();
+    let mut expr = if let Some(primitive_kind) = primitive_kind {
+        match primitive_kind {
+            PrimitiveKind::String => quote!(::agent_core::ToolSchemaProperty::string()),
+            PrimitiveKind::Boolean => quote!(::agent_core::ToolSchemaProperty::boolean()),
+            PrimitiveKind::StringArray => {
+                quote!(::agent_core::ToolSchemaProperty::array(
+                    ::agent_core::ToolSchemaProperty::string()
+                ))
+            }
+            PrimitiveKind::UnsignedInteger => {
+                quote!(::agent_core::ToolSchemaProperty::integer().minimum(0u64))
+            }
+            PrimitiveKind::SignedInteger => quote!(::agent_core::ToolSchemaProperty::integer()),
         }
-        PrimitiveKind::UnsignedInteger => {
-            quote!(::agent_core::ToolSchemaProperty::integer().minimum(0u64))
+    } else if let Some(vector_inner_ty) = unwrap_vec(inner_ty) {
+        let (item_expr, item_required) = property_expr(vector_inner_ty, config)?;
+        if !item_required {
+            return Err(syn::Error::new_spanned(
+                ty,
+                "ToolArgsSchema derive 暂不支持 Option<_> 作为数组元素类型",
+            ));
         }
-        PrimitiveKind::SignedInteger => quote!(::agent_core::ToolSchemaProperty::integer()),
+        quote!(::agent_core::ToolSchemaProperty::array(#item_expr))
+    } else {
+        quote!(::agent_core::ToolSchemaProperty::object(
+            <#inner_ty as ::agent_core::ToolArgsSchema>::schema()
+        ))
     };
 
     if let Some(description) = config.description.as_deref() {
@@ -127,32 +142,36 @@ fn property_expr(ty: &Type, config: &FieldSchemaConfig) -> syn::Result<(TokenStr
     }
 
     if let Some(minimum) = config.minimum {
-        if matches!(
-            primitive_kind,
-            PrimitiveKind::String | PrimitiveKind::Boolean | PrimitiveKind::StringArray
-        ) {
+        if primitive_kind.is_none_or(|kind| {
+            matches!(
+                kind,
+                PrimitiveKind::String | PrimitiveKind::Boolean | PrimitiveKind::StringArray
+            )
+        }) {
             return Err(syn::Error::new_spanned(
                 ty,
                 "tool_schema(minimum = ...) 仅支持整数类型字段",
             ));
         }
-        if matches!(primitive_kind, PrimitiveKind::UnsignedInteger) && minimum < 0 {
+        if matches!(primitive_kind, Some(PrimitiveKind::UnsignedInteger)) && minimum < 0 {
             return Err(syn::Error::new_spanned(ty, "无符号整数字段的 minimum 不能为负数"));
         }
         expr = quote!(#expr.minimum(#minimum));
     }
 
     if let Some(maximum) = config.maximum {
-        if matches!(
-            primitive_kind,
-            PrimitiveKind::String | PrimitiveKind::Boolean | PrimitiveKind::StringArray
-        ) {
+        if primitive_kind.is_none_or(|kind| {
+            matches!(
+                kind,
+                PrimitiveKind::String | PrimitiveKind::Boolean | PrimitiveKind::StringArray
+            )
+        }) {
             return Err(syn::Error::new_spanned(
                 ty,
                 "tool_schema(maximum = ...) 仅支持整数类型字段",
             ));
         }
-        if matches!(primitive_kind, PrimitiveKind::UnsignedInteger) && maximum < 0 {
+        if matches!(primitive_kind, Some(PrimitiveKind::UnsignedInteger)) && maximum < 0 {
             return Err(syn::Error::new_spanned(ty, "无符号整数字段的 maximum 不能为负数"));
         }
         expr = quote!(#expr.maximum(#maximum));
@@ -177,6 +196,7 @@ fn property_expr(ty: &Type, config: &FieldSchemaConfig) -> syn::Result<(TokenStr
     Ok((expr, required))
 }
 
+#[derive(Clone, Copy)]
 enum PrimitiveKind {
     String,
     Boolean,
@@ -189,7 +209,7 @@ fn primitive_kind(ty: &Type) -> syn::Result<PrimitiveKind> {
     let Type::Path(type_path) = ty else {
         return Err(syn::Error::new_spanned(
             ty,
-            "ToolArgsSchema derive 当前支持 String、bool、Vec<String>、usize/u32/u64、isize/i32/i64 与它们的 Option 形式",
+            "ToolArgsSchema derive 当前支持 String、bool、Vec<String>、命名字段 struct、Vec<命名字段 struct>、usize/u32/u64、isize/i32/i64 与它们的 Option 形式",
         ));
     };
 
@@ -221,7 +241,7 @@ fn primitive_kind(ty: &Type) -> syn::Result<PrimitiveKind> {
         "isize" | "i32" | "i64" => Ok(PrimitiveKind::SignedInteger),
         _ => Err(syn::Error::new_spanned(
             ty,
-            "ToolArgsSchema derive 当前支持 String、bool、Vec<String>、usize/u32/u64、isize/i32/i64 与它们的 Option 形式",
+            "ToolArgsSchema derive 当前支持 String、bool、Vec<String>、命名字段 struct、Vec<命名字段 struct>、usize/u32/u64、isize/i32/i64 与它们的 Option 形式",
         )),
     }
 }
@@ -232,6 +252,23 @@ fn unwrap_option(ty: &Type) -> Option<&Type> {
     };
     let segment = type_path.path.segments.last()?;
     if segment.ident != "Option" {
+        return None;
+    }
+    let PathArguments::AngleBracketed(arguments) = &segment.arguments else {
+        return None;
+    };
+    let Some(GenericArgument::Type(inner_ty)) = arguments.args.first() else {
+        return None;
+    };
+    Some(inner_ty)
+}
+
+fn unwrap_vec(ty: &Type) -> Option<&Type> {
+    let Type::Path(type_path) = ty else {
+        return None;
+    };
+    let segment = type_path.path.segments.last()?;
+    if segment.ident != "Vec" {
         return None;
     }
     let PathArguments::AngleBracketed(arguments) = &segment.arguments else {

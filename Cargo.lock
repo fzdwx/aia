@@ -471,6 +471,7 @@ dependencies = [
  "agent-core-macros",
  "agent-prompts",
  "async-trait",
+ "base64",
  "brush-builtins",
  "brush-core",
  "globset",

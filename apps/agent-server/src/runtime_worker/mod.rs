@@ -155,6 +155,7 @@ pub(crate) fn live_tool_block(
 pub(crate) fn turn_lifecycle_status(lifecycle: &agent_runtime::TurnLifecycle) -> TurnStatus {
     match lifecycle.outcome {
         agent_runtime::TurnOutcome::Cancelled => TurnStatus::Cancelled,
+        agent_runtime::TurnOutcome::WaitingForQuestion => TurnStatus::WaitingForQuestion,
         _ if lifecycle
             .blocks
             .iter()

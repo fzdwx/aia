@@ -35,6 +35,7 @@ import {
   clearSessionSettingsState,
   hydrateSessionSettingsForSession,
 } from "@/stores/session-settings-coordinator"
+import { usePendingQuestionStore } from "@/stores/pending-question-store"
 
 const SESSION_HISTORY_PAGE_SIZE = 5
 const INITIAL_SESSION_HISTORY_PAGE_SIZE = 1
@@ -450,6 +451,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           if (activeId) {
             void hydrateSession(activeId)
             void hydrateSessionSettingsForSession(activeId)
+            void usePendingQuestionStore.getState().hydrateForSession(activeId)
           }
         })
         .catch(() => {})
@@ -607,17 +609,19 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
           set((state) => {
             const turns = [...state.turns, event.data]
+            const isWaitingForQuestion =
+              event.data.outcome === "waiting_for_question"
             const snapshot: SessionSnapshot = {
               latestTurn: event.data,
               streamingTurn: null,
-              chatState: "idle",
+              chatState: isWaitingForQuestion ? "active" : "idle",
               contextPressure: state.contextPressure,
               lastCompression: null,
             }
             return {
               turns,
               streamingTurn: null,
-              chatState: "idle" as const,
+              chatState: (isWaitingForQuestion ? "active" : "idle") as const,
               error: null,
               lastCompression: null,
               _sessionSnapshots: upsertSessionSnapshot(
@@ -628,6 +632,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
               ),
             }
           })
+          void usePendingQuestionStore.getState().hydrateForSession(activeId)
           refreshActiveSessionPressure(activeId)
           break
         }
@@ -660,6 +665,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             .fetchSessions()
             .catch(() => {})
           void hydrateSession(activeId)
+          void usePendingQuestionStore.getState().hydrateForSession(activeId)
           break
         }
         case "error": {
@@ -791,8 +797,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
           if (wasActive && nextActiveId) {
             void hydrateSession(nextActiveId)
             void hydrateSessionSettingsForSession(nextActiveId)
+            void usePendingQuestionStore.getState().hydrateForSession(nextActiveId)
           } else if (wasActive) {
             clearSessionSettingsState()
+            usePendingQuestionStore.getState().clear()
           }
           break
         }
@@ -838,6 +846,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         }
       })
       apiSubmitTurn(prompt, sessionId).catch((err: unknown) => {
+        void usePendingQuestionStore.getState().hydrateForSession(sessionId)
         set((state) => {
           const nextState = {
             ...state,
@@ -930,6 +939,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
       cancelPendingHistoryHydration()
       await hydrateSession(id)
       await hydrateSessionSettingsForSession(id)
+      await usePendingQuestionStore.getState().hydrateForSession(id)
     },
 
     loadOlderTurns: async () => {
@@ -998,6 +1008,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           await get().switchSession(next.id)
         } else {
           clearSessionSettingsState()
+          usePendingQuestionStore.getState().clear()
           set({
             activeSessionId: null,
             sessionHydrating: false,

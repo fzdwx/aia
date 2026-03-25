@@ -126,6 +126,7 @@ struct TurnHistoryBuilder {
     failure_message: Option<String>,
     pending_tool_calls: BTreeMap<String, agent_core::ToolCall>,
     completed: bool,
+    waiting_for_question: bool,
 }
 
 impl TurnHistoryBuilder {
@@ -213,6 +214,12 @@ impl TurnHistoryBuilder {
                 .and_then(|value| value.get("usage"))
                 .and_then(|value| decode_completion_usage(entry, value));
             self.completed = true;
+            return;
+        }
+
+        if entry.kind == "event" && entry.event_name() == Some("turn_waiting_for_question") {
+            self.completed = true;
+            self.waiting_for_question = true;
         }
     }
 
@@ -236,6 +243,8 @@ impl TurnHistoryBuilder {
                 .is_some_and(|message| message.contains("已取消"))
             {
                 TurnOutcome::Cancelled
+            } else if self.waiting_for_question {
+                TurnOutcome::WaitingForQuestion
             } else if self.failure_message.is_some() {
                 TurnOutcome::Failed
             } else {

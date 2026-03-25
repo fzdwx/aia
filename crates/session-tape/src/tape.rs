@@ -1,6 +1,8 @@
 use std::{fs, fs::OpenOptions, io::Write, path::Path};
 
-use agent_core::{ConversationItem, Message};
+use std::collections::BTreeSet;
+
+use agent_core::{ConversationItem, Message, QuestionRequest, QuestionResult};
 use serde_json::Value;
 
 use crate::entry::serialize_payload;
@@ -78,6 +80,20 @@ impl SessionTape {
         ))
     }
 
+    pub fn record_question_requested(&mut self, request: &QuestionRequest) -> u64 {
+        self.append_entry(TapeEntry::event(
+            "question_requested",
+            Some(serialize_payload("question_requested", request)),
+        ))
+    }
+
+    pub fn record_question_resolved(&mut self, result: &QuestionResult) -> u64 {
+        self.append_entry(TapeEntry::event(
+            "question_resolved",
+            Some(serialize_payload("question_resolved", result)),
+        ))
+    }
+
     pub fn try_latest_provider_binding(
         &self,
     ) -> Result<Option<SessionProviderBinding>, SessionTapeError> {
@@ -98,6 +114,50 @@ impl SessionTape {
 
     pub fn latest_provider_binding(&self) -> Option<SessionProviderBinding> {
         self.try_latest_provider_binding().ok().flatten()
+    }
+
+    pub fn try_pending_question_request(
+        &self,
+    ) -> Result<Option<QuestionRequest>, SessionTapeError> {
+        let mut resolved_request_ids = BTreeSet::new();
+
+        for entry in self.entries.iter().rev() {
+            if entry.kind != "event" {
+                continue;
+            }
+
+            match entry.event_name() {
+                Some("question_resolved") => {
+                    let data = entry.event_data().ok_or_else(|| {
+                        SessionTapeError::new("question_resolved 事件缺少 data 载荷".to_string())
+                    })?;
+                    let result: QuestionResult =
+                        serde_json::from_value(data.clone()).map_err(|error| {
+                            SessionTapeError::new(format!(
+                                "question_resolved 事件解码失败: {error}"
+                            ))
+                        })?;
+                    resolved_request_ids.insert(result.request_id);
+                }
+                Some("question_requested") => {
+                    let data = entry.event_data().ok_or_else(|| {
+                        SessionTapeError::new("question_requested 事件缺少 data 载荷".to_string())
+                    })?;
+                    let request: QuestionRequest =
+                        serde_json::from_value(data.clone()).map_err(|error| {
+                            SessionTapeError::new(format!(
+                                "question_requested 事件解码失败: {error}"
+                            ))
+                        })?;
+                    if !resolved_request_ids.contains(&request.request_id) {
+                        return Ok(Some(request));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        Ok(None)
     }
 
     pub fn handoff(&mut self, name: impl Into<String>, state: Value) -> Handoff {

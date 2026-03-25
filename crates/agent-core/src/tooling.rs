@@ -84,6 +84,13 @@ impl ToolSchema {
         self
     }
 
+    pub fn description(mut self, description: impl Into<String>) -> Self {
+        if let Some(object) = self.value.as_object_mut() {
+            object.insert("description".into(), Value::String(description.into()));
+        }
+        self
+    }
+
     pub fn into_value(self) -> Value {
         self.value
     }
@@ -95,6 +102,10 @@ pub struct ToolSchemaProperty {
 }
 
 impl ToolSchemaProperty {
+    pub fn object(schema: ToolSchema) -> Self {
+        Self { value: schema.into_value() }
+    }
+
     pub fn string() -> Self {
         Self { value: serde_json::json!({ "type": "string" }) }
     }

@@ -11,8 +11,9 @@ use crate::state::SharedState;
 use agent_core::ReasoningEffort;
 
 use super::{
-    AutoCompressRequest, CreateSessionRequest, HandoffRequest, SessionQuery,
-    SessionInfoResponse, SessionSettingsResponse, UpdateSessionSettingsRequest,
+    AutoCompressRequest, CreateSessionRequest, HandoffRequest, PendingQuestionResponse,
+    ResolvePendingQuestionRequest, SessionInfoResponse, SessionQuery, SessionSettingsResponse,
+    UpdateSessionSettingsRequest,
 };
 use crate::routes::common::{
     JsonResponse, json_response, require_session_id, resolve_session_id,
@@ -80,6 +81,54 @@ pub(crate) async fn get_session_settings(
         Ok(settings) => {
             json_response(StatusCode::OK, SessionSettingsResponse::from_binding(settings))
         }
+        Err(error) => runtime_worker_error_response(error),
+    }
+}
+
+pub(crate) async fn get_pending_question(
+    State(state): State<SharedState>,
+    Query(query): Query<SessionQuery>,
+) -> impl IntoResponse {
+    let session_id = match require_session_id(state.as_ref(), query.session_id).await {
+        Ok(session_id) => session_id,
+        Err(response) => return response,
+    };
+
+    match state.session_manager.get_pending_question(session_id).await {
+        Ok(request) => json_response(
+            StatusCode::OK,
+            PendingQuestionResponse { pending: request.is_some(), request },
+        ),
+        Err(error) => runtime_worker_error_response(error),
+    }
+}
+
+pub(crate) async fn resolve_pending_question(
+    State(state): State<SharedState>,
+    Json(body): Json<ResolvePendingQuestionRequest>,
+) -> impl IntoResponse {
+    let session_id = match require_session_id(state.as_ref(), body.session_id).await {
+        Ok(session_id) => session_id,
+        Err(response) => return response,
+    };
+
+    match state.session_manager.resolve_pending_question(session_id, body.result).await {
+        Ok(()) => json_response(StatusCode::OK, serde_json::json!({ "ok": true })),
+        Err(error) => runtime_worker_error_response(error),
+    }
+}
+
+pub(crate) async fn cancel_pending_question(
+    State(state): State<SharedState>,
+    Query(query): Query<SessionQuery>,
+) -> impl IntoResponse {
+    let session_id = match require_session_id(state.as_ref(), query.session_id).await {
+        Ok(session_id) => session_id,
+        Err(response) => return response,
+    };
+
+    match state.session_manager.cancel_pending_question(session_id).await {
+        Ok(()) => json_response(StatusCode::OK, serde_json::json!({ "ok": true })),
         Err(error) => runtime_worker_error_response(error),
     }
 }

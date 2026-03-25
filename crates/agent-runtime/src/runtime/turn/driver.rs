@@ -8,6 +8,7 @@ use super::super::{
     compress::is_context_length_error,
     helpers::{next_turn_id, now_timestamp_ms},
 };
+use super::segments::CompletionProcessingResult;
 use super::types::TurnBuffers;
 
 impl<M, T> AgentRuntime<M, T>
@@ -150,7 +151,7 @@ where
             {
                 self.flush_streamed_partial_segments(&turn_id, &mut buffers)?;
             }
-            let saw_tool_calls = match self
+            let processing_result = match self
                 .process_completion_segments(
                     &turn_id,
                     llm_trace_context.as_ref(),
@@ -171,6 +172,25 @@ where
                         runtime_error,
                     );
                 }
+            };
+
+            if matches!(processing_result, CompletionProcessingResult::WaitingForQuestion) {
+                self.finish_waiting_for_question_turn(buffers.into_success_context(
+                    turn_id.clone(),
+                    started_at_ms,
+                    user_message.content,
+                    completion.usage.clone(),
+                ))?;
+
+                return Ok(TurnOutput {
+                    assistant_text,
+                    completion,
+                    visible_tools: self.visible_tools(),
+                });
+            }
+
+            let CompletionProcessingResult::Continue { saw_tool_calls } = processing_result else {
+                unreachable!();
             };
 
             match completion.stop_reason {

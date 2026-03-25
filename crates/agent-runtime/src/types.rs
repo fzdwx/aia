@@ -61,6 +61,7 @@ pub enum TurnOutcome {
     Succeeded,
     Failed,
     Cancelled,
+    WaitingForQuestion,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

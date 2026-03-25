@@ -1,14 +1,15 @@
 use agent_runtime::{ContextStats, TurnLifecycle};
 use agent_store::SessionRecord;
-use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use channel_bridge::{ChannelBridgeError, ChannelSessionInfo, ChannelSessionService};
+use std::path::{Path, PathBuf};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::runtime_worker::{
     CreateProviderInput, CurrentTurnSnapshot, ProviderInfoSnapshot, RuntimeWorkerError,
     SwitchProviderInput, UpdateProviderInput,
 };
+use agent_core::{QuestionRequest, QuestionResult};
 use session_tape::SessionProviderBinding;
 
 use super::types::SessionCommand;
@@ -111,6 +112,29 @@ impl SessionManagerHandle {
         session_id: String,
     ) -> Result<SessionProviderBinding, RuntimeWorkerError> {
         self.request(|reply| SessionCommand::GetSessionSettings { session_id, reply }).await
+    }
+
+    pub async fn get_pending_question(
+        &self,
+        session_id: String,
+    ) -> Result<Option<QuestionRequest>, RuntimeWorkerError> {
+        self.request(|reply| SessionCommand::GetPendingQuestion { session_id, reply }).await
+    }
+
+    pub async fn resolve_pending_question(
+        &self,
+        session_id: String,
+        result: QuestionResult,
+    ) -> Result<(), RuntimeWorkerError> {
+        self.request(|reply| SessionCommand::ResolvePendingQuestion { session_id, result, reply })
+            .await
+    }
+
+    pub async fn cancel_pending_question(
+        &self,
+        session_id: String,
+    ) -> Result<(), RuntimeWorkerError> {
+        self.request(|reply| SessionCommand::CancelPendingQuestion { session_id, reply }).await
     }
 
     pub async fn update_session_settings(

@@ -211,3 +211,55 @@ fn rebuild_turn_history_from_tape_restores_legacy_turn_record() {
     assert_eq!(turns.len(), 1);
     assert_eq!(turns[0], legacy_turn);
 }
+
+#[test]
+fn rebuild_turn_history_from_tape_restores_waiting_for_question_outcome() {
+    let mut tape = SessionTape::new();
+    let turn_id = "turn-question";
+    tape.append_entry(
+        TapeEntry::message(&Message::new(Role::User, "需要确认数据库")).with_run_id(turn_id),
+    );
+    tape.append_entry(
+        TapeEntry::tool_call(
+            &ToolCall::new("Question").with_invocation_id("call-question-1").with_arguments_value(
+                serde_json::json!({
+                    "questions": [{
+                        "id": "database",
+                        "header": "Database",
+                        "question": "Use which database?",
+                        "kind": "choice"
+                    }]
+                }),
+            ),
+        )
+        .with_run_id(turn_id),
+    );
+    tape.append_entry(
+        TapeEntry::event(
+            "question_requested",
+            Some(serde_json::json!({
+                "request_id": "qreq_123",
+                "invocation_id": "call-question-1",
+                "turn_id": turn_id,
+                "questions": [{
+                    "id": "database",
+                    "header": "Database",
+                    "question": "Use which database?",
+                    "kind": "choice",
+                    "required": true,
+                    "multi_select": false,
+                    "options": [],
+                    "recommended_option_ids": [],
+                    "recommendation_reason": null
+                }]
+            })),
+        )
+        .with_run_id(turn_id),
+    );
+    tape.append_entry(TapeEntry::event("turn_waiting_for_question", None).with_run_id(turn_id));
+
+    let turns = rebuild_session_snapshots_from_tape(&tape).history;
+
+    assert_eq!(turns.len(), 1);
+    assert_eq!(turns[0].outcome, TurnOutcome::WaitingForQuestion);
+}

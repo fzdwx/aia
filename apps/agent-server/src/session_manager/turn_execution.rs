@@ -225,6 +225,8 @@ impl TurnWorker {
                 )
                 .project(events);
                 if let Some(turn) = turn {
+                    let waiting_for_question =
+                        matches!(turn.outcome, agent_runtime::TurnOutcome::WaitingForQuestion);
                     let turn_for_traces = turn.clone();
                     write_lock(&self.context.history_snapshot).push(turn.clone());
                     let _ = self.context.broadcast_tx.send(SsePayload::TurnCompleted {
@@ -232,6 +234,17 @@ impl TurnWorker {
                         turn_id: self.context.turn_id.clone(),
                         turn,
                     });
+                    if waiting_for_question {
+                        update_current_turn_status(
+                            &self.context.current_turn_snapshot,
+                            TurnStatus::WaitingForQuestion,
+                        );
+                        let _ = self.context.broadcast_tx.send(SsePayload::Status {
+                            session_id: self.context.session_id.clone(),
+                            turn_id: self.context.turn_id.clone(),
+                            status: TurnStatus::WaitingForQuestion,
+                        });
+                    }
                     let trace_recorder = self.context.trace_recorder.clone();
                     tokio::spawn(async move {
                         trace_recorder.persist_turn_spans(&turn_for_traces).await;

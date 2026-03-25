@@ -4,6 +4,7 @@ mod events;
 mod finalize;
 mod helpers;
 mod hooks;
+mod question_tool;
 mod request;
 mod tape_tools;
 #[cfg(test)]
@@ -195,9 +196,7 @@ where
             .into_iter()
             .filter(|definition| !self.disabled_tools.contains(&definition.name))
             .collect();
-        tools.extend(tape_tools::runtime_tool_definitions_for(
-            &self.interaction_capabilities,
-        ));
+        tools.extend(tape_tools::runtime_tool_definitions_for(&self.interaction_capabilities));
         tools
     }
 

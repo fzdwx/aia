@@ -3,6 +3,7 @@ import type { StreamingTurn } from "@/lib/types"
 
 const STATUS_LABELS: Record<StreamingTurn["status"], string> = {
   waiting: "Waiting",
+  waiting_for_question: "Waiting for your answer",
   thinking: "Thinking",
   working: "Working",
   generating: "Generating",

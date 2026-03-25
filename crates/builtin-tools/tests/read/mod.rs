@@ -71,6 +71,41 @@ async fn read_tool_reads_large_file_window_with_line_numbers() -> Result<(), Box
     assert_eq!(details["lines_read"], 3);
     assert_eq!(details["total_lines"], 2500);
     assert_eq!(details["file_path"], path.display().to_string());
+    assert_eq!(details["is_image"], false);
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn read_tool_returns_image_as_base64_data_url() -> Result<(), Box<dyn Error>> {
+    let dir = TestDir::new()?;
+    let path = dir.path().join("pixel.png");
+    let png_bytes = [
+        0x89_u8, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
+        0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x04, 0x00, 0x00, 0x00,
+        0xb5, 0x1c, 0x0c, 0x02, 0x00, 0x00, 0x00, 0x0b, 0x49, 0x44, 0x41, 0x54, 0x78, 0xda, 0x63,
+        0xfc, 0xff, 0x1f, 0x00, 0x03, 0x03, 0x01, 0xff, 0xa5, 0xf7, 0xa9, 0xb5, 0x00, 0x00, 0x00,
+        0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    ];
+    fs::write(&path, png_bytes)?;
+
+    let tool = ReadTool;
+    let call =
+        ToolCall::new("read").with_arguments_value(serde_json::json!({ "file_path": "pixel.png" }));
+    let result = tool
+        .call(&call, &mut |_| {}, &test_context(dir.path()))
+        .await
+        .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
+
+    assert!(result.content.starts_with("data:image/png;base64,"));
+
+    let details = match result.details {
+        Some(details) => details,
+        None => return Err("read result should include details".into()),
+    };
+    assert_eq!(details["file_path"], path.display().to_string());
+    assert_eq!(details["is_image"], true);
+    assert_eq!(details["mime_type"], "image/png");
+    assert_eq!(details["encoding"], "data_url");
     Ok(())
 }
 
