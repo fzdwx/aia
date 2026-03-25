@@ -99,8 +99,116 @@ describe("chat message status surfaces", () => {
     )
 
     expect(html.match(/Explored/g)).toHaveLength(1)
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).not.toContain('data-component="context-tool-group-list"')
     expect(html).toContain("1 read")
     expect(html).toContain("1 search")
+  })
+
+  test("keeps explored groups expanded only on the active streaming turn", () => {
+    const completedHtml = renderWithTheme(
+      <MemoizedTurnView
+        turn={{
+          turn_id: "turn-tools-collapsed",
+          started_at_ms: 100,
+          finished_at_ms: 200,
+          source_entry_ids: [1],
+          user_message: "Question",
+          blocks: [
+            {
+              kind: "tool_invocation",
+              invocation: {
+                call: {
+                  invocation_id: "tool-read",
+                  tool_name: "Read",
+                  arguments: { file_path: "docs/status.md" },
+                },
+                started_at_ms: 110,
+                finished_at_ms: 120,
+                outcome: {
+                  status: "succeeded",
+                  result: {
+                    invocation_id: "tool-read",
+                    tool_name: "Read",
+                    content: "status",
+                    details: {},
+                  },
+                },
+              },
+            },
+            {
+              kind: "tool_invocation",
+              invocation: {
+                call: {
+                  invocation_id: "tool-grep",
+                  tool_name: "Grep",
+                  arguments: { pattern: "phase", path: "docs" },
+                },
+                started_at_ms: 121,
+                finished_at_ms: 130,
+                outcome: {
+                  status: "succeeded",
+                  result: {
+                    invocation_id: "tool-grep",
+                    tool_name: "Grep",
+                    content: "phase",
+                    details: {},
+                  },
+                },
+              },
+            },
+          ],
+          assistant_message: null,
+          thinking: null,
+          tool_invocations: [],
+          usage: null,
+          failure_message: null,
+          outcome: "succeeded",
+        }}
+      />
+    )
+
+    const streamingHtml = renderWithTheme(
+      <MemoizedStreamingView
+        streaming={{
+          userMessage: "Question",
+          status: "working",
+          blocks: [
+            {
+              type: "tool",
+              tool: {
+                invocationId: "tool-read",
+                toolName: "Read",
+                arguments: { file_path: "docs/status.md" },
+                detectedAtMs: 100,
+                output: "status",
+                completed: true,
+                finishedAtMs: 120,
+                resultContent: "status",
+              },
+            },
+            {
+              type: "tool",
+              tool: {
+                invocationId: "tool-grep",
+                toolName: "Grep",
+                arguments: { pattern: "phase", path: "docs" },
+                detectedAtMs: 121,
+                output: "phase",
+                completed: true,
+                finishedAtMs: 130,
+                resultContent: "phase",
+              },
+            },
+          ],
+        }}
+      />
+    )
+
+    expect(completedHtml).toContain('aria-expanded="false"')
+    expect(completedHtml).not.toContain('data-component="context-tool-group-list"')
+    expect(streamingHtml).toContain('aria-expanded="true"')
+    expect(streamingHtml).toContain('data-component="context-tool-group-list"')
   })
 
   test("breaks context groups on non-context tools and non-tool blocks", () => {

@@ -275,7 +275,8 @@ export function StatusIndicator({
 }) {
   return (
     <div
-      className="text-heading-sm py-2 font-medium text-foreground"
+      className="py-2"
+      data-slot="tool-title"
       role="status"
       aria-live="polite"
       aria-atomic="true"
@@ -378,11 +379,7 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
         {grouped.map((group, i) => {
           if (group.type === "tools") {
             return (
-              <MemoizedToolGroup
-                key={i}
-                items={group.invocations.map(fromInvocation)}
-                keepContextGroupsOpen
-              />
+              <MemoizedToolGroup key={i} items={group.invocations.map(fromInvocation)} />
             )
           }
           return <BlockRenderer key={i} block={group.block} />
