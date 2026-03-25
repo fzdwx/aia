@@ -15,10 +15,7 @@ import {
   getStringValue,
   truncateInline,
 } from "../helpers"
-import {
-  ExpandableOutput,
-  ToolDetailSection,
-} from "../ui"
+import { ExpandableOutput, ToolDetailSection } from "../ui"
 import { PierreMultiFileDiffOutput } from "../../diff/pierre-diff"
 
 function getToolFileName(data: Parameters<ToolRenderer["renderDetails"]>[0]) {

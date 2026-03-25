@@ -36,6 +36,13 @@ function loadPierreConfigSource() {
   ).replace(/\s+/g, " ")
 }
 
+function loadAppIndexCssSource() {
+  return readFileSync(
+    new URL("../../../index.css", import.meta.url),
+    "utf8"
+  ).replace(/\s+/g, " ")
+}
+
 type ElementWithChildren = {
   children?: ReactNode
 }
@@ -1029,7 +1036,7 @@ describe("tool renderer registry", () => {
     )
     expect(configSource).toContain("overscrollSize: 1200")
     expect(configSource).toContain("intersectionObserverMargin: 600")
-    expect(source).toContain("lineDiffType: \"none\"")
+    expect(source).toContain('lineDiffType: "none"')
     expect(source).not.toContain("WorkerPoolContextProvider")
   })
 
@@ -1052,5 +1059,17 @@ describe("tool renderer registry", () => {
     expect(source).toContain(":host ::-webkit-scrollbar {")
     expect(source).toContain("height: 0;")
     expect(source).toContain("display: none;")
+  })
+
+  test("keeps pierre diff host border on both horizontal edges", () => {
+    const source = loadAppIndexCssSource()
+
+    expect(source).toContain(".tool-timeline-pierre-root")
+    expect(source).toContain(
+      "border: 1px solid color-mix(in oklch, var(--border) 58%, transparent);"
+    )
+    expect(source).not.toContain(
+      ".tool-timeline-pierre-root { display: block; width: 100%; overflow: hidden; border-radius: 0.875rem; border: 1px solid color-mix(in oklch, var(--border) 58%, transparent); border-left: 0;"
+    )
   })
 })

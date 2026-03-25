@@ -1219,7 +1219,6 @@ body {
     overflow: hidden;
     border-radius: 0.875rem;
     border: 1px solid color-mix(in oklch, var(--border) 58%, transparent);
-    border-left: 0;
     background: transparent;
   }
 

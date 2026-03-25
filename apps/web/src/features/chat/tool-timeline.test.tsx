@@ -31,7 +31,10 @@ function loadWebCssSource() {
 }
 
 function loadViteConfigSource() {
-  return readFileSync(new URL("../../../vite.config.ts", import.meta.url), "utf8")
+  return readFileSync(
+    new URL("../../../vite.config.ts", import.meta.url),
+    "utf8"
+  )
 }
 
 describe("tool timeline", () => {
