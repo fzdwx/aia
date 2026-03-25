@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState } from "react"
+import { memo, useEffect, useRef, useState } from "react"
 import { AnimatePresence, motion } from "motion/react"
 
 import { TextShimmer } from "@/components/ai-elements/text-shimmer"
@@ -417,25 +417,17 @@ function ContextToolTriggerRow({ item }: { item: ToolRowItem }) {
 }
 
 function ContextToolGroupList({ items }: { items: ToolRowItem[] }) {
-  const contentRef = useRef<HTMLDivElement | null>(null)
-  const [height, setHeight] = useState(0)
-
-  useLayoutEffect(() => {
-    const nextHeight = contentRef.current?.scrollHeight ?? 0
-    setHeight(nextHeight)
-  }, [items])
-
   return (
     <motion.div
       key="list"
       data-component="context-tool-group-list"
       initial={{ height: 0 }}
-      animate={{ height }}
+      animate={{ height: "auto" }}
       exit={{ height: 0 }}
       transition={CONTEXT_GROUP_TRANSITION}
       style={{ overflow: "hidden" }}
     >
-      <div ref={contentRef} data-slot="context-tool-group-list-inner">
+      <div data-slot="context-tool-group-list-inner">
         {items.map((item) => (
           <ContextToolTriggerRow key={item.id} item={item} />
         ))}
@@ -580,6 +572,7 @@ export function StreamingToolGroup({
     <div data-component="tool-timeline-stream">
       {completed.length > 0 && (
         <ToolGroup
+          key="completed"
           items={completed.map(fromStreamingTool)}
           keepContextGroupsOpen={keepContextGroupsOpen}
         />
@@ -587,6 +580,7 @@ export function StreamingToolGroup({
 
       {active.length > 0 && (
         <ToolGroup
+          key="active"
           items={active.map(fromStreamingTool)}
           status="running"
           keepContextGroupsOpen={keepContextGroupsOpen}

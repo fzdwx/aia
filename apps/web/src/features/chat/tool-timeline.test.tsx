@@ -557,15 +557,9 @@ describe("tool timeline", () => {
     expect(source).toContain("setOpen(false)")
     expect(source).toContain("keepContextGroupsOpen?: boolean")
     expect(source).toContain("function ContextToolGroupList(")
-    expect(source).toContain(
-      "const contentRef = useRef<HTMLDivElement | null>(null)"
-    )
-    expect(source).toContain("const [height, setHeight] = useState(0)")
-    expect(source).toContain(
-      "const nextHeight = contentRef.current?.scrollHeight ?? 0"
-    )
+    expect(source).toContain('animate={{ height: "auto" }}')
     expect(source).toContain("const CONTEXT_GROUP_TRANSITION =")
-    expect(source).toContain("animate={{ height }}")
+    expect(source).toContain('animate={{ height: "auto" }}')
   })
 
   test("renders shell details on the flat path without generic request or result sections", () => {

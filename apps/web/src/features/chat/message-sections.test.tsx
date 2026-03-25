@@ -206,7 +206,9 @@ describe("chat message status surfaces", () => {
     )
 
     expect(completedHtml).toContain('aria-expanded="false"')
-    expect(completedHtml).not.toContain('data-component="context-tool-group-list"')
+    expect(completedHtml).not.toContain(
+      'data-component="context-tool-group-list"'
+    )
     expect(streamingHtml).toContain('aria-expanded="true"')
     expect(streamingHtml).toContain('data-component="context-tool-group-list"')
   })

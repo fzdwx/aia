@@ -379,7 +379,10 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
         {grouped.map((group, i) => {
           if (group.type === "tools") {
             return (
-              <MemoizedToolGroup key={i} items={group.invocations.map(fromInvocation)} />
+              <MemoizedToolGroup
+                key={i}
+                items={group.invocations.map(fromInvocation)}
+              />
             )
           }
           return <BlockRenderer key={i} block={group.block} />
