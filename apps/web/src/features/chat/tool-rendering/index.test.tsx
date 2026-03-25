@@ -1,11 +1,12 @@
 import { Children, isValidElement, type ReactNode } from "react"
 import { readFileSync } from "node:fs"
 import { renderToStaticMarkup } from "react-dom/server"
-import { describe, expect, test } from "vite-plus/test"
+import { beforeEach, describe, expect, test } from "vite-plus/test"
 
 import { ThemeProvider } from "@/components/theme-provider"
 
 import { toolRendererRegistry } from "./index"
+import { setActiveWorkspaceRoot } from "@/lib/tool-display"
 
 function loadToolRenderingUiSource() {
   return readFileSync(new URL("./ui.tsx", import.meta.url), "utf8").replace(
@@ -25,7 +26,11 @@ function renderWithTheme(content: ReactNode) {
 }
 
 describe("tool renderer registry", () => {
-  test("renders read tool title as file path only", () => {
+  beforeEach(() => {
+    setActiveWorkspaceRoot("/home/like/projects/like")
+  })
+
+  test("renders read tool title as filename plus parent path", () => {
     const title = toolRendererRegistry.renderTitle({
       toolName: "Read",
       arguments: {
@@ -37,7 +42,20 @@ describe("tool renderer registry", () => {
       succeeded: true,
     })
 
-    expect(title).toBe("apps/web/src/components/chat-messages.tsx")
+    expect(title).toBe("chat-messages.tsx apps/web/src/components")
+  })
+
+  test("renders current-directory file tool title as filename only", () => {
+    const title = toolRendererRegistry.renderTitle({
+      toolName: "Read",
+      arguments: {
+        file_path: "/home/like/projects/like/tool-display.ts",
+      },
+      outputContent: "",
+      succeeded: true,
+    })
+
+    expect(title).toBe("tool-display.ts")
   })
 
   test("renders read tool meta as a compact line range", () => {
@@ -378,7 +396,7 @@ describe("tool renderer registry", () => {
     expect(livecrawlBadge.props.children).toBe("Live crawl")
   })
 
-  test("renders write tool title with compacted path", () => {
+  test("renders write tool title as filename plus compacted parent path", () => {
     const title = toolRendererRegistry.renderTitle({
       toolName: "Write",
       arguments: {
@@ -396,11 +414,11 @@ describe("tool renderer registry", () => {
     })
 
     expect(title).toBe(
-      ".../src/features/chat/tool-rendering/renderers/file-tools.tsx"
+      "file-tools.tsx .../src/features/chat/tool-rendering/renderers"
     )
   })
 
-  test("renders edit tool title with compacted path", () => {
+  test("renders edit tool title as filename plus compacted parent path", () => {
     const title = toolRendererRegistry.renderTitle({
       toolName: "Edit",
       arguments: {
@@ -419,7 +437,7 @@ describe("tool renderer registry", () => {
     })
 
     expect(title).toBe(
-      ".../src/features/chat/tool-rendering/renderers/file-tools.tsx"
+      "file-tools.tsx .../src/features/chat/tool-rendering/renderers"
     )
   })
 
@@ -503,7 +521,7 @@ describe("tool renderer registry", () => {
       succeeded: false,
     })
 
-    expect(title).toBe("apps/web/src/lib/tool-display.ts")
+    expect(title).toBe("tool-display.ts apps/web/src/lib")
   })
 
   test("renders shell tool title from command", () => {

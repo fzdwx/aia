@@ -195,6 +195,10 @@ describe("tool timeline", () => {
     )
 
     expect(html).toContain('data-slot="tool-meta"')
+    expect(html).toContain("chat-messages.tsx")
+    expect(html).toContain("apps/web/src/components")
+    expect(html).toContain('data-slot="tool-file-name"')
+    expect(html).toContain('data-slot="tool-file-dir"')
     expect(html).toContain("L121~160")
     expect(html).toContain("&quot;renderDetails&quot; apps/web/src")
     expect(html).toContain("12 matches")
@@ -428,6 +432,8 @@ describe("tool timeline", () => {
     const source = loadWebCssSource()
 
     expect(source).toContain('[data-slot="tool-subtitle"]')
+    expect(source).toContain('[data-slot="tool-subtitle"][data-kind="file-path"]')
+    expect(source).toContain('grid-template-columns: minmax(0, 15ch) minmax(0, 1fr);')
     expect(source).toContain('[data-slot="tool-meta"]')
     expect(source).toContain(
       "color: oklch(from var(--muted-foreground) l c h / 0.5);"

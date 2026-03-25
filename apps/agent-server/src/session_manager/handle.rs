@@ -1,5 +1,6 @@
 use agent_runtime::{ContextStats, TurnLifecycle};
 use agent_store::SessionRecord;
+use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use channel_bridge::{ChannelBridgeError, ChannelSessionInfo, ChannelSessionService};
 use tokio::sync::{mpsc, oneshot};
@@ -19,11 +20,16 @@ mod tests;
 #[derive(Clone)]
 pub struct SessionManagerHandle {
     pub(super) tx: mpsc::Sender<SessionCommand>,
+    pub(super) workspace_root: PathBuf,
 }
 
 impl SessionManagerHandle {
-    pub(super) fn new(tx: mpsc::Sender<SessionCommand>) -> Self {
-        Self { tx }
+    pub fn workspace_root(&self) -> &Path {
+        &self.workspace_root
+    }
+
+    pub(super) fn new(tx: mpsc::Sender<SessionCommand>, workspace_root: PathBuf) -> Self {
+        Self { tx, workspace_root }
     }
 
     async fn request<R>(

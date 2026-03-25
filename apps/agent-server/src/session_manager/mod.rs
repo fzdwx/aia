@@ -52,12 +52,13 @@ pub use crate::runtime_worker::{
 pub(crate) use tool_trace::ToolTraceRecorder;
 
 pub fn spawn_session_manager(config: SessionManagerConfig) -> SessionManagerHandle {
+    let workspace_root = config.workspace_root.clone();
     let (command_tx, command_rx) = mpsc::channel(256);
     let (return_tx, return_rx) = mpsc::channel(64);
     tokio::spawn(
         SessionManagerLoop::new(config, command_tx.clone(), command_rx, return_tx, return_rx).run(),
     );
-    SessionManagerHandle::new(command_tx)
+    SessionManagerHandle::new(command_tx, workspace_root)
 }
 
 const UNAVAILABLE_SESSION_MODEL: &str = "unavailable";

@@ -7,6 +7,7 @@ use serde::Serialize;
 
 use crate::state::SharedState;
 use agent_core::ReasoningEffort;
+use agent_runtime::ContextStats;
 use session_tape::SessionProviderBinding;
 
 #[derive(Deserialize)]
@@ -39,6 +40,13 @@ pub(crate) struct SessionSettingsResponse {
     pub model: String,
     pub protocol: String,
     pub reasoning_effort: Option<String>,
+}
+
+#[derive(Serialize)]
+pub(crate) struct SessionInfoResponse {
+    #[serde(flatten)]
+    pub stats: ContextStats,
+    pub workspace_root: String,
 }
 
 #[derive(Deserialize)]

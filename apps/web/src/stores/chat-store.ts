@@ -18,7 +18,10 @@ import {
   type IdleCanceller,
   type IdleScheduler,
 } from "@/lib/idle"
-import { normalizeToolArguments } from "@/lib/tool-display"
+import {
+  normalizeToolArguments,
+  setActiveWorkspaceRoot,
+} from "@/lib/tool-display"
 import type {
   AppView,
   ChatState,
@@ -326,6 +329,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     })
     const currentTurnPromise = fetchCurrentTurn(id)
     const sessionInfoPromise = fetchSessionInfo(id)
+    setActiveWorkspaceRoot(null)
 
     set((state) => ({
       activeSessionId: id,
@@ -341,6 +345,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     sessionInfoPromise
       .then((info) => {
         if (loadId !== latestSessionLoadId) return
+        setActiveWorkspaceRoot(info.workspace_root)
         set((state) => {
           const snapshot = {
             ...(state._sessionSnapshots[id] ?? cachedSnapshot),

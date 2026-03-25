@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils"
 import type { StreamingToolOutput } from "@/lib/types"
 
 import { toolRendererRegistry } from "./tool-rendering"
+import { getFileDisplayParts, getToolDisplayPath } from "@/lib/tool-display"
 import { buildDetailEntries } from "./tool-rendering/helpers"
 import {
   DetailList,
@@ -212,13 +213,34 @@ function ToolTrigger({
   const meta = isRunning ? null : toolRendererRegistry.renderMeta(renderData)
   const subtitle =
     getFallbackSubtitle(item) ?? (title && title !== displayName ? title : null)
+  const normalizedToolName = normalizeToolName(item.toolName)
+  const isFileTool =
+    normalizedToolName === "Read" ||
+    normalizedToolName === "Write" ||
+    normalizedToolName === "Edit"
+  const filePath = isFileTool
+    ? getToolDisplayPath(item.toolName, item.details, item.arguments)
+    : ""
+  const fileParts = filePath ? getFileDisplayParts(filePath) : null
 
   return (
     <div data-component="tool-trigger">
       <span data-slot="tool-title">
         {isRunning ? <TextShimmer text={displayName} active /> : displayName}
       </span>
-      {!isRunning && subtitle ? (
+      {!isRunning && fileParts ? (
+        <span
+          data-slot="tool-subtitle"
+          data-kind="file-path"
+          data-state={item.succeeded ? "default" : "failure"}
+          title={title ?? undefined}
+        >
+          <span data-slot="tool-file-name">{fileParts.fileName}</span>
+          {fileParts.directory ? (
+            <span data-slot="tool-file-dir">{fileParts.directory}</span>
+          ) : null}
+        </span>
+      ) : !isRunning && subtitle ? (
         <span
           data-slot="tool-subtitle"
           data-state={item.succeeded ? "default" : "failure"}
@@ -393,12 +415,36 @@ function ToolRow({ item }: { item: ToolRowItem }) {
 
 function ContextToolTriggerRow({ item }: { item: ToolRowItem }) {
   const trigger = contextToolTrigger(item)
+  const renderedTitle = toolRendererRegistry.renderTitle({
+    toolName: item.toolName,
+    arguments: item.arguments,
+    details: item.details,
+    outputContent: item.outputContent,
+    succeeded: item.succeeded,
+  })
+  const subtitle =
+    renderedTitle && renderedTitle !== trigger.title
+      ? renderedTitle
+      : trigger.subtitle
+  const isFileTool =
+    trigger.title === "Read" || trigger.title === "Write" || trigger.title === "Edit"
+  const filePath = isFileTool
+    ? getToolDisplayPath(item.toolName, item.details, item.arguments)
+    : ""
+  const fileParts = filePath ? getFileDisplayParts(filePath) : null
 
   return (
     <div data-component="context-tool-trigger-row">
       <span data-slot="tool-title">{trigger.title}</span>
-      {trigger.subtitle ? (
-        <span data-slot="tool-subtitle">{trigger.subtitle}</span>
+      {fileParts ? (
+        <span data-slot="tool-subtitle" data-kind="file-path">
+          <span data-slot="tool-file-name">{fileParts.fileName}</span>
+          {fileParts.directory ? (
+            <span data-slot="tool-file-dir">{fileParts.directory}</span>
+          ) : null}
+        </span>
+      ) : subtitle ? (
+        <span data-slot="tool-subtitle">{subtitle}</span>
       ) : null}
       {trigger.meta.length > 0 ? (
         <span data-slot="tool-meta">

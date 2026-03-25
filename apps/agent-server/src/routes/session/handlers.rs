@@ -12,7 +12,7 @@ use agent_core::ReasoningEffort;
 
 use super::{
     AutoCompressRequest, CreateSessionRequest, HandoffRequest, SessionQuery,
-    SessionSettingsResponse, UpdateSessionSettingsRequest,
+    SessionInfoResponse, SessionSettingsResponse, UpdateSessionSettingsRequest,
 };
 use crate::routes::common::{
     JsonResponse, json_response, require_session_id, resolve_session_id,
@@ -56,7 +56,13 @@ pub(crate) async fn get_session_info(
     };
 
     match state.session_manager.get_session_info(session_id).await {
-        Ok(stats) => json_response(StatusCode::OK, stats),
+        Ok(stats) => json_response(
+            StatusCode::OK,
+            SessionInfoResponse {
+                stats,
+                workspace_root: state.session_manager.workspace_root().display().to_string(),
+            },
+        ),
         Err(error) => runtime_worker_error_response(error),
     }
 }

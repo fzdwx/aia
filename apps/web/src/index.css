@@ -757,6 +757,29 @@ body {
     flex: 1 1 0;
   }
 
+  [data-slot="tool-subtitle"][data-kind="file-path"] {
+    display: inline-grid;
+    grid-template-columns: minmax(0, 15ch) minmax(0, 1fr);
+    align-items: baseline;
+    column-gap: 0.625rem;
+  }
+
+  [data-slot="tool-file-name"] {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: inherit;
+  }
+
+  [data-slot="tool-file-dir"] {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: inherit;
+  }
+
   [data-slot="tool-meta"] {
     min-width: 0;
     display: inline-flex;

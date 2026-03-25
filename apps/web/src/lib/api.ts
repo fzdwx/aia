@@ -25,6 +25,7 @@ export type ContextStats = {
   context_limit: number | null
   output_limit: number | null
   pressure_ratio: number | null
+  workspace_root: string
 }
 
 // ── Session management ─────────────────────────────────────────

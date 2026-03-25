@@ -7,6 +7,50 @@ export function normalizeToolArguments(
   return args
 }
 
+let activeWorkspaceRoot: string | null = null
+
+function normalizePathForDisplay(value: string): string {
+  return value.trim().replace(/\\/g, "/").replace(/\/+$/, "")
+}
+
+export function setActiveWorkspaceRoot(
+  workspaceRoot: string | null | undefined
+): void {
+  activeWorkspaceRoot =
+    typeof workspaceRoot === "string" && workspaceRoot.trim().length > 0
+      ? normalizePathForDisplay(workspaceRoot)
+      : null
+}
+
+export function relativizeToActiveWorkspaceRoot(path: string): string {
+  const normalizedPath = normalizePathForDisplay(path)
+  if (!normalizedPath || !activeWorkspaceRoot) return normalizedPath
+
+  if (normalizedPath === activeWorkspaceRoot) return ""
+
+  const workspacePrefix = `${activeWorkspaceRoot}/`
+  if (normalizedPath.startsWith(workspacePrefix)) {
+    return normalizedPath.slice(workspacePrefix.length)
+  }
+
+  return normalizedPath
+}
+
+export function getFileDisplayParts(path: string): {
+  fileName: string
+  directory: string
+} {
+  const normalized = relativizeToActiveWorkspaceRoot(path)
+  const segments = normalized.split("/").filter(Boolean)
+  const fileName = segments[segments.length - 1] ?? normalized
+  const directory = segments.slice(0, -1).join("/").replace(/^\.$/, "")
+
+  return {
+    fileName,
+    directory,
+  }
+}
+
 function getToolNameSegment(toolName: string | undefined): string | undefined {
   if (!toolName) return undefined
   const trimmed = toolName.trim()

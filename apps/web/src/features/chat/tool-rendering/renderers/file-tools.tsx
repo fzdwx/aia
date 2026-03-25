@@ -1,4 +1,8 @@
-import { getToolDisplayPath, normalizeToolArguments } from "@/lib/tool-display"
+import {
+  getFileDisplayParts,
+  getToolDisplayPath,
+  normalizeToolArguments,
+} from "@/lib/tool-display"
 
 import { formatReadLineRange } from "../../read-range"
 import { toolTimelineCopy } from "../../tool-timeline-copy"
@@ -9,6 +13,7 @@ import {
   createMetaBadge,
   getNumberValue,
   getStringValue,
+  truncateInline,
 } from "../helpers"
 import {
   ExpandableOutput,
@@ -59,6 +64,14 @@ function getToolFileName(data: Parameters<ToolRenderer["renderDetails"]>[0]) {
   )
 }
 
+function buildFileToolTitle(path: string) {
+  const { fileName, directory } = getFileDisplayParts(path)
+
+  if (!directory) return truncateInline(fileName, 40)
+
+  return `${truncateInline(fileName, 40)} ${compactPath(directory, 48)}`
+}
+
 function buildWriteContentsFromArguments(
   data: Parameters<ToolRenderer["renderDetails"]>[0]
 ) {
@@ -79,7 +92,7 @@ export function createReadRenderer(): ToolRenderer {
     renderTitle(data) {
       const args = normalizeToolArguments(data.arguments)
       const path = getToolDisplayPath(data.toolName, data.details, args)
-      return compactPath(path, 64)
+      return buildFileToolTitle(path)
     },
     renderMeta(data) {
       const range = formatReadLineRange({
@@ -117,7 +130,7 @@ export function createWriteRenderer(): ToolRenderer {
     renderTitle(data) {
       const args = normalizeToolArguments(data.arguments)
       const path = getToolDisplayPath(data.toolName, data.details, args)
-      return compactPath(path, 64)
+      return buildFileToolTitle(path)
     },
     renderMeta(data) {
       const lines = getNumberValue(data.details, "lines")
@@ -149,7 +162,7 @@ export function createEditRenderer(): ToolRenderer {
     renderTitle(data) {
       const args = normalizeToolArguments(data.arguments)
       const path = getToolDisplayPath(data.toolName, data.details, args)
-      return compactPath(path, 64)
+      return buildFileToolTitle(path)
     },
     renderMeta(data) {
       const added = getNumberValue(data.details, "added")

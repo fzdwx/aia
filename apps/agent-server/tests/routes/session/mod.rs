@@ -8,6 +8,7 @@ use provider_registry::{ProviderProfile, ProviderRegistry};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{UpdateSessionSettingsRequest, handlers};
+use crate::routes::session::SessionQuery;
 use crate::routes::test_support::{
     test_state_with_session_manager, test_state_with_session_manager_setup,
 };
@@ -130,6 +131,37 @@ async fn session_list_projection_marks_missing_slot_model_unavailable() {
                 .find(|item| item.get("id") == Some(&serde_json::json!("session-missing-slot"))))
             .and_then(|item| item.get("model")),
         Some(&serde_json::json!("unavailable"))
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn session_info_includes_workspace_root() {
+    let (state, root) =
+        test_state_with_session_manager("session-info-workspace-root", sample_registry());
+    let session = state
+        .session_manager
+        .create_session(Some("Session One".into()))
+        .await
+        .expect("session should be created");
+
+    let response = handlers::get_session_info(
+        State(state.clone()),
+        axum::extract::Query(SessionQuery {
+            session_id: Some(session.id),
+            before_turn_id: None,
+            limit: None,
+        }),
+    )
+    .await
+    .into_response();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_body_json(response).await;
+    assert_eq!(
+        body.get("workspace_root"),
+        Some(&serde_json::json!(root.display().to_string()))
     );
 
     let _ = std::fs::remove_dir_all(root);
