@@ -869,7 +869,6 @@ body {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-    border-left: 1px solid color-mix(in oklch, var(--border) 34%, transparent);
     padding-left: 0.875rem;
   }
 
@@ -1224,6 +1223,7 @@ body {
     overflow: hidden;
     border-radius: 0.875rem;
     border: 1px solid color-mix(in oklch, var(--border) 58%, transparent);
+    border-left: 0;
     background: transparent;
   }
 }

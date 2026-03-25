@@ -18,26 +18,8 @@ import {
 import {
   ExpandableOutput,
   PierreMultiFileDiffOutput,
-  PierrePatchDiffOutput,
   ToolDetailSection,
 } from "../ui"
-
-function buildEditPatchFromDetails(
-  data: Parameters<ToolRenderer["renderDetails"]>[0],
-  fileName: string
-) {
-  const diff = getStringValue(data.details, "diff")
-  if (!diff) return null
-
-  if (diff.startsWith("diff --git ")) return diff
-
-  return [
-    `diff --git a/${fileName} b/${fileName}`,
-    `--- a/${fileName}`,
-    `+++ b/${fileName}`,
-    diff,
-  ].join("\n")
-}
 
 function buildEditContentsFromArguments(
   data: Parameters<ToolRenderer["renderDetails"]>[0]
@@ -181,12 +163,7 @@ export function createEditRenderer(): ToolRenderer {
     },
     renderDetails(data) {
       const fileName = getToolFileName(data)
-      const patch = buildEditPatchFromDetails(data, fileName)
       const contents = buildEditContentsFromArguments(data)
-
-      if (patch) {
-        return <PierrePatchDiffOutput patch={patch} />
-      }
 
       if (contents) {
         return (
