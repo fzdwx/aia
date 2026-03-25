@@ -274,8 +274,13 @@ export function StatusIndicator({
   status: StreamingTurn["status"]
 }) {
   return (
-    <div className="py-2" role="status" aria-live="polite" aria-atomic="true">
-      <Shimmer as="span" duration={1} spread={3}>
+    <div
+      className="text-heading-sm py-2 font-medium text-foreground"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      <Shimmer className="" as="span" duration={1} spread={3}>
         {STATUS_LABELS[status]}
       </Shimmer>
     </div>
