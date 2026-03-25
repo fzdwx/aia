@@ -54,12 +54,7 @@ web-check:
 	cd apps/web && ./node_modules/.bin/vp check
 
 # 同时启动后端和前端
-dev:
-	#!/usr/bin/env bash
-	set -e
-	if [ ! -x apps/web/node_modules/.bin/vp ]; then
-		just web-install
-	fi
+dev: web-install
 	cargo run -p agent-server &
 	SERVER_PID=$!
 	cd apps/web && pnpm run dev &
