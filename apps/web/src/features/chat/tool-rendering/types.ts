@@ -11,6 +11,7 @@ export type ToolRenderData = {
 export type ToolRenderer = {
   matches: (toolName: string) => boolean
   renderTitle: (data: ToolRenderData) => string
+  renderSubtitle?: (data: ToolRenderData) => string | null
   renderMeta?: (data: ToolRenderData) => ReactNode | null
   renderDetails: (data: ToolRenderData) => ReactNode | null
 }
@@ -19,6 +20,7 @@ export type ToolRendererRegistry = {
   register: (renderer: ToolRenderer) => void
   resolve: (toolName: string) => ToolRenderer
   renderTitle: (data: ToolRenderData) => string
+  renderSubtitle: (data: ToolRenderData) => string | null
   renderMeta: (data: ToolRenderData) => ReactNode | null
   renderDetails: (data: ToolRenderData) => ReactNode | null
 }

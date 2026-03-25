@@ -486,7 +486,7 @@ describe("tool renderer registry", () => {
     expect(html).not.toContain("Edited apps/web/src/index.css")
   })
 
-  test("renders edit tool details from explicit diff before falling back to output text", () => {
+  test("renders edit tool details from old and new strings instead of explicit diff text", () => {
     const details = toolRendererRegistry.renderDetails({
       toolName: "Edit",
       arguments: {
@@ -620,6 +620,26 @@ describe("tool renderer registry", () => {
     expect(title).toBe("apps/web/src/components/chat-messages.tsx")
   })
 
+  test("renders apply_patch subtitle from first patch operation", () => {
+    const subtitle = toolRendererRegistry.renderSubtitle({
+      toolName: "ApplyPatch",
+      arguments: {
+        patch: [
+          "*** Begin Patch",
+          "*** Update File: apps/web/src/components/chat-messages.tsx",
+          "@@",
+          "-old",
+          "+new",
+          "*** End Patch",
+        ].join("\n"),
+      },
+      outputContent: "",
+      succeeded: true,
+    })
+
+    expect(subtitle).toBe("apps/web/src/components/chat-messages.tsx")
+  })
+
   test("renders write tool meta with green additions", () => {
     const meta = toolRendererRegistry.renderMeta({
       toolName: "Write",
@@ -678,7 +698,9 @@ describe("tool renderer registry", () => {
     expect(meta).not.toBe(null)
     const html = renderToStaticMarkup(<>{meta}</>)
     expect(html).toContain("+4")
+    expect(html).toContain("text-emerald-400")
     expect(html).toContain("-2")
+    expect(html).toContain("text-red-400")
   })
 
   test("renders ApplyPatch details without a patch section title", () => {
@@ -699,6 +721,8 @@ describe("tool renderer registry", () => {
     expect(html).toContain("apps/web/src/index.css")
     expect(html).toContain(">+1<")
     expect(html).toContain(">-1<")
+    expect(html).toContain("text-emerald-400")
+    expect(html).toContain("text-red-400")
     expect(html).toContain("<diffs-container")
     expect(html).not.toContain("tool-timeline-detail-title")
     expect(html).not.toContain('data-tool-detail-kind="patch"')
@@ -736,6 +760,29 @@ describe("tool renderer registry", () => {
     })
 
     expect(title).toBe("old.txt → nested/new.txt")
+  })
+
+  test("renders ApplyPatch multi-file subtitle as first path plus count", () => {
+    const subtitle = toolRendererRegistry.renderSubtitle({
+      toolName: "ApplyPatch",
+      arguments: {
+        patch: [
+          "*** Begin Patch",
+          "*** Update File: old.txt",
+          "*** Move to: nested/new.txt",
+          "@@",
+          "-old",
+          "+new",
+          "*** Add File: another.txt",
+          "+hello",
+          "*** End Patch",
+        ].join("\n"),
+      },
+      outputContent: "",
+      succeeded: true,
+    })
+
+    expect(subtitle).toBe("old.txt → nested/new.txt +1 files")
   })
 
   test("renders question tool summary and ignored semantics", () => {

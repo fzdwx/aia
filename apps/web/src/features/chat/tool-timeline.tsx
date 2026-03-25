@@ -225,8 +225,11 @@ function ToolTrigger({
   const displayName = getToolDisplayName(item.toolName)
   const title = toolRendererRegistry.renderTitle(renderData)
   const meta = isRunning ? null : toolRendererRegistry.renderMeta(renderData)
+  const renderedSubtitle = toolRendererRegistry.renderSubtitle(renderData)
   const subtitle =
-    getFallbackSubtitle(item) ?? (title && title !== displayName ? title : null)
+    getFallbackSubtitle(item) ??
+    renderedSubtitle ??
+    (title && title !== displayName ? title : null)
   const normalizedToolName = normalizeToolName(item.toolName)
   const isFileTool =
     normalizedToolName === "Read" ||
@@ -441,10 +444,18 @@ function ContextToolTriggerRow({ item }: { item: ToolRowItem }) {
     outputContent: item.outputContent,
     succeeded: item.succeeded,
   })
+  const renderedSubtitle = toolRendererRegistry.renderSubtitle({
+    toolName: item.toolName,
+    arguments: item.arguments,
+    details: item.details,
+    outputContent: item.outputContent,
+    succeeded: item.succeeded,
+  })
   const subtitle =
-    renderedTitle && renderedTitle !== trigger.title
+    renderedSubtitle ??
+    (renderedTitle && renderedTitle !== trigger.title
       ? renderedTitle
-      : trigger.subtitle
+      : trigger.subtitle)
   const isFileTool =
     trigger.title === "Read" || trigger.title === "Write" || trigger.title === "Edit"
   const filePath = isFileTool

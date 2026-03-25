@@ -972,14 +972,6 @@ body {
     flex: none;
   }
 
-  .tool-timeline-patch-stat-add {
-    color: color-mix(in oklch, oklch(0.82 0.11 155) 84%, var(--text-strong));
-  }
-
-  .tool-timeline-patch-stat-remove {
-    color: color-mix(in oklch, var(--destructive) 86%, var(--text-strong));
-  }
-
   .tool-timeline-patch-chevron {
     color: color-mix(in oklch, var(--text-weak) 82%, transparent);
     font-size: 0.95rem;
@@ -1226,6 +1218,7 @@ body {
     border-left: 0;
     background: transparent;
   }
+
 }
 
 /* Subtle grain texture for depth */

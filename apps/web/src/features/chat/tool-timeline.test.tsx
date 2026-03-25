@@ -711,6 +711,43 @@ describe("tool timeline", () => {
     expect(html).not.toContain('data-slot="tool-row-inline-details"')
   })
 
+  test("renders ApplyPatch subtitle from renderer instead of title fallback", () => {
+    const html = renderWithTheme(
+      <ToolGroup
+        items={[
+          {
+            id: "tool-patch-subtitle-1",
+            toolName: "ApplyPatch",
+            arguments: {
+              patch: [
+                "*** Begin Patch",
+                "*** Update File: old.txt",
+                "*** Move to: nested/new.txt",
+                "@@",
+                "-old",
+                "+new",
+                "*** Add File: another.txt",
+                "+hello",
+                "*** End Patch",
+              ].join("\n"),
+            },
+            startedAtMs: 221,
+            finishedAtMs: 260,
+            succeeded: true,
+            outputContent: "",
+            details: {
+              lines_added: 2,
+              lines_removed: 1,
+            },
+          },
+        ]}
+      />
+    )
+
+    expect(html).toContain("ApplyPatch")
+    expect(html).toContain("old.txt → nested/new.txt +1 files")
+  })
+
   test("keeps all tool rows on the caretless expandable path", () => {
     const source = loadToolTimelineSource()
 

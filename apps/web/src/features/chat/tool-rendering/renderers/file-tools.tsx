@@ -21,21 +21,6 @@ import {
   ToolDetailSection,
 } from "../ui"
 
-function buildEditContentsFromArguments(
-  data: Parameters<ToolRenderer["renderDetails"]>[0]
-) {
-  const args = normalizeToolArguments(data.arguments)
-  const oldString = getStringValue(args, "old_string")
-  const newString = getStringValue(args, "new_string")
-
-  if (!oldString && !newString) return null
-
-  return {
-    oldContent: oldString ?? "",
-    newContent: newString ?? "",
-  }
-}
-
 function getToolFileName(data: Parameters<ToolRenderer["renderDetails"]>[0]) {
   const args = normalizeToolArguments(data.arguments)
 
@@ -163,13 +148,15 @@ export function createEditRenderer(): ToolRenderer {
     },
     renderDetails(data) {
       const fileName = getToolFileName(data)
-      const contents = buildEditContentsFromArguments(data)
-      if (contents) {
+      const args = normalizeToolArguments(data.arguments)
+      const oldString = getStringValue(args, "old_string") ?? ""
+      const newString = getStringValue(args, "new_string") ?? ""
+      if (oldString || newString) {
         return (
           <PierreMultiFileDiffOutput
             fileName={fileName}
-            oldContent={contents.oldContent}
-            newContent={contents.newContent}
+            oldContent={oldString}
+            newContent={newString}
             diffStyle="split"
           />
         )

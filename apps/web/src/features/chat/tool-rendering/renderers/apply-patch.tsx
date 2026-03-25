@@ -135,6 +135,16 @@ function getPatchDisplayTitle(patch: string) {
   return firstOperation?.displayPath ?? null
 }
 
+function getPatchDisplaySubtitle(patch: string) {
+  const operations = toPatchOperations(patch)
+  const firstOperation = operations[0]
+
+  if (!firstOperation) return null
+  if (operations.length === 1) return firstOperation.displayPath
+
+  return `${firstOperation.displayPath} +${operations.length - 1} files`
+}
+
 function convertOperationToUnifiedDiff(
   kind: "update" | "add" | "delete",
   filePath: string,
@@ -201,10 +211,10 @@ function renderApplyPatchOperationList(operations: ApplyPatchOperation[]) {
             </span>
             <span className="tool-timeline-patch-summary-meta">
               <span className="tool-timeline-patch-stats">
-                <span className="tool-timeline-patch-stat tool-timeline-patch-stat-add">
+                <span className="tool-timeline-patch-stat text-emerald-400">
                   +{entry.added}
                 </span>
-                <span className="tool-timeline-patch-stat tool-timeline-patch-stat-remove">
+                <span className="tool-timeline-patch-stat text-red-400">
                   -{entry.removed}
                 </span>
               </span>
@@ -333,6 +343,14 @@ export function createApplyPatchRenderer(): ToolRenderer {
       return filePath
         ? truncateInline(filePath, 96)
         : toolTimelineCopy.toolName.patch
+    },
+    renderSubtitle(data) {
+      const args = normalizeToolArguments(data.arguments)
+      const patch = getStringValue(args, "patch", "patchText")
+      if (!patch) return null
+
+      const subtitle = getPatchDisplaySubtitle(patch)
+      return subtitle ? truncateInline(subtitle, 96) : null
     },
     renderMeta(data) {
       const linesAdded = getNumberValue(data.details, "lines_added")
