@@ -41,6 +41,20 @@ const CONTEXT_GROUP_TRANSITION = {
 } as const
 const INLINE_DETAIL_TOOLS = new Set<string>()
 const FLAT_DETAIL_SURFACE_TOOLS = new Set(["Edit", "Write", "ApplyPatch"])
+const NON_DEFAULT_TOOL_NAMES = new Set([
+  "Read",
+  "Write",
+  "Edit",
+  "CodeSearch",
+  "WebSearch",
+  "Glob",
+  "Grep",
+  "Shell",
+  "ApplyPatch",
+  "question",
+  "TapeInfo",
+  "TapeHandoff",
+])
 const OMITTED_ARGUMENT_KEYS = new Set([
   "content",
   "patch",
@@ -290,6 +304,11 @@ function renderToolDetailsPanel(item: ToolRowItem) {
   const resultEntries = buildDetailEntries(item.details, {
     omitKeys: OMITTED_DETAIL_KEYS,
   })
+  const usesDefaultRenderer = !NON_DEFAULT_TOOL_NAMES.has(normalizedToolName)
+
+  if (usesDefaultRenderer && detailsContent != null) {
+    return <ToolDetailSurface>{detailsContent}</ToolDetailSurface>
+  }
 
   if (normalizedToolName === "Shell") {
     if (detailsContent == null) return null

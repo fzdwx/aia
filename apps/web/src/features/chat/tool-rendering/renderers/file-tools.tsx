@@ -164,7 +164,6 @@ export function createEditRenderer(): ToolRenderer {
     renderDetails(data) {
       const fileName = getToolFileName(data)
       const contents = buildEditContentsFromArguments(data)
-
       if (contents) {
         return (
           <PierreMultiFileDiffOutput

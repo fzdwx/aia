@@ -505,7 +505,7 @@ describe("tool renderer registry", () => {
 
     const html = renderWithTheme(details)
     expect(html).toContain("<diffs-container")
-    expect(html).toContain("tool-timeline-pierre-root-patch")
+    expect(html).toContain("tool-timeline-pierre-root-multi")
     expect(html).not.toContain("Edited apps/web/src/index.css")
   })
 
@@ -882,6 +882,26 @@ describe("tool renderer registry", () => {
     expect(html).toContain("Raw Details")
     expect(html).toContain("Failure")
     expect(html).toContain("command failed with exit code 1")
+  })
+
+  test("deduplicates fallback result when output JSON matches structured details", () => {
+    const details = toolRendererRegistry.renderDetails({
+      toolName: "tape_info",
+      arguments: {},
+      details: {
+        anchors: 0,
+        context_limit: 340000,
+        entries: 48,
+      },
+      outputContent: '{"entries":48,"anchors":0,"context_limit":340000}',
+      succeeded: true,
+    })
+
+    expect(details).not.toBe(null)
+    const html = renderToStaticMarkup(<>{details}</>)
+    expect(html).toContain("Raw Details")
+    expect(html).not.toContain("Result")
+    expect(html).not.toContain("Expand")
   })
 
   test("reads shared timeline copy for expand and section labels", () => {

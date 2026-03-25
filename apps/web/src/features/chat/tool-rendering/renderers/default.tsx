@@ -22,6 +22,43 @@ const PRIMARY_TITLE_KEYS = new Set([
   "query",
 ])
 
+function sortJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sortJsonValue)
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, child]) => [key, sortJsonValue(child)])
+    )
+  }
+
+  return value
+}
+
+function matchesStructuredDetails(
+  outputContent: string,
+  details: Record<string, unknown> | undefined
+): boolean {
+  if (!details) return false
+
+  try {
+    const parsed = JSON.parse(outputContent) as unknown
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return false
+    }
+
+    return (
+      JSON.stringify(sortJsonValue(parsed)) ===
+      JSON.stringify(sortJsonValue(details))
+    )
+  } catch {
+    return false
+  }
+}
+
 function buildFallbackTitle(
   data: Parameters<ToolRenderer["renderTitle"]>[0]
 ): string {
@@ -60,7 +97,9 @@ export function createDefaultToolRenderer(): ToolRenderer {
       const normalizedArgs = normalizeToolArguments(data.arguments)
       const argumentEntries = buildDetailEntries(normalizedArgs)
       const detailEntries = buildDetailEntries(data.details)
-      const hasResult = Boolean(data.outputContent)
+      const hasResult =
+        Boolean(data.outputContent) &&
+        !matchesStructuredDetails(data.outputContent, data.details)
 
       if (
         argumentEntries.length === 0 &&

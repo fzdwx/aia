@@ -412,6 +412,18 @@ describe("tool timeline", () => {
     expect(html).not.toContain('data-slot="tool-row-details"')
   })
 
+  test("keeps fallback tool detail rendering on the renderer-owned path", () => {
+    const source = loadToolTimelineSource()
+
+    expect(source).toContain(
+      "const usesDefaultRenderer = !NON_DEFAULT_TOOL_NAMES.has(normalizedToolName)"
+    )
+    expect(source).toContain(
+      "if (usesDefaultRenderer && detailsContent != null)"
+    )
+    expect(source).toContain("<ToolDetailSurface>{detailsContent}</ToolDetailSurface>")
+  })
+
   test("keeps explored list spacing inside the measured inner content", () => {
     const source = loadWebCssSource()
 
