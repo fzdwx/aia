@@ -20,11 +20,20 @@ function renderWithTheme(element: ReactElement) {
   )
 }
 
-const CHAT_MESSAGES_TSX = new URL(
-  "../../components/chat-messages.tsx",
+const CHAT_MESSAGES_TSX = new URL("./chat-messages/index.tsx", import.meta.url)
+const MESSAGE_SECTIONS_TSX = new URL("./message-sections.tsx", import.meta.url)
+const MESSAGE_BLOCKS_TSX = new URL(
+  "./message-sections/message-blocks.tsx",
   import.meta.url
 )
-const MESSAGE_SECTIONS_TSX = new URL("./message-sections.tsx", import.meta.url)
+const CHAT_MESSAGES_HISTORY_HINT_TSX = new URL(
+  "./chat-messages/chat-messages-history-hint.tsx",
+  import.meta.url
+)
+const TOOL_TIMELINE_DURATION_HOOK_TS = new URL(
+  "./tool-timeline/use-duration-ticker.ts",
+  import.meta.url
+)
 
 function loadChatMessagesSource() {
   return readFileSync(CHAT_MESSAGES_TSX, "utf8").replace(/\s+/g, " ")
@@ -32,6 +41,24 @@ function loadChatMessagesSource() {
 
 function loadMessageSectionsSource() {
   return readFileSync(MESSAGE_SECTIONS_TSX, "utf8").replace(/\s+/g, " ")
+}
+
+function loadMessageBlocksSource() {
+  return readFileSync(MESSAGE_BLOCKS_TSX, "utf8").replace(/\s+/g, " ")
+}
+
+function loadChatMessagesHistoryHintSource() {
+  return readFileSync(CHAT_MESSAGES_HISTORY_HINT_TSX, "utf8").replace(
+    /\s+/g,
+    " "
+  )
+}
+
+function loadToolTimelineDurationHookSource() {
+  return readFileSync(TOOL_TIMELINE_DURATION_HOOK_TS, "utf8").replace(
+    /\s+/g,
+    " "
+  )
 }
 
 describe("chat message status surfaces", () => {
@@ -365,7 +392,7 @@ describe("chat message status surfaces", () => {
   })
 
   test("adds a touch more vertical breathing room to reasoning blocks", () => {
-    const source = loadMessageSectionsSource()
+    const source = loadMessageBlocksSource()
 
     expect(source).toContain("className={`${MESSAGE_READING_MEASURE} py-1`}")
     expect(source).toContain(
@@ -425,7 +452,7 @@ describe("chat message status surfaces", () => {
   })
 
   test("uses shared auxiliary scale for history hint in message list", () => {
-    const source = loadChatMessagesSource()
+    const source = loadChatMessagesHistoryHintSource()
 
     expect(source).toContain("Scroll up for older messages")
     expect(source).toContain("text-center text-xs text-muted-foreground/80")
@@ -451,15 +478,18 @@ describe("chat message status surfaces", () => {
   })
 
   test("keeps streaming tool durations on an interval ticker", () => {
-    const source = readFileSync(
+    const timelineSource = readFileSync(
       new URL("./tool-timeline.tsx", import.meta.url),
       "utf8"
     ).replace(/\s+/g, " ")
+    const durationSource = loadToolTimelineDurationHookSource()
 
-    expect(source).toContain("const ACTIVE_DURATION_TICK_MS = 100")
-    expect(source).toContain("window.setInterval")
-    expect(source).toContain("useDurationTicker(item.finishedAtMs == null)")
-    expect(source).toContain("useDurationTicker(active.length > 0)")
+    expect(durationSource).toContain("const ACTIVE_DURATION_TICK_MS = 100")
+    expect(durationSource).toContain("window.setInterval")
+    expect(timelineSource).toContain(
+      "useDurationTicker(item.finishedAtMs == null)"
+    )
+    expect(timelineSource).toContain("useDurationTicker(active.length > 0)")
   })
 
   test("formats live tool durations in smooth seconds", () => {

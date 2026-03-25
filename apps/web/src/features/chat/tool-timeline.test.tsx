@@ -23,6 +23,27 @@ function loadToolTimelineSource() {
   ).replace(/\s+/g, " ")
 }
 
+function loadToolRowPolicySource() {
+  return readFileSync(
+    new URL("./tool-timeline/tool-row-policy.ts", import.meta.url),
+    "utf8"
+  ).replace(/\s+/g, " ")
+}
+
+function loadToolDetailsPanelSource() {
+  return readFileSync(
+    new URL("./tool-timeline/tool-details-panel.tsx", import.meta.url),
+    "utf8"
+  ).replace(/\s+/g, " ")
+}
+
+function loadContextGroupSource() {
+  return readFileSync(
+    new URL("./tool-timeline/context-group.tsx", import.meta.url),
+    "utf8"
+  ).replace(/\s+/g, " ")
+}
+
 function loadWebCssSource() {
   return readFileSync(
     new URL("../../index.css", import.meta.url),
@@ -323,10 +344,10 @@ describe("tool timeline", () => {
   })
 
   test("reads shared timeline copy instead of hardcoded group labels", () => {
-    const source = loadToolTimelineSource()
+    const source = loadContextGroupSource()
 
     expect(source).toContain(
-      'import { toolTimelineCopy } from "./tool-timeline-copy"'
+      'import { toolTimelineCopy } from "@/features/chat/tool-timeline-copy"'
     )
     expect(source).toContain("toolTimelineCopy.groupStatus.running")
     expect(source).toContain("toolTimelineCopy.groupStatus.completed")
@@ -420,7 +441,7 @@ describe("tool timeline", () => {
   })
 
   test("keeps fallback tool detail rendering on the renderer-owned path", () => {
-    const source = loadToolTimelineSource()
+    const source = loadToolDetailsPanelSource()
 
     expect(source).toContain(
       "const usesDefaultRenderer = !NON_DEFAULT_TOOL_NAMES.has(normalizedToolName)"
@@ -597,6 +618,7 @@ describe("tool timeline", () => {
 
   test("uses data-component attributes for context groups and tool rows", () => {
     const source = loadToolTimelineSource()
+    const contextSource = loadContextGroupSource()
 
     expect(source).toContain(
       "const isContextGroup = visibleItems.every((item) =>"
@@ -606,11 +628,8 @@ describe("tool timeline", () => {
     expect(source).toContain(
       'data-component="tool-group" data-variant="standalone"'
     )
-    expect(source).toContain('data-component="context-tool-group-trigger"')
     expect(source).toContain("setOpen((current) => !current)")
     expect(source).toContain('status="running"')
-    expect(source).toContain('data-slot="context-group-counts-shell"')
-    expect(source).toContain('data-state={open ? "hidden" : "visible"}')
     expect(source).toContain("keepContextGroupsOpen = false")
     expect(source).toContain(
       "const shouldKeepOpen = isContextGroup && (isRunning || keepContextGroupsOpen)"
@@ -619,10 +638,14 @@ describe("tool timeline", () => {
     expect(source).toContain("} else if (wasOpenRef.current) {")
     expect(source).toContain("setOpen(false)")
     expect(source).toContain("keepContextGroupsOpen?: boolean")
-    expect(source).toContain("function ContextToolGroupList(")
-    expect(source).toContain('animate={{ height: "auto" }}')
-    expect(source).toContain("const CONTEXT_GROUP_TRANSITION =")
-    expect(source).toContain('animate={{ height: "auto" }}')
+    expect(contextSource).toContain(
+      'data-component="context-tool-group-trigger"'
+    )
+    expect(contextSource).toContain('data-slot="context-group-counts-shell"')
+    expect(contextSource).toContain('data-state={open ? "hidden" : "visible"}')
+    expect(contextSource).toContain("function ContextToolGroupList(")
+    expect(contextSource).toContain('animate={{ height: "auto" }}')
+    expect(contextSource).toContain("const CONTEXT_GROUP_TRANSITION =")
   })
 
   test("keeps timeline groups free of the pierre provider wrapper", () => {
@@ -632,7 +655,7 @@ describe("tool timeline", () => {
   })
 
   test("renders shell details on the flat path without generic request or result sections", () => {
-    const source = loadToolTimelineSource()
+    const source = loadToolDetailsPanelSource()
 
     expect(source).toContain('if (normalizedToolName === "Shell")')
     expect(source).toContain(
@@ -800,7 +823,7 @@ describe("tool timeline", () => {
   })
 
   test("keeps all tool rows on the caretless expandable path", () => {
-    const source = loadToolTimelineSource()
+    const source = loadToolRowPolicySource()
 
     expect(source).toContain("const INLINE_DETAIL_TOOLS = new Set<string>()")
     expect(source).toContain("function shouldShowToolRowCaret()")
