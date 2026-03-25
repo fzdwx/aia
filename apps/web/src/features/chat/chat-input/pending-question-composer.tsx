@@ -1,6 +1,7 @@
-import { ChevronLeft, ChevronRight, X } from "lucide-react"
+import { ChevronLeft, ChevronRight } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 
+import { Textarea } from "@/components/ui/textarea"
 import type { QuestionAnswer, QuestionItem, QuestionResult } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat-store"
@@ -19,8 +20,10 @@ function ChoiceQuestion({
 }) {
   const selected = new Set(value?.selected_option_ids ?? [])
   const customText = value?.text ?? ""
+  const [customInputFocused, setCustomInputFocused] = useState(false)
   const recommendedOptionIds = item.recommended_option_ids ?? []
   const recommendationReason = item.recommendation_reason ?? null
+  const customInputActive = customInputFocused || customText.trim().length > 0
 
   return (
     <div className="space-y-2">
@@ -41,7 +44,7 @@ function ChoiceQuestion({
               type={item.multi_select ? "checkbox" : "radio"}
               name={item.id}
               checked={checked}
-              disabled={disabled}
+              disabled={disabled || customInputActive}
               onChange={() => {
                 const next = item.multi_select
                   ? checked
@@ -81,20 +84,55 @@ function ChoiceQuestion({
         )
       })}
 
-      <textarea
-        value={customText}
-        disabled={disabled}
-        placeholder={item.placeholder ?? "Type your own answer..."}
-        onChange={(event) =>
-          onChange({
-            question_id: item.id,
-            selected_option_ids: [],
-            text: event.target.value,
-          })
-        }
-        rows={3}
-        className="text-body-sm leading-body-sm min-h-[88px] w-full resize-y rounded-xl border border-border/50 bg-card px-3 py-2.5 text-foreground outline-none placeholder:text-muted-foreground/40"
-      />
+      <label
+        className={cn(
+          "flex items-start gap-3 rounded-lg border border-border/50 px-3 py-2.5 transition-colors",
+          customInputActive ? "border-foreground/20 bg-muted/60" : "bg-card hover:bg-muted/40",
+          disabled && "opacity-60"
+        )}
+      >
+        <input
+          type={item.multi_select ? "checkbox" : "radio"}
+          name={item.id}
+          checked={customInputActive}
+          disabled={disabled}
+          onChange={() => {
+            setCustomInputFocused(true)
+            onChange({
+              question_id: item.id,
+              selected_option_ids: [],
+              text: customText,
+            })
+          }}
+          className="mt-0.5"
+        />
+        <span className="min-w-0 flex-1">
+          <span className="text-ui mb-1 block font-medium text-foreground">Custom input</span>
+          <input
+            type="text"
+            value={customText}
+            disabled={disabled}
+            placeholder={item.placeholder ?? "Write your answer..."}
+            onFocus={() => {
+              setCustomInputFocused(true)
+              onChange({
+                question_id: item.id,
+                selected_option_ids: [],
+                text: customText,
+              })
+            }}
+            onBlur={() => setCustomInputFocused(false)}
+            onChange={(event) =>
+              onChange({
+                question_id: item.id,
+                selected_option_ids: [],
+                text: event.target.value,
+              })
+            }
+            className="text-body-sm leading-body-sm h-6 w-full bg-transparent text-foreground outline-none placeholder:text-muted-foreground/35"
+          />
+        </span>
+      </label>
     </div>
   )
 }
@@ -111,10 +149,10 @@ function TextQuestion({
   onChange: (answer: QuestionAnswer) => void
 }) {
   return (
-    <textarea
+    <Textarea
       value={value?.text ?? ""}
       disabled={disabled}
-      placeholder={item.placeholder ?? "Type your answer..."}
+      placeholder={item.placeholder ?? "Write your answer..."}
       onChange={(event) =>
         onChange({
           question_id: item.id,
@@ -123,7 +161,7 @@ function TextQuestion({
         })
       }
       rows={3}
-      className="text-body-sm leading-body-sm min-h-[88px] w-full resize-y rounded-xl border border-border/50 bg-card px-3 py-2.5 text-foreground outline-none placeholder:text-muted-foreground/40"
+      className="min-h-[72px] resize-y rounded-lg border-border/40 bg-background/20 px-3 py-2.5 placeholder:text-muted-foreground/35"
     />
   )
 }
@@ -249,27 +287,25 @@ export function PendingQuestionComposer() {
     <div className="relative shrink-0 border-t border-border/30 px-4 pt-3 pb-4">
       <div className="pointer-events-none absolute -top-10 right-0 left-0 h-10 bg-gradient-to-t from-background to-transparent" />
       <div className="mx-auto w-full max-w-[720px] rounded-xl border border-border/50 bg-card px-4 py-3">
-        <div className="mb-2 flex justify-end">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <div className="text-meta text-muted-foreground/50">
+            {questionIndex + 1} / {questionItems.length}
+          </div>
           <button
             type="button"
             disabled={disabled}
             onClick={() => void handleDismiss()}
-            className="text-meta inline-flex h-7 shrink-0 items-center gap-1 rounded-lg px-2 text-muted-foreground/65 transition-colors hover:bg-muted/50 hover:text-foreground/80 disabled:opacity-60"
+            className="text-meta inline-flex h-7 shrink-0 items-center justify-center rounded-md px-1 text-muted-foreground/50 transition-colors hover:text-foreground/75 disabled:opacity-60"
             title="Dismiss question"
           >
-            <X className="size-3.5" />
-            <span>Dismiss</span>
+            <span>Ignore</span>
           </button>
         </div>
 
-        <section key={currentItem.id} className="space-y-3">
-          <div className="space-y-1">
-            <div className="text-ui font-medium text-foreground">
-              {currentItem.header}
-            </div>
-            <p className="text-body-sm text-muted-foreground/80">
-              {currentItem.question}
-            </p>
+        <section key={currentItem.id} className="space-y-2.5">
+          <div className="space-y-0.5">
+            <div className="text-ui font-medium text-foreground/95">{currentItem.header}</div>
+            <p className="text-body-sm text-muted-foreground/70">{currentItem.question}</p>
           </div>
 
           {currentItem.kind === "choice" ? (
@@ -312,7 +348,7 @@ export function PendingQuestionComposer() {
           </div>
         )}
 
-        <div className="mt-4 flex items-center justify-end gap-2">
+        <div className="mt-3 flex items-center justify-end gap-2">
           {questionIndex > 0 ? (
             <button
               type="button"
@@ -324,22 +360,14 @@ export function PendingQuestionComposer() {
               <span>Back</span>
             </button>
           ) : null}
-            <button
-                type="button"
-                disabled={disabled || currentValidationError != null}
-                onClick={() => void handlePrimaryAction()}
-                className="text-ui inline-flex h-7 items-center gap-1 rounded-lg bg-foreground px-2.5 text-background transition-opacity hover:opacity-85 disabled:opacity-50"
-              >
-                <span>
-                  {submitting
-                    ? "Submitting..."
-                    : isLastQuestion
-                      ? "Submit answer"
-                      : "Next"}
-                </span>
-                {!submitting && !isLastQuestion ? (
-                  <ChevronRight className="size-4" />
-                ) : null}
+          <button
+            type="button"
+            disabled={disabled || currentValidationError != null}
+            onClick={() => void handlePrimaryAction()}
+            className="text-ui inline-flex h-7 items-center gap-1 rounded-lg bg-foreground px-2.5 text-background transition-opacity hover:opacity-85 disabled:opacity-50"
+          >
+            <span>{submitting ? "Submitting..." : isLastQuestion ? "Submit" : "Next"}</span>
+            {!submitting && !isLastQuestion ? <ChevronRight className="size-4" /> : null}
             </button>
         </div>
       </div>
