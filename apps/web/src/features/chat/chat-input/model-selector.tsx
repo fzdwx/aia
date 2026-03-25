@@ -11,6 +11,8 @@ import {
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat-store"
+import { useProviderRegistryStore } from "@/stores/provider-registry-store"
+import { switchActiveSessionModel } from "@/stores/session-settings-runtime"
 import { useSessionSettingsStore } from "@/stores/session-settings-store"
 
 const MODEL_SELECTOR_LABEL =
@@ -18,9 +20,8 @@ const MODEL_SELECTOR_LABEL =
 const MODEL_SELECTOR_ITEM = "text-ui px-2.5 py-1.5"
 
 export function ModelSelector() {
-  const providerList = useChatStore((s) => s.providerList)
+  const providerList = useProviderRegistryStore((s) => s.providerList)
   const chatState = useChatStore((s) => s.chatState)
-  const switchSessionModel = useChatStore((s) => s.switchSessionModel)
   const sessionSettings = useSessionSettingsStore((s) => s.sessionSettings)
   const hydrating = useSessionSettingsStore((s) => s.hydrating)
   const updating = useSessionSettingsStore((s) => s.updating)
@@ -48,7 +49,7 @@ export function ModelSelector() {
           if (!value) return
           const [providerName, modelId] = value.split("::")
           if (!providerName || !modelId) return
-          void switchSessionModel(providerName, modelId).catch(() => {})
+          void switchActiveSessionModel(providerName, modelId).catch(() => {})
         }}
       >
         <SelectTrigger

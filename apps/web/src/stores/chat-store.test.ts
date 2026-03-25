@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "vite-plus/test"
 import assert from "node:assert/strict"
 
 import { __setIdleSchedulerForTests, useChatStore } from "./chat-store"
+import { useProviderRegistryStore } from "./provider-registry-store"
+import { switchActiveSessionModel } from "./session-settings-runtime"
 import { useSessionSettingsStore } from "./session-settings-store"
 import type { SseEvent } from "@/lib/types"
 
@@ -27,9 +29,7 @@ const initialState = {
   historyLoadingMore: false,
   streamingTurn: null,
   chatState: "idle" as const,
-  providerList: [],
   error: null,
-  view: "chat" as const,
   contextPressure: null,
   lastCompression: null,
   _pendingPrompt: null,
@@ -41,6 +41,7 @@ describe("chat store submitTurn", () => {
 
   beforeEach(() => {
     useChatStore.setState(initialState)
+    useProviderRegistryStore.setState({ providerList: [] })
     __setIdleSchedulerForTests({
       schedule: (callback) => {
         callback()
@@ -1453,6 +1454,9 @@ describe("chat store submitTurn", () => {
           model: "gpt-5",
         },
       ],
+    })
+
+    useProviderRegistryStore.setState({
       providerList: [
         {
           name: "openai",
@@ -1490,12 +1494,12 @@ describe("chat store submitTurn", () => {
       error: null,
     })
 
-    await useChatStore.getState().switchSessionModel("openai", "gpt-5-mini")
+    await switchActiveSessionModel("openai", "gpt-5-mini")
 
     expect(useChatStore.getState().sessions[0]?.model).toBe("gpt-5-mini")
-    expect(useChatStore.getState().providerList[0]?.models[0]?.id).toBe(
-      "gpt-5-mini"
-    )
+    expect(
+      useProviderRegistryStore.getState().providerList[0]?.models[0]?.id
+    ).toBe("gpt-5-mini")
 
     globalThis.fetch = originalFetchImpl
   })

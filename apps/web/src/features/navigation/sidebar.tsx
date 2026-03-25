@@ -4,11 +4,11 @@ import { SidebarFooter } from "./sidebar-footer"
 import { SidebarSettings } from "./sidebar-settings-view"
 import { SidebarSessions } from "./sidebar-sessions-view"
 import { TraceSidebar } from "@/features/trace/sidebar"
-import { useChatStore } from "@/stores/chat-store"
 import { useChannelsStore } from "@/stores/channels-store"
+import { useWorkbenchStore } from "@/stores/workbench-store"
 
 export function Sidebar() {
-  const view = useChatStore((s) => s.view)
+  const view = useWorkbenchStore((s) => s.view)
   const initializeChannels = useChannelsStore((s) => s.initialize)
 
   useEffect(() => {

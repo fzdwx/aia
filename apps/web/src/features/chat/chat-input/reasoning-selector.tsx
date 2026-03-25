@@ -8,16 +8,15 @@ import {
 import { getThinkingLevelLabel, THINKING_OPTIONS } from "./thinking"
 import type { ThinkingLevel } from "@/lib/types"
 import { useChatStore } from "@/stores/chat-store"
+import { useProviderRegistryStore } from "@/stores/provider-registry-store"
+import { setActiveSessionReasoningEffort } from "@/stores/session-settings-runtime"
 import { useSessionSettingsStore } from "@/stores/session-settings-store"
 
 const REASONING_SELECTOR_ITEM = "text-ui px-2.5 py-1.5"
 
 export function ReasoningSelector() {
-  const providerList = useChatStore((s) => s.providerList)
+  const providerList = useProviderRegistryStore((s) => s.providerList)
   const chatState = useChatStore((s) => s.chatState)
-  const setSessionReasoningEffort = useChatStore(
-    (s) => s.setSessionReasoningEffort
-  )
   const sessionSettings = useSessionSettingsStore((s) => s.sessionSettings)
   const hydrating = useSessionSettingsStore((s) => s.hydrating)
   const updating = useSessionSettingsStore((s) => s.updating)
@@ -36,7 +35,9 @@ export function ReasoningSelector() {
         disabled={hydrating || updating || chatState === "active"}
         onValueChange={(next) => {
           if (!next) return
-          void setSessionReasoningEffort(next as ThinkingLevel).catch(() => {})
+          void setActiveSessionReasoningEffort(next as ThinkingLevel).catch(
+            () => {}
+          )
         }}
       >
         <SelectTrigger

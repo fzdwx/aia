@@ -1,18 +1,16 @@
 import { useEffect, useId, useMemo, useState, type FormEvent } from "react"
-import { ArrowLeft, Plus, Search, Trash2, X } from "lucide-react"
+import { ArrowLeft, Plus, Search, Trash2 } from "lucide-react"
 
 import { ChannelsPanel } from "@/features/channels"
+import {
+  ProviderAuthenticationSection,
+  ProviderConnectionSection,
+  ProviderModelCatalogSection,
+  type ModelFormRow,
+} from "./provider-form-sections"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
 import type {
   ChannelListItem,
   SupportedChannelDefinition,
@@ -20,7 +18,9 @@ import type {
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useChannelsStore } from "@/stores/channels-store"
-import { NEW_PROVIDER_SETTINGS_KEY, useChatStore } from "@/stores/chat-store"
+import { NEW_PROVIDER_SETTINGS_KEY } from "@/stores/chat-store"
+import { useProviderRegistryStore } from "@/stores/provider-registry-store"
+import { useWorkbenchStore } from "@/stores/workbench-store"
 
 const SETTINGS_META_LABEL_FOREGROUND = "workspace-section-label text-foreground"
 const SETTINGS_PANEL_HELP_TEXT = "workspace-panel-copy"
@@ -28,14 +28,6 @@ const SETTINGS_BADGE =
   "text-ui-xs rounded-sm border border-border/30 px-1.5 py-0.5 font-medium"
 const SETTINGS_INFO_TEXT = "workspace-meta"
 const SETTINGS_MONO_COUNT = "workspace-code text-muted-foreground"
-
-type ModelFormRow = {
-  id: string
-  display_name: string
-  limit_context: string
-  limit_output: string
-  supports_reasoning: boolean
-}
 
 function emptyModelRow(): ModelFormRow {
   return {
@@ -83,14 +75,17 @@ function configuredChannelForTransport(
 }
 
 export function SettingsPanel() {
-  const providerList = useChatStore((s) => s.providerList)
-  const setView = useChatStore((s) => s.setView)
-  const settingsSection = useChatStore((s) => s.settingsSection)
-  const selectedProviderName = useChatStore((s) => s.selectedProviderName)
-  const selectProviderName = useChatStore((s) => s.selectProviderName)
-  const storeCreateProvider = useChatStore((s) => s.createProvider)
-  const storeUpdateProvider = useChatStore((s) => s.updateProvider)
-  const storeDeleteProvider = useChatStore((s) => s.deleteProvider)
+  const providerList = useProviderRegistryStore((s) => s.providerList)
+  const storeCreateProvider = useProviderRegistryStore((s) => s.createProvider)
+  const storeUpdateProvider = useProviderRegistryStore((s) => s.updateProvider)
+  const storeDeleteProvider = useProviderRegistryStore((s) => s.deleteProvider)
+  const setView = useWorkbenchStore((s) => s.setView)
+  const settingsSection = useWorkbenchStore((s) => s.settingsSection)
+  const selectedProviderName = useWorkbenchStore((s) => s.selectedProviderName)
+  const selectProviderName = useWorkbenchStore((s) => s.selectProviderName)
+  const reconcileProviderSelection = useWorkbenchStore(
+    (s) => s.reconcileProviderSelection
+  )
 
   const supportedChannels = useChannelsStore((s) => s.supportedChannels)
   const selectedTransport = useChannelsStore((s) => s.selectedTransport)
@@ -147,6 +142,10 @@ export function SettingsPanel() {
   useEffect(() => {
     setItemQuery("")
   }, [settingsSection])
+
+  useEffect(() => {
+    reconcileProviderSelection(providerList)
+  }, [providerList, reconcileProviderSelection])
 
   function updateModelRow(index: number, patch: Partial<ModelFormRow>) {
     setModels((prev) =>
@@ -549,275 +548,38 @@ export function SettingsPanel() {
                     className="flex min-h-0 flex-1 flex-col overflow-hidden"
                   >
                     <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
-                      <section className="rounded-xl border border-border/30 bg-card/70 p-3">
-                        <div className="mb-2.5">
-                          <p className="workspace-section-label text-foreground">
-                            Connection
-                          </p>
-                          <p className="workspace-panel-copy mt-1 text-muted-foreground">
-                            Name is the registry key and must be unique.
-                            Protocol controls request mapping.
-                          </p>
-                        </div>
+                      <ProviderConnectionSection
+                        name={name}
+                        kind={kind}
+                        providerNameInputId={providerNameInputId}
+                        providerProtocolInputId={providerProtocolInputId}
+                        providerProtocolLabelId={providerProtocolLabelId}
+                        selectedProviderLocked={selectedProvider != null}
+                        onNameChange={setName}
+                        onKindChange={handleKindChange}
+                      />
 
-                        <div className="grid gap-2 sm:grid-cols-2">
-                          <div className="space-y-1.5">
-                            <label
-                              htmlFor={providerNameInputId}
-                              className="workspace-form-label"
-                            >
-                              Name
-                            </label>
-                            <Input
-                              id={providerNameInputId}
-                              value={name}
-                              onChange={(event) => setName(event.target.value)}
-                              placeholder="e.g. openai-main"
-                              className="h-8"
-                              disabled={selectedProvider != null}
-                            />
-                          </div>
+                      <ProviderAuthenticationSection
+                        selectedProvider={selectedProvider != null}
+                        providerBaseUrlInputId={providerBaseUrlInputId}
+                        providerApiKeyInputId={providerApiKeyInputId}
+                        providerApiKeyHintId={providerApiKeyHintId}
+                        baseUrl={baseUrl}
+                        apiKey={apiKey}
+                        onBaseUrlChange={setBaseUrl}
+                        onApiKeyChange={setApiKey}
+                      />
 
-                          <div className="space-y-1.5">
-                            <label
-                              id={providerProtocolLabelId}
-                              htmlFor={providerProtocolInputId}
-                              className="workspace-form-label"
-                            >
-                              Protocol
-                            </label>
-                            <Select
-                              value={kind}
-                              onValueChange={handleKindChange}
-                            >
-                              <SelectTrigger
-                                id={providerProtocolInputId}
-                                aria-labelledby={providerProtocolLabelId}
-                                className="h-8 w-full"
-                              >
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="openai-responses">
-                                  OpenAI Responses
-                                </SelectItem>
-                                <SelectItem value="openai-chat-completions">
-                                  OpenAI Chat Completions
-                                </SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
-                      </section>
-
-                      <section className="rounded-xl border border-border/30 bg-card/70 p-3">
-                        <div className="mb-2.5">
-                          <p className="workspace-section-label text-foreground">
-                            Authentication
-                          </p>
-                          <p className="workspace-panel-copy mt-1 text-muted-foreground">
-                            Required when creating a provider. Leave it blank
-                            while editing to keep the current key.
-                          </p>
-                        </div>
-
-                        <div className="grid gap-2 sm:grid-cols-2">
-                          <div className="space-y-1.5">
-                            <label
-                              htmlFor={providerBaseUrlInputId}
-                              className="workspace-form-label"
-                            >
-                              Base URL
-                            </label>
-                            <Input
-                              id={providerBaseUrlInputId}
-                              value={baseUrl}
-                              onChange={(event) =>
-                                setBaseUrl(event.target.value)
-                              }
-                              className="h-8"
-                            />
-                            <p className="workspace-form-note">
-                              This URL defines the request host and path prefix,
-                              such as an OpenAI-compatible gateway.
-                            </p>
-                          </div>
-
-                          <div className="space-y-1.5">
-                            <label
-                              htmlFor={providerApiKeyInputId}
-                              className="workspace-form-label"
-                            >
-                              API key
-                            </label>
-                            {selectedProvider ? (
-                              <p
-                                id={providerApiKeyHintId}
-                                className="workspace-form-note"
-                              >
-                                Leave blank to keep the current key.
-                              </p>
-                            ) : null}
-                            <Input
-                              id={providerApiKeyInputId}
-                              type="text"
-                              value={apiKey}
-                              onChange={(event) =>
-                                setApiKey(event.target.value)
-                              }
-                              placeholder="sk-..."
-                              aria-describedby={
-                                selectedProvider
-                                  ? providerApiKeyHintId
-                                  : undefined
-                              }
-                              className="h-8"
-                            />
-                          </div>
-                        </div>
-                      </section>
-
-                      <section className="rounded-xl border border-border/30 bg-card/70 p-3">
-                        <div className="mb-2.5 flex flex-wrap items-start justify-between gap-2">
-                          <div>
-                            <p className="workspace-section-label text-foreground">
-                              Model Catalog
-                            </p>
-                            <p className="workspace-panel-copy mt-1 text-muted-foreground">
-                              At least one valid Model ID is required. Context
-                              and output limits fall back to backend defaults
-                              when left blank.
-                            </p>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            <span className="workspace-code rounded-sm border border-border/30 px-1.5 py-0.5 text-muted-foreground">
-                              {modelRowsWithId.length} active
-                            </span>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() =>
-                                setModels((prev) => [emptyModelRow(), ...prev])
-                              }
-                              className="h-8 px-2.5"
-                            >
-                              <Plus className="size-3.5" />
-                              Add model
-                            </Button>
-                          </div>
-                        </div>
-
-                        <div className="overflow-x-auto rounded-lg border border-border/25">
-                          <div className="min-w-[840px]">
-                            <div className="workspace-section-label grid grid-cols-[minmax(220px,2fr)_minmax(170px,1.4fr)_110px_110px_120px_44px] gap-2 border-b border-border/20 bg-muted/[0.12] px-2.5 py-2 text-muted-foreground">
-                              <span>Model ID</span>
-                              <span>Display Name</span>
-                              <span>Context</span>
-                              <span>Output</span>
-                              <span>Reasoning</span>
-                              <span className="text-center">-</span>
-                            </div>
-
-                            <div className="divide-y divide-border/20">
-                              {models.map((row, index) => (
-                                <div
-                                  key={`${row.id}:${index}`}
-                                  className="grid grid-cols-[minmax(220px,2fr)_minmax(170px,1.4fr)_110px_110px_120px_44px] gap-2 px-2.5 py-2"
-                                >
-                                  <Input
-                                    id={`${settingsScopeId}-model-id-${index}`}
-                                    value={row.id}
-                                    onChange={(event) =>
-                                      updateModelRow(index, {
-                                        id: event.target.value,
-                                      })
-                                    }
-                                    placeholder="gpt-5.4"
-                                    className="h-8"
-                                    aria-label={`Model ${index + 1} ID`}
-                                  />
-
-                                  <Input
-                                    id={`${settingsScopeId}-model-display-name-${index}`}
-                                    value={row.display_name}
-                                    onChange={(event) =>
-                                      updateModelRow(index, {
-                                        display_name: event.target.value,
-                                      })
-                                    }
-                                    placeholder="Optional display name"
-                                    className="h-8"
-                                    aria-label={`Model ${index + 1} display name`}
-                                  />
-
-                                  <Input
-                                    id={`${settingsScopeId}-model-context-limit-${index}`}
-                                    value={row.limit_context}
-                                    onChange={(event) =>
-                                      updateModelRow(index, {
-                                        limit_context: event.target.value,
-                                      })
-                                    }
-                                    placeholder="ctx"
-                                    className="h-8"
-                                    inputMode="numeric"
-                                    aria-label={`Model ${index + 1} context limit`}
-                                  />
-
-                                  <Input
-                                    id={`${settingsScopeId}-model-output-limit-${index}`}
-                                    value={row.limit_output}
-                                    onChange={(event) =>
-                                      updateModelRow(index, {
-                                        limit_output: event.target.value,
-                                      })
-                                    }
-                                    placeholder="out"
-                                    className="h-8"
-                                    inputMode="numeric"
-                                    aria-label={`Model ${index + 1} output limit`}
-                                  />
-
-                                  <div className="flex items-center justify-center rounded-md border border-border/25 bg-background/60 px-2">
-                                    <Switch
-                                      checked={row.supports_reasoning}
-                                      onCheckedChange={(checked: boolean) =>
-                                        updateModelRow(index, {
-                                          supports_reasoning: checked,
-                                        })
-                                      }
-                                      size="default"
-                                      aria-label={`Model ${index + 1} reasoning support`}
-                                    />
-                                  </div>
-
-                                  <div className="flex items-center justify-center">
-                                    {models.length > 1 ? (
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        onClick={() => removeModelRow(index)}
-                                        aria-label={`Remove model ${index + 1}`}
-                                        className="size-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                                      >
-                                        <X className="size-3.5" />
-                                      </Button>
-                                    ) : null}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-
-                        <p className="workspace-meta mt-2 text-muted-foreground">
-                          The Reasoning switch indicates whether this model
-                          supports session-level thinking controls.
-                        </p>
-                      </section>
+                      <ProviderModelCatalogSection
+                        modelRowsWithId={modelRowsWithId.length}
+                        models={models}
+                        settingsScopeId={settingsScopeId}
+                        onAddModel={() =>
+                          setModels((prev) => [emptyModelRow(), ...prev])
+                        }
+                        onUpdateModelRow={updateModelRow}
+                        onRemoveModelRow={removeModelRow}
+                      />
                     </div>
 
                     <div className="shrink-0 border-t border-border/20 px-3 py-2.5">

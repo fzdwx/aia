@@ -1,14 +1,14 @@
 import { PanelRightDashed, Settings } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { useChatStore } from "@/stores/chat-store"
+import { useWorkbenchStore } from "@/stores/workbench-store"
 
 const SIDEBAR_FOOTER_BUTTON =
   "sidebar-nav-secondary mb-1 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-muted-foreground transition-colors duration-150 hover:bg-muted/55 hover:text-foreground/80"
 
 export function SidebarFooter() {
-  const view = useChatStore((s) => s.view)
-  const setView = useChatStore((s) => s.setView)
+  const view = useWorkbenchStore((s) => s.view)
+  const setView = useWorkbenchStore((s) => s.setView)
 
   return (
     <div className="p-2">

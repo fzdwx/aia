@@ -1,7 +1,10 @@
 import { PanelRightDashed, Settings } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { type SettingsSection, useChatStore } from "@/stores/chat-store"
+import {
+  type SettingsSection,
+  useWorkbenchStore,
+} from "@/stores/workbench-store"
 
 const SETTINGS_NAV_ITEMS: Array<{
   icon: typeof Settings
@@ -21,8 +24,8 @@ const SETTINGS_NAV_ITEMS: Array<{
 ]
 
 export function SidebarSettings() {
-  const settingsSection = useChatStore((s) => s.settingsSection)
-  const setSettingsSection = useChatStore((s) => s.setSettingsSection)
+  const settingsSection = useWorkbenchStore((s) => s.settingsSection)
+  const setSettingsSection = useWorkbenchStore((s) => s.setSettingsSection)
 
   return (
     <div className="flex-1 overflow-y-auto px-2 py-2">

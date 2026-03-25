@@ -2,7 +2,7 @@ import { Suspense, lazy, type ReactNode } from "react"
 
 import { ChatMessages } from "@/features/chat/chat-messages"
 import { ChatInput } from "@/features/chat/chat-input"
-import { useChatStore } from "@/stores/chat-store"
+import { useWorkbenchStore } from "@/stores/workbench-store"
 
 const SettingsPanel = lazy(async () => {
   const module = await import("@/features/settings")
@@ -27,7 +27,7 @@ function renderSecondaryPanel(panel: ReactNode) {
 }
 
 export function MainContent() {
-  const view = useChatStore((s) => s.view)
+  const view = useWorkbenchStore((s) => s.view)
 
   switch (view) {
     case "settings":
