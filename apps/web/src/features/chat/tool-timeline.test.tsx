@@ -452,6 +452,18 @@ describe("tool timeline", () => {
     )
   })
 
+  test("styles ApplyPatch file items with filename-first hierarchy", () => {
+    const source = loadWebCssSource()
+
+    expect(source).toContain(".tool-timeline-patch-path")
+    expect(source).toContain("flex-direction: column")
+    expect(source).toContain(".tool-timeline-patch-filename")
+    expect(source).toContain("font-weight: 500")
+    expect(source).toContain(".tool-timeline-patch-directory")
+    expect(source).toContain("color: color-mix(in oklch, var(--text-weak) 82%, transparent);")
+    expect(source).toContain(".tool-timeline-patch-stat")
+  })
+
   test("uses default cursor for timeline tool triggers", () => {
     const source = loadWebCssSource()
 

@@ -718,7 +718,8 @@ describe("tool renderer registry", () => {
     const html = renderWithTheme(details)
     expect(html).toContain("tool-timeline-patch-list")
     expect(html).toContain("tool-timeline-patch-item")
-    expect(html).toContain("apps/web/src/index.css")
+    expect(html).toContain("index.css")
+    expect(html).toContain("apps/web/src/")
     expect(html).toContain(">+1<")
     expect(html).toContain(">-1<")
     expect(html).toContain("text-emerald-400")
@@ -741,11 +742,33 @@ describe("tool renderer registry", () => {
     })
 
     const html = renderWithTheme(details)
-    expect(html).toContain(".aia/")
     expect(html).toContain("note.txt")
+    expect(html).toContain(".aia/")
     expect(html).toContain(">+2<")
     expect(html).toContain(">-0<")
     expect(html).toContain("tool-timeline-pierre-root-patch")
+  })
+
+  test("renders ApplyPatch move detail with basename-first hierarchy", () => {
+    const details = toolRendererRegistry.renderDetails({
+      toolName: "ApplyPatch",
+      arguments: {
+        patch:
+          "*** Begin Patch\n*** Update File: src/old/file.ts\n*** Move to: app/new/file-renamed.ts\n@@\n-old\n+new\n*** End Patch",
+      },
+      outputContent:
+        "*** Begin Patch\n*** Update File: src/old/file.ts\n*** Move to: app/new/file-renamed.ts\n@@\n-old\n+new\n*** End Patch",
+      succeeded: true,
+    })
+
+    const html = renderWithTheme(details)
+    expect(html).toContain("file.ts → file-renamed.ts")
+    expect(html).toContain("src/old/ → app/new/")
+    expect(html).toContain('class="tool-timeline-patch-filename"')
+    expect(html).toContain('class="tool-timeline-patch-directory"')
+    expect(html).toContain(
+      'class="tool-timeline-patch-filename">file.ts → file-renamed.ts<span class="tool-timeline-patch-directory"> \u202Asrc/old/ → app/new/\u202C</span></span>'
+    )
   })
 
   test("renders ApplyPatch move title with destination path", () => {

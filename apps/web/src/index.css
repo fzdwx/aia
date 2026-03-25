@@ -930,29 +930,29 @@ body {
 
   .tool-timeline-patch-path {
     min-width: 0;
-    display: inline-flex;
-    align-items: center;
+    display: block;
     overflow: hidden;
-    white-space: nowrap;
     font-size: var(--font-size-meta);
     line-height: var(--font-line-height-meta);
+    white-space: nowrap;
   }
 
   .tool-timeline-patch-directory {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    direction: rtl;
-    text-align: left;
-    color: var(--text-weak);
+    display: inline;
+    color: color-mix(in oklch, var(--text-weak) 82%, transparent);
   }
 
   .tool-timeline-patch-filename {
-    flex: 0 1 auto;
+    display: inline-block;
     min-width: 0;
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow-wrap: normal;
+    word-break: normal;
     color: var(--text-strong);
+    font-weight: 500;
   }
 
   .tool-timeline-patch-stats {
@@ -963,6 +963,10 @@ body {
     font-family: var(--font-mono);
     font-size: var(--font-size-meta);
     line-height: var(--font-line-height-meta);
+  }
+
+  .tool-timeline-patch-stat {
+    color: color-mix(in oklch, var(--text-weak) 72%, transparent);
   }
 
   .tool-timeline-patch-summary-meta {

@@ -47,6 +47,23 @@ function splitDisplayPath(displayPath: string) {
   }
 }
 
+function splitFilePath(filePath: string) {
+  const normalized = filePath.replace(/\\/g, "/")
+  const lastSlashIndex = normalized.lastIndexOf("/")
+
+  if (lastSlashIndex === -1) {
+    return {
+      directory: null,
+      fileName: filePath,
+    }
+  }
+
+  return {
+    directory: filePath.slice(0, lastSlashIndex + 1),
+    fileName: filePath.slice(lastSlashIndex + 1),
+  }
+}
+
 function normalizeLineEndings(value: string) {
   return value.replace(/\r\n/g, "\n")
 }
@@ -159,7 +176,6 @@ function convertOperationToUnifiedDiff(
   const changeStats = countPatchChanges(convertedBody)
   const displayPath =
     targetPath === filePath ? filePath : `${filePath} → ${targetPath}`
-  const pathParts = splitDisplayPath(displayPath)
   const operationKind: ApplyPatchOperation["kind"] =
     kind === "add"
       ? "added"
@@ -168,10 +184,30 @@ function convertOperationToUnifiedDiff(
         : moveToPath?.trim()
           ? "moved"
           : "modified"
+  const pathParts =
+    operationKind === "moved"
+      ? {
+          directory: null,
+          fileName: `${splitFilePath(filePath).fileName} → ${splitFilePath(targetPath).fileName}`,
+        }
+      : splitDisplayPath(displayPath)
+  const directory =
+    operationKind === "moved"
+      ? (() => {
+          const fromDirectory = splitFilePath(filePath).directory
+          const toDirectory = splitFilePath(targetPath).directory
+
+          if (fromDirectory === toDirectory) {
+            return fromDirectory
+          }
+
+          return `${fromDirectory ?? ""} → ${toDirectory ?? ""}`
+        })()
+      : pathParts.directory
 
   return {
     added: changeStats.added,
-    directory: pathParts.directory,
+    directory,
     displayPath,
     fileName: pathParts.fileName,
     filePath: targetPath,
@@ -200,13 +236,13 @@ function renderApplyPatchOperationList(operations: ApplyPatchOperation[]) {
               className="tool-timeline-patch-path"
               title={entry.displayPath}
             >
-              {entry.directory ? (
-                <span className="tool-timeline-patch-directory">
-                  {`\u202A${entry.directory}\u202C`}
-                </span>
-              ) : null}
               <span className="tool-timeline-patch-filename">
                 {entry.fileName}
+                {entry.directory ? (
+                  <span className="tool-timeline-patch-directory">
+                    {` \u202A${entry.directory}\u202C`}
+                  </span>
+                ) : null}
               </span>
             </span>
             <span className="tool-timeline-patch-summary-meta">
