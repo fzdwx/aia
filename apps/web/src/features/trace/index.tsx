@@ -10,8 +10,8 @@ import {
   Wrench,
 } from "lucide-react"
 
-import { TraceDetailModal } from "@/components/trace-detail-modal"
-import { TraceOverviewPanel } from "@/components/trace-overview-panel"
+import { TraceDetailModal } from "./detail-modal"
+import { TraceOverviewPanel } from "./overview-panel"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -894,7 +894,7 @@ function ToolInspector({
   )
 }
 
-export function TracePanelView() {
+export function TracePanel() {
   const setView = useChatStore((state) => state.setView)
   const turns = useChatStore((state) => state.turns)
   const traces = useTraceStore((state) => state.traces)

@@ -1,9 +1,9 @@
 import { useEffect } from "react"
 import { Separator } from "@/components/ui/separator"
-import { SidebarFooter } from "@/components/sidebar-footer"
-import { SidebarSettingsView } from "@/components/sidebar-settings-view"
-import { SidebarSessionsView } from "@/components/sidebar-sessions-view"
-import { TraceSidebar } from "@/components/trace-sidebar"
+import { SidebarFooter } from "./sidebar-footer"
+import { SidebarSettings } from "./sidebar-settings-view"
+import { SidebarSessions } from "./sidebar-sessions-view"
+import { TraceSidebar } from "@/features/trace/sidebar"
 import { useChatStore } from "@/stores/chat-store"
 import { useChannelsStore } from "@/stores/channels-store"
 
@@ -28,9 +28,9 @@ export function Sidebar() {
       {view === "trace" ? (
         <TraceSidebar />
       ) : view === "settings" ? (
-        <SidebarSettingsView />
+        <SidebarSettings />
       ) : (
-        <SidebarSessionsView />
+        <SidebarSessions />
       )}
 
       <Separator className="opacity-30" />

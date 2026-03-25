@@ -20,7 +20,7 @@ const SETTINGS_NAV_ITEMS: Array<{
   },
 ]
 
-export function SidebarSettingsView() {
+export function SidebarSettings() {
   const settingsSection = useChatStore((s) => s.settingsSection)
   const setSettingsSection = useChatStore((s) => s.setSettingsSection)
 

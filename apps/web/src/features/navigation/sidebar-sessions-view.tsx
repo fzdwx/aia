@@ -8,7 +8,7 @@ const SIDEBAR_ACTION_BUTTON =
 const SIDEBAR_SESSION_ITEM =
   "sidebar-session-item group flex w-full items-center gap-1 rounded-lg"
 
-export function SidebarSessionsView() {
+export function SidebarSessions() {
   const sessions = useChatStore((s) => s.sessions)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const sessionHydrating = useChatStore((s) => s.sessionHydrating)

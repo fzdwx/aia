@@ -7,6 +7,7 @@
 - 最新默认提示词收口：`agent-prompts` 现已新增共享 `aia-agents.md` 模板、`AiaAgentsPromptContext` 与 `render_aia_agents_prompt(...)` 渲染入口；模板中的平台、工作路径、本地日期、星期与时区都不再硬编码，而是由 `apps/agent-server` 基于真实运行时采集后注入。与此同时，`SessionManagerConfig.system_prompt` 与 `ServerBootstrapOptions.system_prompt` 也都已收口为 `Option<String>`：默认情况下 session 会渲染 `aia-agents` 并追加 `Context Contract`，但如果嵌入方或用户显式传入 system prompt，就直接使用用户给定文本，不再额外拼装 block/guideline。对应测试已覆盖共享渲染、session prompt 默认/覆盖路径，以及 bootstrap 透传链路。
 - 最新 system prompt 配置收口：`agent-prompts::SystemPromptConfig` 已去掉 `custom_prompt`，并把 `prompt_guidelines` 收口为更直接的 `guidelines`。当前这个共享配置只负责在给定 base prompt 之上追加 guideline / section / context block；真正的“整段 system prompt 替换”统一留在外层的 `Option<String>` 覆盖路径处理，避免共享层继续保留第二套替换语义。
 - 最新前端进展：`apps/web` 的 `Channels` 入口已改成 transport-centric 配置台：左侧常驻 sidebar 在 `channels` 视图下直接列出 server 返回的全部 supported channel type，右侧主面板只展示当前 type 的 schema 配置项与启停状态；对应的 catalog/profile 读取、CRUD 与当前选中 transport 也已从 `chat-store` 拆到独立 `channels-store`，避免继续把配置面板状态混进会话/SSE 主链。
+- 最新前端分层收口：`apps/web` 当前又继续按 feature ownership 收紧目录边界：`channels`、`settings`、`trace`、`chat-input` 与 `navigation` 相关实现都已收进 `src/features/*`，`App` / workspace 入口也已直接引用 feature，而不再绕经 `components` 的单文件转发壳；与此同时，聊天历史滚动 helper 也已迁回 `features/chat/chat-messages`，当前 `src/components` 已基本只剩共享 UI primitives、markdown、主题与可复用视觉元素，并已通过 `just web-check`、`just web-test`、`just web-typecheck` 与 `just web-build` 验证。
 - 最新前端消息渲染收口：`apps/web` 的 chat message text surface 当前已借鉴 `opencode` 的部分交互细节，收口到“单列消息流 + 顶角 copy 按钮 + user bubble / assistant text part”组合，消息正文不再依赖旧的 `You / aia` 标题行来切段，也不再采用左右分栏式摆放；不过消息内容宽度仍保持本项目原有的单列全宽承载，而没有沿用 `opencode` 那种更窄的阅读列。与此同时，`Streamdown` 承接的 markdown 排版也已同步压平标题层级、收紧列表/引用/代码块节奏，并保留现有 code copy、math 与 mermaid 能力，继续与已改造过的 tool timeline / thinking 视觉语义并存。
 - 最新前端工具时间线对齐：`apps/web` 的 chat tool timeline 已按更接近 `opencode` 的事实收口为“上下文探索组 + 独立工具行”双轨语义，其中只有 `read` / `glob` / `grep` / `list` 会合并进上下文探索组，`codesearch`、`websearch`、`shell`、文件编辑类与未知工具都会保留独立工具行；与此同时，组头状态词、摘要标签、详情标题与常见工具名已统一收口到共享文案源，进行中不可折叠、已完成可折叠、问题忽略、未知工具降级与详情视觉语义等边缘态也都已补齐；最近又把 tool row 与 context group 的展开动画从 `height:auto + spring` 收口为固定时长 tween，减少展开/折叠时的轻微抖动，并让 `write / edit / apply_patch` 这类编辑工具在行尾显示 `+ / -` 变更摘要、正文直接显示结果或 diff 内容，而不是再走额外展开层，并已通过对应前端测试、`just web-check` 与 `just web-build` 验证。
 - 最新前端 session 所有权收口：`apps/web` 当前已把 active session 的 ownership 与 model / reasoning mutation 责任继续收回 `chat-store`；`session-settings-store` 只保留 session settings 的水合与更新资源态，不再镜像 active session，也不再反向写 `chat-store`。与此同时，`switchSessionModel(...)` 与 `setSessionReasoningEffort(...)` 现在会在 mutation 完成后统一等待 provider 列表刷新，`ModelSelector` / `ChatInput` 组件侧不再拼 `.then(refreshProviders())` 式胶水，避免 UI 在 session 列表投影与 provider 面板之间出现短暂不同步。
@@ -63,6 +64,7 @@
 ## 已完成
 
 - 完成 Web 工具时间线 `opencode` 风格对齐：上下文探索工具现只按 `read` / `glob` / `grep` / `list` 连续分组，`codesearch`、`websearch`、`shell`、文件编辑类与未知工具保持独立工具行；共享微文案、详情视觉语义、进行中/完成态折叠规则、问题忽略与未知工具降级也已统一收口，并通过前端测试、`just web-check` 与 `just web-build` 验证
+- 完成 `apps/web` 目录分层新一轮收口：`channels/settings/trace/chat-input/navigation` 的业务实现已继续迁入 `features`，单文件重导出壳已删除，`components` 基本只剩共享 UI/markdown/theme，前端验证链路保持全绿
 - 建立 Rust 工作区
 - 建立 `aia-config`
 - 建立 `agent-core`

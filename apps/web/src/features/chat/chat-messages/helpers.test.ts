@@ -6,7 +6,7 @@ import {
   shouldShowHistoryHint,
   shouldStickToBottom,
   shouldTriggerOlderTurnsLoad,
-} from "./chat-messages-helpers"
+} from "./helpers"
 
 describe("chat message scroll helpers", () => {
   test("detects when the viewport is still near the bottom edge", () => {

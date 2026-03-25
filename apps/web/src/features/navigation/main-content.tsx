@@ -1,16 +1,16 @@
 import { Suspense, lazy, type ReactNode } from "react"
 
-import { ChatMessages } from "@/components/chat-messages"
-import { ChatInput } from "@/components/chat-input"
+import { ChatMessages } from "@/features/chat/chat-messages"
+import { ChatInput } from "@/features/chat/chat-input"
 import { useChatStore } from "@/stores/chat-store"
 
 const SettingsPanel = lazy(async () => {
-  const module = await import("@/components/settings-panel")
+  const module = await import("@/features/settings")
   return { default: module.SettingsPanel }
 })
 
 const TracePanel = lazy(async () => {
-  const module = await import("@/components/trace-panel")
+  const module = await import("@/features/trace")
   return { default: module.TracePanel }
 })
 

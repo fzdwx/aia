@@ -1,6 +1,6 @@
 import { useEffect } from "react"
-import { Sidebar } from "@/components/sidebar"
-import { MainContent } from "@/components/main-content"
+import { Sidebar } from "@/features/navigation/sidebar"
+import { MainContent } from "@/features/navigation/main-content"
 import { useChatStore } from "@/stores/chat-store"
 import { connectEvents } from "@/lib/api"
 import { PierreDiffProvider } from "@/features/chat/diff/pierre-diff-provider"

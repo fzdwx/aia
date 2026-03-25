@@ -18,7 +18,7 @@ import {
   shouldLoadOlderTurnsOnScroll,
   shouldShowHistoryHint,
   shouldStickToBottom,
-} from "@/components/chat-messages-helpers"
+} from "./helpers"
 import { useChatStore } from "@/stores/chat-store"
 
 import { ChatMessagesEmptyState } from "./chat-messages-empty-state"
@@ -26,7 +26,7 @@ import { ChatMessagesHistoryHint } from "./chat-messages-history-hint"
 import { ScrollToBottomButton } from "./scroll-to-bottom-button"
 import { usePrefersReducedMotion } from "./use-prefers-reduced-motion"
 
-export function ChatMessagesView() {
+export function ChatMessages() {
   const turns = useChatStore((s) => s.turns)
   const sessionHydrating = useChatStore((s) => s.sessionHydrating)
   const historyHasMore = useChatStore((s) => s.historyHasMore)

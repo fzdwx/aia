@@ -6,7 +6,7 @@ import {
   buildDeleteConfirmationCopy,
   collectFieldIssues,
   summarizeChannelTarget,
-} from "./channels-panel.helpers"
+} from "./helpers"
 
 const FEISHU_DEFINITION: SupportedChannelDefinition = {
   transport: "feishu",

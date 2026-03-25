@@ -5,10 +5,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  getThinkingLevelLabel,
-  THINKING_OPTIONS,
-} from "@/components/chat-input-thinking"
+import { getThinkingLevelLabel, THINKING_OPTIONS } from "./thinking"
 import type { ThinkingLevel } from "@/lib/types"
 import { useChatStore } from "@/stores/chat-store"
 import { useSessionSettingsStore } from "@/stores/session-settings-store"

@@ -1,8 +1,8 @@
 import { useRef, useState } from "react"
 import { ArrowUp, Square } from "lucide-react"
 
-import { ModelSelector } from "@/components/model-selector"
-import { ReasoningSelector } from "@/components/reasoning-selector"
+import { ModelSelector } from "./model-selector"
+import { ReasoningSelector } from "./reasoning-selector"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat-store"
 import { useSessionSettingsStore } from "@/stores/session-settings-store"

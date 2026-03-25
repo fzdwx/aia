@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vite-plus/test"
 
-import { getThinkingLevelLabel } from "./chat-input-thinking"
+import { getThinkingLevelLabel } from "./thinking"
 
 describe("getThinkingLevelLabel", () => {
   test("keeps current label while chat is active but settings are already loaded", () => {

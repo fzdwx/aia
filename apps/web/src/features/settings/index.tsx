@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useState, type FormEvent } from "react"
 import { ArrowLeft, Plus, Search, Trash2, X } from "lucide-react"
 
-import { ChannelsPanel } from "@/components/channels-panel"
+import { ChannelsPanel } from "@/features/channels"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"

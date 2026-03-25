@@ -1346,17 +1346,19 @@ function RawPayloadsCard({ trace }: { trace: TraceRecord }) {
   )
 }
 
+export type TraceDetailModalProps = {
+  open: boolean
+  trace: TraceRecord | null
+  loading: boolean
+  onOpenChange: (open: boolean) => void
+}
+
 export function TraceDetailModal({
   open,
   trace,
   loading,
   onOpenChange,
-}: {
-  open: boolean
-  trace: TraceRecord | null
-  loading: boolean
-  onOpenChange: (open: boolean) => void
-}) {
+}: TraceDetailModalProps) {
   const payloadTabs = useMemo(
     () => (trace ? buildPayloadTabs(trace) : []),
     [trace]
