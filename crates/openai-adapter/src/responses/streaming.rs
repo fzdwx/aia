@@ -16,21 +16,14 @@ fn now_timestamp_ms() -> u64 {
 }
 
 fn error_message(value: &Value) -> Option<String> {
-    value
-        .as_str()
-        .filter(|text| !text.trim().is_empty())
-        .map(ToString::to_string)
+    value.as_str().filter(|text| !text.trim().is_empty()).map(ToString::to_string)
 }
 
 fn response_stream_error(event: &Value) -> Option<String> {
     error_message(&event["error"]["message"])
         .or_else(|| error_message(&event["response"]["error"]["message"]))
         .or_else(|| error_message(&event["message"]))
-        .or_else(|| {
-            event["response"]["status"]
-                .as_str()
-                .map(|status| format!("response {status}"))
-        })
+        .or_else(|| event["response"]["status"].as_str().map(|status| format!("response {status}")))
 }
 
 #[derive(Default)]

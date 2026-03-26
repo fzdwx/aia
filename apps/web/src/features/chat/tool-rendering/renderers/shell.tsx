@@ -22,6 +22,21 @@ function buildShellOutput(data: {
   return parts.length > 0 ? parts.join("\n") : null
 }
 
+function firstShellLine(data: {
+  details?: Record<string, unknown>
+  outputContent: string
+}): string | null {
+  const output = buildShellOutput(data)
+  if (!output) return null
+
+  const firstLine = output
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.length > 0)
+
+  return firstLine ? truncateInline(firstLine, 96) : null
+}
+
 export function createShellRenderer(): ToolRenderer {
   return {
     matches: (toolName) => toolName === "Shell",
@@ -38,6 +53,20 @@ export function createShellRenderer(): ToolRenderer {
       )
 
       return description || command || toolTimelineCopy.toolName.shell
+    },
+    renderSubtitle(data) {
+      const args = normalizeToolArguments(data.arguments)
+      const description = getStringValue(args, "description")
+      const command =
+        getStringValue(data.details, "command") ??
+        getStringValue(args, "command", "cmd")
+
+      return (
+        truncateInline(
+          description ?? command ?? firstShellLine(data) ?? "",
+          96
+        ) || null
+      )
     },
     renderDetails(data) {
       const args = normalizeToolArguments(data.arguments)

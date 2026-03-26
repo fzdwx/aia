@@ -551,6 +551,43 @@ describe("chat store submitTurn", () => {
     expect(state.blocks[0].tool.finishedAtMs).toBe(14350)
   })
 
+  test("creates a runnable tool timestamp when output arrives before started event", () => {
+    useChatStore.setState({
+      activeSessionId: "session-1",
+      chatState: "active",
+      streamingTurn: {
+        userMessage: "run checks",
+        status: "working",
+        blocks: [],
+      },
+    })
+
+    const before = Date.now()
+    useChatStore.getState().handleSseEvent({
+      type: "stream",
+      data: {
+        session_id: "session-1",
+        turn_id: "turn-1",
+        kind: "tool_output_delta",
+        invocation_id: "Shell:1",
+        stream: "stdout",
+        text: "running...",
+      },
+    })
+    const after = Date.now()
+
+    const state = useChatStore.getState().streamingTurn
+    expect(state?.blocks).toHaveLength(1)
+    expect(state?.blocks[0]?.type).toBe("tool")
+    if (state?.blocks[0]?.type !== "tool") {
+      throw new Error("expected tool block")
+    }
+
+    expect(state.blocks[0].tool.startedAtMs).toBeDefined()
+    expect(state.blocks[0].tool.startedAtMs).toBeGreaterThanOrEqual(before)
+    expect(state.blocks[0].tool.startedAtMs).toBeLessThanOrEqual(after)
+  })
+
   test("keeps partial streaming content visible after cancelled error", () => {
     useChatStore.setState({
       chatState: "active",

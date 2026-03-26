@@ -124,7 +124,7 @@ struct TurnHistoryBuilder {
     tool_invocations: Vec<agent_runtime::ToolInvocationLifecycle>,
     usage: Option<CompletionUsage>,
     failure_message: Option<String>,
-    pending_tool_calls: BTreeMap<String, agent_core::ToolCall>,
+    pending_tool_calls: BTreeMap<String, (agent_core::ToolCall, u64)>,
     completed: bool,
     waiting_for_question: bool,
 }
@@ -167,18 +167,22 @@ impl TurnHistoryBuilder {
         }
 
         if let Some(call) = entry.as_tool_call() {
-            self.pending_tool_calls.insert(call.invocation_id.clone(), call);
+            self.pending_tool_calls.insert(call.invocation_id.clone(), (call, timestamp_ms));
             return;
         }
 
         if let Some(result) = entry.as_tool_result() {
-            let call = self.pending_tool_calls.remove(&result.invocation_id).unwrap_or_else(|| {
-                agent_core::ToolCall::new(result.tool_name.clone())
-                    .with_invocation_id(result.invocation_id.clone())
-            });
+            let (call, started_at_ms) =
+                self.pending_tool_calls.remove(&result.invocation_id).unwrap_or_else(|| {
+                    (
+                        agent_core::ToolCall::new(result.tool_name.clone())
+                            .with_invocation_id(result.invocation_id.clone()),
+                        timestamp_ms,
+                    )
+                });
             let invocation = agent_runtime::ToolInvocationLifecycle {
                 call,
-                started_at_ms: timestamp_ms,
+                started_at_ms,
                 finished_at_ms: timestamp_ms,
                 trace_context: None,
                 outcome: agent_runtime::ToolInvocationOutcome::Succeeded { result },

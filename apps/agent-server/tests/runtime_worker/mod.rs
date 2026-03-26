@@ -161,6 +161,41 @@ fn rebuild_session_snapshots_from_tape_projects_completed_tool_block() {
 }
 
 #[test]
+fn rebuild_turn_history_from_tape_keeps_tool_start_time_from_tool_call_entry() {
+    let mut tape = SessionTape::new();
+    let turn_id = "turn-tool-history";
+    let call = ToolCall::new("Shell")
+        .with_invocation_id("call-shell-1")
+        .with_argument("command", "cargo test");
+    let result = ToolResult::from_call(&call, "done");
+
+    let mut user_entry =
+        TapeEntry::message(&Message::new(Role::User, "run checks")).with_run_id(turn_id);
+    user_entry.date = "2026-03-26T10:00:00Z".into();
+    tape.append_entry(user_entry);
+
+    let mut call_entry = TapeEntry::tool_call(&call).with_run_id(turn_id);
+    call_entry.date = "2026-03-26T10:00:01Z".into();
+    tape.append_entry(call_entry);
+
+    let mut result_entry = TapeEntry::tool_result(&result).with_run_id(turn_id);
+    result_entry.date = "2026-03-26T10:00:05Z".into();
+    tape.append_entry(result_entry);
+
+    let mut complete_entry = TapeEntry::event("turn_completed", None).with_run_id(turn_id);
+    complete_entry.date = "2026-03-26T10:00:06Z".into();
+    tape.append_entry(complete_entry);
+
+    let turns = rebuild_session_snapshots_from_tape(&tape).history;
+
+    assert_eq!(turns.len(), 1);
+    assert_eq!(turns[0].tool_invocations.len(), 1);
+    let invocation = &turns[0].tool_invocations[0];
+    assert_eq!(invocation.started_at_ms, 1_774_519_201_000);
+    assert_eq!(invocation.finished_at_ms, 1_774_519_205_000);
+}
+
+#[test]
 fn rebuild_turn_history_from_tape_marks_cancelled_blocks_explicitly() {
     let mut tape = SessionTape::new();
     let turn_id = "turn-cancelled";

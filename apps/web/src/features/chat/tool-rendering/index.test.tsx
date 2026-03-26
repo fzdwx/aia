@@ -579,6 +579,17 @@ describe("tool renderer registry", () => {
     expect(title).toBe("Run runtime crate checks")
   })
 
+  test("renders shell subtitle from first output line when arguments are missing", () => {
+    const subtitle = toolRendererRegistry.renderSubtitle({
+      toolName: "Shell",
+      arguments: {},
+      outputContent: "npm run check\nsecond line",
+      succeeded: true,
+    })
+
+    expect(subtitle).toBe("npm run check")
+  })
+
   test("renders shell tool details as command followed by output", () => {
     const details = toolRendererRegistry.renderDetails({
       toolName: "Shell",

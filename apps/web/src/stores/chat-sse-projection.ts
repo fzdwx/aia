@@ -186,13 +186,15 @@ export function applyStreamEventToBlocks(
         },
       }
     } else {
+      const startedAtMs = Date.now()
       nextBlocks.push({
         type: "tool",
         tool: {
           invocationId: data.invocation_id,
           toolName: "",
           arguments: {},
-          detectedAtMs: 0,
+          detectedAtMs: startedAtMs,
+          startedAtMs,
           output: data.text,
           completed: false,
         },
@@ -212,6 +214,11 @@ export function applyStreamEventToBlocks(
         ...block,
         tool: {
           ...block.tool,
+          startedAtMs:
+            block.tool.startedAtMs ??
+            (block.tool.detectedAtMs > 0
+              ? block.tool.detectedAtMs
+              : data.finished_at_ms),
           finishedAtMs: data.finished_at_ms,
           completed: true,
           resultContent: data.content,

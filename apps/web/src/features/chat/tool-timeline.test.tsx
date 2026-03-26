@@ -495,7 +495,29 @@ describe("tool timeline", () => {
 
     expect(html).toContain("Runs Rust workspace tests")
     expect(html).toContain("Runs frontend full checks")
-    expect(html.match(/data-slot="tool-duration"/g)?.length ?? 0).toBe(1)
+    expect(html.match(/data-slot="tool-duration"/g)?.length ?? 0).toBe(2)
+  })
+
+  test("renders running fallback tools with first output line as subtitle", () => {
+    const html = renderWithTheme(
+      <StreamingToolGroup
+        toolOutputs={[
+          {
+            invocationId: "streaming-unknown-live-1",
+            toolName: "CustomTool",
+            arguments: {},
+            detectedAtMs: Date.now() - 2000,
+            output: "first useful line\nsecond line",
+            completed: false,
+          },
+        ]}
+      />
+    )
+
+    expect(html).toContain("CustomTool")
+    expect(html).toContain("first useful line")
+    expect(html).toContain('data-slot="tool-subtitle"')
+    expect(html).toContain('data-slot="tool-duration"')
   })
 
   test("renders TapeInfo as a non-expandable inline summary row", () => {

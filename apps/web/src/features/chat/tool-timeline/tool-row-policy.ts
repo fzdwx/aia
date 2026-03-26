@@ -12,6 +12,15 @@ function hasText(value: string | undefined | null): value is string {
   return typeof value === "string" && value.trim().length > 0
 }
 
+function firstNonEmptyLine(value: string): string | null {
+  const line = value
+    .split("\n")
+    .map((entry) => entry.trim())
+    .find((entry) => entry.length > 0)
+
+  return line ?? null
+}
+
 function hasMeaningfulValue(value: unknown): boolean {
   if (value == null) return false
   if (typeof value === "string") return value.trim().length > 0
@@ -115,6 +124,10 @@ export function getFallbackSubtitle(item: ToolRowItem): string | null {
     return hasText(item.outputContent)
       ? item.outputContent.trim()
       : FAILED_TOOL_RESULT_FALLBACK
+  }
+
+  if (item.finishedAtMs == null && hasText(item.outputContent)) {
+    return firstNonEmptyLine(item.outputContent)
   }
 
   if (item.finishedAtMs != null && !hasVisibleToolDetails(item)) {
