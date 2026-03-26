@@ -98,7 +98,7 @@ pub(crate) fn test_state_with_session_manager_setup(
         },
         system_prompt: None,
         runtime_hooks: agent_runtime::RuntimeHooks::default(),
-        question_coordinator: Arc::new(crate::session_manager::QuestionCoordinator {
+        runtime_tool_host: Arc::new(crate::session_manager::RuntimeToolHost {
             tx: tokio::sync::mpsc::channel(8).0,
         }),
     });

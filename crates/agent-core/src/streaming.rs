@@ -6,9 +6,10 @@ use std::{
     },
 };
 
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use crate::CoreError;
+use crate::{CoreError, QuestionRequest, QuestionResult};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -57,6 +58,17 @@ pub struct RuntimeToolContextStats {
     pub pressure_ratio: Option<f64>,
 }
 
+#[async_trait]
+pub trait RuntimeToolHost: Send + Sync {
+    async fn ask_question(
+        &self,
+        _session_id: &str,
+        _request: QuestionRequest,
+    ) -> Result<QuestionResult, CoreError> {
+        Err(CoreError::new("question runtime capability unavailable"))
+    }
+}
+
 pub trait RuntimeToolContext: Send + Sync {
     fn context_stats(&self) -> RuntimeToolContextStats;
     fn record_handoff(&self, name: &str, summary: &str) -> Result<(), CoreError>;
@@ -68,6 +80,7 @@ pub struct ToolExecutionContext {
     pub workspace_root: Option<PathBuf>,
     pub abort: AbortSignal,
     pub runtime: Option<Arc<dyn RuntimeToolContext>>,
+    pub runtime_host: Option<Arc<dyn RuntimeToolHost>>,
 }
 
 impl ToolExecutionContext {

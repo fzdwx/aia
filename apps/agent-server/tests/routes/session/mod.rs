@@ -315,7 +315,10 @@ async fn resolve_pending_question_without_waiter_only_records_resolution() {
 
     let restored = session_tape::SessionTape::load_jsonl_or_default(&session_path)
         .expect("updated tape should load");
-    assert_eq!(restored.try_pending_question_request().expect("pending question should decode"), None);
+    assert_eq!(
+        restored.try_pending_question_request().expect("pending question should decode"),
+        None
+    );
 
     let _ = std::fs::remove_dir_all(root);
 }

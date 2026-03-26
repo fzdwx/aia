@@ -9,6 +9,7 @@ aia-config = { path = "../aia-config" }
 agent-core = { path = "../agent-core" }
 agent-core-macros = { path = "../agent-core-macros" }
 agent-prompts = { path = "../agent-prompts" }
+builtin-tools = { path = "../builtin-tools" }
 session-tape = { path = "../session-tape" }
 async-trait = "0.1"
 futures = "0.3"

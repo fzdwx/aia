@@ -3,7 +3,7 @@ mod handle;
 mod prompt;
 mod provider_sync;
 mod query_ops;
-mod server_question_tool;
+mod server_runtime_tool_host;
 #[cfg(test)]
 #[path = "../../tests/session_manager/mod.rs"]
 mod tests;
@@ -16,7 +16,7 @@ use std::sync::{Arc, RwLock};
 
 use agent_core::{
     ModelIdentity, PromptCacheConfig, PromptCacheRetention as RuntimePromptCacheRetention,
-    QuestionRequest, QuestionResult, QuestionResultStatus, ReasoningEffort, ToolRegistry,
+    QuestionRequest, QuestionResult, QuestionResultStatus, ReasoningEffort,
 };
 use agent_runtime::AgentRuntime;
 use agent_store::{AiaStore, SessionRecord, generate_session_id};
@@ -36,12 +36,12 @@ pub use handle::SessionManagerHandle;
 use prompt::build_session_system_prompt;
 use provider_sync::{ProviderSyncService, ReturnedRuntimeSync};
 pub(crate) use query_ops::SessionQueryService;
-use server_question_tool::ServerQuestionTool;
+use server_runtime_tool_host::ServerRuntimeToolHost;
 use turn_execution::{RuntimeEventProjector, TurnExecutionService, collect_runtime_events};
-pub use types::{QuestionCoordinator, SessionManagerConfig};
 #[cfg(test)]
 pub(crate) use types::SlotExecutionState;
 use types::{RuntimeReturn, SessionCommand, SessionId, SessionSlot, SlotStatus};
+pub use types::{RuntimeToolHost, SessionManagerConfig};
 
 #[cfg(test)]
 pub(crate) use crate::runtime_worker::CurrentTurnSnapshot;
@@ -57,7 +57,7 @@ pub fn spawn_session_manager(config: SessionManagerConfig) -> SessionManagerHand
     let (command_tx, command_rx) = mpsc::channel(256);
     let (return_tx, return_rx) = mpsc::channel(64);
     let config = SessionManagerConfig {
-        question_coordinator: Arc::new(types::QuestionCoordinator { tx: command_tx.clone() }),
+        runtime_tool_host: Arc::new(types::RuntimeToolHost { tx: command_tx.clone() }),
         ..config
     };
     tokio::spawn(
@@ -456,8 +456,9 @@ impl SessionManagerLoop {
         let entry = tape.entries().last().cloned().ok_or_else(|| {
             RuntimeWorkerError::internal("question request was not appended to tape")
         })?;
-        SessionTape::append_jsonl_entry(&slot.session_path, &entry)
-            .map_err(|error| RuntimeWorkerError::internal(format!("session append failed: {error}")))?;
+        SessionTape::append_jsonl_entry(&slot.session_path, &entry).map_err(|error| {
+            RuntimeWorkerError::internal(format!("session append failed: {error}"))
+        })?;
 
         let (sender, receiver) = tokio::sync::oneshot::channel();
         slot.insert_pending_question_waiter(request.request_id.clone(), sender);
@@ -516,8 +517,9 @@ impl SessionManagerLoop {
         let entry = tape.entries().last().cloned().ok_or_else(|| {
             RuntimeWorkerError::internal("question result was not appended to tape")
         })?;
-        SessionTape::append_jsonl_entry(&slot.session_path, &entry)
-            .map_err(|error| RuntimeWorkerError::internal(format!("session append failed: {error}")))?;
+        SessionTape::append_jsonl_entry(&slot.session_path, &entry).map_err(|error| {
+            RuntimeWorkerError::internal(format!("session append failed: {error}"))
+        })?;
 
         if let Some(waiter) = slot.remove_pending_question_waiter(&pending_request.request_id) {
             let _ = waiter.send(result);
@@ -571,25 +573,24 @@ impl<'a> SessionSlotFactory<'a> {
 
         let session_append_path = session_path.clone();
         let workspace_root = self.config.workspace_root.clone();
-        let mut runtime = AgentRuntime::with_tape(
-            model,
-            build_server_tool_registry(self.config.question_coordinator.clone()),
-            identity,
-            tape,
-        )
-            .with_instructions(build_session_system_prompt(
-                self.config.system_prompt.as_deref(),
-                &self.config.workspace_root,
-            ))
-            .with_hooks(self.config.runtime_hooks.clone())
-            .with_session_id(session_id.to_string())
-            .with_user_agent(self.config.user_agent.clone())
-            .with_workspace_root(workspace_root)
-            .with_tape_entry_listener(move |entry| {
-                SessionTape::append_jsonl_entry(&session_append_path, entry)
-            })
-            .with_max_tool_calls_per_turn(100000)
-            .with_request_timeout(self.config.request_timeout.clone());
+        let mut runtime =
+            AgentRuntime::with_tape(model, builtin_tools::build_tool_registry(), identity, tape)
+                .with_instructions(build_session_system_prompt(
+                    self.config.system_prompt.as_deref(),
+                    &self.config.workspace_root,
+                ))
+                .with_hooks(self.config.runtime_hooks.clone())
+                .with_runtime_tool_host(Arc::new(ServerRuntimeToolHost::new(
+                    self.config.runtime_tool_host.clone(),
+                )))
+                .with_session_id(session_id.to_string())
+                .with_user_agent(self.config.user_agent.clone())
+                .with_workspace_root(workspace_root)
+                .with_tape_entry_listener(move |entry| {
+                    SessionTape::append_jsonl_entry(&session_append_path, entry)
+                })
+                .with_max_tool_calls_per_turn(100000)
+                .with_request_timeout(self.config.request_timeout.clone());
         if let Some(prompt_cache) = prompt_cache {
             runtime = runtime.with_prompt_cache(prompt_cache);
         }
@@ -720,14 +721,6 @@ fn prompt_cache_for_selection(
         key: Some(aia_config::build_prompt_cache_key(&profile.name, &model.id, session_id)),
         retention: Some(RuntimePromptCacheRetention::OneDay),
     })
-}
-
-fn build_server_tool_registry(
-    question_coordinator: std::sync::Arc<types::QuestionCoordinator>,
-) -> ToolRegistry {
-    let mut registry = builtin_tools::build_tool_registry();
-    registry.register(Box::new(ServerQuestionTool::new(question_coordinator)));
-    registry
 }
 
 pub(crate) use types::{read_lock, write_lock};

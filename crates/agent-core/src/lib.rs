@@ -28,8 +28,8 @@ pub use question::{
 };
 pub use registry::ToolRegistry;
 pub use streaming::{
-    AbortSignal, RuntimeToolContext, RuntimeToolContextStats, StreamEvent, ToolExecutionContext,
-    ToolOutputDelta, ToolOutputStream,
+    AbortSignal, RuntimeToolContext, RuntimeToolContextStats, RuntimeToolHost, StreamEvent,
+    ToolExecutionContext, ToolOutputDelta, ToolOutputStream,
 };
 pub use tooling::{
     ToolArgsSchema, ToolCall, ToolDefinition, ToolResult, ToolSchema, ToolSchemaMetadataValue,

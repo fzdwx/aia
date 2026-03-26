@@ -9,7 +9,7 @@ use crate::{RuntimeEvent, ToolInvocationLifecycle, ToolInvocationOutcome};
 use super::super::{
     AgentRuntime, RuntimeError,
     helpers::{build_tool_source_entry_ids, now_timestamp_ms},
-    tape_tools,
+    runtime_tool_context_adapter,
 };
 use super::types::{FailedToolCallContext, ToolCallLifecycleContext};
 
@@ -21,7 +21,7 @@ where
     pub(super) fn apply_runtime_tool_handoffs(
         &mut self,
         _turn_id: &str,
-        runtime_bridge: &Arc<tape_tools::RuntimeToolContextBridge>,
+        runtime_bridge: &Arc<runtime_tool_context_adapter::RuntimeToolContextAdapter>,
     ) -> Result<(), RuntimeError> {
         for (name, summary) in runtime_bridge.drain_handoffs() {
             self.record_handoff(name, json!({ "summary": summary }), "ai")?;

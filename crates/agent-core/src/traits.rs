@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 
 use crate::{
-    AbortSignal, Completion, CompletionRequest, CoreError, StreamEvent, ToolDefinition,
-    ToolExecutionContext, ToolOutputDelta, ToolResult,
+    AbortSignal, Completion, CompletionRequest, CoreError, SessionInteractionCapabilities,
+    StreamEvent, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
 };
 
 #[async_trait]
@@ -27,6 +27,17 @@ pub trait ToolExecutor: Send + Sync {
 
     fn definitions(&self) -> Vec<ToolDefinition>;
 
+    fn definitions_for_capabilities(
+        &self,
+        _capabilities: &SessionInteractionCapabilities,
+    ) -> Vec<ToolDefinition> {
+        self.definitions()
+    }
+
+    fn tool_requires_runtime_context(&self, _name: &str) -> bool {
+        false
+    }
+
     async fn call(
         &self,
         call: &crate::ToolCall,
@@ -40,6 +51,14 @@ pub trait Tool: Send + Sync {
     fn name(&self) -> &str;
 
     fn definition(&self) -> ToolDefinition;
+
+    fn requires_interactive_capability(&self) -> bool {
+        false
+    }
+
+    fn requires_runtime_context(&self) -> bool {
+        false
+    }
 
     async fn call(
         &self,

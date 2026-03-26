@@ -211,4 +211,3 @@ fn rebuild_turn_history_from_tape_restores_legacy_turn_record() {
     assert_eq!(turns.len(), 1);
     assert_eq!(turns[0], legacy_turn);
 }
-

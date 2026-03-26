@@ -11,7 +11,7 @@ use crate::{ToolInvocationLifecycle, ToolTraceContext};
 use super::super::{
     AgentRuntime, RuntimeError,
     helpers::{build_tool_trace_context, now_timestamp_ms},
-    tape_tools,
+    runtime_tool_context_adapter,
 };
 use super::types::{ExecuteToolCallContext, FailedToolCallContext, PreparedToolCallOutcome};
 
@@ -65,23 +65,9 @@ where
             };
         }
 
-        if tape_tools::is_runtime_tool(&context.call.tool_name) {
-            let prepared = match self.invoke_runtime_tool(context).await {
-                Ok(result) => PreparedToolCallOutcome::Completed {
-                    started_at_ms,
-                    tool_trace_context,
-                    result,
-                    failed: context.abort_signal.is_aborted(),
-                },
-                Err(runtime_error) => PreparedToolCallOutcome::Failed {
-                    started_at_ms,
-                    tool_trace_context,
-                    event_name: "tool_call_failed",
-                    runtime_error,
-                },
-            };
-            return prepared;
-        }
+        let runtime_bridge = runtime_tool_context_adapter::RuntimeToolContextAdapter::new(self);
+        let runtime_context: Arc<dyn RuntimeToolContext> = runtime_bridge.clone();
+        let runtime_host = runtime_bridge.host_delegate();
 
         match self
             .tools
@@ -99,12 +85,23 @@ where
                     session_id: self.session_id.clone(),
                     workspace_root: self.workspace_root.clone(),
                     abort: context.abort_signal.clone(),
-                    runtime: None,
+                    runtime: Some(runtime_context),
+                    runtime_host,
                 },
             )
             .await
         {
             Ok(result) => {
+                if let Err(runtime_error) =
+                    self.apply_runtime_tool_handoffs(context.turn_id, &runtime_bridge)
+                {
+                    return PreparedToolCallOutcome::Failed {
+                        started_at_ms,
+                        tool_trace_context,
+                        event_name: "tool_call_failed",
+                        runtime_error,
+                    };
+                }
                 if result.invocation_id != context.call.invocation_id
                     || result.tool_name != context.call.tool_name
                 {
@@ -166,32 +163,6 @@ where
                 on_delta,
             ),
         }
-    }
-
-    async fn invoke_runtime_tool(
-        &mut self,
-        context: &ExecuteToolCallContext<'_>,
-    ) -> Result<ToolResult, RuntimeError> {
-        let runtime_tools =
-            tape_tools::build_runtime_tool_registry(self.interaction_capabilities());
-        let runtime_bridge = tape_tools::RuntimeToolContextBridge::new(self);
-        let runtime_context: Arc<dyn RuntimeToolContext> = runtime_bridge.clone();
-        let result = runtime_tools
-            .call(
-                context.call,
-                &mut |_| {},
-                &ToolExecutionContext {
-                    run_id: context.turn_id.to_string(),
-                    session_id: self.session_id.clone(),
-                    workspace_root: self.workspace_root.clone(),
-                    abort: context.abort_signal.clone(),
-                    runtime: Some(runtime_context),
-                },
-            )
-            .await
-            .map_err(RuntimeError::tool)?;
-        self.apply_runtime_tool_handoffs(context.turn_id, &runtime_bridge)?;
-        Ok(result)
     }
 
     fn record_completed_tool_call_for_context(

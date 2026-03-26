@@ -11,7 +11,6 @@ use crate::{RuntimeEvent, TurnBlock};
 use super::super::{
     AgentRuntime, RuntimeError,
     helpers::{build_tool_trace_context, now_timestamp_ms},
-    tape_tools,
     tool_calls::{ExecuteToolCallContext, can_run_in_parallel},
 };
 use super::types::TurnBuffers;
@@ -65,7 +64,10 @@ where
                 CompletionSegment::ToolUse(call) => Some(call),
                 CompletionSegment::Thinking(_) | CompletionSegment::Text(_) => None,
             })
-            .all(|call| can_run_in_parallel(call) && !tape_tools::is_runtime_tool(&call.tool_name));
+            .all(|call| {
+                can_run_in_parallel(call)
+                    && !self.tools.tool_requires_runtime_context(&call.tool_name)
+            });
 
         let mut parallel_calls = Vec::new();
 
@@ -239,6 +241,7 @@ where
                                     workspace_root,
                                     abort: abort_signal.clone(),
                                     runtime: None,
+                                    runtime_host: None,
                                 },
                             )
                             .await

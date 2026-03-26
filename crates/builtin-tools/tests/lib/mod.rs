@@ -3,14 +3,15 @@ use agent_prompts::tool_descriptions::shell_tool_description;
 use std::collections::BTreeSet;
 
 use super::{
-    ApplyPatchTool, CodeSearchTool, EditTool, GlobTool, GrepTool, ReadTool, ShellTool,
-    WebSearchTool, WriteTool, build_tool_registry,
+    ApplyPatchTool, CodeSearchTool, EditTool, GlobTool, GrepTool, QuestionTool, ReadTool,
+    ShellTool, TapeHandoffTool, TapeInfoTool, WebSearchTool, WriteTool, build_tool_registry,
 };
 use crate::apply_patch::ApplyPatchToolArgs;
 use crate::codesearch::CodeSearchToolArgs;
 use crate::edit::EditToolArgs;
 use crate::glob::GlobToolArgs;
 use crate::grep::GrepToolArgs;
+use crate::question::QuestionToolArgs;
 use crate::read::ReadToolArgs;
 use crate::shell::ShellToolArgs;
 use crate::websearch::WebSearchToolArgs;
@@ -25,11 +26,23 @@ fn registry_exposes_only_new_tool_names() {
         .map(|definition| definition.name)
         .collect::<BTreeSet<_>>();
 
-    let expected =
-        ["Shell", "Read", "Write", "Edit", "ApplyPatch", "Glob", "Grep", "CodeSearch", "WebSearch"]
-            .into_iter()
-            .map(str::to_owned)
-            .collect::<BTreeSet<_>>();
+    let expected = [
+        "Shell",
+        "Read",
+        "Write",
+        "Edit",
+        "ApplyPatch",
+        "Glob",
+        "Grep",
+        "Question",
+        "TapeInfo",
+        "TapeHandoff",
+        "CodeSearch",
+        "WebSearch",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect::<BTreeSet<_>>();
 
     assert_eq!(names, expected);
     assert!(!names.contains("bash"));
@@ -113,6 +126,20 @@ fn builtin_tool_definitions_match_derive_schema_output() {
     assert_eq!(grep.parameters["properties"]["path"]["type"], "string");
     assert_eq!(grep.parameters["properties"]["glob"]["type"], "string");
     assert_eq!(grep.parameters["properties"]["limit"]["type"], "integer");
+
+    let question = QuestionTool.definition();
+    assert_eq!(
+        question.parameters,
+        ToolDefinition::new("Question", "ignored")
+            .with_parameters_schema::<QuestionToolArgs>()
+            .parameters
+    );
+
+    let tape_info = TapeInfoTool.definition();
+    assert_eq!(tape_info.name, "TapeInfo");
+
+    let tape_handoff = TapeHandoffTool.definition();
+    assert_eq!(tape_handoff.name, "TapeHandoff");
 
     let codesearch = CodeSearchTool.definition();
     assert_eq!(codesearch.name, "CodeSearch");

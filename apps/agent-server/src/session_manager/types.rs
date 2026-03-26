@@ -7,8 +7,8 @@ use agent_runtime::{AgentRuntime, ContextStats, RuntimeHooks, RuntimeSubscriberI
 use agent_store::{AiaStore, SessionRecord};
 use provider_registry::ProviderRegistry;
 use session_tape::SessionProviderBinding;
-use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::sync::oneshot as tokio_oneshot;
+use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::{
     model::ServerModel,
@@ -317,10 +317,10 @@ pub struct SessionManagerConfig {
     pub request_timeout: RequestTimeoutConfig,
     pub system_prompt: Option<String>,
     pub runtime_hooks: RuntimeHooks,
-    pub question_coordinator: Arc<QuestionCoordinator>,
+    pub runtime_tool_host: Arc<RuntimeToolHost>,
 }
 
-pub struct QuestionCoordinator {
+pub struct RuntimeToolHost {
     pub(crate) tx: mpsc::Sender<SessionCommand>,
 }
 

@@ -164,13 +164,7 @@ impl TurnWorker {
         turn_control: agent_runtime::TurnControl,
         context: TurnWorkerContext,
     ) -> Self {
-        Self {
-            runtime,
-            subscriber,
-            mode: TurnWorkerMode::Submit { prompt },
-            turn_control,
-            context,
-        }
+        Self { runtime, subscriber, mode: TurnWorkerMode::Submit { prompt }, turn_control, context }
     }
 
     pub(super) async fn run(mut self) -> RuntimeReturn {
@@ -239,7 +233,8 @@ impl TurnWorker {
                     let turn_for_traces = turn.clone();
                     {
                         let mut history = write_lock(&self.context.history_snapshot);
-                        if let Some(index) = history.iter().position(|item| item.turn_id == turn.turn_id)
+                        if let Some(index) =
+                            history.iter().position(|item| item.turn_id == turn.turn_id)
                         {
                             history[index] = turn.clone();
                         } else {

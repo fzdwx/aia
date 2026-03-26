@@ -5,7 +5,7 @@ mod finalize;
 mod helpers;
 mod hooks;
 mod request;
-mod tape_tools;
+mod runtime_tool_context_adapter;
 #[cfg(test)]
 #[path = "../tests/runtime/mod.rs"]
 mod tests;
@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use agent_core::{
     AbortSignal, LanguageModel, ModelIdentity, PromptCacheConfig, RequestTimeoutConfig,
-    SessionInteractionCapabilities, ToolDefinition, ToolExecutor,
+    RuntimeToolHost, SessionInteractionCapabilities, ToolDefinition, ToolExecutor,
 };
 use session_tape::{Handoff, SessionTape, SessionTapeError, TapeEntry};
 
@@ -49,6 +49,7 @@ pub struct AgentRuntime<M, T> {
     prompt_cache: Option<PromptCacheConfig>,
     request_timeout: Option<RequestTimeoutConfig>,
     interaction_capabilities: SessionInteractionCapabilities,
+    runtime_tool_host: Option<Arc<dyn RuntimeToolHost>>,
     last_input_tokens: Option<u64>,
     hooks: RuntimeHooks,
     agent_started: bool,
@@ -93,6 +94,7 @@ where
             prompt_cache: None,
             request_timeout: None,
             interaction_capabilities: SessionInteractionCapabilities::interactive(),
+            runtime_tool_host: None,
             last_input_tokens,
             hooks: RuntimeHooks::default(),
             agent_started: false,
@@ -168,12 +170,21 @@ where
         self
     }
 
+    pub fn with_runtime_tool_host(mut self, runtime_tool_host: Arc<dyn RuntimeToolHost>) -> Self {
+        self.runtime_tool_host = Some(runtime_tool_host);
+        self
+    }
+
     pub fn set_interaction_capabilities(&mut self, capabilities: SessionInteractionCapabilities) {
         self.interaction_capabilities = capabilities;
     }
 
     pub fn interaction_capabilities(&self) -> &SessionInteractionCapabilities {
         &self.interaction_capabilities
+    }
+
+    pub(crate) fn runtime_tool_host(&self) -> Option<Arc<dyn RuntimeToolHost>> {
+        self.runtime_tool_host.clone()
     }
 
     pub fn set_request_timeout(&mut self, timeout: Option<RequestTimeoutConfig>) {
@@ -189,14 +200,11 @@ where
     }
 
     pub fn visible_tools(&self) -> Vec<ToolDefinition> {
-        let mut tools: Vec<ToolDefinition> = self
-            .tools
-            .definitions()
+        self.tools
+            .definitions_for_capabilities(&self.interaction_capabilities)
             .into_iter()
             .filter(|definition| !self.disabled_tools.contains(&definition.name))
-            .collect();
-        tools.extend(tape_tools::runtime_tool_definitions_for(&self.interaction_capabilities));
-        tools
+            .collect()
     }
 
     pub fn handoff(&mut self, name: impl Into<String>, state: serde_json::Value) -> Handoff {

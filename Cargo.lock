@@ -53,6 +53,7 @@ dependencies = [
  "agent-prompts",
  "aia-config",
  "async-trait",
+ "builtin-tools",
  "futures",
  "serde",
  "serde_json",
@@ -65,6 +66,7 @@ name = "agent-server"
 version = "0.1.0"
 dependencies = [
  "agent-core",
+ "agent-core-macros",
  "agent-prompts",
  "agent-runtime",
  "agent-store",

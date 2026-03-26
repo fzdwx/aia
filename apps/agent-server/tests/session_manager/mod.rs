@@ -66,7 +66,7 @@ fn sample_manager_config(root: &std::path::Path) -> SessionManagerConfig {
         },
         system_prompt: None,
         runtime_hooks: agent_runtime::RuntimeHooks::default(),
-        question_coordinator: Arc::new(crate::session_manager::QuestionCoordinator {
+        runtime_tool_host: Arc::new(crate::session_manager::RuntimeToolHost {
             tx: tokio::sync::mpsc::channel(8).0,
         }),
     }
@@ -467,7 +467,7 @@ fn handle_cancel_turn_marks_running_snapshot_as_cancelled() {
         },
         system_prompt: None,
         runtime_hooks: agent_runtime::RuntimeHooks::default(),
-        question_coordinator: Arc::new(crate::session_manager::QuestionCoordinator {
+        runtime_tool_host: Arc::new(crate::session_manager::RuntimeToolHost {
             tx: tokio::sync::mpsc::channel(8).0,
         }),
     };
@@ -514,7 +514,7 @@ fn spawned_turn_worker_completes_bootstrap_turn() {
             },
             system_prompt: None,
             runtime_hooks: agent_runtime::RuntimeHooks::default(),
-            question_coordinator: Arc::new(crate::session_manager::QuestionCoordinator {
+            runtime_tool_host: Arc::new(crate::session_manager::RuntimeToolHost {
                 tx: tokio::sync::mpsc::channel(8).0,
             }),
         });
@@ -602,7 +602,7 @@ fn spawned_turn_worker_applies_custom_system_prompt_and_runtime_hooks() {
             },
             system_prompt: Some("你是测试客户端代理。".into()),
             runtime_hooks,
-            question_coordinator: Arc::new(crate::session_manager::QuestionCoordinator {
+            runtime_tool_host: Arc::new(crate::session_manager::RuntimeToolHost {
                 tx: tokio::sync::mpsc::channel(8).0,
             }),
         });

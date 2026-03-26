@@ -11,6 +11,7 @@ use agent_core::{
     ToolOutputDelta, ToolResult,
 };
 use async_trait::async_trait;
+use builtin_tools::build_tool_registry;
 use serde_json::json;
 use session_tape::SessionTape;
 
@@ -541,7 +542,6 @@ impl LanguageModel for StopReasonDrivenModel {
     }
 }
 
-
 struct StubTools;
 
 #[async_trait]
@@ -856,8 +856,6 @@ fn 运行时会记录用户与助手消息() {
     assert_eq!(output.assistant_text, "已收到：你好");
     assert_eq!(runtime.tape().entries().len(), 7);
     assert_eq!(runtime.tape().entries()[6].event_name(), Some("turn_completed"));
-    assert!(output.visible_tools.iter().any(|definition| definition.name == "TapeInfo"));
-    assert!(output.visible_tools.iter().any(|definition| definition.name == "TapeHandoff"));
 }
 
 #[test]
@@ -2187,7 +2185,8 @@ fn tape_info_结果包含结构化_details() {
             }
         })),
     ));
-    let mut runtime = AgentRuntime::with_tape(TapeInfoModel::new(), StubTools, identity, tape);
+    let mut runtime =
+        AgentRuntime::with_tape(TapeInfoModel::new(), build_tool_registry(), identity, tape);
 
     let _ = run_turn(&mut runtime, "读取 tape info").expect("应成功完成");
 
@@ -2273,7 +2272,7 @@ fn tape_info_工具返回上下文统计() {
     let identity = ModelIdentity::new("local", "tape-info", ModelDisposition::Balanced)
         .with_limit(Some(agent_core::ModelLimit { context: Some(100_000), output: Some(8192) }));
     let model = TapeInfoModel::new();
-    let mut runtime = AgentRuntime::new(model, StubTools, identity);
+    let mut runtime = AgentRuntime::new(model, build_tool_registry(), identity);
 
     let output = run_turn(&mut runtime, "查看上下文状态").expect("应成功完成");
 
@@ -2293,7 +2292,7 @@ fn tape_handoff_工具创建锚点() {
     let mut tape = SessionTape::new();
     tape.append(Message::new(Role::User, "历史消息"));
     tape.append(Message::new(Role::Assistant, "历史回答"));
-    let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape);
+    let mut runtime = AgentRuntime::with_tape(model, build_tool_registry(), identity, tape);
 
     let output = run_turn(&mut runtime, "创建检查点").expect("应成功完成");
 
@@ -2314,7 +2313,7 @@ fn runtime_tool_bridge_创建锚点后后续请求会过滤孤立_tool_result() 
     let mut tape = SessionTape::new();
     tape.append(Message::new(Role::User, "历史消息"));
     tape.append(Message::new(Role::Assistant, "历史回答"));
-    let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape);
+    let mut runtime = AgentRuntime::with_tape(model, build_tool_registry(), identity, tape);
 
     let output = run_turn(&mut runtime, "创建检查点").expect("应成功完成");
 

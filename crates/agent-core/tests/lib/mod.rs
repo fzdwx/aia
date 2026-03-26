@@ -374,9 +374,11 @@ fn parse_arguments_类型不匹配时返回错误() {
 fn resolve_path_绝对路径直接返回() {
     let ctx = ToolExecutionContext {
         run_id: "r1".into(),
+        session_id: None,
         workspace_root: Some(PathBuf::from("/workspace")),
         abort: AbortSignal::new(),
         runtime: None,
+        runtime_host: None,
     };
     assert_eq!(ctx.resolve_path("/etc/hosts"), PathBuf::from("/etc/hosts"));
 }
@@ -385,9 +387,11 @@ fn resolve_path_绝对路径直接返回() {
 fn resolve_path_相对路径拼接_workspace_root() {
     let ctx = ToolExecutionContext {
         run_id: "r1".into(),
+        session_id: None,
         workspace_root: Some(PathBuf::from("/workspace")),
         abort: AbortSignal::new(),
         runtime: None,
+        runtime_host: None,
     };
     assert_eq!(ctx.resolve_path("src/main.rs"), PathBuf::from("/workspace/src/main.rs"));
 }
@@ -396,9 +400,11 @@ fn resolve_path_相对路径拼接_workspace_root() {
 fn resolve_path_无_workspace_root_时返回原样() {
     let ctx = ToolExecutionContext {
         run_id: "r1".into(),
+        session_id: None,
         workspace_root: None,
         abort: AbortSignal::new(),
         runtime: None,
+        runtime_host: None,
     };
     assert_eq!(ctx.resolve_path("src/main.rs"), PathBuf::from("src/main.rs"));
 }
@@ -443,9 +449,11 @@ async fn 注册表按名称分派工具调用() {
     let call = ToolCall::new("Echo").with_argument("text", "你好");
     let ctx = ToolExecutionContext {
         run_id: "r1".into(),
+        session_id: None,
         workspace_root: None,
         abort: AbortSignal::new(),
         runtime: None,
+        runtime_host: None,
     };
     let result = ToolExecutor::call(&registry, &call, &mut |_| {}, &ctx).await.unwrap();
     assert_eq!(result.content, "你好");
@@ -457,9 +465,11 @@ async fn 注册表未知工具返回错误() {
     let call = ToolCall::new("nonexistent");
     let ctx = ToolExecutionContext {
         run_id: "r1".into(),
+        session_id: None,
         workspace_root: None,
         abort: AbortSignal::new(),
         runtime: None,
+        runtime_host: None,
     };
     let err = ToolExecutor::call(&registry, &call, &mut |_| {}, &ctx).await.unwrap_err();
     assert!(err.to_string().contains("unknown tool"));

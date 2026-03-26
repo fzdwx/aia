@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use async_trait::async_trait;
 
 use crate::{
-    CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolExecutor, ToolOutputDelta,
-    ToolResult,
+    CoreError, SessionInteractionCapabilities, Tool, ToolCall, ToolDefinition,
+    ToolExecutionContext, ToolExecutor, ToolOutputDelta, ToolResult,
 };
 
 pub struct ToolRegistry {
@@ -46,6 +46,25 @@ impl ToolExecutor for ToolRegistry {
 
     fn definitions(&self) -> Vec<ToolDefinition> {
         self.tools.values().map(|tool| tool.definition()).collect()
+    }
+
+    fn definitions_for_capabilities(
+        &self,
+        capabilities: &SessionInteractionCapabilities,
+    ) -> Vec<ToolDefinition> {
+        self.tools
+            .values()
+            .filter(|tool| {
+                !tool.requires_interactive_capability()
+                    || capabilities.supports_interactive_components
+                        && capabilities.can_use_question_tool()
+            })
+            .map(|tool| tool.definition())
+            .collect()
+    }
+
+    fn tool_requires_runtime_context(&self, name: &str) -> bool {
+        self.tools.get(name).map(|tool| tool.requires_runtime_context()).unwrap_or(false)
     }
 
     async fn call(

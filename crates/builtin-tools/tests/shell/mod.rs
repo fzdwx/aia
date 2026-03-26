@@ -51,9 +51,11 @@ async fn shell_call_keeps_stdout_stderr_and_exit_code_in_details() {
         ToolCall::new("shell").with_argument("command", "printf 'out'; printf 'err' >&2; exit 7");
     let context = ToolExecutionContext {
         run_id: "test-run".into(),
+        session_id: None,
         workspace_root: Some(Path::new(".").to_path_buf()),
         abort: AbortSignal::new(),
         runtime: None,
+        runtime_host: None,
     };
     let mut deltas = Vec::new();
 
