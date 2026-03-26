@@ -388,6 +388,7 @@ describe("tool timeline", () => {
               description: "Run workspace checks",
             },
             detectedAtMs: Date.now() - 100,
+            startedAtMs: Date.now() - 90,
             output: "",
             completed: false,
           },
@@ -458,6 +459,43 @@ describe("tool timeline", () => {
     expect(readHtml).toContain('data-slot="tool-subtitle"')
     expect(readHtml).toContain('data-slot="tool-meta"')
     expect(readHtml).toContain("L2~21")
+  })
+
+  test("does not show live duration before a serial tool actually starts", () => {
+    const now = Date.now()
+    const html = renderWithTheme(
+      <StreamingToolGroup
+        toolOutputs={[
+          {
+            invocationId: "streaming-shell-started-1",
+            toolName: "Shell",
+            arguments: {
+              command: "cargo test",
+              description: "Runs Rust workspace tests",
+            },
+            detectedAtMs: now - 16_400,
+            startedAtMs: now - 16_300,
+            output: "",
+            completed: false,
+          },
+          {
+            invocationId: "streaming-shell-detected-2",
+            toolName: "Shell",
+            arguments: {
+              command: "pnpm run check",
+              description: "Runs frontend full checks",
+            },
+            detectedAtMs: now - 16_400,
+            output: "",
+            completed: false,
+          },
+        ]}
+      />
+    )
+
+    expect(html).toContain("Runs Rust workspace tests")
+    expect(html).toContain("Runs frontend full checks")
+    expect(html.match(/data-slot="tool-duration"/g)?.length ?? 0).toBe(1)
   })
 
   test("renders TapeInfo as a non-expandable inline summary row", () => {

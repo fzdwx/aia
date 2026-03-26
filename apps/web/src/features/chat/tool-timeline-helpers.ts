@@ -7,6 +7,7 @@ export type ToolRowItem = {
   id: string
   toolName: string
   arguments: Record<string, unknown>
+  detectedAtMs?: number
   startedAtMs?: number
   finishedAtMs?: number
   succeeded: boolean
@@ -88,6 +89,7 @@ export function fromInvocation(inv: ToolInvocationLifecycle): ToolRowItem {
     return {
       id: call.invocation_id,
       toolName: call.tool_name,
+      detectedAtMs: inv.started_at_ms,
       arguments: call.arguments,
       startedAtMs: inv.started_at_ms,
       finishedAtMs: inv.finished_at_ms,
@@ -99,6 +101,7 @@ export function fromInvocation(inv: ToolInvocationLifecycle): ToolRowItem {
   return {
     id: call.invocation_id,
     toolName: call.tool_name,
+    detectedAtMs: inv.started_at_ms,
     arguments: call.arguments,
     startedAtMs: inv.started_at_ms,
     finishedAtMs: inv.finished_at_ms,
@@ -112,7 +115,8 @@ export function fromStreamingTool(tool: StreamingToolOutput): ToolRowItem {
     id: tool.invocationId,
     toolName: tool.toolName,
     arguments: tool.arguments,
-    startedAtMs: tool.startedAtMs ?? tool.detectedAtMs,
+    detectedAtMs: tool.detectedAtMs,
+    startedAtMs: tool.startedAtMs,
     finishedAtMs: tool.finishedAtMs,
     succeeded: !tool.failed,
     outputContent: tool.resultContent ?? tool.output,

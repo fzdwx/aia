@@ -90,9 +90,7 @@ function ToolTrigger({
         </span>
       ) : null}
       {meta ? <span data-slot="tool-meta">{meta}</span> : null}
-      {duration ? (
-        <span data-slot="tool-duration">{duration}</span>
-      ) : null}
+      {duration ? <span data-slot="tool-duration">{duration}</span> : null}
     </div>
   )
 }
@@ -101,7 +99,9 @@ function ToolRow({ item }: { item: ToolRowItem }) {
   const [showDetails, setShowDetails] = useState(false)
   useDurationTicker(item.finishedAtMs == null)
   const isRunning = item.finishedAtMs == null
-  const duration = formatDurationMs(item.startedAtMs, item.finishedAtMs, {
+  const durationStartMs =
+    item.startedAtMs ?? (isRunning ? undefined : item.detectedAtMs)
+  const duration = formatDurationMs(durationStartMs, item.finishedAtMs, {
     live: isRunning,
   })
   const renderData = {
