@@ -12,6 +12,7 @@ mod turn_execution;
 mod types;
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 use agent_core::{
@@ -67,6 +68,48 @@ pub fn spawn_session_manager(config: SessionManagerConfig) -> SessionManagerHand
 }
 
 const UNAVAILABLE_SESSION_MODEL: &str = "unavailable";
+
+fn load_session_tape_with_repair(session_path: &Path) -> Result<SessionTape, RuntimeWorkerError> {
+    if !session_path.exists() {
+        return Ok(SessionTape::new());
+    }
+
+    let contents = std::fs::read_to_string(session_path)
+        .map_err(|error| RuntimeWorkerError::internal(format!("tape load failed: {error}")))?;
+    let mut tape = SessionTape::new();
+    let mut repaired = false;
+
+    for (index, line) in contents.lines().filter(|line| !line.trim().is_empty()).enumerate() {
+        let mut entry: TapeEntry = serde_json::from_str(line).map_err(|error| {
+            RuntimeWorkerError::internal(format!(
+                "tape decode failed at line {}: {error}",
+                index + 1
+            ))
+        })?;
+        let expected_id = (index as u64) + 1;
+        if entry.id != expected_id {
+            repaired = true;
+        }
+        entry.id = 0;
+        tape.append_entry(entry);
+    }
+
+    if repaired {
+        tape.save_jsonl(session_path).map_err(|error| {
+            RuntimeWorkerError::internal(format!("session save failed: {error}"))
+        })?;
+    }
+
+    Ok(tape)
+}
+
+fn refresh_runtime_tape_from_disk(
+    session_path: &Path,
+    runtime: &mut AgentRuntime<ServerModel, agent_core::ToolRegistry>,
+) -> Result<(), RuntimeWorkerError> {
+    *runtime.tape_mut() = load_session_tape_with_repair(session_path)?;
+    Ok(())
+}
 
 struct SessionManagerLoop {
     slots: HashMap<SessionId, SessionSlot>,
@@ -149,7 +192,7 @@ impl SessionManagerLoop {
                 let _ = reply.send(turn_execution.submit_turn(&session_id, prompt).await);
             }
             SessionCommand::CancelTurn { session_id, reply } => {
-                let mut query = SessionQueryService::new(&mut self.slots);
+                let mut query = SessionQueryService::new(&mut self.slots, &self.hydration_errors);
                 let result = query.cancel_turn(&session_id);
                 drop(query);
                 if matches!(result, Ok(true)) {
@@ -165,15 +208,15 @@ impl SessionManagerLoop {
                 let _ = reply.send(result);
             }
             SessionCommand::GetHistory { session_id, reply } => {
-                let query = SessionQueryService::new(&mut self.slots);
+                let query = SessionQueryService::new(&mut self.slots, &self.hydration_errors);
                 let _ = reply.send(query.history(&session_id));
             }
             SessionCommand::GetCurrentTurn { session_id, reply } => {
-                let query = SessionQueryService::new(&mut self.slots);
+                let query = SessionQueryService::new(&mut self.slots, &self.hydration_errors);
                 let _ = reply.send(query.current_turn(&session_id));
             }
             SessionCommand::GetSessionInfo { session_id, reply } => {
-                let query = SessionQueryService::new(&mut self.slots);
+                let query = SessionQueryService::new(&mut self.slots, &self.hydration_errors);
                 let _ = reply.send(query.session_info(&session_id));
             }
             SessionCommand::CreateHandoff { session_id, name, summary, reply } => {
@@ -238,6 +281,13 @@ impl SessionManagerLoop {
     fn handle_runtime_return(&mut self, mut ret: RuntimeReturn) {
         if let Some(slot) = self.slots.get_mut(&ret.session_id) {
             let session_path = slot.session_path.clone();
+            if let Err(error) = refresh_runtime_tape_from_disk(&session_path, &mut ret.runtime) {
+                let _ = self.config.broadcast_tx.send(SsePayload::Error {
+                    session_id: ret.session_id.clone(),
+                    turn_id: None,
+                    message: error.message,
+                });
+            }
             let pending_provider_binding = slot.take_pending_provider_binding();
             let sync = ReturnedRuntimeSync::new(
                 &ret.session_id,
@@ -440,8 +490,7 @@ impl SessionManagerLoop {
             return Ok(slot.provider_binding.clone());
         }
 
-        let tape = SessionTape::load_jsonl_or_default(&slot.session_path)
-            .map_err(|error| RuntimeWorkerError::internal(format!("tape load failed: {error}")))?;
+        let tape = load_session_tape_with_repair(&slot.session_path)?;
         tape.try_latest_provider_binding()
             .map_err(|error| RuntimeWorkerError::internal(error.to_string()))
             .map(|binding| binding.unwrap_or(SessionProviderBinding::Bootstrap))
@@ -457,8 +506,7 @@ impl SessionManagerLoop {
             })
         })?;
 
-        let tape = SessionTape::load_jsonl_or_default(&slot.session_path)
-            .map_err(|error| RuntimeWorkerError::internal(format!("tape load failed: {error}")))?;
+        let tape = load_session_tape_with_repair(&slot.session_path)?;
 
         tape.try_pending_question_request()
             .map_err(|error| RuntimeWorkerError::internal(error.to_string()))
@@ -475,8 +523,7 @@ impl SessionManagerLoop {
             })
         })?;
 
-        let mut tape = SessionTape::load_jsonl_or_default(&slot.session_path)
-            .map_err(|error| RuntimeWorkerError::internal(format!("tape load failed: {error}")))?;
+        let mut tape = load_session_tape_with_repair(&slot.session_path)?;
         if tape
             .try_pending_question_request()
             .map_err(|error| RuntimeWorkerError::internal(error.to_string()))?
@@ -533,8 +580,7 @@ impl SessionManagerLoop {
             })
         })?;
 
-        let mut tape = SessionTape::load_jsonl_or_default(&slot.session_path)
-            .map_err(|error| RuntimeWorkerError::internal(format!("tape load failed: {error}")))?;
+        let mut tape = load_session_tape_with_repair(&slot.session_path)?;
         let pending_request = tape
             .try_pending_question_request()
             .map_err(|error| RuntimeWorkerError::internal(error.to_string()))?
@@ -588,8 +634,7 @@ impl<'a> SessionSlotFactory<'a> {
 
     fn create(&self, session_id: &str) -> Result<SessionSlot, RuntimeWorkerError> {
         let session_path = self.config.sessions_dir.join(format!("{session_id}.jsonl"));
-        let mut tape = SessionTape::load_jsonl_or_default(&session_path)
-            .map_err(|error| RuntimeWorkerError::internal(format!("tape load failed: {error}")))?;
+        let mut tape = load_session_tape_with_repair(&session_path)?;
         reconcile_orphaned_inflight_state(&session_path, &mut tape)?;
         let provider_binding = tape
             .try_latest_provider_binding()
@@ -749,8 +794,7 @@ fn projected_session_model(
         });
     }
 
-    let tape = SessionTape::load_jsonl_or_default(&slot.session_path)
-        .map_err(|error| RuntimeWorkerError::internal(format!("tape load failed: {error}")))?;
+    let tape = load_session_tape_with_repair(&slot.session_path)?;
     let selection = choose_provider_for_tape(registry, &tape);
     Ok(crate::model::model_identity_from_selection(&selection).name)
 }

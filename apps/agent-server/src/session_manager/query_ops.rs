@@ -1,31 +1,51 @@
 use std::collections::HashMap;
 
+use crate::{runtime_worker::CurrentTurnSnapshot, sse::TurnStatus};
 use agent_core::{QuestionResult, QuestionResultStatus};
 use agent_runtime::{ContextStats, TurnLifecycle};
-use session_tape::SessionTape;
-
-use crate::{runtime_worker::CurrentTurnSnapshot, sse::TurnStatus};
 
 use super::{
-    RuntimeWorkerError, SessionId, SessionSlot, SlotStatus, read_lock, update_current_turn_status,
+    RuntimeWorkerError, SessionId, SessionSlot, SlotStatus, load_session_tape_with_repair,
+    read_lock, update_current_turn_status,
 };
 
 pub(crate) struct SessionQueryService<'a> {
     slots: &'a mut HashMap<SessionId, SessionSlot>,
+    hydration_errors: &'a HashMap<SessionId, RuntimeWorkerError>,
 }
 
 impl<'a> SessionQueryService<'a> {
-    pub(crate) fn new(slots: &'a mut HashMap<SessionId, SessionSlot>) -> Self {
-        Self { slots }
+    pub(crate) fn new(
+        slots: &'a mut HashMap<SessionId, SessionSlot>,
+        hydration_errors: &'a HashMap<SessionId, RuntimeWorkerError>,
+    ) -> Self {
+        Self { slots, hydration_errors }
+    }
+
+    fn get_slot(&self, session_id: &str) -> Result<&SessionSlot, RuntimeWorkerError> {
+        self.slots.get(session_id).ok_or_else(|| {
+            self.hydration_errors.get(session_id).cloned().unwrap_or_else(|| {
+                RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
+            })
+        })
+    }
+
+    fn get_slot_mut(&mut self, session_id: &str) -> Result<&mut SessionSlot, RuntimeWorkerError> {
+        if self.slots.contains_key(session_id) {
+            return self.slots.get_mut(session_id).ok_or_else(|| {
+                RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
+            });
+        }
+
+        Err(self.hydration_errors.get(session_id).cloned().unwrap_or_else(|| {
+            RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
+        }))
     }
 
     pub(crate) fn cancel_turn(&mut self, session_id: &str) -> Result<bool, RuntimeWorkerError> {
-        let slot = self.slots.get_mut(session_id).ok_or_else(|| {
-            RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
-        })?;
+        let slot = self.get_slot_mut(session_id)?;
 
-        let pending_request = SessionTape::load_jsonl_or_default(&slot.session_path)
-            .map_err(|error| RuntimeWorkerError::internal(format!("tape load failed: {error}")))?
+        let pending_request = load_session_tape_with_repair(&slot.session_path)?
             .try_pending_question_request()
             .map_err(|error| RuntimeWorkerError::internal(error.to_string()))?;
 
@@ -68,9 +88,7 @@ impl<'a> SessionQueryService<'a> {
         &self,
         session_id: &str,
     ) -> Result<Vec<TurnLifecycle>, RuntimeWorkerError> {
-        let slot = self.slots.get(session_id).ok_or_else(|| {
-            RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
-        })?;
+        let slot = self.get_slot(session_id)?;
         Ok(read_lock(&slot.history).clone())
     }
 
@@ -78,9 +96,7 @@ impl<'a> SessionQueryService<'a> {
         &self,
         session_id: &str,
     ) -> Result<Option<CurrentTurnSnapshot>, RuntimeWorkerError> {
-        let slot = self.slots.get(session_id).ok_or_else(|| {
-            RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
-        })?;
+        let slot = self.get_slot(session_id)?;
         Ok(read_lock(&slot.current_turn).clone())
     }
 
@@ -88,9 +104,7 @@ impl<'a> SessionQueryService<'a> {
         &self,
         session_id: &str,
     ) -> Result<ContextStats, RuntimeWorkerError> {
-        let slot = self.slots.get(session_id).ok_or_else(|| {
-            RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
-        })?;
+        let slot = self.get_slot(session_id)?;
 
         if let Some(runtime) = slot.runtime() {
             return Ok(runtime.context_stats());

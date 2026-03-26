@@ -17,8 +17,9 @@ use crate::{
 };
 
 use super::{
-    SessionId, SessionManagerConfig, SessionSlot, choose_provider_for_tape, prepare_runtime_sync,
-    prompt_cache_for_selection, refresh_context_stats_snapshot,
+    SessionId, SessionManagerConfig, SessionSlot, choose_provider_for_tape,
+    load_session_tape_with_repair, prepare_runtime_sync, prompt_cache_for_selection,
+    refresh_context_stats_snapshot,
 };
 
 enum RuntimeSyncMode {
@@ -261,10 +262,7 @@ impl<'a> ProviderSyncService<'a> {
                     });
                 }
 
-                let mut tape =
-                    SessionTape::load_jsonl_or_default(&slot.session_path).map_err(|error| {
-                        RuntimeWorkerError::internal(format!("tape load failed: {error}"))
-                    })?;
+                let mut tape = load_session_tape_with_repair(&slot.session_path)?;
                 if tape.latest_provider_binding().as_ref() != Some(&binding) {
                     tape.bind_provider(binding.clone());
                     tape.save_jsonl(&slot.session_path).map_err(|error| {
@@ -275,8 +273,7 @@ impl<'a> ProviderSyncService<'a> {
             }
         }
 
-        let tape = SessionTape::load_jsonl_or_default(&slot.session_path)
-            .map_err(|error| RuntimeWorkerError::internal(format!("tape load failed: {error}")))?;
+        let tape = load_session_tape_with_repair(&slot.session_path)?;
         let selection = choose_provider_for_tape(&self.config.registry, &tape);
         Ok(ProviderInfoSnapshot::from_identity(&crate::model::model_identity_from_selection(
             &selection,
@@ -339,9 +336,7 @@ impl<'a> ProviderSyncService<'a> {
                         next_active_binding,
                     },
                 ) => {
-                    let tape = SessionTape::load_jsonl_or_default(&slot.session_path).map_err(
-                        |error| RuntimeWorkerError::internal(format!("tape load failed: {error}")),
-                    )?;
+                    let tape = load_session_tape_with_repair(&slot.session_path)?;
                     slot.replace_pending_provider_binding(
                         if tape_follows_active_provider(&tape, previous_registry) {
                             Some(next_active_binding.clone())

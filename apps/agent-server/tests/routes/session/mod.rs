@@ -226,6 +226,184 @@ async fn get_pending_question_returns_request_from_session_tape() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn get_history_restores_session_after_question_waiting_restart() {
+    let suffix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+    let root =
+        std::env::temp_dir().join(format!("aia-routes-session-history-question-restart-{suffix}"));
+    let session_id = "session-question-restart";
+    let (state, root) =
+        test_state_with_session_manager_setup(root, sample_registry(), |root, store| {
+            store
+                .create_session(&agent_store::SessionRecord::new(
+                    session_id,
+                    "Question Session",
+                    "model-primary",
+                ))
+                .expect("session record should be inserted");
+
+            let session_path = root.join("sessions").join(format!("{session_id}.jsonl"));
+            let mut tape = session_tape::SessionTape::load_jsonl_or_default(&session_path)
+                .expect("session tape should load");
+            let turn_id = "turn-question-restart";
+            tape.append_entry(
+                session_tape::TapeEntry::message(&agent_core::Message::new(
+                    agent_core::Role::User,
+                    "请帮我确认偏好",
+                ))
+                .with_run_id(turn_id),
+            );
+            tape.append_entry(
+                session_tape::TapeEntry::event("turn_waiting_for_question", None)
+                    .with_run_id(turn_id),
+            );
+            tape.record_question_requested(&sample_question_request());
+            tape.save_jsonl(&session_path).expect("session tape should save");
+        });
+
+    let response = handlers::get_history(
+        State(state.clone()),
+        axum::extract::Query(SessionQuery {
+            session_id: Some(session_id.to_string()),
+            before_turn_id: None,
+            limit: Some(1),
+        }),
+    )
+    .await
+    .into_response();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_body_json(response).await;
+    let turns = body
+        .get("turns")
+        .and_then(|value| value.as_array())
+        .expect("history response should include turns array");
+    assert!(turns.len() <= 1);
+    assert_eq!(turns[0].get("outcome"), Some(&serde_json::json!("waiting_for_question")));
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn get_history_reports_hydration_error_for_unrestorable_session() {
+    let suffix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+    let root =
+        std::env::temp_dir().join(format!("aia-routes-session-history-hydration-error-{suffix}"));
+    let session_id = "session-broken-history";
+    let (state, root) = test_state_with_session_manager_setup(
+        root,
+        sample_registry(),
+        |root, store| {
+            store
+                .create_session(&agent_store::SessionRecord::new(
+                    session_id,
+                    "Broken Session",
+                    "model-primary",
+                ))
+                .expect("session record should be inserted");
+
+            std::fs::write(
+            root.join("sessions").join(format!("{session_id}.jsonl")),
+            concat!(
+                "{\"id\":1,\"kind\":\"event\",\"payload\":{\"name\":\"provider_binding\",\"data\":{\"name\":\"older\",\"model\":\"gpt-4.1-mini\",\"base_url\":\"https://api.openai.com/v1\",\"protocol\":\"openai-responses\"}},\"meta\":{},\"date\":\"2026-03-21T00:00:00Z\"}\n",
+                "{\"id\":2,\"kind\":\"event\",\"payload\":{\"name\":\"provider_binding\",\"data\":{\"broken\":true}},\"meta\":{},\"date\":\"2026-03-21T00:00:01Z\"}\n"
+            ),
+        )
+        .expect("broken tape should be written");
+        },
+    );
+
+    let response = handlers::get_history(
+        State(state.clone()),
+        axum::extract::Query(SessionQuery {
+            session_id: Some(session_id.to_string()),
+            before_turn_id: None,
+            limit: Some(1),
+        }),
+    )
+    .await
+    .into_response();
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let body = response_body_json(response).await;
+    assert!(
+        body.get("error")
+            .and_then(|value| value.as_str())
+            .is_some_and(|value| value.contains("provider_binding"))
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn get_history_repairs_non_contiguous_question_tape_ids_on_restart() {
+    let suffix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+    let root = std::env::temp_dir().join(format!("aia-routes-session-history-id-repair-{suffix}"));
+    let session_id = "session-question-id-repair";
+    let (state, root) = test_state_with_session_manager_setup(
+        root,
+        sample_registry(),
+        |root, store| {
+            store
+                .create_session(&agent_store::SessionRecord::new(
+                    session_id,
+                    "Question Session",
+                    "model-primary",
+                ))
+                .expect("session record should be inserted");
+
+            std::fs::write(
+            root.join("sessions").join(format!("{session_id}.jsonl")),
+            concat!(
+                "{\"id\":1,\"kind\":\"message\",\"payload\":{\"role\":\"user\",\"content\":\"请帮我确认偏好\"},\"meta\":{\"run_id\":\"turn-question-repair\"},\"date\":\"2026-03-21T00:00:00Z\"}\n",
+                "{\"id\":2,\"kind\":\"event\",\"payload\":{\"name\":\"turn_waiting_for_question\",\"data\":null},\"meta\":{\"run_id\":\"turn-question-repair\"},\"date\":\"2026-03-21T00:00:01Z\"}\n",
+                "{\"id\":3,\"kind\":\"event\",\"payload\":{\"name\":\"question_requested\",\"data\":{\"request_id\":\"qreq_123\",\"invocation_id\":\"call_123\",\"turn_id\":\"turn-question-repair\",\"questions\":[{\"id\":\"database\",\"question\":\"Use which database?\",\"kind\":\"choice\",\"required\":true,\"multi_select\":false,\"options\":[],\"placeholder\":null,\"recommended_option_id\":null,\"recommendation_reason\":null}]}},\"meta\":{},\"date\":\"2026-03-21T00:00:02Z\"}\n",
+                "{\"id\":3,\"kind\":\"tool_result\",\"payload\":{\"invocation_id\":\"call_123\",\"tool_name\":\"Question\",\"content\":\"{}\",\"details\":null},\"meta\":{\"run_id\":\"turn-question-repair\"},\"date\":\"2026-03-21T00:00:03Z\"}\n",
+                "{\"id\":4,\"kind\":\"event\",\"payload\":{\"name\":\"turn_completed\",\"data\":null},\"meta\":{\"run_id\":\"turn-question-repair\"},\"date\":\"2026-03-21T00:00:04Z\"}\n"
+            ),
+        )
+        .expect("broken tape should be written");
+        },
+    );
+
+    let response = handlers::get_history(
+        State(state.clone()),
+        axum::extract::Query(SessionQuery {
+            session_id: Some(session_id.to_string()),
+            before_turn_id: None,
+            limit: Some(1),
+        }),
+    )
+    .await
+    .into_response();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_body_json(response).await;
+    let turns = body
+        .get("turns")
+        .and_then(|value| value.as_array())
+        .expect("history response should include turns array");
+    assert!(turns.len() <= 1);
+
+    let repaired =
+        std::fs::read_to_string(root.join("sessions").join(format!("{session_id}.jsonl")))
+            .expect("repaired tape should be readable");
+    let ids = repaired
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            serde_json::from_str::<serde_json::Value>(line)
+                .expect("persisted line should be valid json")
+                .get("id")
+                .and_then(|value| value.as_u64())
+                .expect("persisted line should contain id")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec![1, 2, 3, 4, 5, 6]);
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn resolve_pending_question_appends_resolution_and_clears_pending_state() {
     let (state, root) =
         test_state_with_session_manager("session-resolve-question", sample_registry());

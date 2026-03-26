@@ -240,7 +240,8 @@ fn get_session_info_uses_cached_stats_when_turn_is_running() {
         },
     );
 
-    let query = SessionQueryService::new(&mut slots);
+    let hydration_errors = std::collections::HashMap::new();
+    let query = SessionQueryService::new(&mut slots, &hydration_errors);
     let stats = query.session_info("session-1").expect("session info should use cache");
 
     assert_eq!(stats.total_entries, 3);
@@ -586,7 +587,8 @@ fn handle_cancel_turn_marks_running_snapshot_as_cancelled() {
         }),
     };
 
-    let mut query = SessionQueryService::new(&mut slots);
+    let hydration_errors = std::collections::HashMap::new();
+    let mut query = SessionQueryService::new(&mut slots, &hydration_errors);
     let cancelled = query.cancel_turn("session-1").expect("cancel succeeds");
 
     assert!(cancelled);
