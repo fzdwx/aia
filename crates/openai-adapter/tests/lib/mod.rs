@@ -12,7 +12,7 @@ use agent_core::{
 };
 use agent_core_macros::ToolArgsSchema as DeriveToolArgsSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::{
     OpenAiChatCompletionsConfig, OpenAiChatCompletionsModel, OpenAiResponsesConfig,
@@ -121,9 +121,9 @@ fn responses_请求体会透传自研_schema_工具参数且不包含_schema_元
     .expect("模型创建成功");
 
     let mut request = sample_request();
-    request.available_tools = vec![
-        ToolDefinition::new("search_code", "搜索代码").with_parameters_schema::<SearchToolArgs>(),
-    ];
+    request.available_tools =
+        vec![ToolDefinition::new("search_code", "搜索代码")
+            .with_parameters_schema::<SearchToolArgs>()];
 
     let body = model.build_request_body(&request);
 
@@ -953,6 +953,126 @@ fn 未知_reasoning_事件不会被当成思考内容() {
             StreamEvent::Done,
         ]
     );
+}
+
+#[test]
+fn responses_流式_error_事件会让请求失败而不是返回空完成() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("监听成功");
+    let address = listener.local_addr().expect("读取地址成功");
+
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("接受连接成功");
+        let mut buffer = [0_u8; 4096];
+        let _ = stream.read(&mut buffer).expect("读取请求成功");
+
+        let sse_body = [
+            r#"data: {"type":"response.created","response":{"id":"resp_failed"}}"#,
+            r#"data: {"type":"error","error":{"type":"server_error","code":"server_error","message":"upstream failed"}}"#,
+            r#"data: {"type":"response.failed","response":{"id":"resp_failed","status":"failed","error":{"code":"server_error","message":"upstream failed"}}}"#,
+            r#"data: [DONE]"#,
+        ]
+        .join("\n\n");
+
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n{sse_body}\n\n"
+        );
+        stream.write_all(response.as_bytes()).expect("写回响应成功");
+    });
+
+    let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
+        format!("http://{address}"),
+        "test-key",
+        "gpt-4.1-mini",
+    ))
+    .expect("模型创建成功");
+
+    let error =
+        run_async(model.complete_streaming(sample_request(), &AbortSignal::new(), &mut |_| {}))
+            .expect_err("流式调用应当失败");
+
+    handle.join().expect("服务线程退出");
+    assert!(error.to_string().contains("upstream failed"));
+}
+
+#[test]
+fn responses_仅有_response_failed_事件时也会失败() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("监听成功");
+    let address = listener.local_addr().expect("读取地址成功");
+
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("接受连接成功");
+        let mut buffer = [0_u8; 4096];
+        let _ = stream.read(&mut buffer).expect("读取请求成功");
+
+        let sse_body = [
+            r#"data: {"type":"response.created","response":{"id":"resp_failed"}}"#,
+            r#"data: {"type":"response.failed","response":{"id":"resp_failed","status":"failed","error":{"code":"server_error","message":"failed from response object"}}}"#,
+            r#"data: [DONE]"#,
+        ]
+        .join("\n\n");
+
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n{sse_body}\n\n"
+        );
+        stream.write_all(response.as_bytes()).expect("写回响应成功");
+    });
+
+    let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
+        format!("http://{address}"),
+        "test-key",
+        "gpt-4.1-mini",
+    ))
+    .expect("模型创建成功");
+
+    let error =
+        run_async(model.complete_streaming(sample_request(), &AbortSignal::new(), &mut |_| {}))
+            .expect_err("仅 response.failed 也应失败");
+
+    handle.join().expect("服务线程退出");
+    assert!(error.to_string().contains("failed from response object"));
+}
+
+#[test]
+fn responses_流式失败时不会额外发送_done_事件() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("监听成功");
+    let address = listener.local_addr().expect("读取地址成功");
+
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("接受连接成功");
+        let mut buffer = [0_u8; 4096];
+        let _ = stream.read(&mut buffer).expect("读取请求成功");
+
+        let sse_body = [
+            r#"data: {"type":"response.created","response":{"id":"resp_failed"}}"#,
+            r#"data: {"type":"response.output_text.delta","delta":"partial"}"#,
+            r#"data: {"type":"response.failed","response":{"id":"resp_failed","status":"failed","error":{"code":"server_error","message":"upstream failed"}}}"#,
+            r#"data: [DONE]"#,
+        ]
+        .join("\n\n");
+
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n{sse_body}\n\n"
+        );
+        stream.write_all(response.as_bytes()).expect("写回响应成功");
+    });
+
+    let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
+        format!("http://{address}"),
+        "test-key",
+        "gpt-4.1-mini",
+    ))
+    .expect("模型创建成功");
+
+    let mut deltas = Vec::new();
+    let error =
+        run_async(model.complete_streaming(sample_request(), &AbortSignal::new(), &mut |event| {
+            deltas.push(event);
+        }))
+        .expect_err("失败流不应返回完成结果");
+
+    handle.join().expect("服务线程退出");
+    assert!(error.to_string().contains("upstream failed"));
+    assert_eq!(deltas, vec![StreamEvent::TextDelta { text: "partial".into() }]);
 }
 
 #[test]

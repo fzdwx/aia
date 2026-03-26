@@ -15,6 +15,24 @@ fn now_timestamp_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
 }
 
+fn error_message(value: &Value) -> Option<String> {
+    value
+        .as_str()
+        .filter(|text| !text.trim().is_empty())
+        .map(ToString::to_string)
+}
+
+fn response_stream_error(event: &Value) -> Option<String> {
+    error_message(&event["error"]["message"])
+        .or_else(|| error_message(&event["response"]["error"]["message"]))
+        .or_else(|| error_message(&event["message"]))
+        .or_else(|| {
+            event["response"]["status"]
+                .as_str()
+                .map(|status| format!("response {status}"))
+        })
+}
+
 #[derive(Default)]
 pub(super) struct ResponsesStreamingState {
     text_buf: String,
@@ -123,6 +141,11 @@ impl StreamingState for ResponsesStreamingState {
             }
             Some("response.function_call_arguments.done") => {
                 self.finish_current_tool_call(sink);
+            }
+            Some("error" | "response.failed") => {
+                let message = response_stream_error(event)
+                    .unwrap_or_else(|| "OpenAI Responses stream failed".to_string());
+                return Err(OpenAiAdapterError::new(message));
             }
             Some("response.completed") => {
                 if self.response_id.is_none() {
