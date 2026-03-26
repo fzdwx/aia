@@ -7,8 +7,8 @@ use std::{
 use agent_core::{
     AbortSignal, Completion, CompletionRequest, CompletionSegment, CompletionStopReason,
     CompletionUsage, ConversationItem, CoreError, LanguageModel, Message, ModelDisposition,
-    ModelIdentity, Role, ToolCall, ToolDefinition, ToolExecutionContext, ToolExecutor,
-    ToolOutputDelta, ToolResult,
+    ModelIdentity, QuestionAnswer, QuestionResult, QuestionResultStatus, Role, ToolCall,
+    ToolDefinition, ToolExecutionContext, ToolExecutor, ToolOutputDelta, ToolResult,
 };
 use async_trait::async_trait;
 use serde_json::json;
@@ -541,7 +541,6 @@ impl LanguageModel for StopReasonDrivenModel {
     }
 }
 
-
 struct StubTools;
 
 #[async_trait]
@@ -614,6 +613,107 @@ impl ToolExecutor for BlockingCancelAwareTools {
     }
 }
 
+struct QuestionToolModel;
+
+#[async_trait]
+impl LanguageModel for QuestionToolModel {
+    type Error = CoreError;
+
+    async fn complete_streaming(
+        &self,
+        _request: CompletionRequest,
+        _abort: &AbortSignal,
+        _sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
+    ) -> Result<Completion, Self::Error> {
+        Ok(Completion {
+            segments: vec![CompletionSegment::ToolUse(
+                ToolCall::new("Question").with_arguments_value(serde_json::json!({
+                    "questions": [{
+                        "id": "database",
+                        "question": "Use which database?",
+                        "kind": "choice",
+                        "required": true,
+                        "multi_select": false,
+                        "options": [
+                            { "id": "sqlite", "label": "SQLite" },
+                            { "id": "postgres", "label": "Postgres" }
+                        ],
+                        "recommended_option_id": "sqlite",
+                        "recommendation_reason": "best local default"
+                    }]
+                })),
+            )],
+            stop_reason: CompletionStopReason::ToolUse,
+            usage: None,
+            response_body: None,
+            http_status_code: None,
+        })
+    }
+}
+
+struct ResumeAfterQuestionModel {
+    seen_requests: Mutex<Vec<CompletionRequest>>,
+}
+
+impl ResumeAfterQuestionModel {
+    fn new() -> Self {
+        Self { seen_requests: Mutex::new(Vec::new()) }
+    }
+}
+
+#[async_trait]
+impl LanguageModel for ResumeAfterQuestionModel {
+    type Error = CoreError;
+
+    async fn complete_streaming(
+        &self,
+        request: CompletionRequest,
+        _abort: &AbortSignal,
+        _sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
+    ) -> Result<Completion, Self::Error> {
+        let step = mutex_lock(&self.seen_requests).len();
+        mutex_lock(&self.seen_requests).push(request.clone());
+
+        if step == 0 {
+            return Ok(Completion {
+                segments: vec![CompletionSegment::ToolUse(
+                    ToolCall::new("Question").with_arguments_value(serde_json::json!({
+                        "questions": [{
+                            "id": "database",
+                            "question": "Use which database?",
+                            "kind": "choice",
+                            "required": true,
+                            "multi_select": false,
+                            "options": [
+                                { "id": "sqlite", "label": "SQLite" },
+                                { "id": "postgres", "label": "Postgres" }
+                            ],
+                            "recommended_option_id": "sqlite",
+                            "recommendation_reason": "best local default"
+                        }]
+                    })),
+                )],
+                stop_reason: CompletionStopReason::ToolUse,
+                usage: None,
+                response_body: None,
+                http_status_code: None,
+            });
+        }
+
+        let saw_question_result = request.conversation.iter().any(|item| {
+            item.as_tool_result().is_some_and(|result| {
+                result.tool_name == "Question" && result.content.contains("answered")
+            })
+        });
+
+        if !saw_question_result {
+            return Err(CoreError::new("missing question result in resumed request"));
+        }
+
+        Ok(Completion::text("已根据你的回答继续完成"))
+    }
+}
+
 #[test]
 fn 运行时可在工具执行期间取消当前轮() {
     let identity = ModelIdentity::new("local", "stub", ModelDisposition::Balanced);
@@ -641,6 +741,112 @@ fn 运行时可在工具执行期间取消当前轮() {
                 .and_then(|value| value.get("message"))
                 .and_then(|value| value.as_str())
                 .is_some_and(|message| message.contains("已取消"))
+    }));
+}
+
+#[test]
+fn question_runtime_tool_会生成_pending_request_并以等待态结束轮次() {
+    let identity = ModelIdentity::new("local", "question", ModelDisposition::Balanced);
+    let mut runtime = AgentRuntime::new(QuestionToolModel, StubTools, identity);
+    let subscriber = runtime.subscribe();
+
+    let output = run_turn(&mut runtime, "需要你决定数据库").expect("question turn should finish");
+
+    assert_eq!(output.assistant_text, "");
+    let pending = runtime
+        .tape()
+        .try_pending_question_request()
+        .expect("pending question should decode")
+        .expect("pending question should exist");
+    assert!(pending.request_id.starts_with("qreq_"));
+    assert!(pending.turn_id.starts_with("turn-"));
+    assert!(pending.invocation_id.starts_with("tool-call-"));
+    assert_eq!(pending.questions.len(), 1);
+    assert!(
+        runtime
+            .tape()
+            .entries()
+            .iter()
+            .any(|entry| { entry.event_name() == Some("question_requested") })
+    );
+    assert!(
+        !runtime
+            .tape()
+            .entries()
+            .iter()
+            .any(|entry| { entry.event_name() == Some("turn_completed") })
+    );
+    assert!(
+        runtime
+            .tape()
+            .entries()
+            .iter()
+            .any(|entry| { entry.event_name() == Some("turn_waiting_for_question") })
+    );
+
+    let events = runtime.collect_events(subscriber).expect("events should collect");
+    let lifecycle = events
+        .into_iter()
+        .find_map(|event| match event {
+            RuntimeEvent::TurnLifecycle { turn } => Some(turn),
+            _ => None,
+        })
+        .expect("turn lifecycle should exist");
+    assert_eq!(lifecycle.outcome, TurnOutcome::WaitingForQuestion);
+}
+
+#[test]
+fn question_answer_result_can_resume_original_turn() {
+    let identity = ModelIdentity::new("local", "question-resume", ModelDisposition::Balanced);
+    let model = ResumeAfterQuestionModel::new();
+    let mut runtime = AgentRuntime::new(model, StubTools, identity);
+
+    let first = run_turn(&mut runtime, "需要你决定数据库").expect("question turn should finish");
+    assert_eq!(first.assistant_text, "");
+
+    let pending = runtime
+        .tape()
+        .try_pending_question_request()
+        .expect("pending question should decode")
+        .expect("pending question should exist");
+
+    let result = QuestionResult {
+        status: QuestionResultStatus::Answered,
+        request_id: pending.request_id.clone(),
+        answers: vec![QuestionAnswer {
+            question_id: "database".into(),
+            selected_option_ids: vec!["sqlite".into()],
+            text: None,
+        }],
+        reason: None,
+    };
+
+    runtime.tape_mut().record_question_resolved(&result);
+    let call = ToolCall::new("Question")
+        .with_invocation_id(pending.invocation_id.clone())
+        .with_arguments_value(serde_json::json!({ "questions": pending.questions }));
+    let content = serde_json::to_string(&result).expect("question result should encode");
+    let details = serde_json::to_value(&result).expect("question result should serialize");
+    runtime.tape_mut().append_entry(
+        session_tape::TapeEntry::tool_result(
+            &ToolResult::from_call(&call, content).with_details(details),
+        )
+        .with_run_id(&pending.turn_id),
+    );
+
+    let resumed = run_async(runtime.resume_turn_after_question(
+        &pending.turn_id,
+        &result,
+        TurnControl::new(AbortSignal::new()),
+        |_| {},
+    ))
+    .expect("resumed turn should finish");
+
+    assert_eq!(resumed.assistant_text, "已根据你的回答继续完成");
+    let requests = mutex_lock(&runtime.model.seen_requests);
+    assert_eq!(requests.len(), 2);
+    assert!(requests[1].conversation.iter().any(|item| {
+        item.as_tool_result().is_some_and(|tool_result| tool_result.tool_name == "Question")
     }));
 }
 

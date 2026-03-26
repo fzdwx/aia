@@ -219,3 +219,15 @@ pub(crate) fn turn_block_to_current(block: agent_runtime::TurnBlock) -> Option<C
         }
     }
 }
+
+pub(crate) fn current_turn_snapshot_from_lifecycle(
+    lifecycle: &agent_runtime::TurnLifecycle,
+) -> CurrentTurnSnapshot {
+    CurrentTurnSnapshot {
+        turn_id: lifecycle.turn_id.clone(),
+        started_at_ms: lifecycle.started_at_ms,
+        user_message: lifecycle.user_message.clone(),
+        status: turn_lifecycle_status(lifecycle),
+        blocks: lifecycle.blocks.clone().into_iter().filter_map(turn_block_to_current).collect(),
+    }
+}

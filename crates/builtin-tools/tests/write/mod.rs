@@ -40,6 +40,7 @@ impl Drop for TestDir {
 fn test_context(workspace_root: &Path) -> ToolExecutionContext {
     ToolExecutionContext {
         run_id: "test-run".into(),
+        session_id: None,
         workspace_root: Some(workspace_root.to_path_buf()),
         abort: AbortSignal::new(),
         runtime: None,

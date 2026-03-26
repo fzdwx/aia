@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -7,8 +6,7 @@ use agent_runtime::{AgentRuntime, ContextStats, RuntimeHooks, RuntimeSubscriberI
 use agent_store::{AiaStore, SessionRecord};
 use provider_registry::ProviderRegistry;
 use session_tape::SessionProviderBinding;
-use tokio::sync::{broadcast, mpsc, oneshot};
-use tokio::sync::oneshot as tokio_oneshot;
+use tokio::sync::{broadcast, oneshot};
 
 use crate::{
     model::ServerModel,
@@ -47,7 +45,6 @@ pub(crate) struct SessionSlot {
     pub(crate) current_turn: Arc<RwLock<Option<CurrentTurnSnapshot>>>,
     pub(crate) context_stats: Arc<RwLock<ContextStats>>,
     pub(crate) execution: SlotExecutionState,
-    pub(crate) pending_question_waiters: HashMap<String, tokio_oneshot::Sender<QuestionResult>>,
 }
 
 impl SessionSlot {
@@ -67,7 +64,6 @@ impl SessionSlot {
             current_turn,
             context_stats,
             execution: SlotExecutionState::Idle { runtime, subscriber },
-            pending_question_waiters: HashMap::new(),
         }
     }
 
@@ -193,21 +189,6 @@ impl SessionSlot {
             }
         }
     }
-
-    pub(crate) fn insert_pending_question_waiter(
-        &mut self,
-        request_id: String,
-        sender: tokio_oneshot::Sender<QuestionResult>,
-    ) {
-        self.pending_question_waiters.insert(request_id, sender);
-    }
-
-    pub(crate) fn remove_pending_question_waiter(
-        &mut self,
-        request_id: &str,
-    ) -> Option<tokio_oneshot::Sender<QuestionResult>> {
-        self.pending_question_waiters.remove(request_id)
-    }
 }
 
 pub(crate) struct RuntimeReturn {
@@ -267,11 +248,6 @@ pub(crate) enum SessionCommand {
         session_id: SessionId,
         reply: oneshot::Sender<Result<Option<QuestionRequest>, RuntimeWorkerError>>,
     },
-    AskQuestion {
-        session_id: SessionId,
-        request: QuestionRequest,
-        reply: oneshot::Sender<Result<QuestionResult, RuntimeWorkerError>>,
-    },
     ResolvePendingQuestion {
         session_id: SessionId,
         result: QuestionResult,
@@ -317,11 +293,6 @@ pub struct SessionManagerConfig {
     pub request_timeout: RequestTimeoutConfig,
     pub system_prompt: Option<String>,
     pub runtime_hooks: RuntimeHooks,
-    pub question_coordinator: Arc<QuestionCoordinator>,
-}
-
-pub struct QuestionCoordinator {
-    pub(crate) tx: mpsc::Sender<SessionCommand>,
 }
 
 pub(crate) fn read_lock<T>(lock: &RwLock<T>) -> RwLockReadGuard<'_, T> {

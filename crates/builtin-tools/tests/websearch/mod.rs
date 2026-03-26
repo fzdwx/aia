@@ -84,6 +84,7 @@ async fn websearch_tool_returns_aborted_result_when_signal_is_pre_cancelled()
             &mut |_| {},
             &ToolExecutionContext {
                 run_id: "test-run".into(),
+                session_id: None,
                 workspace_root: Some(dir.path().to_path_buf()),
                 abort,
                 runtime: None,

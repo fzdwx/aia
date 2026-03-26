@@ -66,9 +66,6 @@ fn sample_manager_config(root: &std::path::Path) -> SessionManagerConfig {
         },
         system_prompt: None,
         runtime_hooks: agent_runtime::RuntimeHooks::default(),
-        question_coordinator: Arc::new(crate::session_manager::QuestionCoordinator {
-            tx: tokio::sync::mpsc::channel(8).0,
-        }),
     }
 }
 
@@ -122,7 +119,6 @@ fn get_session_info_uses_cached_stats_when_turn_is_running() {
                 },
                 pending_provider_binding: None,
             },
-            pending_question_waiters: std::collections::HashMap::new(),
         },
     );
 
@@ -170,7 +166,6 @@ fn running_session_slot_keeps_in_memory_provider_binding() {
                 },
                 pending_provider_binding: None,
             },
-            pending_question_waiters: std::collections::HashMap::new(),
         },
     );
 
@@ -199,6 +194,15 @@ fn session_slot_begin_turn_transitions_to_running_state() {
     assert!(slot.runtime().is_none());
     assert!(slot.running_turn().is_some());
     assert!(!running_turn.control.abort_signal().is_aborted());
+}
+
+#[test]
+fn idle_session_slot_only_exposes_single_question_runtime_tool() {
+    let slot = build_idle_slot("slot-question-runtime-tool");
+    let runtime = slot.runtime().expect("idle slot should retain runtime");
+    let visible_tools = runtime.visible_tools();
+
+    assert_eq!(visible_tools.iter().filter(|definition| definition.name == "Question").count(), 1);
 }
 
 #[test]
@@ -443,7 +447,6 @@ fn handle_cancel_turn_marks_running_snapshot_as_cancelled() {
                 running_turn: handle,
                 pending_provider_binding: None,
             },
-            pending_question_waiters: std::collections::HashMap::new(),
         },
     );
     let (broadcast_tx, _broadcast_rx) = tokio::sync::broadcast::channel(8);
@@ -467,9 +470,6 @@ fn handle_cancel_turn_marks_running_snapshot_as_cancelled() {
         },
         system_prompt: None,
         runtime_hooks: agent_runtime::RuntimeHooks::default(),
-        question_coordinator: Arc::new(crate::session_manager::QuestionCoordinator {
-            tx: tokio::sync::mpsc::channel(8).0,
-        }),
     };
 
     let mut query = SessionQueryService::new(&mut slots);
@@ -514,9 +514,6 @@ fn spawned_turn_worker_completes_bootstrap_turn() {
             },
             system_prompt: None,
             runtime_hooks: agent_runtime::RuntimeHooks::default(),
-            question_coordinator: Arc::new(crate::session_manager::QuestionCoordinator {
-                tx: tokio::sync::mpsc::channel(8).0,
-            }),
         });
 
         let session = handle
@@ -602,9 +599,6 @@ fn spawned_turn_worker_applies_custom_system_prompt_and_runtime_hooks() {
             },
             system_prompt: Some("你是测试客户端代理。".into()),
             runtime_hooks,
-            question_coordinator: Arc::new(crate::session_manager::QuestionCoordinator {
-                tx: tokio::sync::mpsc::channel(8).0,
-            }),
         });
 
         let session = handle

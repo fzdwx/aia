@@ -94,4 +94,33 @@ where
         Ok(())
     }
 
+    pub(super) fn finish_waiting_for_question_turn(
+        &mut self,
+        context: TurnSuccessContext,
+    ) -> Result<(), RuntimeError> {
+        let waiting_event_id = self.append_tape_entry(
+            TapeEntry::event("turn_waiting_for_question", Some(json!({ "status": "waiting" })))
+                .with_run_id(&context.turn_id)
+                .with_meta("source_entry_ids", json!(context.source_entry_ids.clone())),
+        )?;
+        let mut source_entry_ids = context.source_entry_ids;
+        source_entry_ids.push(waiting_event_id);
+        let turn = TurnLifecycle {
+            turn_id: context.turn_id,
+            started_at_ms: context.started_at_ms,
+            finished_at_ms: now_timestamp_ms(),
+            source_entry_ids,
+            user_message: context.user_message,
+            blocks: context.blocks,
+            assistant_message: context.summary.assistant_message,
+            thinking: context.summary.thinking,
+            tool_invocations: context.tool_invocations,
+            usage: context.summary.usage,
+            failure_message: None,
+            outcome: TurnOutcome::WaitingForQuestion,
+        };
+        self.publish_turn_lifecycle(turn.clone());
+        self.notify_turn_end(&turn);
+        Ok(())
+    }
 }

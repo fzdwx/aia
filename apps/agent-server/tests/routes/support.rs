@@ -98,9 +98,6 @@ pub(crate) fn test_state_with_session_manager_setup(
         },
         system_prompt: None,
         runtime_hooks: agent_runtime::RuntimeHooks::default(),
-        question_coordinator: Arc::new(crate::session_manager::QuestionCoordinator {
-            tx: tokio::sync::mpsc::channel(8).0,
-        }),
     });
     let channel_adapter_catalog = Arc::new(build_channel_adapter_catalog(
         store.clone(),

@@ -1,4 +1,6 @@
-use agent_core::{CompletionStopReason, LanguageModel, Message, Role, StreamEvent, ToolExecutor};
+use agent_core::{
+    CompletionStopReason, LanguageModel, Message, QuestionResult, Role, StreamEvent, ToolExecutor,
+};
 use session_tape::TapeEntry;
 
 use crate::{RuntimeEvent, TurnControl, TurnOutput};
@@ -10,6 +12,30 @@ use super::super::{
 };
 use super::segments::CompletionProcessingResult;
 use super::types::TurnBuffers;
+
+fn parse_iso8601_utc_seconds(input: &str) -> Option<u64> {
+    if input.len() != 20 || !input.ends_with('Z') {
+        return None;
+    }
+
+    let year: i64 = input.get(0..4)?.parse().ok()?;
+    let month: i64 = input.get(5..7)?.parse().ok()?;
+    let day: i64 = input.get(8..10)?.parse().ok()?;
+    let hour: i64 = input.get(11..13)?.parse().ok()?;
+    let minute: i64 = input.get(14..16)?.parse().ok()?;
+    let second: i64 = input.get(17..19)?.parse().ok()?;
+
+    let adjusted_year = year - if month <= 2 { 1 } else { 0 };
+    let era = if adjusted_year >= 0 { adjusted_year } else { adjusted_year - 399 } / 400;
+    let year_of_era = adjusted_year - era * 400;
+    let adjusted_month = month + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * adjusted_month + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days_since_epoch = era * 146097 + day_of_era - 719468;
+    let total_seconds = days_since_epoch * 86_400 + hour * 3_600 + minute * 60 + second;
+
+    (total_seconds >= 0).then_some((total_seconds as u64) * 1000)
+}
 
 impl<M, T> AgentRuntime<M, T>
 where
@@ -29,6 +55,97 @@ where
             runtime_error.clone(),
         )?;
         Err(runtime_error)
+    }
+
+    fn restore_waiting_turn(
+        &self,
+        turn_id: &str,
+    ) -> Result<(u64, String, TurnBuffers), RuntimeError> {
+        let entries = self.tape().entries();
+        let has_waiting_event = entries.iter().rev().any(|entry| {
+            entry.event_name() == Some("turn_waiting_for_question")
+                && entry.meta.get("run_id").and_then(|value| value.as_str()) == Some(turn_id)
+        });
+        if !has_waiting_event {
+            return Err(RuntimeError::session("missing turn_waiting_for_question event"));
+        }
+
+        let mut started_at_ms = 0_u64;
+        let mut user_message: Option<String> = None;
+        let mut source_entry_ids = Vec::new();
+        let mut aggregated_thinking = String::new();
+        let mut tool_invocations = Vec::new();
+        let mut blocks = Vec::new();
+        let mut last_assistant_text = None;
+        let mut pending_tool_calls = std::collections::BTreeMap::new();
+
+        for entry in entries {
+            let run_id = entry.meta.get("run_id").and_then(|value| value.as_str());
+            if run_id != Some(turn_id) {
+                continue;
+            }
+
+            source_entry_ids.push(entry.id);
+            if started_at_ms == 0 {
+                started_at_ms = parse_iso8601_utc_seconds(&entry.date).unwrap_or(0);
+            }
+
+            if let Some(message) = entry.as_message() {
+                match message.role {
+                    Role::User if user_message.is_none() => user_message = Some(message.content),
+                    Role::Assistant => {
+                        last_assistant_text = Some(message.content.clone());
+                        blocks.push(crate::TurnBlock::Assistant { content: message.content });
+                    }
+                    Role::System | Role::Tool | Role::User => {}
+                }
+                continue;
+            }
+
+            if let Some(content) = entry.as_thinking() {
+                aggregated_thinking.push_str(content);
+                blocks.push(crate::TurnBlock::Thinking { content: content.to_string() });
+                continue;
+            }
+
+            if let Some(call) = entry.as_tool_call() {
+                pending_tool_calls.insert(call.invocation_id.clone(), call);
+                continue;
+            }
+
+            if let Some(result) = entry.as_tool_result() {
+                let call = pending_tool_calls.remove(&result.invocation_id).unwrap_or_else(|| {
+                    agent_core::ToolCall::new(result.tool_name.clone())
+                        .with_invocation_id(result.invocation_id.clone())
+                });
+                let invocation = crate::ToolInvocationLifecycle {
+                    call,
+                    started_at_ms,
+                    finished_at_ms: started_at_ms,
+                    trace_context: None,
+                    outcome: crate::ToolInvocationOutcome::Succeeded { result },
+                };
+                blocks.push(crate::TurnBlock::ToolInvocation {
+                    invocation: Box::new(invocation.clone()),
+                });
+                tool_invocations.push(invocation);
+            }
+        }
+
+        let user_message = user_message
+            .ok_or_else(|| RuntimeError::session("missing user message for waiting turn"))?;
+
+        Ok((
+            started_at_ms,
+            user_message,
+            TurnBuffers::from_restored_state(
+                source_entry_ids,
+                aggregated_thinking,
+                tool_invocations,
+                blocks,
+                last_assistant_text,
+            ),
+        ))
     }
 
     async fn drive_turn_loop(
@@ -154,7 +271,24 @@ where
                 }
             };
 
-            let CompletionProcessingResult::Continue { saw_tool_calls } = processing_result;
+            if matches!(processing_result, CompletionProcessingResult::WaitingForQuestion) {
+                self.finish_waiting_for_question_turn(buffers.into_success_context(
+                    turn_id.clone(),
+                    started_at_ms,
+                    user_message.content.clone(),
+                    completion.usage.clone(),
+                ))?;
+
+                return Ok(TurnOutput {
+                    assistant_text,
+                    completion,
+                    visible_tools: self.visible_tools(),
+                });
+            }
+
+            let CompletionProcessingResult::Continue { saw_tool_calls } = processing_result else {
+                unreachable!();
+            };
 
             match completion.stop_reason {
                 CompletionStopReason::ToolUse => {
@@ -235,6 +369,30 @@ where
             control,
             buffers,
             llm_step_index,
+            on_delta,
+        )
+        .await
+    }
+
+    pub async fn resume_turn_after_question(
+        &mut self,
+        turn_id: &str,
+        _result: &QuestionResult,
+        control: TurnControl,
+        on_delta: impl FnMut(StreamEvent) + Send,
+    ) -> Result<TurnOutput, RuntimeError> {
+        self.ensure_agent_started()?;
+
+        let (started_at_ms, user_message, buffers) = self.restore_waiting_turn(turn_id)?;
+        let resumed_user_message = Message::new(Role::User, user_message);
+
+        self.drive_turn_loop(
+            turn_id.to_string(),
+            started_at_ms,
+            resumed_user_message,
+            control,
+            buffers,
+            1,
             on_delta,
         )
         .await

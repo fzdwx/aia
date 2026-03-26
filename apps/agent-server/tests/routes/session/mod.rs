@@ -271,6 +271,9 @@ async fn resolve_pending_question_appends_resolution_and_clears_pending_state() 
         None
     );
     assert!(restored.entries().iter().any(|entry| entry.event_name() == Some("question_resolved")));
+    assert!(restored.entries().iter().any(|entry| {
+        entry.as_tool_result().is_some_and(|tool_result| tool_result.tool_name == "Question")
+    }));
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -315,7 +318,13 @@ async fn resolve_pending_question_without_waiter_only_records_resolution() {
 
     let restored = session_tape::SessionTape::load_jsonl_or_default(&session_path)
         .expect("updated tape should load");
-    assert_eq!(restored.try_pending_question_request().expect("pending question should decode"), None);
+    assert_eq!(
+        restored.try_pending_question_request().expect("pending question should decode"),
+        None
+    );
+    assert!(restored.entries().iter().any(|entry| {
+        entry.as_tool_result().is_some_and(|tool_result| tool_result.tool_name == "Question")
+    }));
 
     let _ = std::fs::remove_dir_all(root);
 }

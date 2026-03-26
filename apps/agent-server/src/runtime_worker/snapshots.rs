@@ -4,7 +4,7 @@ use agent_core::{CompletionUsage, Role};
 use agent_runtime::{TurnLifecycle, TurnOutcome};
 use session_tape::SessionTape;
 
-use super::{CurrentTurnSnapshot, turn_block_to_current, turn_lifecycle_status};
+use super::{CurrentTurnSnapshot, current_turn_snapshot_from_lifecycle};
 
 #[derive(Default)]
 pub struct SessionSnapshots {
@@ -259,14 +259,6 @@ impl TurnHistoryBuilder {
 
     fn into_current_turn(self) -> Option<CurrentTurnSnapshot> {
         let lifecycle = self.into_turn_lifecycle()?;
-        let status = turn_lifecycle_status(&lifecycle);
-
-        Some(CurrentTurnSnapshot {
-            turn_id: lifecycle.turn_id,
-            started_at_ms: lifecycle.started_at_ms,
-            user_message: lifecycle.user_message,
-            status,
-            blocks: lifecycle.blocks.into_iter().filter_map(turn_block_to_current).collect(),
-        })
+        Some(current_turn_snapshot_from_lifecycle(&lifecycle))
     }
 }
