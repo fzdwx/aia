@@ -380,6 +380,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
       const currentTurn = await fetchCurrentTurn(sessionId)
       if (!currentTurn) return
       if (get().activeSessionId !== sessionId) return
+      if (currentTurn.status === "waiting_for_question") {
+        void usePendingQuestionStore.getState().hydrateForSession(sessionId)
+      }
       set((state) => {
         const nextStreamingTurn = currentTurnToStreamingTurn(currentTurn)
         return {
@@ -511,6 +514,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
           if (event.data.session_id !== activeId) break
 
           const status = event.data.status as TurnStatus
+          if (status === "waiting_for_question" && activeId) {
+            void usePendingQuestionStore.getState().hydrateForSession(activeId)
+          }
           if (status === "waiting") {
             const prev = get().streamingTurn
             if (prev) {

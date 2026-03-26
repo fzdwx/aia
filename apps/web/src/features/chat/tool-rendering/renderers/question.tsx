@@ -9,12 +9,7 @@ import {
   getStringValue,
   truncateInline,
 } from "../helpers"
-import {
-  DetailList,
-  ExpandableOutput,
-  ToolDetailSection,
-  ToolDetailSurface,
-} from "../ui"
+import { ExpandableOutput, ToolDetailSection, ToolDetailSurface } from "../ui"
 
 type QuestionOption = {
   id: string
@@ -43,6 +38,21 @@ type QuestionResult = {
   status?: string
   answers?: QuestionAnswer[]
   reason?: string | null
+}
+
+function extractRawQuestionPrompts(record: Record<string, unknown>): string[] {
+  return getArrayValue(record, "questions").flatMap((item) => {
+    if (!item || typeof item !== "object") return []
+    const value = item as Record<string, unknown>
+    const question = getStringValue(
+      value,
+      "question",
+      "label",
+      "prompt",
+      "message"
+    )
+    return question ? [question] : []
+  })
 }
 
 function isIgnored(data: {
@@ -135,30 +145,17 @@ function parseQuestionResult(
 function statusLabel(status: string | undefined): string {
   switch (status) {
     case "answered":
-      return "Answered"
+      return "answered"
     case "cancelled":
-      return "Cancelled"
+      return "cancelled"
     case "dismissed":
-      return "Dismissed"
+      return "dismissed"
     case "timed_out":
-      return "Timed Out"
+      return "timed out"
     case "unavailable":
-      return "Unavailable"
+      return "unavailable"
     default:
-      return "Question"
-  }
-}
-
-function kindLabel(kind: string): string {
-  switch (kind) {
-    case "choice":
-      return "Choice"
-    case "text":
-      return "Text"
-    case "confirm":
-      return "Confirm"
-    default:
-      return kind
+      return "waiting"
   }
 }
 
@@ -167,7 +164,8 @@ function getQuestionSummary(data: {
   details?: Record<string, unknown>
 }): string {
   const questions = parseQuestionItems(data.arguments)
-  const firstQuestion = questions[0]?.question
+  const firstQuestion =
+    questions[0]?.question ?? extractRawQuestionPrompts(data.arguments)[0]
   const summary =
     firstQuestion ??
     getStringValue(
@@ -180,7 +178,7 @@ function getQuestionSummary(data: {
     ) ??
     getStringValue(data.details, "question", "summary", "message")
 
-  return summary ? truncateInline(summary, 96) : toolTimelineCopy.section.issue
+  return summary ? truncateInline(summary, 96) : "Awaiting structured question"
 }
 
 function resolveAnswerSummary(
@@ -205,6 +203,26 @@ function resolveAnswerSummary(
   return "No answer"
 }
 
+function buildQuestionSubtitle(data: {
+  arguments: Record<string, unknown>
+  details?: Record<string, unknown>
+}): string | null {
+  const questions = parseQuestionItems(data.arguments)
+  const result = parseQuestionResult(data.details)
+  if (questions.length === 0) return null
+
+  const answeredCount = (result?.answers ?? []).length
+  if (result?.status === "answered") {
+    return `${answeredCount} answered`
+  }
+
+  if (result?.status && result.status !== "answered") {
+    return statusLabel(result.status)
+  }
+
+  return null
+}
+
 function getQuestionContent(data: {
   arguments: Record<string, unknown>
   details?: Record<string, unknown>
@@ -224,12 +242,22 @@ export function createQuestionRenderer(): ToolRenderer {
     matches: (toolName) => toolName === "Question" || toolName === "question",
     renderTitle(data) {
       const args = normalizeToolArguments(data.arguments)
+      const questions = parseQuestionItems(args)
+      if (questions.length > 1) {
+        return "Questions"
+      }
       return getQuestionSummary({ arguments: args, details: data.details })
+    },
+    renderSubtitle(data) {
+      const args = normalizeToolArguments(data.arguments)
+      return buildQuestionSubtitle({ arguments: args, details: data.details })
     },
     renderMeta(data) {
       const args = normalizeToolArguments(data.arguments)
       const questions = parseQuestionItems(args)
       const result = parseQuestionResult(data.details)
+
+      if (questions.length > 0) return null
 
       return (
         <div className="flex flex-wrap items-center gap-2">
@@ -281,83 +309,45 @@ export function createQuestionRenderer(): ToolRenderer {
 
       return (
         <div className="space-y-3">
-          <ToolDetailSection title="Question Summary">
-            <ToolDetailSurface>
-              <DetailList
-                entries={[
-                  { label: "Status", value: statusLabel(result?.status) },
-                  { label: "Questions", value: questions.length },
-                  {
-                    label: "Answered",
-                    value: (result?.answers ?? []).length,
-                  },
-                ]}
-              />
-              {result?.reason ? (
-                <ExpandableOutput value={result.reason} failed={false} />
-              ) : null}
-            </ToolDetailSurface>
-          </ToolDetailSection>
-
-          <ToolDetailSection title="Question Flow">
-            <div className="space-y-2">
-              {questions.map((item, index) => {
-                const answer = answersByQuestionId.get(item.id)
-                return (
-                  <ToolDetailSurface key={item.id} className="space-y-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="tool-timeline-meta-badge">
-                        {index + 1}
-                      </span>
-                      <span className="tool-timeline-meta-badge">
-                        {kindLabel(item.kind)}
-                      </span>
-                      {item.required ? (
-                        <span className="tool-timeline-meta-badge">
-                          Required
-                        </span>
-                      ) : null}
+          <div className="space-y-2">
+            {questions.map((item) => {
+              const answer = answersByQuestionId.get(item.id)
+              const answerSummary = resolveAnswerSummary(item, answer)
+              const hasAnswer = answerSummary !== "No answer"
+              return (
+                <ToolDetailSurface
+                  key={item.id}
+                  className="space-y-2 border-none bg-transparent px-0 py-0 shadow-none"
+                >
+                  <div className="space-y-1">
+                    <p className="text-body-sm text-muted-foreground/78">
+                      {item.question}
+                    </p>
+                    <div
+                      className={
+                        hasAnswer
+                          ? "text-body-sm leading-6 font-medium text-foreground"
+                          : "text-body-sm text-muted-foreground/75 italic"
+                      }
+                    >
+                      {hasAnswer ? answerSummary : "(no answer)"}
                     </div>
-
-                    <div className="space-y-1">
-                      <p className="text-ui font-medium text-foreground">
-                        {item.question}
+                    {item.recommendation_reason && !hasAnswer ? (
+                      <p className="text-meta text-muted-foreground/65">
+                        Recommended: {item.recommendation_reason}
                       </p>
-                      {item.recommendation_reason ? (
-                        <p className="text-meta text-muted-foreground/75">
-                          Recommended: {item.recommendation_reason}
-                        </p>
-                      ) : null}
-                    </div>
-
-                    {item.options && item.options.length > 0 ? (
-                      <DetailList
-                        entries={item.options.map((option) => ({
-                          label: option.label,
-                          value:
-                            option.id === item.recommended_option_id
-                              ? option.description
-                                ? `${option.description} · recommended`
-                                : "recommended"
-                              : (option.description ?? "-"),
-                        }))}
-                      />
                     ) : null}
+                  </div>
+                </ToolDetailSurface>
+              )
+            })}
+          </div>
 
-                    <div className="space-y-1">
-                      <p className="text-meta font-medium text-muted-foreground/75">
-                        Answer
-                      </p>
-                      <ExpandableOutput
-                        value={resolveAnswerSummary(item, answer)}
-                        failed={false}
-                      />
-                    </div>
-                  </ToolDetailSurface>
-                )
-              })}
-            </div>
-          </ToolDetailSection>
+          {result?.reason ? (
+            <ToolDetailSection title="Result">
+              <ExpandableOutput value={result.reason} failed={false} />
+            </ToolDetailSection>
+          ) : null}
         </div>
       )
     },

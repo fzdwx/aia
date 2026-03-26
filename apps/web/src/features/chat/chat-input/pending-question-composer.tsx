@@ -1,4 +1,3 @@
-import { ChevronLeft, ChevronRight } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 
 import { Textarea } from "@/components/ui/textarea"
@@ -6,6 +5,22 @@ import type { QuestionAnswer, QuestionItem, QuestionResult } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat-store"
 import { usePendingQuestionStore } from "@/stores/pending-question-store"
+import {
+  buildConfirmQuestionItem,
+  normalizeQuestionOptions,
+} from "./pending-question-helpers"
+
+function questionSelectionHint(item: QuestionItem): string {
+  if (item.kind === "text") {
+    return item.required
+      ? "Please enter your answer"
+      : "You can leave this blank"
+  }
+  if (item.multi_select) {
+    return "Select all answers that apply"
+  }
+  return "Select one answer"
+}
 
 function ChoiceQuestion({
   item,
@@ -21,13 +36,14 @@ function ChoiceQuestion({
   const selected = new Set(value?.selected_option_ids ?? [])
   const customText = value?.text ?? ""
   const [customInputFocused, setCustomInputFocused] = useState(false)
+  const options = normalizeQuestionOptions(item)
   const recommendedOptionId = item.recommended_option_id ?? null
   const recommendationReason = item.recommendation_reason ?? null
   const customInputActive = customInputFocused || customText.trim().length > 0
 
   return (
     <div className="space-y-2">
-      {item.options.map((option) => {
+      {options.map((option) => {
         const checked = selected.has(option.id)
         const isRecommended = recommendedOptionId === option.id
         return (
@@ -36,7 +52,9 @@ function ChoiceQuestion({
             className={cn(
               "flex cursor-pointer items-start gap-3 rounded-lg border border-border/50 px-3 py-2.5 transition-colors",
               isRecommended && !checked && "border-foreground/15 bg-muted/35",
-              checked ? "border-foreground/20 bg-muted/60" : "bg-card hover:bg-muted/40",
+              checked
+                ? "border-foreground/20 bg-muted/60"
+                : "bg-card hover:bg-muted/40",
               disabled && "cursor-not-allowed opacity-60"
             )}
           >
@@ -76,7 +94,9 @@ function ChoiceQuestion({
                   {option.description && isRecommended && recommendationReason
                     ? " — "
                     : ""}
-                  {isRecommended && recommendationReason ? recommendationReason : ""}
+                  {isRecommended && recommendationReason
+                    ? recommendationReason
+                    : ""}
                 </span>
               ) : null}
             </span>
@@ -86,8 +106,10 @@ function ChoiceQuestion({
 
       <label
         className={cn(
-          "flex items-start gap-3 rounded-lg border border-border/50 px-3 py-2.5 transition-colors",
-          customInputActive ? "border-foreground/20 bg-muted/60" : "bg-card hover:bg-muted/40",
+          "flex items-start gap-3 rounded-xl border px-3.5 py-3 transition-colors",
+          customInputActive
+            ? "border-blue-500/45 bg-blue-500/[0.05]"
+            : "border-border/50 bg-card hover:bg-muted/40",
           disabled && "opacity-60"
         )}
       >
@@ -107,7 +129,9 @@ function ChoiceQuestion({
           className="mt-0.5"
         />
         <span className="min-w-0 flex-1">
-          <span className="text-ui mb-1 block font-medium text-foreground">Custom input</span>
+          <span className="text-ui mb-1 block font-medium text-foreground">
+            Type your own answer
+          </span>
           <input
             type="text"
             value={customText}
@@ -172,18 +196,7 @@ function ConfirmQuestion(props: {
   value: QuestionAnswer | undefined
   onChange: (answer: QuestionAnswer) => void
 }) {
-  const fallbackItem: QuestionItem = {
-    ...props.item,
-    kind: "choice",
-    multi_select: false,
-    options:
-      props.item.options.length > 0
-        ? props.item.options
-        : [
-            { id: "yes", label: "Yes", description: null },
-            { id: "no", label: "No", description: null },
-          ],
-  }
+  const fallbackItem = buildConfirmQuestionItem(props.item)
   return <ChoiceQuestion {...props} item={fallbackItem} />
 }
 
@@ -197,7 +210,11 @@ function questionValidationError(
   if (item.kind === "text" && !hasText) {
     return `Please answer “${item.question}”.`
   }
-  if (item.kind !== "text" && answer.selected_option_ids.length === 0 && !hasText) {
+  if (
+    item.kind !== "text" &&
+    answer.selected_option_ids.length === 0 &&
+    !hasText
+  ) {
     return `Please answer “${item.question}”.`
   }
   return null
@@ -205,7 +222,9 @@ function questionValidationError(
 
 export function PendingQuestionComposer() {
   const activeSessionId = useChatStore((state) => state.activeSessionId)
-  const pendingQuestion = usePendingQuestionStore((state) => state.pendingQuestion)
+  const pendingQuestion = usePendingQuestionStore(
+    (state) => state.pendingQuestion
+  )
   const submitting = usePendingQuestionStore((state) => state.submitting)
   const storeError = usePendingQuestionStore((state) => state.error)
   const submitResult = usePendingQuestionStore((state) => state.submitResult)
@@ -218,6 +237,10 @@ export function PendingQuestionComposer() {
   const disabled = submitting || !activeSessionId || !pendingQuestion
   const currentItem = questionItems[questionIndex] ?? null
   const isLastQuestion = questionIndex >= questionItems.length - 1
+  const progressWidth =
+    questionItems.length > 0
+      ? `${Math.max(((questionIndex + 1) / questionItems.length) * 100, 8)}%`
+      : "0%"
 
   const validationError = useMemo(() => {
     if (!pendingQuestion) return null
@@ -229,7 +252,11 @@ export function PendingQuestionComposer() {
       if (item.kind === "text" && !hasText) {
         return `Please answer “${item.question}”.`
       }
-      if (item.kind !== "text" && answer.selected_option_ids.length === 0 && !hasText) {
+      if (
+        item.kind !== "text" &&
+        answer.selected_option_ids.length === 0 &&
+        !hasText
+      ) {
         return `Please answer “${item.question}”.`
       }
     }
@@ -237,7 +264,11 @@ export function PendingQuestionComposer() {
   }, [answers, pendingQuestion])
 
   const currentValidationError = useMemo(
-    () => questionValidationError(currentItem, currentItem ? answers[currentItem.id] : undefined),
+    () =>
+      questionValidationError(
+        currentItem,
+        currentItem ? answers[currentItem.id] : undefined
+      ),
     [answers, currentItem]
   )
 
@@ -251,15 +282,18 @@ export function PendingQuestionComposer() {
 
   async function handleSubmit() {
     if (!activeSessionId || validationError) return
+    const requestId = pendingQuestion?.request_id
+    if (!requestId) return
     const result: QuestionResult = {
       status: "answered",
-      request_id: pendingQuestion.request_id,
-      answers: questionItems.map((item) =>
-        answers[item.id] ?? {
-          question_id: item.id,
-          selected_option_ids: [],
-          text: null,
-        }
+      request_id: requestId,
+      answers: questionItems.map(
+        (item) =>
+          answers[item.id] ?? {
+            question_id: item.id,
+            selected_option_ids: [],
+            text: null,
+          }
       ),
     }
     await submitResult(activeSessionId, result)
@@ -280,30 +314,36 @@ export function PendingQuestionComposer() {
       await handleSubmit()
       return
     }
-    setQuestionIndex((current) => Math.min(current + 1, questionItems.length - 1))
+    setQuestionIndex((current) =>
+      Math.min(current + 1, questionItems.length - 1)
+    )
   }
 
   return (
     <div className="relative shrink-0 border-t border-border/30 px-4 pt-3 pb-4">
       <div className="pointer-events-none absolute -top-10 right-0 left-0 h-10 bg-gradient-to-t from-background to-transparent" />
-      <div className="mx-auto w-full max-w-[720px] rounded-xl border border-border/50 bg-card px-4 py-3">
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <div className="text-meta text-muted-foreground/50">
-            {questionIndex + 1} / {questionItems.length}
+      <div className="mx-auto w-full max-w-[720px] rounded-xl border border-border/60 bg-card px-4 py-4 shadow-[0_8px_32px_rgba(15,23,42,0.06)]">
+        <div className="mb-4 flex items-center justify-between gap-4">
+          <div className="text-ui font-medium text-foreground/90">
+            {questionIndex + 1} of {questionItems.length} questions
           </div>
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={() => void handleDismiss()}
-            className="text-meta inline-flex h-7 shrink-0 items-center justify-center rounded-md px-1 text-muted-foreground/50 transition-colors hover:text-foreground/75 disabled:opacity-60"
-            title="Dismiss question"
-          >
-            <span>Ignore</span>
-          </button>
+          <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-blue-500 transition-[width] duration-200"
+              style={{ width: progressWidth }}
+            />
+          </div>
         </div>
 
-        <section key={currentItem.id} className="space-y-2.5">
-          <p className="text-body-sm text-foreground/90">{currentItem.question}</p>
+        <section key={currentItem.id} className="space-y-4">
+          <div className="space-y-1.5">
+            <p className="text-body-sm text-foreground/95">
+              {currentItem.question}
+            </p>
+            <p className="text-meta text-muted-foreground/65">
+              {questionSelectionHint(currentItem)}
+            </p>
+          </div>
 
           {currentItem.kind === "choice" ? (
             <ChoiceQuestion
@@ -311,7 +351,10 @@ export function PendingQuestionComposer() {
               disabled={disabled}
               value={answers[currentItem.id]}
               onChange={(next) =>
-                setAnswers((current) => ({ ...current, [currentItem.id]: next }))
+                setAnswers((current) => ({
+                  ...current,
+                  [currentItem.id]: next,
+                }))
               }
             />
           ) : null}
@@ -322,7 +365,10 @@ export function PendingQuestionComposer() {
               disabled={disabled}
               value={answers[currentItem.id]}
               onChange={(next) =>
-                setAnswers((current) => ({ ...current, [currentItem.id]: next }))
+                setAnswers((current) => ({
+                  ...current,
+                  [currentItem.id]: next,
+                }))
               }
             />
           ) : null}
@@ -333,39 +379,63 @@ export function PendingQuestionComposer() {
               disabled={disabled}
               value={answers[currentItem.id]}
               onChange={(next) =>
-                setAnswers((current) => ({ ...current, [currentItem.id]: next }))
+                setAnswers((current) => ({
+                  ...current,
+                  [currentItem.id]: next,
+                }))
               }
             />
           ) : null}
         </section>
 
         {storeError && (
-          <div className="text-meta mt-3 text-destructive/80">
-            {storeError}
-          </div>
+          <div className="text-meta mt-4 text-destructive/80">{storeError}</div>
         )}
 
-        <div className="mt-3 flex items-center justify-end gap-2">
-          {questionIndex > 0 ? (
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={() => setQuestionIndex((current) => Math.max(current - 1, 0))}
-              className="text-ui inline-flex h-7 items-center gap-1 rounded-lg border border-border/50 px-2.5 text-muted-foreground transition-colors hover:bg-muted/50 disabled:opacity-40"
-            >
-              <ChevronLeft className="size-4" />
-              <span>Back</span>
-            </button>
-          ) : null}
+        <div className="mt-5 flex items-center justify-between gap-3 border-t border-border/40 pt-3">
           <button
             type="button"
-            disabled={disabled || currentValidationError != null}
-            onClick={() => void handlePrimaryAction()}
-            className="text-ui inline-flex h-7 items-center gap-1 rounded-lg bg-foreground px-2.5 text-background transition-opacity hover:opacity-85 disabled:opacity-50"
+            disabled={disabled}
+            onClick={() => void handleDismiss()}
+            className="text-ui inline-flex h-9 shrink-0 items-center justify-center rounded-lg px-3 font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground disabled:opacity-50"
+            title="Dismiss question"
           >
-            <span>{submitting ? "Submitting..." : isLastQuestion ? "Submit" : "Next"}</span>
-            {!submitting && !isLastQuestion ? <ChevronRight className="size-4" /> : null}
+            <span>Dismiss</span>
+          </button>
+
+          <div className="flex items-center gap-2">
+            {questionIndex > 0 ? (
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() =>
+                  setQuestionIndex((current) => Math.max(current - 1, 0))
+                }
+                className="text-ui inline-flex h-9 items-center gap-1 rounded-lg border border-border/50 px-3 text-foreground transition-colors hover:bg-muted/50 disabled:opacity-40"
+              >
+                <span>Back</span>
+              </button>
+            ) : null}
+            <button
+              type="button"
+              disabled={disabled || currentValidationError != null}
+              onClick={() => void handlePrimaryAction()}
+              className={cn(
+                "text-ui inline-flex h-9 items-center gap-1 rounded-lg px-3 transition-colors disabled:opacity-50",
+                isLastQuestion
+                  ? "bg-foreground text-background hover:opacity-85"
+                  : "border border-border/50 bg-background text-foreground hover:bg-muted/50"
+              )}
+            >
+              <span>
+                {submitting
+                  ? "Submitting..."
+                  : isLastQuestion
+                    ? "Submit"
+                    : "Next"}
+              </span>
             </button>
+          </div>
         </div>
       </div>
     </div>

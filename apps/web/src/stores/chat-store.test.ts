@@ -172,6 +172,41 @@ describe("chat store submitTurn", () => {
     })
   })
 
+  test("waiting_for_question status hydrates pending question for active session", () => {
+    let hydratedSessionId: string | null = null
+    usePendingQuestionStore.setState({
+      hydrateForSession: async (sessionId: string) => {
+        hydratedSessionId = sessionId
+      },
+    })
+
+    useChatStore.setState({
+      activeSessionId: "session-1",
+      chatState: "active",
+      streamingTurn: {
+        userMessage: "hello world",
+        status: "working",
+        blocks: [],
+      },
+    })
+
+    useChatStore.getState().handleSseEvent({
+      type: "status",
+      data: {
+        session_id: "session-1",
+        turn_id: "turn-1",
+        status: "waiting_for_question",
+      },
+    })
+
+    expect(hydratedSessionId).toBe("session-1")
+    assert.deepEqual(useChatStore.getState().streamingTurn, {
+      userMessage: "hello world",
+      status: "waiting_for_question",
+      blocks: [],
+    })
+  })
+
   test("finishing status updates streaming turn immediately after stream done", () => {
     useChatStore.setState({
       activeSessionId: "session-1",
@@ -267,6 +302,57 @@ describe("chat store submitTurn", () => {
       userMessage: "飞书外部消息",
       status: "working",
       blocks: [{ type: "text", content: "已恢复中的输出" }],
+    })
+
+    globalThis.fetch = originalFetchImpl
+  })
+
+  test("recovering a current turn waiting for question hydrates pending question", async () => {
+    const originalFetchImpl = globalThis.fetch
+    let hydratedSessionId: string | null = null
+    usePendingQuestionStore.setState({
+      hydrateForSession: async (sessionId: string) => {
+        hydratedSessionId = sessionId
+      },
+    })
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString()
+      if (url.includes("/api/session/current-turn")) {
+        return new Response(
+          JSON.stringify({
+            started_at_ms: 30,
+            user_message: "工具在等回答",
+            status: "waiting_for_question",
+            blocks: [],
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }) as FetchMock
+
+    useChatStore.setState({
+      activeSessionId: "session-1",
+      streamingTurn: null,
+      _pendingPrompt: null,
+      chatState: "idle",
+    })
+
+    useChatStore.getState().handleSseEvent({
+      type: "status",
+      data: { session_id: "session-1", turn_id: "turn-1", status: "waiting" },
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(hydratedSessionId).toBe("session-1")
+    assert.deepEqual(useChatStore.getState().streamingTurn, {
+      userMessage: "工具在等回答",
+      status: "waiting_for_question",
+      blocks: [],
     })
 
     globalThis.fetch = originalFetchImpl

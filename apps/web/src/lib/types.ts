@@ -279,7 +279,7 @@ export type QuestionItem = {
   kind: QuestionKind
   required: boolean
   multi_select: boolean
-  options: QuestionOption[]
+  options?: QuestionOption[]
   placeholder?: string | null
   recommended_option_id?: string | null
   recommendation_reason?: string | null

@@ -866,6 +866,156 @@ describe("tool renderer registry", () => {
     expect(html).toContain("Issue Ignored")
   })
 
+  test("renders question title from partial structured questions while waiting", () => {
+    const title = toolRendererRegistry.renderTitle({
+      toolName: "Question",
+      arguments: {
+        questions: [
+          {
+            question: "你晚上吃了的话，第一反应会想吃什么？",
+          },
+        ],
+      },
+      outputContent: "",
+      succeeded: true,
+    })
+
+    expect(title).toBe("你晚上吃了的话，第一反应会想吃什么？")
+  })
+
+  test("renders multi-question results as a compact answered list", () => {
+    const title = toolRendererRegistry.renderTitle({
+      toolName: "Question",
+      arguments: {
+        questions: [
+          {
+            id: "q1",
+            question: "你最近大概处于哪种状态？",
+            kind: "choice",
+          },
+          {
+            id: "q2",
+            question: "你更喜欢哪类工作？",
+            kind: "choice",
+          },
+        ],
+      },
+      details: {
+        status: "answered",
+        answers: [
+          {
+            question_id: "q1",
+            text: "在冲项目",
+            selected_option_ids: [],
+          },
+        ],
+      },
+      outputContent: "",
+      succeeded: true,
+    })
+
+    const subtitle = toolRendererRegistry.renderSubtitle({
+      toolName: "Question",
+      arguments: {
+        questions: [
+          {
+            id: "q1",
+            question: "你最近大概处于哪种状态？",
+            kind: "choice",
+          },
+          {
+            id: "q2",
+            question: "你更喜欢哪类工作？",
+            kind: "choice",
+          },
+        ],
+      },
+      details: {
+        status: "answered",
+        answers: [
+          {
+            question_id: "q1",
+            text: "在冲项目",
+            selected_option_ids: [],
+          },
+        ],
+      },
+      outputContent: "",
+      succeeded: true,
+    })
+
+    const meta = toolRendererRegistry.renderMeta({
+      toolName: "Question",
+      arguments: {
+        questions: [
+          {
+            id: "q1",
+            question: "你最近大概处于哪种状态？",
+            kind: "choice",
+          },
+          {
+            id: "q2",
+            question: "你更喜欢哪类工作？",
+            kind: "choice",
+          },
+        ],
+      },
+      details: {
+        status: "answered",
+        answers: [
+          {
+            question_id: "q1",
+            text: "在冲项目",
+            selected_option_ids: [],
+          },
+        ],
+      },
+      outputContent: "",
+      succeeded: true,
+    })
+
+    const details = toolRendererRegistry.renderDetails({
+      toolName: "Question",
+      arguments: {
+        questions: [
+          {
+            id: "q1",
+            question: "你最近大概处于哪种状态？",
+            kind: "choice",
+          },
+          {
+            id: "q2",
+            question: "你更喜欢哪类工作？",
+            kind: "choice",
+          },
+        ],
+      },
+      details: {
+        status: "answered",
+        answers: [
+          {
+            question_id: "q1",
+            text: "在冲项目",
+            selected_option_ids: [],
+          },
+        ],
+      },
+      outputContent: "",
+      succeeded: true,
+    })
+
+    expect(title).toBe("Questions")
+    expect(subtitle).toBe("1 answered")
+    expect(meta).toBe(null)
+    const html = renderToStaticMarkup(<>{details}</>)
+    expect(html).toContain("你最近大概处于哪种状态？")
+    expect(html).toContain("在冲项目")
+    expect(html).toContain("你更喜欢哪类工作？")
+    expect(html).toContain("(no answer)")
+    expect(html).toContain("text-muted-foreground/78")
+    expect(html).toContain("leading-6 font-medium text-foreground")
+  })
+
   test("renders TapeHandoff title from name and summary", () => {
     const title = toolRendererRegistry.renderTitle({
       toolName: "TapeHandoff",
