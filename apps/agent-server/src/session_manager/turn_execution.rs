@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use agent_core::{QuestionResult, StreamEvent, ToolRegistry};
+use agent_core::{StreamEvent, ToolRegistry};
 use agent_runtime::{AgentRuntime, ContextStats, RuntimeEvent, RuntimeSubscriberId, TurnLifecycle};
 use tokio::sync::{broadcast, mpsc};
 
@@ -154,7 +154,6 @@ pub(super) struct TurnWorker {
 
 enum TurnWorkerMode {
     Submit { prompt: String },
-    ResumeQuestion { turn_id: String, result: QuestionResult },
 }
 
 impl TurnWorker {
@@ -174,23 +173,6 @@ impl TurnWorker {
         }
     }
 
-    pub(super) fn resume_question(
-        runtime: AgentRuntime<ServerModel, ToolRegistry>,
-        subscriber: RuntimeSubscriberId,
-        turn_id: String,
-        result: QuestionResult,
-        turn_control: agent_runtime::TurnControl,
-        context: TurnWorkerContext,
-    ) -> Self {
-        Self {
-            runtime,
-            subscriber,
-            mode: TurnWorkerMode::ResumeQuestion { turn_id, result },
-            turn_control,
-            context,
-        }
-    }
-
     pub(super) async fn run(mut self) -> RuntimeReturn {
         let mut current_status = CurrentStatusInner::Waiting;
         let status_broadcast = self.context.broadcast_tx.clone();
@@ -198,70 +180,38 @@ impl TurnWorker {
         let stream_turn_id = self.context.turn_id.clone();
         let stream_snapshot = self.context.current_turn_snapshot.clone();
 
-        let result = match &self.mode {
-            TurnWorkerMode::Submit { prompt } => self
-                .runtime
-                .handle_turn_streaming(prompt.clone(), self.turn_control.clone(), |event| {
-                    let new_status = match &event {
-                        StreamEvent::ThinkingDelta { .. } => CurrentStatusInner::Thinking,
-                        StreamEvent::TextDelta { .. } => CurrentStatusInner::Generating,
-                        StreamEvent::ToolCallDetected { .. } => current_status.clone(),
-                        StreamEvent::ToolCallStarted { .. } => CurrentStatusInner::Working,
-                        StreamEvent::ToolOutputDelta { .. } => CurrentStatusInner::Working,
-                        StreamEvent::Done => CurrentStatusInner::Finishing,
-                        _ => current_status.clone(),
-                    };
+        let TurnWorkerMode::Submit { prompt } = &self.mode;
+        let result = self
+            .runtime
+            .handle_turn_streaming(prompt.clone(), self.turn_control.clone(), |event| {
+                let new_status = match &event {
+                    StreamEvent::ThinkingDelta { .. } => CurrentStatusInner::Thinking,
+                    StreamEvent::TextDelta { .. } => CurrentStatusInner::Generating,
+                    StreamEvent::ToolCallDetected { .. } => current_status.clone(),
+                    StreamEvent::ToolCallStarted { .. } => CurrentStatusInner::Working,
+                    StreamEvent::ToolOutputDelta { .. } => CurrentStatusInner::Working,
+                    StreamEvent::Done => CurrentStatusInner::Finishing,
+                    _ => current_status.clone(),
+                };
 
-                    if new_status != current_status {
-                        current_status = new_status.clone();
-                        update_current_turn_status(&stream_snapshot, new_status.to_turn_status());
-                        let _ = status_broadcast.send(SsePayload::Status {
-                            session_id: stream_session_id.clone(),
-                            turn_id: stream_turn_id.clone(),
-                            status: new_status.to_turn_status(),
-                        });
-                    }
-
-                    update_current_turn_from_stream(&stream_snapshot, &event);
-                    let _ = status_broadcast.send(SsePayload::Stream {
+                if new_status != current_status {
+                    current_status = new_status.clone();
+                    update_current_turn_status(&stream_snapshot, new_status.to_turn_status());
+                    let _ = status_broadcast.send(SsePayload::Status {
                         session_id: stream_session_id.clone(),
                         turn_id: stream_turn_id.clone(),
-                        event,
+                        status: new_status.to_turn_status(),
                     });
-                })
-                .await,
-            TurnWorkerMode::ResumeQuestion { turn_id, result } => self
-                .runtime
-                .resume_turn_after_question(turn_id, result, self.turn_control.clone(), |event| {
-                    let new_status = match &event {
-                        StreamEvent::ThinkingDelta { .. } => CurrentStatusInner::Thinking,
-                        StreamEvent::TextDelta { .. } => CurrentStatusInner::Generating,
-                        StreamEvent::ToolCallDetected { .. } => current_status.clone(),
-                        StreamEvent::ToolCallStarted { .. } => CurrentStatusInner::Working,
-                        StreamEvent::ToolOutputDelta { .. } => CurrentStatusInner::Working,
-                        StreamEvent::Done => CurrentStatusInner::Finishing,
-                        _ => current_status.clone(),
-                    };
+                }
 
-                    if new_status != current_status {
-                        current_status = new_status.clone();
-                        update_current_turn_status(&stream_snapshot, new_status.to_turn_status());
-                        let _ = status_broadcast.send(SsePayload::Status {
-                            session_id: stream_session_id.clone(),
-                            turn_id: stream_turn_id.clone(),
-                            status: new_status.to_turn_status(),
-                        });
-                    }
-
-                    update_current_turn_from_stream(&stream_snapshot, &event);
-                    let _ = status_broadcast.send(SsePayload::Stream {
-                        session_id: stream_session_id.clone(),
-                        turn_id: stream_turn_id.clone(),
-                        event,
-                    });
-                })
-                .await,
-        };
+                update_current_turn_from_stream(&stream_snapshot, &event);
+                let _ = status_broadcast.send(SsePayload::Stream {
+                    session_id: stream_session_id.clone(),
+                    turn_id: stream_turn_id.clone(),
+                    event,
+                });
+            })
+            .await;
         *write_lock(&self.context.context_stats_snapshot) = self.runtime.context_stats();
 
         match result {
@@ -286,8 +236,6 @@ impl TurnWorker {
                 )
                 .project(events);
                 if let Some(turn) = turn {
-                    let waiting_for_question =
-                        matches!(turn.outcome, agent_runtime::TurnOutcome::WaitingForQuestion);
                     let turn_for_traces = turn.clone();
                     {
                         let mut history = write_lock(&self.context.history_snapshot);
@@ -303,17 +251,6 @@ impl TurnWorker {
                         turn_id: self.context.turn_id.clone(),
                         turn,
                     });
-                    if waiting_for_question {
-                        update_current_turn_status(
-                            &self.context.current_turn_snapshot,
-                            TurnStatus::WaitingForQuestion,
-                        );
-                        let _ = self.context.broadcast_tx.send(SsePayload::Status {
-                            session_id: self.context.session_id.clone(),
-                            turn_id: self.context.turn_id.clone(),
-                            status: TurnStatus::WaitingForQuestion,
-                        });
-                    }
                     let trace_recorder = self.context.trace_recorder.clone();
                     tokio::spawn(async move {
                         trace_recorder.persist_turn_spans(&turn_for_traces).await;

@@ -96,6 +96,7 @@ where
                 },
                 &ToolExecutionContext {
                     run_id: context.turn_id.to_string(),
+                    session_id: self.session_id.clone(),
                     workspace_root: self.workspace_root.clone(),
                     abort: context.abort_signal.clone(),
                     runtime: None,
@@ -181,6 +182,7 @@ where
                 &mut |_| {},
                 &ToolExecutionContext {
                     run_id: context.turn_id.to_string(),
+                    session_id: self.session_id.clone(),
                     workspace_root: self.workspace_root.clone(),
                     abort: context.abort_signal.clone(),
                     runtime: Some(runtime_context),

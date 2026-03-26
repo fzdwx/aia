@@ -11,14 +11,13 @@ use crate::{RuntimeEvent, TurnBlock};
 use super::super::{
     AgentRuntime, RuntimeError,
     helpers::{build_tool_trace_context, now_timestamp_ms},
-    question_tool, tape_tools,
+    tape_tools,
     tool_calls::{ExecuteToolCallContext, can_run_in_parallel},
 };
 use super::types::TurnBuffers;
 
 pub(super) enum CompletionProcessingResult {
     Continue { saw_tool_calls: bool },
-    WaitingForQuestion,
 }
 
 impl<M, T> AgentRuntime<M, T>
@@ -111,25 +110,6 @@ where
                         self.append_tape_entry(TapeEntry::tool_call(call).with_run_id(turn_id))?;
                     buffers.source_entry_ids.push(tool_call_entry_id);
 
-                    if question_tool::is_question_tool_call(call) {
-                        let request = question_tool::question_request_from_call(call, turn_id)
-                            .map_err(RuntimeError::tool)?;
-                        let question_entry_id = self.append_tape_entry(
-                            TapeEntry::event(
-                                "question_requested",
-                                Some(serde_json::to_value(&request).map_err(|error| {
-                                    RuntimeError::session(format!(
-                                        "failed to serialize question request: {error}"
-                                    ))
-                                })?),
-                            )
-                            .with_run_id(turn_id)
-                            .with_meta("source_entry_ids", serde_json::json!([tool_call_entry_id])),
-                        )?;
-                        buffers.source_entry_ids.push(question_entry_id);
-                        return Ok(CompletionProcessingResult::WaitingForQuestion);
-                    }
-
                     if tool_calls_are_parallel {
                         parallel_calls.push((
                             assistant_entry_id,
@@ -183,6 +163,7 @@ where
                 .collect::<std::collections::BTreeSet<_>>();
             let tools = self.tools.clone();
             let workspace_root = self.workspace_root.clone();
+            let session_id = self.session_id.clone();
             let turn_id_owned = turn_id.to_string();
             let trace_context = llm_trace_context.cloned();
 
@@ -191,6 +172,7 @@ where
                     let tools = tools.clone();
                     let visible_tool_names = visible_tool_names.clone();
                     let workspace_root = workspace_root.clone();
+                    let session_id = session_id.clone();
                     let abort_signal = abort_signal.clone();
                     let turn_id_owned = turn_id_owned.clone();
                     let trace_context = trace_context.clone();
@@ -253,6 +235,7 @@ where
                                 &mut |delta| deltas.push(delta),
                                 &ToolExecutionContext {
                                     run_id: turn_id_owned,
+                                    session_id,
                                     workspace_root,
                                     abort: abort_signal.clone(),
                                     runtime: None,

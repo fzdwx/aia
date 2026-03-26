@@ -236,6 +236,11 @@ impl ServerBootstrap {
             }),
             system_prompt: self.options.system_prompt.clone(),
             runtime_hooks: self.options.runtime_hooks.clone(),
+            question_coordinator: std::sync::Arc::new(
+                crate::session_manager::QuestionCoordinator {
+                    tx: tokio::sync::mpsc::channel(1).0,
+                },
+            ),
         });
         let channel_adapter_catalog = Arc::new(build_channel_adapter_catalog(
             resources.store.clone(),

@@ -55,6 +55,9 @@ fn sample_config(root: &std::path::Path, registry: ProviderRegistry) -> SessionM
         },
         system_prompt: None,
         runtime_hooks: agent_runtime::RuntimeHooks::default(),
+        question_coordinator: Arc::new(crate::session_manager::QuestionCoordinator {
+            tx: tokio::sync::mpsc::channel(8).0,
+        }),
     }
 }
 

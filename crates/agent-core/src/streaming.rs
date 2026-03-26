@@ -64,6 +64,7 @@ pub trait RuntimeToolContext: Send + Sync {
 
 pub struct ToolExecutionContext {
     pub run_id: String,
+    pub session_id: Option<String>,
     pub workspace_root: Option<PathBuf>,
     pub abort: AbortSignal,
     pub runtime: Option<Arc<dyn RuntimeToolContext>>,

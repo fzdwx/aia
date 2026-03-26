@@ -121,6 +121,14 @@ impl SessionManagerHandle {
         self.request(|reply| SessionCommand::GetPendingQuestion { session_id, reply }).await
     }
 
+    pub async fn ask_question(
+        &self,
+        session_id: String,
+        request: QuestionRequest,
+    ) -> Result<QuestionResult, RuntimeWorkerError> {
+        self.request(|reply| SessionCommand::AskQuestion { session_id, request, reply }).await
+    }
+
     pub async fn resolve_pending_question(
         &self,
         session_id: String,

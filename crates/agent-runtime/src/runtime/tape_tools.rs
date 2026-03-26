@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::AgentRuntime;
-use super::question_tool::QuestionTool;
 
 pub(super) fn build_runtime_tool_registry(
     capabilities: &SessionInteractionCapabilities,
@@ -20,9 +19,7 @@ pub(super) fn build_runtime_tool_registry(
     let mut registry = ToolRegistry::new();
     registry.register(Box::new(TapeInfoTool));
     registry.register(Box::new(TapeHandoffTool));
-    if capabilities.can_use_question_tool() {
-        registry.register(Box::new(QuestionTool));
-    }
+    let _ = capabilities;
     registry
 }
 

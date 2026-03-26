@@ -25,24 +25,6 @@ impl TurnBuffers {
         }
     }
 
-    pub(super) fn from_restored_state(
-        source_entry_ids: Vec<u64>,
-        aggregated_thinking: String,
-        tool_invocations: Vec<ToolInvocationLifecycle>,
-        blocks: Vec<TurnBlock>,
-        last_assistant_text: Option<String>
-    ) -> Self {
-        Self {
-            source_entry_ids,
-            aggregated_thinking,
-            streamed_thinking: String::new(),
-            tool_invocations,
-            blocks,
-            last_assistant_text,
-            streamed_assistant_text: String::new(),
-        }
-    }
-
     pub(super) fn thinking(&self) -> Option<String> {
         if self.aggregated_thinking.is_empty() {
             None

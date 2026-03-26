@@ -271,19 +271,14 @@ async fn resolve_pending_question_appends_resolution_and_clears_pending_state() 
         None
     );
     assert!(restored.entries().iter().any(|entry| entry.event_name() == Some("question_resolved")));
-    assert!(restored.entries().iter().any(|entry| {
-        entry.as_tool_result().is_some_and(|result| {
-            result.tool_name == "Question" && result.invocation_id == "call_123"
-        })
-    }));
 
     let _ = std::fs::remove_dir_all(root);
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn resolve_pending_question_resumes_turn_execution() {
+async fn resolve_pending_question_without_waiter_only_records_resolution() {
     let (state, root) =
-        test_state_with_session_manager("session-resume-question", ProviderRegistry::default());
+        test_state_with_session_manager("session-resolve-no-waiter", ProviderRegistry::default());
     let session = state
         .session_manager
         .create_session(Some("Session One".into()))
@@ -291,27 +286,10 @@ async fn resolve_pending_question_resumes_turn_execution() {
         .expect("session should be created");
 
     let session_path = root.join("sessions").join(format!("{}.jsonl", session.id));
-    let turn_id = "turn_123";
     let request = sample_question_request();
     let mut tape = session_tape::SessionTape::load_jsonl_or_default(&session_path)
         .expect("session tape should load");
-    tape.append_entry(
-        session_tape::TapeEntry::message(&agent_core::Message::new(
-            agent_core::Role::User,
-            "need database decision",
-        ))
-        .with_run_id(turn_id),
-    );
-    tape.append_entry(
-        session_tape::TapeEntry::tool_call(
-            &agent_core::ToolCall::new("Question")
-                .with_invocation_id(request.invocation_id.clone())
-                .with_arguments_value(serde_json::json!({ "questions": request.questions })),
-        )
-        .with_run_id(turn_id),
-    );
     tape.record_question_requested(&request);
-    tape.append_entry(session_tape::TapeEntry::event("turn_waiting_for_question", None).with_run_id(turn_id));
     tape.save_jsonl(&session_path).expect("session tape should save");
 
     let response = handlers::resolve_pending_question(
@@ -335,26 +313,9 @@ async fn resolve_pending_question_resumes_turn_execution() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-    let history = state
-        .session_manager
-        .get_history(session.id.clone())
-        .await
-        .expect("history should load");
-    let resumed_turn = history
-        .iter()
-        .find(|turn| turn.turn_id == turn_id)
-        .expect("original turn should remain in history");
-    assert_ne!(resumed_turn.outcome, agent_runtime::TurnOutcome::WaitingForQuestion);
-    assert!(resumed_turn.assistant_message.is_some());
-
-    let current = state
-        .session_manager
-        .get_current_turn(session.id.clone())
-        .await
-        .expect("current turn query should succeed");
-    assert!(current.is_none());
+    let restored = session_tape::SessionTape::load_jsonl_or_default(&session_path)
+        .expect("updated tape should load");
+    assert_eq!(restored.try_pending_question_request().expect("pending question should decode"), None);
 
     let _ = std::fs::remove_dir_all(root);
 }

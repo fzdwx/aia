@@ -3,6 +3,7 @@ mod handle;
 mod prompt;
 mod provider_sync;
 mod query_ops;
+mod server_question_tool;
 #[cfg(test)]
 #[path = "../../tests/session_manager/mod.rs"]
 mod tests;
@@ -15,11 +16,10 @@ use std::sync::{Arc, RwLock};
 
 use agent_core::{
     ModelIdentity, PromptCacheConfig, PromptCacheRetention as RuntimePromptCacheRetention,
-    QuestionRequest, QuestionResult, QuestionResultStatus, ReasoningEffort, ToolCall, ToolResult,
+    QuestionRequest, QuestionResult, QuestionResultStatus, ReasoningEffort, ToolRegistry,
 };
 use agent_runtime::AgentRuntime;
 use agent_store::{AiaStore, SessionRecord, generate_session_id};
-use builtin_tools::build_tool_registry;
 use provider_registry::ProviderRegistry;
 use session_tape::{SessionProviderBinding, SessionTape};
 use tokio::sync::mpsc;
@@ -36,8 +36,9 @@ pub use handle::SessionManagerHandle;
 use prompt::build_session_system_prompt;
 use provider_sync::{ProviderSyncService, ReturnedRuntimeSync};
 pub(crate) use query_ops::SessionQueryService;
+use server_question_tool::ServerQuestionTool;
 use turn_execution::{RuntimeEventProjector, TurnExecutionService, collect_runtime_events};
-pub use types::SessionManagerConfig;
+pub use types::{QuestionCoordinator, SessionManagerConfig};
 #[cfg(test)]
 pub(crate) use types::SlotExecutionState;
 use types::{RuntimeReturn, SessionCommand, SessionId, SessionSlot, SlotStatus};
@@ -55,6 +56,10 @@ pub fn spawn_session_manager(config: SessionManagerConfig) -> SessionManagerHand
     let workspace_root = config.workspace_root.clone();
     let (command_tx, command_rx) = mpsc::channel(256);
     let (return_tx, return_rx) = mpsc::channel(64);
+    let config = SessionManagerConfig {
+        question_coordinator: Arc::new(types::QuestionCoordinator { tx: command_tx.clone() }),
+        ..config
+    };
     tokio::spawn(
         SessionManagerLoop::new(config, command_tx.clone(), command_rx, return_tx, return_rx).run(),
     );
@@ -170,6 +175,9 @@ impl SessionManagerLoop {
             }
             SessionCommand::GetPendingQuestion { session_id, reply } => {
                 let _ = reply.send(self.get_pending_question(&session_id));
+            }
+            SessionCommand::AskQuestion { session_id, request, reply } => {
+                let _ = reply.send(self.ask_question(&session_id, request).await);
             }
             SessionCommand::ResolvePendingQuestion { session_id, result, reply } => {
                 let _ = reply.send(self.resolve_pending_question(&session_id, result));
@@ -431,6 +439,55 @@ impl SessionManagerLoop {
             .map_err(|error| RuntimeWorkerError::internal(error.to_string()))
     }
 
+    async fn ask_question(
+        &mut self,
+        session_id: &str,
+        request: QuestionRequest,
+    ) -> Result<QuestionResult, RuntimeWorkerError> {
+        let slot = self.slots.get_mut(session_id).ok_or_else(|| {
+            self.hydration_errors.get(session_id).cloned().unwrap_or_else(|| {
+                RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
+            })
+        })?;
+
+        let mut tape = SessionTape::load_jsonl_or_default(&slot.session_path)
+            .map_err(|error| RuntimeWorkerError::internal(format!("tape load failed: {error}")))?;
+        tape.record_question_requested(&request);
+        let entry = tape.entries().last().cloned().ok_or_else(|| {
+            RuntimeWorkerError::internal("question request was not appended to tape")
+        })?;
+        SessionTape::append_jsonl_entry(&slot.session_path, &entry)
+            .map_err(|error| RuntimeWorkerError::internal(format!("session append failed: {error}")))?;
+
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        slot.insert_pending_question_waiter(request.request_id.clone(), sender);
+
+        *write_lock(&slot.current_turn) = Some(crate::runtime_worker::CurrentTurnSnapshot {
+            turn_id: request.turn_id.clone(),
+            started_at_ms: now_timestamp_ms(),
+            user_message: slot
+                .current_turn
+                .read()
+                .ok()
+                .and_then(|current| current.as_ref().map(|turn| turn.user_message.clone()))
+                .unwrap_or_default(),
+            status: crate::sse::TurnStatus::WaitingForQuestion,
+            blocks: slot
+                .current_turn
+                .read()
+                .ok()
+                .and_then(|current| current.as_ref().map(|turn| turn.blocks.clone()))
+                .unwrap_or_default(),
+        });
+        let _ = self.config.broadcast_tx.send(SsePayload::Status {
+            session_id: session_id.to_string(),
+            turn_id: request.turn_id.clone(),
+            status: crate::sse::TurnStatus::WaitingForQuestion,
+        });
+
+        receiver.await.map_err(|_| RuntimeWorkerError::internal("question waiter dropped"))
+    }
+
     fn resolve_pending_question(
         &mut self,
         session_id: &str,
@@ -456,80 +513,15 @@ impl SessionManagerLoop {
         }
 
         tape.record_question_resolved(&result);
-        let call = ToolCall::new("Question")
-            .with_invocation_id(pending_request.invocation_id.clone())
-            .with_arguments_value(serde_json::json!({
-                "questions": pending_request.questions,
-            }));
-        let details = serde_json::to_value(&result).map_err(|error| {
-            RuntimeWorkerError::internal(format!("question result serialization failed: {error}"))
+        let entry = tape.entries().last().cloned().ok_or_else(|| {
+            RuntimeWorkerError::internal("question result was not appended to tape")
         })?;
-        let content = serde_json::to_string(&result).map_err(|error| {
-            RuntimeWorkerError::internal(format!("question result encoding failed: {error}"))
-        })?;
-        tape.append_entry(
-            session_tape::TapeEntry::tool_result(
-                &ToolResult::from_call(&call, content).with_details(details),
-            )
-            .with_run_id(&pending_request.turn_id),
-        );
-        tape.save_jsonl(&slot.session_path).map_err(|error| {
-            RuntimeWorkerError::internal(format!("session save failed: {error}"))
-        })?;
+        SessionTape::append_jsonl_entry(&slot.session_path, &entry)
+            .map_err(|error| RuntimeWorkerError::internal(format!("session append failed: {error}")))?;
 
-        let snapshots = rebuild_session_snapshots_from_tape(&tape);
-        *write_lock(&slot.history) = snapshots.history.clone();
-        *write_lock(&slot.current_turn) = snapshots.current_turn.clone();
-
-        let (mut runtime, subscriber, running_turn) = slot.begin_turn()?;
-        *runtime.tape_mut() = tape.clone();
-        let turn_id = pending_request.turn_id.clone();
-        let current_turn = crate::runtime_worker::CurrentTurnSnapshot {
-            turn_id: turn_id.clone(),
-            started_at_ms: now_timestamp_ms(),
-            user_message: snapshots
-                .current_turn
-                .as_ref()
-                .map(|turn| turn.user_message.clone())
-                .unwrap_or_default(),
-            status: crate::sse::TurnStatus::Waiting,
-            blocks: Vec::new(),
-        };
-        *write_lock(&slot.current_turn) = Some(current_turn.clone());
-
-        let session_id_owned = session_id.to_string();
-        let worker = turn_execution::TurnWorker::resume_question(
-            runtime,
-            subscriber,
-            turn_id.clone(),
-            result,
-            running_turn.control.clone(),
-            turn_execution::TurnWorkerContext {
-                broadcast_tx: self.config.broadcast_tx.clone(),
-                current_turn_snapshot: slot.current_turn.clone(),
-                history_snapshot: slot.history.clone(),
-                context_stats_snapshot: slot.context_stats.clone(),
-                trace_recorder: ToolTraceRecorder::new(self.config.store.clone()),
-                session_id: session_id_owned.clone(),
-                turn_id: turn_id.clone(),
-            },
-        );
-        let return_tx = self.return_tx.clone();
-
-        let _ = self.config.broadcast_tx.send(SsePayload::CurrentTurnStarted {
-            session_id: session_id_owned.clone(),
-            current_turn,
-        });
-        let _ = self.config.broadcast_tx.send(SsePayload::Status {
-            session_id: session_id_owned,
-            turn_id,
-            status: crate::sse::TurnStatus::Waiting,
-        });
-
-        tokio::spawn(async move {
-            let runtime_return = worker.run().await;
-            let _ = return_tx.send(runtime_return).await;
-        });
+        if let Some(waiter) = slot.remove_pending_question_waiter(&pending_request.request_id) {
+            let _ = waiter.send(result);
+        }
 
         Ok(())
     }
@@ -579,7 +571,12 @@ impl<'a> SessionSlotFactory<'a> {
 
         let session_append_path = session_path.clone();
         let workspace_root = self.config.workspace_root.clone();
-        let mut runtime = AgentRuntime::with_tape(model, build_tool_registry(), identity, tape)
+        let mut runtime = AgentRuntime::with_tape(
+            model,
+            build_server_tool_registry(self.config.question_coordinator.clone()),
+            identity,
+            tape,
+        )
             .with_instructions(build_session_system_prompt(
                 self.config.system_prompt.as_deref(),
                 &self.config.workspace_root,
@@ -723,6 +720,14 @@ fn prompt_cache_for_selection(
         key: Some(aia_config::build_prompt_cache_key(&profile.name, &model.id, session_id)),
         retention: Some(RuntimePromptCacheRetention::OneDay),
     })
+}
+
+fn build_server_tool_registry(
+    question_coordinator: std::sync::Arc<types::QuestionCoordinator>,
+) -> ToolRegistry {
+    let mut registry = builtin_tools::build_tool_registry();
+    registry.register(Box::new(ServerQuestionTool::new(question_coordinator)));
+    registry
 }
 
 pub(crate) use types::{read_lock, write_lock};
