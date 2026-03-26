@@ -47,7 +47,7 @@ function ToolTrigger({
   }
   const displayName = getToolDisplayName(item.toolName)
   const title = toolRendererRegistry.renderTitle(renderData)
-  const meta = isRunning ? null : toolRendererRegistry.renderMeta(renderData)
+  const meta = toolRendererRegistry.renderMeta(renderData)
   const renderedSubtitle = toolRendererRegistry.renderSubtitle(renderData)
   const subtitle =
     getFallbackSubtitle(item) ??
@@ -68,7 +68,7 @@ function ToolTrigger({
       <span data-slot="tool-title">
         {isRunning ? <TextShimmer text={displayName} active /> : displayName}
       </span>
-      {!isRunning && fileParts ? (
+      {fileParts ? (
         <span
           data-slot="tool-subtitle"
           data-kind="file-path"
@@ -80,7 +80,7 @@ function ToolTrigger({
             <span data-slot="tool-file-dir">{fileParts.directory}</span>
           ) : null}
         </span>
-      ) : !isRunning && subtitle ? (
+      ) : subtitle ? (
         <span
           data-slot="tool-subtitle"
           data-state={item.succeeded ? "default" : "failure"}
@@ -89,8 +89,8 @@ function ToolTrigger({
           {subtitle}
         </span>
       ) : null}
-      {!isRunning && meta ? <span data-slot="tool-meta">{meta}</span> : null}
-      {!isRunning && duration ? (
+      {meta ? <span data-slot="tool-meta">{meta}</span> : null}
+      {duration ? (
         <span data-slot="tool-duration">{duration}</span>
       ) : null}
     </div>

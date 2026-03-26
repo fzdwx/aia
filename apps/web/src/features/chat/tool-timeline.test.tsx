@@ -402,9 +402,62 @@ describe("tool timeline", () => {
     expect(completedHtml).not.toContain("Exploring")
 
     expect(runningHtml).toContain("Shell")
+    expect(runningHtml).toContain("Run workspace checks")
+    expect(runningHtml).toContain('data-slot="tool-duration"')
     expect(runningHtml).not.toContain("Explored")
     expect(runningHtml).not.toContain("Exploring")
     expect(runningHtml).not.toContain("Running tools")
+  })
+
+  test("renders running tools with live subtitle and duration", () => {
+    const now = Date.now()
+    const shellHtml = renderWithTheme(
+      <StreamingToolGroup
+        toolOutputs={[
+          {
+            invocationId: "streaming-shell-live-1",
+            toolName: "Shell",
+            arguments: {
+              command: "cargo check",
+              description: "Run workspace checks",
+            },
+            detectedAtMs: now - 1500,
+            startedAtMs: now - 1200,
+            output: "",
+            completed: false,
+          },
+        ]}
+      />
+    )
+
+    const readHtml = renderWithTheme(
+      <StreamingToolGroup
+        toolOutputs={[
+          {
+            invocationId: "streaming-read-live-1",
+            toolName: "Read",
+            arguments: {
+              file_path: "apps/web/src/features/chat/tool-timeline.tsx",
+              offset: 1,
+              limit: 20,
+            },
+            detectedAtMs: now - 1800,
+            startedAtMs: now - 1000,
+            output: "",
+            completed: false,
+          },
+        ]}
+      />
+    )
+
+    expect(shellHtml).toContain("Run workspace checks")
+    expect(shellHtml).toContain('data-slot="tool-subtitle"')
+    expect(shellHtml).toContain('data-slot="tool-duration"')
+    expect(readHtml).toContain("tool-timeline.tsx")
+    expect(readHtml).toContain('data-slot="tool-file-name"')
+    expect(readHtml).toContain('data-slot="tool-subtitle"')
+    expect(readHtml).toContain('data-slot="tool-meta"')
+    expect(readHtml).toContain("L2~21")
   })
 
   test("renders TapeInfo as a non-expandable inline summary row", () => {
