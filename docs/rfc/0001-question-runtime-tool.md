@@ -15,7 +15,22 @@ superseded_by: null
 
 ## Summary
 
-为 `aia` 引入内部 `Question` runtime tool：仅在当前 session 支持交互式组件时向模型暴露该工具；问题请求与结果均使用结构化 JSON；运行时支持暂停等待用户回答，并可通过 append-only session tape 在停机后恢复 pending question。
+为 `aia` 引入内部 `Question` 工具能力：仅在当前 session 支持交互式组件时向模型暴露该工具；问题请求与结果均使用结构化 JSON；当前实现通过统一工具注册表 + runtime host/context 完成提问与等待语义，并可通过 append-only session tape 恢复 pending question。
+
+## Implementation Snapshot
+
+截至当前实现，RFC 的主体方向保持成立，但有两点需要以代码事实为准：
+
+1. `Question`、`TapeInfo`、`TapeHandoff` 的工具实现当前都放在 `builtin-tools`，而不是再由 `agent-runtime` 维护第二份 runtime tool 注册表。
+2. `Question` 并没有落成“通用 suspend/resume 原语”，而是通过 `ToolExecutionContext.runtime_host` 进入 server 侧 host 能力；server 会先同步落 `question_requested`、登记 waiter 并立刻回到 session manager 主循环，再由独立等待任务在用户回答后把结构化结果回给当前 tool call。pending question 的恢复覆盖控制面与 UI 恢复，不等同于进程重启后原阻塞 future 自动续跑。
+
+当前代码边界如下：
+
+- `agent-core`：共享 `Question*` 类型、`SessionInteractionCapabilities`、`RuntimeToolContext`、`RuntimeToolHost`
+- `builtin-tools`：`Question`、`TapeInfo`、`TapeHandoff` 的工具定义与参数解析
+- `agent-runtime`：按 capability 暴露工具、向工具执行上下文注入 `runtime` / `runtime_host`
+- `apps/agent-server`：提供 `RuntimeToolHost` 实现、pending question 控制面、tape 落盘与 waiter
+- `apps/web`：pending question 拉取、展示、回答与取消
 
 ## Motivation
 
@@ -85,9 +100,9 @@ superseded_by: null
 
 在当前阶段，推荐保持两者同值；保留两个字段只是为了给未来更细粒度能力拆分留出口。
 
-### 1. `Question` 是 runtime tool，不是普通 builtin tool
+### 1. `Question` 通过统一工具注册表暴露，但依赖 runtime host/context
 
-`Question` 的本质不是“执行一个同步函数并立即返回结果”，而是：
+`Question` 的本质不是“只靠参数同步执行并立即返回结果”，而是：
 
 - 生成问题
 - 把问题交给当前 session 的交互承接面
@@ -95,20 +110,29 @@ superseded_by: null
 - 等待用户回答
 - 恢复原 turn 继续执行
 
-因此它应落在 runtime tool 这一层，而不是 `builtin-tools`。
+当前实现选择把 `Question` 的工具定义放在 `builtin-tools`，但它仍然不是纯参数驱动工具，而是依赖：
+
+- `ToolExecutionContext.runtime_host`：把结构化 `QuestionRequest` 交给当前 server/session host
+- `ToolExecutionContext.runtime`：与 `TapeInfo` / `TapeHandoff` 一样，承接 runtime 本地上下文能力
+
+因此，真正需要保持统一的是“能力边界”，而不是“工具定义必须放在哪个 crate”。当前实现遵循的边界是：
+
+- `builtin-tools`：承接工具定义、参数 schema 与 `Tool` 实现
+- `agent-runtime`：承接 capability gating、执行时上下文注入与 turn/tool 生命周期
+- `apps/agent-server`：承接 host 侧等待、落盘、恢复查询与控制面
 
 这样可以保持职责清晰：
 
 - `agent-core`：承接共享类型和结构化协议
-- `agent-runtime`：承接暂停 / 恢复 / tool result 注入语义
-- `apps/agent-server`：承接 pending question 控制面与 session 状态恢复
+- `agent-runtime`：承接 capability 过滤、tool 执行上下文与结果注入语义
+- `apps/agent-server`：承接 pending question 控制面、等待与 session 状态恢复
 - `apps/web`：承接交互 UI
 
 ### 2. `Question` 的可见性由 session interaction capability 决定
 
 不是所有 session 都应该向模型暴露 `Question`。
 
-本 RFC 采用 capability gating：只有当前 session 明确支持交互式组件时，runtime 才把 `Question` 注册到模型可见工具列表中。
+本 RFC 采用 capability gating：只有当前 session 明确支持交互式组件时，runtime 才把 `Question` 放进模型可见工具列表中。
 
 建议新增 session 级 capability，例如：
 
@@ -131,7 +155,7 @@ superseded_by: null
 同时，建议明确以下约束：
 
 - 同一 session 任意时刻最多只能存在一个 pending `QuestionRequest`
-- `Question` 是否注册只由 `SessionInteractionCapabilities` 决定，不允许 runtime 再根据 tool call 现场兜底猜测
+- `Question` 的可见性由 `SessionInteractionCapabilities` 与工具自身的 capability 声明共同决定，不允许 runtime 在 tool call 现场兜底猜测
 
 ### 3. 结果必须对模型结构化，而不是只返回一句话
 
@@ -301,7 +325,7 @@ superseded_by: null
 
 ### 状态机
 
-建议为 session 增加显式 question 等待态：
+当前实现仍然需要显式 question 等待态：
 
 - `Idle`
 - `Running`
@@ -328,11 +352,17 @@ superseded_by: null
 
 前者会让模型误以为已经拿到用户反馈；后者会把 server 交互、停机恢复、session 状态都藏进临时内存路径里，不符合当前架构方向。
 
-因此正确做法是：
+当前实现的正确做法是：
 
-- runtime 把 `Question` 视为可挂起的 runtime tool
-- 当前 turn 暂停在 pending question 上
-- 恢复后把结构化 `QuestionResult` 注入回工具结果链路
+- `Question` 作为统一工具注册表里的一个工具被调用
+- server host 收到 `QuestionRequest` 后写入 `question_requested` 并注册 waiter
+- session manager 主循环立即返回 `select!`，继续处理其他命令、归还与 question 控制面请求
+- 当前 turn 进入 `WaitingForQuestion`
+- 用户通过控制面提交 `QuestionResult`
+- server 写入 `question_resolved` 并唤醒 waiter
+- 独立等待任务把结构化 `QuestionResult` 回给当前工具调用，再继续模型侧流程
+
+这比“只通知客户端然后立即返回”更重，但它保留了当前工具调用等待答案的语义，同时不再把整个 session manager 命令循环卡死。
 
 ## Session Tape 设计
 
@@ -369,6 +399,8 @@ superseded_by: null
 
 3. 追加 `event(question_resolved)`
 4. 追加 `tool_result(question)`
+
+当前实现中，`tool_result(question)` 仍由通用工具调用链在 `Question` 返回后统一写入；server control-plane 本身只负责 `question_requested/question_resolved` 事实追加，而不直接伪造工具结果。
 
 这样做的意义：
 
@@ -623,23 +655,27 @@ Web 等承接面应尽量把这层语义显式投影到交互上，例如：
 ### Phase 1：共享协议与恢复语义
 
 - `agent-core`：新增 `QuestionRequest`、`QuestionItem`、`QuestionOption`、`QuestionAnswer`、`QuestionResult`
-- `agent-runtime`：新增 `Question` runtime tool、`SessionInteractionCapabilities` 消费与 suspend/resume 语义
+- `agent-runtime`：消费 `SessionInteractionCapabilities`、向工具执行上下文注入 `runtime` / `runtime_host`
 - `session-tape` / `agent-server`：补 `question_requested` / `question_resolved` 的持久化与恢复
 
 当前进度：
 
-- 已完成：`agent-core` 的共享 `Question*` 类型、`SessionInteractionCapabilities`、`agent-prompts` 的 `question` 工具描述、`agent-runtime` 的 `Question` runtime tool 定义与 capability gating
-- 未完成：`session-tape` / `agent-server` 的 pending question 事实落盘、恢复路径与 suspend/resume 主链
+- 已完成：`agent-core` 的共享 `Question*` 类型、`SessionInteractionCapabilities`、`RuntimeToolContext` / `RuntimeToolHost`；`agent-prompts` 的 `question` 工具描述；`builtin-tools` 中的 `Question` / `TapeInfo` / `TapeHandoff` 实现；`agent-runtime` 的 capability gating 与上下文注入；`session-tape` / `agent-server` 的 `question_requested/question_resolved` 落盘、控制面与 waiter 链路；`apps/web` 的 pending question UI
+- 未完成：真正意义上的“进程重启后原阻塞 tool future 自动恢复续跑”主链；超时语义仍未落地
 
 ### Phase 2：server control-plane
 
 - `apps/agent-server`：新增 `GET/PUT/DELETE /api/session/question` 控制面
 - `SessionSlot` / session state：补 `WaitingForQuestion`
 
+当前进度：已完成。
+
 ### Phase 3：Web 承接
 
 - `apps/web`：新增 pending question UI
 - 继续复用现有时间线里的 `question` renderer 展示历史结果
+
+当前进度：已完成。当前 Web 通过 `/api/session/question` 拉取权威 pending question，再在聊天输入区切换到 pending question composer。
 
 ### Phase 4：超时语义（可选，非首轮必做）
 
@@ -649,13 +685,15 @@ Web 等承接面应尽量把这层语义显式投影到交互上，例如：
 
 ## Alternatives Considered
 
-### 方案 A：把 `Question` 做成普通 builtin tool
+### 方案 A：把 `Question` 做成普通参数驱动工具，不依赖 runtime host/context
 
 不采纳。原因：
 
-- 无法自然表达暂停 / 恢复
+- 无法自然表达等待用户回答后的结果回填
 - 停机恢复会很别扭
 - server control-plane 会被迫绕过 runtime 语义
+
+补充说明：当前实现虽然把 `Question` 的 `Tool` 定义放进了 `builtin-tools`，但它并不是“普通参数驱动工具”，因为它仍依赖 `ToolExecutionContext.runtime_host` 和 capability gating。
 
 ### 方案 B：始终注册 `Question`，不支持的 session 再返回失败
 

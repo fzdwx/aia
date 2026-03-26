@@ -6,6 +6,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::runtime_worker::RunningTurnHandle;
 use crate::sse::TurnStatus;
 use agent_core::{RequestTimeoutConfig, StreamEvent};
+use agent_store::SessionRecord;
+use session_tape::SessionTape;
 
 use super::{
     CurrentTurnSnapshot, SessionManagerConfig, SessionQueryService, SessionSlot,
@@ -76,6 +78,118 @@ fn build_idle_slot(name: &str) -> SessionSlot {
     let root = temp_session_dir(name);
     let config = sample_manager_config(&root);
     SessionSlotFactory::new(&config).create("session-1").expect("session slot should build")
+}
+
+#[test]
+fn session_slot_factory_clears_orphaned_pending_question_on_restore() {
+    let root = temp_session_dir("orphaned-pending-question");
+    let config = sample_manager_config(&root);
+    let session_id = "session-orphaned";
+    let session_path = config.sessions_dir.join(format!("{session_id}.jsonl"));
+
+    run_async(config.store.create_session_async(SessionRecord::new(
+        session_id.to_string(),
+        "Session One".to_string(),
+        "bootstrap".to_string(),
+    )))
+    .expect("session record should persist");
+
+    let mut tape =
+        SessionTape::load_jsonl_or_default(&session_path).expect("session tape should load");
+    tape.record_question_requested(&agent_core::QuestionRequest {
+        request_id: "qreq_orphaned".into(),
+        invocation_id: "call_123".into(),
+        turn_id: "turn_123".into(),
+        questions: vec![agent_core::QuestionItem {
+            id: "database".into(),
+            question: "Use which database?".into(),
+            kind: agent_core::QuestionKind::Choice,
+            required: true,
+            multi_select: false,
+            options: Vec::new(),
+            placeholder: None,
+            recommended_option_id: None,
+            recommendation_reason: None,
+        }],
+    });
+    tape.save_jsonl(&session_path).expect("session tape should save");
+
+    let slot =
+        SessionSlotFactory::new(&config).create(session_id).expect("session slot should restore");
+
+    assert_eq!(
+        slot.runtime()
+            .expect("restored slot should be idle")
+            .tape()
+            .try_pending_question_request()
+            .expect("pending question should decode"),
+        None
+    );
+
+    let restored =
+        SessionTape::load_jsonl_or_default(&session_path).expect("restored tape should load");
+    let cancelled = restored
+        .entries()
+        .iter()
+        .rev()
+        .find(|entry| entry.event_name() == Some("question_resolved"))
+        .and_then(|entry| entry.event_data())
+        .and_then(|value| value.get("status"))
+        .and_then(|value| value.as_str());
+    assert_eq!(cancelled, Some("cancelled"));
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn session_slot_factory_clears_orphaned_incomplete_turn_on_restore() {
+    let root = temp_session_dir("orphaned-incomplete-turn");
+    let config = sample_manager_config(&root);
+    let session_id = "session-incomplete";
+    let session_path = config.sessions_dir.join(format!("{session_id}.jsonl"));
+
+    run_async(config.store.create_session_async(SessionRecord::new(
+        session_id.to_string(),
+        "Session Two".to_string(),
+        "bootstrap".to_string(),
+    )))
+    .expect("session record should persist");
+
+    let mut tape =
+        SessionTape::load_jsonl_or_default(&session_path).expect("session tape should load");
+    let turn_id = "turn_incomplete";
+    tape.append_entry(
+        session_tape::TapeEntry::message(&agent_core::Message::new(
+            agent_core::Role::User,
+            "处理中",
+        ))
+        .with_run_id(turn_id),
+    );
+    tape.append_entry(session_tape::TapeEntry::thinking("先分析").with_run_id(turn_id));
+    tape.save_jsonl(&session_path).expect("session tape should save");
+
+    let slot =
+        SessionSlotFactory::new(&config).create(session_id).expect("session slot should restore");
+
+    assert!(read_lock(&slot.current_turn).is_none());
+    let history = read_lock(&slot.history);
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].turn_id, turn_id);
+    assert_eq!(history[0].outcome, agent_runtime::TurnOutcome::Cancelled);
+
+    let restored =
+        SessionTape::load_jsonl_or_default(&session_path).expect("restored tape should load");
+    let cancelled = restored
+        .entries()
+        .iter()
+        .rev()
+        .find(|entry| entry.event_name() == Some("turn_failed"))
+        .and_then(|entry| entry.event_data())
+        .and_then(|value| value.get("message"))
+        .and_then(|value| value.as_str());
+    assert_eq!(cancelled, Some("服务器重启，当前轮次已取消"));
+
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]

@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
+use agent_core::{QuestionResult, QuestionResultStatus};
 use agent_runtime::{ContextStats, TurnLifecycle};
+use session_tape::SessionTape;
 
 use crate::{runtime_worker::CurrentTurnSnapshot, sse::TurnStatus};
 
@@ -22,7 +24,24 @@ impl<'a> SessionQueryService<'a> {
             RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
         })?;
 
+        let pending_request = SessionTape::load_jsonl_or_default(&slot.session_path)
+            .map_err(|error| RuntimeWorkerError::internal(format!("tape load failed: {error}")))?
+            .try_pending_question_request()
+            .map_err(|error| RuntimeWorkerError::internal(error.to_string()))?;
+
         if slot.status() != SlotStatus::Running {
+            if let Some(request) = pending_request {
+                if let Some(waiter) = slot.remove_pending_question_waiter(&request.request_id) {
+                    let _ = waiter.send(QuestionResult {
+                        status: QuestionResultStatus::Cancelled,
+                        request_id: request.request_id,
+                        answers: Vec::new(),
+                        reason: None,
+                    });
+                    update_current_turn_status(&slot.current_turn, TurnStatus::Cancelled);
+                    return Ok(true);
+                }
+            }
             return Ok(false);
         }
 
@@ -32,6 +51,16 @@ impl<'a> SessionQueryService<'a> {
 
         running_turn.control.cancel();
         update_current_turn_status(&slot.current_turn, TurnStatus::Cancelled);
+        if let Some(request) = pending_request {
+            if let Some(waiter) = slot.remove_pending_question_waiter(&request.request_id) {
+                let _ = waiter.send(QuestionResult {
+                    status: QuestionResultStatus::Cancelled,
+                    request_id: request.request_id,
+                    answers: Vec::new(),
+                    reason: None,
+                });
+            }
+        }
         Ok(true)
     }
 

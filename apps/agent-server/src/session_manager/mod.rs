@@ -21,7 +21,7 @@ use agent_core::{
 use agent_runtime::AgentRuntime;
 use agent_store::{AiaStore, SessionRecord, generate_session_id};
 use provider_registry::ProviderRegistry;
-use session_tape::{SessionProviderBinding, SessionTape};
+use session_tape::{SessionProviderBinding, SessionTape, TapeEntry};
 use tokio::sync::mpsc;
 
 use crate::{
@@ -150,7 +150,19 @@ impl SessionManagerLoop {
             }
             SessionCommand::CancelTurn { session_id, reply } => {
                 let mut query = SessionQueryService::new(&mut self.slots);
-                let _ = reply.send(query.cancel_turn(&session_id));
+                let result = query.cancel_turn(&session_id);
+                drop(query);
+                if matches!(result, Ok(true)) {
+                    match self.cancel_pending_question(&session_id) {
+                        Ok(()) => {}
+                        Err(error) if error.message == "session has no pending question" => {}
+                        Err(error) => {
+                            let _ = reply.send(Err(error));
+                            return;
+                        }
+                    }
+                }
+                let _ = reply.send(result);
             }
             SessionCommand::GetHistory { session_id, reply } => {
                 let query = SessionQueryService::new(&mut self.slots);
@@ -177,7 +189,20 @@ impl SessionManagerLoop {
                 let _ = reply.send(self.get_pending_question(&session_id));
             }
             SessionCommand::AskQuestion { session_id, request, reply } => {
-                let _ = reply.send(self.ask_question(&session_id, request).await);
+                let result = self.register_pending_question(&session_id, request);
+                match result {
+                    Ok(receiver) => {
+                        tokio::spawn(async move {
+                            let outcome = receiver.await.map_err(|_| {
+                                RuntimeWorkerError::internal("question waiter dropped")
+                            });
+                            let _ = reply.send(outcome);
+                        });
+                    }
+                    Err(error) => {
+                        let _ = reply.send(Err(error));
+                    }
+                }
             }
             SessionCommand::ResolvePendingQuestion { session_id, result, reply } => {
                 let _ = reply.send(self.resolve_pending_question(&session_id, result));
@@ -439,11 +464,11 @@ impl SessionManagerLoop {
             .map_err(|error| RuntimeWorkerError::internal(error.to_string()))
     }
 
-    async fn ask_question(
+    fn register_pending_question(
         &mut self,
         session_id: &str,
         request: QuestionRequest,
-    ) -> Result<QuestionResult, RuntimeWorkerError> {
+    ) -> Result<tokio::sync::oneshot::Receiver<QuestionResult>, RuntimeWorkerError> {
         let slot = self.slots.get_mut(session_id).ok_or_else(|| {
             self.hydration_errors.get(session_id).cloned().unwrap_or_else(|| {
                 RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
@@ -452,6 +477,14 @@ impl SessionManagerLoop {
 
         let mut tape = SessionTape::load_jsonl_or_default(&slot.session_path)
             .map_err(|error| RuntimeWorkerError::internal(format!("tape load failed: {error}")))?;
+        if tape
+            .try_pending_question_request()
+            .map_err(|error| RuntimeWorkerError::internal(error.to_string()))?
+            .is_some()
+            || !slot.pending_question_waiters.is_empty()
+        {
+            return Err(RuntimeWorkerError::bad_request("session already has a pending question"));
+        }
         tape.record_question_requested(&request);
         let entry = tape.entries().last().cloned().ok_or_else(|| {
             RuntimeWorkerError::internal("question request was not appended to tape")
@@ -486,7 +519,7 @@ impl SessionManagerLoop {
             status: crate::sse::TurnStatus::WaitingForQuestion,
         });
 
-        receiver.await.map_err(|_| RuntimeWorkerError::internal("question waiter dropped"))
+        Ok(receiver)
     }
 
     fn resolve_pending_question(
@@ -555,8 +588,9 @@ impl<'a> SessionSlotFactory<'a> {
 
     fn create(&self, session_id: &str) -> Result<SessionSlot, RuntimeWorkerError> {
         let session_path = self.config.sessions_dir.join(format!("{session_id}.jsonl"));
-        let tape = SessionTape::load_jsonl_or_default(&session_path)
+        let mut tape = SessionTape::load_jsonl_or_default(&session_path)
             .map_err(|error| RuntimeWorkerError::internal(format!("tape load failed: {error}")))?;
+        reconcile_orphaned_inflight_state(&session_path, &mut tape)?;
         let provider_binding = tape
             .try_latest_provider_binding()
             .map_err(|error| RuntimeWorkerError::internal(error.to_string()))?
@@ -609,6 +643,54 @@ impl<'a> SessionSlotFactory<'a> {
             subscriber,
         ))
     }
+}
+
+fn reconcile_orphaned_inflight_state(
+    session_path: &std::path::Path,
+    tape: &mut SessionTape,
+) -> Result<(), RuntimeWorkerError> {
+    let snapshots = rebuild_session_snapshots_from_tape(tape);
+    let mut changed = false;
+
+    if let Some(current_turn) = snapshots.current_turn {
+        tape.append_entry(
+            TapeEntry::event(
+                "turn_failed",
+                Some(serde_json::json!({
+                    "message": "服务器重启，当前轮次已取消"
+                })),
+            )
+            .with_run_id(&current_turn.turn_id),
+        );
+        changed = true;
+    }
+
+    let Some(pending_request) = tape
+        .try_pending_question_request()
+        .map_err(|error| RuntimeWorkerError::internal(error.to_string()))?
+    else {
+        if changed {
+            return tape.save_jsonl(session_path).map_err(|error| {
+                RuntimeWorkerError::internal(format!("session save failed: {error}"))
+            });
+        }
+        return Ok(());
+    };
+
+    tape.record_question_resolved(&QuestionResult {
+        status: QuestionResultStatus::Cancelled,
+        request_id: pending_request.request_id,
+        answers: Vec::new(),
+        reason: Some("server restarted before the pending question could be resumed".to_string()),
+    });
+    changed = true;
+
+    if !changed {
+        return Ok(());
+    }
+
+    tape.save_jsonl(session_path)
+        .map_err(|error| RuntimeWorkerError::internal(format!("session save failed: {error}")))
 }
 
 fn choose_provider_for_tape(

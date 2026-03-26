@@ -324,6 +324,222 @@ async fn resolve_pending_question_without_waiter_only_records_resolution() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn resolve_pending_question_does_not_block_while_ask_question_is_waiting() {
+    let (state, root) =
+        test_state_with_session_manager("session-resolve-while-waiting", sample_registry());
+    let session = state
+        .session_manager
+        .create_session(Some("Session One".into()))
+        .await
+        .expect("session should be created");
+
+    let request = sample_question_request();
+    let request_id = request.request_id.clone();
+    let session_id = session.id.clone();
+    let session_path = root.join("sessions").join(format!("{}.jsonl", session_id));
+    let ask_handle = tokio::spawn({
+        let session_manager = state.session_manager.clone();
+        let session_id = session_id.clone();
+        let request = request.clone();
+        async move { session_manager.ask_question(session_id, request).await }
+    });
+
+    let pending_ready = tokio::time::timeout(std::time::Duration::from_millis(500), async {
+        loop {
+            let tape = session_tape::SessionTape::load_jsonl_or_default(&session_path)
+                .expect("session tape should load");
+            let pending =
+                tape.try_pending_question_request().expect("pending question should decode");
+            if pending.as_ref().map(|value| value.request_id.as_str()) == Some(request_id.as_str())
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    assert!(pending_ready.is_ok(), "pending question should be recorded before resolution");
+
+    let resolution = tokio::time::timeout(
+        std::time::Duration::from_millis(500),
+        state.session_manager.resolve_pending_question(
+            session_id.clone(),
+            QuestionResult {
+                status: QuestionResultStatus::Answered,
+                request_id: request_id.clone(),
+                answers: vec![QuestionAnswer {
+                    question_id: "database".into(),
+                    selected_option_ids: vec!["sqlite".into()],
+                    text: None,
+                }],
+                reason: None,
+            },
+        ),
+    )
+    .await;
+
+    assert!(
+        resolution.is_ok(),
+        "resolving a pending question should not stall behind ask_question"
+    );
+    resolution
+        .expect("resolution request should finish before timeout")
+        .expect("pending question should resolve successfully");
+
+    let ask_result = tokio::time::timeout(std::time::Duration::from_millis(500), ask_handle)
+        .await
+        .expect("ask_question task should finish after resolution")
+        .expect("ask_question task should join successfully")
+        .expect("ask_question should return the resolved result");
+    assert_eq!(ask_result.status, QuestionResultStatus::Answered);
+    assert_eq!(ask_result.request_id, request_id);
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn cancel_turn_unblocks_ask_question_waiter() {
+    let (state, root) =
+        test_state_with_session_manager("session-cancel-while-waiting", sample_registry());
+    let session = state
+        .session_manager
+        .create_session(Some("Session One".into()))
+        .await
+        .expect("session should be created");
+
+    let request = sample_question_request();
+    let session_id = session.id.clone();
+    let session_path = root.join("sessions").join(format!("{}.jsonl", session_id));
+    let ask_handle = tokio::spawn({
+        let session_manager = state.session_manager.clone();
+        let session_id = session_id.clone();
+        let request = request.clone();
+        async move { session_manager.ask_question(session_id, request).await }
+    });
+
+    tokio::time::timeout(std::time::Duration::from_millis(500), async {
+        loop {
+            let tape = session_tape::SessionTape::load_jsonl_or_default(&session_path)
+                .expect("session tape should load");
+            if tape
+                .try_pending_question_request()
+                .expect("pending question should decode")
+                .is_some()
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("pending question should be recorded before cancel turn");
+
+    let cancelled = state
+        .session_manager
+        .cancel_turn(session_id.clone())
+        .await
+        .expect("cancel turn request should succeed");
+    assert!(cancelled, "cancel turn should report a running turn");
+
+    let ask_result = tokio::time::timeout(std::time::Duration::from_millis(500), ask_handle)
+        .await
+        .expect("ask_question task should finish after cancel turn")
+        .expect("ask_question task should join successfully")
+        .expect("ask_question should return a cancellation result");
+    assert_eq!(ask_result.status, QuestionResultStatus::Cancelled);
+    assert_eq!(ask_result.request_id, request.request_id);
+
+    let restored = session_tape::SessionTape::load_jsonl_or_default(&session_path)
+        .expect("updated tape should load");
+    assert_eq!(
+        restored.try_pending_question_request().expect("pending question should decode"),
+        None
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn ask_question_rejects_second_pending_question_in_same_session() {
+    let (state, root) =
+        test_state_with_session_manager("session-duplicate-pending-question", sample_registry());
+    let session = state
+        .session_manager
+        .create_session(Some("Session One".into()))
+        .await
+        .expect("session should be created");
+
+    let first_request = sample_question_request();
+    let session_id = session.id.clone();
+    let session_path = root.join("sessions").join(format!("{}.jsonl", session_id));
+    let first_handle = tokio::spawn({
+        let session_manager = state.session_manager.clone();
+        let session_id = session_id.clone();
+        let request = first_request.clone();
+        async move { session_manager.ask_question(session_id, request).await }
+    });
+
+    tokio::time::timeout(std::time::Duration::from_millis(500), async {
+        loop {
+            let tape = session_tape::SessionTape::load_jsonl_or_default(&session_path)
+                .expect("session tape should load");
+            if tape
+                .try_pending_question_request()
+                .expect("pending question should decode")
+                .is_some()
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("first pending question should be recorded");
+
+    let second_result = state
+        .session_manager
+        .ask_question(
+            session_id.clone(),
+            QuestionRequest {
+                request_id: "qreq_456".into(),
+                invocation_id: "call_456".into(),
+                turn_id: "turn_456".into(),
+                questions: vec![QuestionItem {
+                    id: "runtime".into(),
+                    question: "Use which runtime?".into(),
+                    kind: QuestionKind::Choice,
+                    required: true,
+                    multi_select: false,
+                    options: Vec::new(),
+                    placeholder: None,
+                    recommended_option_id: None,
+                    recommendation_reason: None,
+                }],
+            },
+        )
+        .await;
+
+    let error = second_result.expect_err("second pending question should be rejected");
+    assert!(
+        error.message.contains("session already has a pending question"),
+        "unexpected error: {}",
+        error.message
+    );
+
+    state
+        .session_manager
+        .cancel_pending_question(session_id)
+        .await
+        .expect("cleanup cancel pending question should succeed");
+    first_handle
+        .await
+        .expect("first ask_question should join successfully")
+        .expect("first ask_question should resolve after cleanup");
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn cancel_pending_question_records_cancelled_result() {
     let (state, root) =
         test_state_with_session_manager("session-cancel-question", sample_registry());

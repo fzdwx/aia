@@ -1,9 +1,12 @@
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use provider_registry::{ProviderProfile, ProviderRegistry};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
 use super::{CancelTurnRequest, TurnRequest, handlers, handlers::map_broadcast_result};
-use crate::routes::test_support::test_state_with_session_manager;
+use crate::routes::test_support::{
+    test_state_with_session_manager, test_state_with_session_manager_setup,
+};
 
 fn sample_registry() -> ProviderRegistry {
     let mut registry = ProviderRegistry::default();
@@ -82,6 +85,52 @@ async fn submit_turn_rejects_session_waiting_for_question_response() {
         body.get("error"),
         Some(&serde_json::json!("session is waiting for a question response"))
     );
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn submit_turn_allows_new_message_after_restart_clears_stale_incomplete_turn() {
+    let suffix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+    let root = std::env::temp_dir().join(format!("aia-routes-stale-turn-{suffix}"));
+    let session_id = "session-stale-turn";
+
+    let (state, root) =
+        test_state_with_session_manager_setup(root, sample_registry(), |root, store| {
+            store
+                .create_session(&agent_store::SessionRecord::new(
+                    session_id.to_string(),
+                    "Stale Turn".to_string(),
+                    "model-primary".to_string(),
+                ))
+                .expect("session record should be inserted directly into store");
+
+            let session_path = root.join("sessions").join(format!("{session_id}.jsonl"));
+            let mut tape = session_tape::SessionTape::load_jsonl_or_default(&session_path)
+                .expect("session tape should load");
+            tape.append_entry(
+                session_tape::TapeEntry::message(&agent_core::Message::new(
+                    agent_core::Role::User,
+                    "处理中",
+                ))
+                .with_run_id("turn-stale"),
+            );
+            tape.append_entry(
+                session_tape::TapeEntry::thinking("先分析").with_run_id("turn-stale"),
+            );
+            tape.save_jsonl(&session_path).expect("session tape should save");
+        });
+
+    let response = handlers::submit_turn(
+        State(state.clone()),
+        Json(TurnRequest { prompt: "keep going".into(), session_id: Some(session_id.into()) }),
+    )
+    .await
+    .into_response();
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let body = response_body_json(response).await;
+    assert_eq!(body.get("ok"), Some(&serde_json::json!(true)));
 
     let _ = std::fs::remove_dir_all(root);
 }

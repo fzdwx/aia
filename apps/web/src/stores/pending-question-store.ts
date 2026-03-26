@@ -5,7 +5,11 @@ import {
   fetchPendingQuestion,
   resolvePendingQuestion as apiResolvePendingQuestion,
 } from "@/lib/api"
-import type { PendingQuestionResponse, QuestionRequest, QuestionResult } from "@/lib/types"
+import type {
+  PendingQuestionResponse,
+  QuestionRequest,
+  QuestionResult,
+} from "@/lib/types"
 
 type PendingQuestionStore = {
   pendingQuestion: QuestionRequest | null
@@ -21,7 +25,9 @@ type PendingQuestionStore = {
 let latestHydrationRequestId = 0
 let latestMutationRequestId = 0
 
-function toPendingQuestion(response: PendingQuestionResponse): QuestionRequest | null {
+function toPendingQuestion(
+  response: PendingQuestionResponse
+): QuestionRequest | null {
   return response.pending ? (response.request ?? null) : null
 }
 
@@ -96,7 +102,9 @@ export const usePendingQuestionStore = create<PendingQuestionStore>((set) => ({
       set({
         submitting: false,
         error:
-          error instanceof Error ? error.message : "Failed to cancel pending question",
+          error instanceof Error
+            ? error.message
+            : "Failed to cancel pending question",
       })
       throw error
     }
