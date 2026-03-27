@@ -797,7 +797,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
           if (wasActive && nextActiveId) {
             void hydrateSession(nextActiveId)
             void hydrateSessionSettingsForSession(nextActiveId)
-            void usePendingQuestionStore.getState().hydrateForSession(nextActiveId)
+            void usePendingQuestionStore
+              .getState()
+              .hydrateForSession(nextActiveId)
           } else if (wasActive) {
             clearSessionSettingsState()
             usePendingQuestionStore.getState().clear()
