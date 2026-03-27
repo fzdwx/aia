@@ -1,11 +1,47 @@
-import { ChevronLeft, ChevronRight } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { Check } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
+import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import type { QuestionAnswer, QuestionItem, QuestionResult } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat-store"
 import { usePendingQuestionStore } from "@/stores/pending-question-store"
+
+function ChoiceIndicator({
+  checked,
+  multiSelect,
+}: {
+  checked: boolean
+  multiSelect: boolean
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "mt-0.5 inline-flex size-4 shrink-0 items-center justify-center border border-border/70 bg-background",
+        multiSelect ? "rounded-[4px]" : "rounded-full",
+        checked &&
+          (multiSelect
+            ? "border-foreground/35 bg-foreground text-background"
+            : "border-foreground/35 bg-foreground")
+      )}
+    >
+      {multiSelect ? (
+        <Check
+          className={cn("size-3", checked ? "opacity-100" : "opacity-0")}
+        />
+      ) : (
+        <span
+          className={cn(
+            "size-1.5 rounded-full bg-background",
+            checked ? "opacity-100" : "opacity-0"
+          )}
+        />
+      )}
+    </span>
+  )
+}
 
 function ChoiceQuestion({
   item,
@@ -21,22 +57,52 @@ function ChoiceQuestion({
   const selected = new Set(value?.selected_option_ids ?? [])
   const customText = value?.text ?? ""
   const [customInputFocused, setCustomInputFocused] = useState(false)
+  const customTextareaRef = useRef<HTMLTextAreaElement | null>(null)
   const recommendedOptionId = item.recommended_option_id ?? null
   const recommendationReason = item.recommendation_reason ?? null
   const customInputActive = customInputFocused || customText.trim().length > 0
 
+  function activateCustomInput() {
+    setCustomInputFocused(true)
+    onChange({
+      question_id: item.id,
+      selected_option_ids: [],
+      text: customText,
+    })
+  }
+
+  useEffect(() => {
+    if (!customInputFocused) return
+    const element = customTextareaRef.current
+    if (!element) return
+    element.focus()
+    element.style.height = "0px"
+    element.style.height = `${element.scrollHeight}px`
+  }, [customInputFocused])
+
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       {item.options.map((option) => {
         const checked = selected.has(option.id)
         const isRecommended = recommendedOptionId === option.id
+        const quietRecommendation = isRecommended
+          ? recommendationReason
+            ? `Recommended: ${recommendationReason}`
+            : "Recommended"
+          : null
+        const hint = [option.description, quietRecommendation]
+          .filter((text): text is string => Boolean(text))
+          .join(" · ")
+
         return (
           <label
             key={option.id}
             className={cn(
-              "flex cursor-pointer items-start gap-3 rounded-lg border border-border/50 px-3 py-2.5 transition-colors",
-              isRecommended && !checked && "border-foreground/15 bg-muted/35",
-              checked ? "border-foreground/20 bg-muted/60" : "bg-card hover:bg-muted/40",
+              "flex cursor-pointer items-start gap-3 rounded-md border px-2.5 py-2 text-left focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50",
+              isRecommended && !checked && "bg-muted/35",
+              checked
+                ? "border-transparent bg-muted/65 shadow-sm"
+                : "border-border/55 bg-background/35 hover:bg-muted/35",
               disabled && "cursor-not-allowed opacity-60"
             )}
           >
@@ -57,26 +123,19 @@ function ChoiceQuestion({
                   text: null,
                 })
               }}
-              className="mt-0.5"
+              className="sr-only"
             />
-            <span className="min-w-0">
-              <span className="flex items-center gap-2">
-                <span className="text-ui block font-medium text-foreground">
-                  {option.label}
-                </span>
-                {isRecommended ? (
-                  <span className="text-caption rounded-full border border-foreground/10 bg-foreground/[0.06] px-1.5 py-0.5 text-foreground/75">
-                    Recommended
-                  </span>
-                ) : null}
+            <ChoiceIndicator
+              checked={checked}
+              multiSelect={item.multi_select}
+            />
+            <span className="min-w-0 flex-1 space-y-0.5">
+              <span className="text-ui block font-medium text-pretty text-foreground">
+                {option.label}
               </span>
-              {option.description || (isRecommended && recommendationReason) ? (
-                <span className="text-meta mt-0.5 block text-muted-foreground/70">
-                  {option.description}
-                  {option.description && isRecommended && recommendationReason
-                    ? " — "
-                    : ""}
-                  {isRecommended && recommendationReason ? recommendationReason : ""}
+              {hint ? (
+                <span className="text-ui block text-pretty text-muted-foreground/80">
+                  {hint}
                 </span>
               ) : null}
             </span>
@@ -86,51 +145,63 @@ function ChoiceQuestion({
 
       <label
         className={cn(
-          "flex items-start gap-3 rounded-lg border border-border/50 px-3 py-2.5 transition-colors",
-          customInputActive ? "border-foreground/20 bg-muted/60" : "bg-card hover:bg-muted/40",
-          disabled && "opacity-60"
+          "flex items-start gap-3 rounded-md border px-2.5 py-2 text-left focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50",
+          customInputActive
+            ? "border-transparent bg-muted/65 shadow-sm"
+            : "border-border/55 bg-background/35 hover:bg-muted/35",
+          disabled && "cursor-not-allowed opacity-60"
         )}
+        onMouseDown={(event) => {
+          if (disabled) return
+          if (event.target instanceof HTMLTextAreaElement) return
+          event.preventDefault()
+          activateCustomInput()
+        }}
       >
         <input
           type={item.multi_select ? "checkbox" : "radio"}
           name={item.id}
           checked={customInputActive}
           disabled={disabled}
-          onChange={() => {
-            setCustomInputFocused(true)
-            onChange({
-              question_id: item.id,
-              selected_option_ids: [],
-              text: customText,
-            })
-          }}
-          className="mt-0.5"
+          onChange={activateCustomInput}
+          className="sr-only"
         />
-        <span className="min-w-0 flex-1">
-          <span className="text-ui mb-1 block font-medium text-foreground">Custom input</span>
-          <input
-            type="text"
-            value={customText}
-            disabled={disabled}
-            placeholder={item.placeholder ?? "Write your answer..."}
-            onFocus={() => {
-              setCustomInputFocused(true)
-              onChange({
-                question_id: item.id,
-                selected_option_ids: [],
-                text: customText,
-              })
-            }}
-            onBlur={() => setCustomInputFocused(false)}
-            onChange={(event) =>
-              onChange({
-                question_id: item.id,
-                selected_option_ids: [],
-                text: event.target.value,
-              })
-            }
-            className="text-body-sm leading-body-sm h-6 w-full bg-transparent text-foreground outline-none placeholder:text-muted-foreground/35"
-          />
+        <ChoiceIndicator
+          checked={customInputActive}
+          multiSelect={item.multi_select}
+        />
+        <span className="min-w-0 flex-1 space-y-0.5">
+          <span className="text-ui block font-medium text-pretty text-foreground">
+            Use your own answer
+          </span>
+          {customInputActive ? (
+            <textarea
+              ref={customTextareaRef}
+              value={customText}
+              disabled={disabled}
+              placeholder={item.placeholder ?? "Type your answer..."}
+              rows={1}
+              onFocus={activateCustomInput}
+              onBlur={() => setCustomInputFocused(false)}
+              onInput={(event) => {
+                const target = event.currentTarget
+                target.style.height = "0px"
+                target.style.height = `${target.scrollHeight}px`
+              }}
+              onChange={(event) =>
+                onChange({
+                  question_id: item.id,
+                  selected_option_ids: [],
+                  text: event.target.value,
+                })
+              }
+              className="text-ui min-h-5 w-full resize-none border-0 bg-transparent p-0 leading-5 text-foreground outline-none placeholder:text-muted-foreground/55 focus-visible:ring-0"
+            />
+          ) : (
+            <span className="text-ui block text-pretty text-muted-foreground/80">
+              {item.placeholder ?? "Type your answer..."}
+            </span>
+          )}
         </span>
       </label>
     </div>
@@ -152,7 +223,7 @@ function TextQuestion({
     <Textarea
       value={value?.text ?? ""}
       disabled={disabled}
-      placeholder={item.placeholder ?? "Write your answer..."}
+      placeholder={item.placeholder ?? "Type your answer..."}
       onChange={(event) =>
         onChange({
           question_id: item.id,
@@ -161,7 +232,7 @@ function TextQuestion({
         })
       }
       rows={3}
-      className="min-h-[72px] resize-y rounded-lg border-border/40 bg-background/20 px-3 py-2.5 placeholder:text-muted-foreground/35"
+      className="text-ui min-h-[84px] resize-y rounded-md border-border/55 bg-background/35 px-2.5 py-2 leading-5 placeholder:text-muted-foreground/55"
     />
   )
 }
@@ -197,15 +268,37 @@ function questionValidationError(
   if (item.kind === "text" && !hasText) {
     return `Please answer “${item.question}”.`
   }
-  if (item.kind !== "text" && answer.selected_option_ids.length === 0 && !hasText) {
+  if (
+    item.kind !== "text" &&
+    answer.selected_option_ids.length === 0 &&
+    !hasText
+  ) {
     return `Please answer “${item.question}”.`
   }
   return null
 }
 
+function questionGuidance(item: QuestionItem): string {
+  if (item.kind === "text") {
+    return "Type a short answer in your own words."
+  }
+  if (item.multi_select) {
+    return "Select one or more options, or type your own answer."
+  }
+  return "Select one option, or type your own answer."
+}
+
+function answerIsPresent(answer: QuestionAnswer | undefined): boolean {
+  if (!answer) return false
+  if (answer.selected_option_ids.length > 0) return true
+  return (answer.text ?? "").trim().length > 0
+}
+
 export function PendingQuestionComposer() {
   const activeSessionId = useChatStore((state) => state.activeSessionId)
-  const pendingQuestion = usePendingQuestionStore((state) => state.pendingQuestion)
+  const pendingQuestion = usePendingQuestionStore(
+    (state) => state.pendingQuestion
+  )
   const submitting = usePendingQuestionStore((state) => state.submitting)
   const storeError = usePendingQuestionStore((state) => state.error)
   const submitResult = usePendingQuestionStore((state) => state.submitResult)
@@ -218,6 +311,7 @@ export function PendingQuestionComposer() {
   const disabled = submitting || !activeSessionId || !pendingQuestion
   const currentItem = questionItems[questionIndex] ?? null
   const isLastQuestion = questionIndex >= questionItems.length - 1
+  const activeRequestId = pendingQuestion?.request_id
 
   const validationError = useMemo(() => {
     if (!pendingQuestion) return null
@@ -229,7 +323,11 @@ export function PendingQuestionComposer() {
       if (item.kind === "text" && !hasText) {
         return `Please answer “${item.question}”.`
       }
-      if (item.kind !== "text" && answer.selected_option_ids.length === 0 && !hasText) {
+      if (
+        item.kind !== "text" &&
+        answer.selected_option_ids.length === 0 &&
+        !hasText
+      ) {
         return `Please answer “${item.question}”.`
       }
     }
@@ -237,29 +335,40 @@ export function PendingQuestionComposer() {
   }, [answers, pendingQuestion])
 
   const currentValidationError = useMemo(
-    () => questionValidationError(currentItem, currentItem ? answers[currentItem.id] : undefined),
+    () =>
+      questionValidationError(
+        currentItem,
+        currentItem ? answers[currentItem.id] : undefined
+      ),
     [answers, currentItem]
   )
 
   useEffect(() => {
+    if (!activeRequestId) {
+      setAnswers({})
+      setQuestionIndex(0)
+      return
+    }
     setAnswers({})
     setQuestionIndex(0)
-  }, [pendingQuestion?.request_id])
+  }, [activeRequestId])
 
   if (!pendingQuestion) return null
   if (!currentItem) return null
 
   async function handleSubmit() {
-    if (!activeSessionId || validationError) return
+    if (!activeSessionId || validationError || !pendingQuestion) return
+    const currentPendingQuestion = pendingQuestion
     const result: QuestionResult = {
       status: "answered",
-      request_id: pendingQuestion.request_id,
-      answers: questionItems.map((item) =>
-        answers[item.id] ?? {
-          question_id: item.id,
-          selected_option_ids: [],
-          text: null,
-        }
+      request_id: currentPendingQuestion.request_id,
+      answers: questionItems.map(
+        (item) =>
+          answers[item.id] ?? {
+            question_id: item.id,
+            selected_option_ids: [],
+            text: null,
+          }
       ),
     }
     await submitResult(activeSessionId, result)
@@ -280,92 +389,162 @@ export function PendingQuestionComposer() {
       await handleSubmit()
       return
     }
-    setQuestionIndex((current) => Math.min(current + 1, questionItems.length - 1))
+    setQuestionIndex((current) =>
+      Math.min(current + 1, questionItems.length - 1)
+    )
   }
 
   return (
     <div className="relative shrink-0 border-t border-border/30 px-4 pt-3 pb-4">
       <div className="pointer-events-none absolute -top-10 right-0 left-0 h-10 bg-gradient-to-t from-background to-transparent" />
-      <div className="mx-auto w-full max-w-[720px] rounded-xl border border-border/50 bg-card px-4 py-3">
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <div className="text-meta text-muted-foreground/50">
-            {questionIndex + 1} / {questionItems.length}
-          </div>
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={() => void handleDismiss()}
-            className="text-meta inline-flex h-7 shrink-0 items-center justify-center rounded-md px-1 text-muted-foreground/50 transition-colors hover:text-foreground/75 disabled:opacity-60"
-            title="Dismiss question"
-          >
-            <span>Ignore</span>
-          </button>
-        </div>
 
-        <section key={currentItem.id} className="space-y-2.5">
-          <p className="text-body-sm text-foreground/90">{currentItem.question}</p>
+      <div className="mx-auto max-w-[720px]">
+        <div className="rounded-xl border border-border/50 bg-card px-4 py-3">
+          <header className="flex items-center justify-between gap-3 px-2">
+            <p className="text-ui font-medium text-muted-foreground/85 tabular-nums">
+              {questionIndex + 1} of {questionItems.length}
+            </p>
+            <div className="flex items-center gap-2">
+              {questionItems.map((item, index) => {
+                const active = index === questionIndex
+                const answered = answerIsPresent(answers[item.id])
 
-          {currentItem.kind === "choice" ? (
-            <ChoiceQuestion
-              item={currentItem}
-              disabled={disabled}
-              value={answers[currentItem.id]}
-              onChange={(next) =>
-                setAnswers((current) => ({ ...current, [currentItem.id]: next }))
-              }
-            />
-          ) : null}
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => setQuestionIndex(index)}
+                    className={cn(
+                      "inline-flex h-4 w-4 items-center justify-center rounded-full",
+                      disabled && "cursor-not-allowed opacity-60"
+                    )}
+                    aria-label={`Question ${index + 1}`}
+                  >
+                    <span
+                      className={cn(
+                        "h-0.5 w-4 rounded-full bg-muted-foreground/35",
+                        answered && "bg-foreground/55",
+                        active && "bg-foreground"
+                      )}
+                    />
+                  </button>
+                )
+              })}
+            </div>
+          </header>
 
-          {currentItem.kind === "text" ? (
-            <TextQuestion
-              item={currentItem}
-              disabled={disabled}
-              value={answers[currentItem.id]}
-              onChange={(next) =>
-                setAnswers((current) => ({ ...current, [currentItem.id]: next }))
-              }
-            />
-          ) : null}
+          <section key={currentItem.id} className="mt-2 space-y-2.5">
+            <h3 className="text-ui px-2 font-medium text-pretty text-foreground">
+              {currentItem.question}
+            </h3>
+            <p className="text-meta px-2 text-pretty text-muted-foreground/75">
+              {questionGuidance(currentItem)}
+            </p>
 
-          {currentItem.kind === "confirm" ? (
-            <ConfirmQuestion
-              item={currentItem}
-              disabled={disabled}
-              value={answers[currentItem.id]}
-              onChange={(next) =>
-                setAnswers((current) => ({ ...current, [currentItem.id]: next }))
-              }
-            />
-          ) : null}
-        </section>
+            {currentItem.kind === "choice" ? (
+              <ChoiceQuestion
+                item={currentItem}
+                disabled={disabled}
+                value={answers[currentItem.id]}
+                onChange={(next) =>
+                  setAnswers((current) => ({
+                    ...current,
+                    [currentItem.id]: next,
+                  }))
+                }
+              />
+            ) : null}
 
-        {storeError && (
-          <div className="text-meta mt-3 text-destructive/80">
-            {storeError}
-          </div>
-        )}
+            {currentItem.kind === "text" ? (
+              <TextQuestion
+                item={currentItem}
+                disabled={disabled}
+                value={answers[currentItem.id]}
+                onChange={(next) =>
+                  setAnswers((current) => ({
+                    ...current,
+                    [currentItem.id]: next,
+                  }))
+                }
+              />
+            ) : null}
 
-        <div className="mt-3 flex items-center justify-end gap-2">
-          {questionIndex > 0 ? (
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={() => setQuestionIndex((current) => Math.max(current - 1, 0))}
-              className="text-ui inline-flex h-7 items-center gap-1 rounded-lg border border-border/50 px-2.5 text-muted-foreground transition-colors hover:bg-muted/50 disabled:opacity-40"
+            {currentItem.kind === "confirm" ? (
+              <ConfirmQuestion
+                item={currentItem}
+                disabled={disabled}
+                value={answers[currentItem.id]}
+                onChange={(next) =>
+                  setAnswers((current) => ({
+                    ...current,
+                    [currentItem.id]: next,
+                  }))
+                }
+              />
+            ) : null}
+          </section>
+
+          <div className="mt-3 border-t border-border/50 px-2 pt-2.5">
+            {storeError ? (
+              <p
+                role="alert"
+                className="text-meta text-pretty text-destructive/85"
+              >
+                {storeError}
+              </p>
+            ) : null}
+
+            <div
+              className={cn(
+                "flex flex-wrap items-center justify-between gap-2",
+                storeError && "mt-2"
+              )}
             >
-              <ChevronLeft className="size-4" />
-              <span>Back</span>
-            </button>
-          ) : null}
-          <button
-            type="button"
-            disabled={disabled || currentValidationError != null}
-            onClick={() => void handlePrimaryAction()}
-            className="text-ui inline-flex h-7 items-center gap-1 rounded-lg bg-foreground px-2.5 text-background transition-opacity hover:opacity-85 disabled:opacity-50"
-          >
-            <span>{submitting ? "Submitting..." : isLastQuestion ? "Submit" : "Next"}</span>
-            {!submitting && !isLastQuestion ? <ChevronRight className="size-4" /> : null}
-            </button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="default"
+                disabled={disabled}
+                onClick={() => void handleDismiss()}
+                className="px-2 text-muted-foreground/75"
+                title="Ignore remaining questions"
+              >
+                Dismiss
+              </Button>
+
+              <div className="flex items-center gap-2">
+                {questionIndex > 0 ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="default"
+                    disabled={disabled}
+                    onClick={() =>
+                      setQuestionIndex((current) => Math.max(current - 1, 0))
+                    }
+                  >
+                    Back
+                  </Button>
+                ) : null}
+
+                <Button
+                  type="button"
+                  variant={isLastQuestion ? "default" : "secondary"}
+                  size="default"
+                  disabled={disabled || currentValidationError != null}
+                  onClick={() => void handlePrimaryAction()}
+                  className="min-w-20"
+                >
+                  {submitting
+                    ? "Submitting..."
+                    : isLastQuestion
+                      ? "Submit"
+                      : "Next"}
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
