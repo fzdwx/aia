@@ -1,3 +1,4 @@
+import type { ToolOutputSegment } from "@/lib/types"
 import { getToolDisplayPath, normalizeToolArguments } from "@/lib/tool-display"
 
 import { toolTimelineCopy } from "../../tool-timeline-copy"
@@ -8,9 +9,14 @@ import { getStringValue, truncateInline } from "../helpers"
 function buildShellOutput(data: {
   details?: Record<string, unknown>
   outputContent: string
+  outputSegments?: ToolOutputSegment[]
 }): string | null {
   if (data.outputContent.trim().length > 0) {
     return data.outputContent
+  }
+
+  if ((data.outputSegments?.length ?? 0) > 0) {
+    return data.outputSegments?.map((segment) => segment.text).join("") ?? null
   }
 
   const stdout = getStringValue(data.details, "stdout")
@@ -25,6 +31,7 @@ function buildShellOutput(data: {
 function firstShellLine(data: {
   details?: Record<string, unknown>
   outputContent: string
+  outputSegments?: ToolOutputSegment[]
 }): string | null {
   const output = buildShellOutput(data)
   if (!output) return null
@@ -77,7 +84,8 @@ export function createShellRenderer(): ToolRenderer {
       if (!command) return null
 
       const output = buildShellOutput(data)
-      const value = output ? `$ ${command}\n\n${output}` : `$ ${command}`
+      const segments = data.outputSegments ?? []
+      const hasStreamingSegments = segments.length > 0
 
       return (
         <section
@@ -86,7 +94,29 @@ export function createShellRenderer(): ToolRenderer {
           data-tool-detail-tone="output"
         >
           <div className="tool-timeline-detail-body tool-timeline-shell-body">
-            <pre className="tool-timeline-shell-pre">{value}</pre>
+            <pre className="tool-timeline-shell-pre">
+              <span className="tool-timeline-shell-command">$ {command}</span>
+              {hasStreamingSegments ? (
+                <>
+                  {"\n\n"}
+                  {segments.map((segment, index) => (
+                    <span
+                      key={`${segment.stream}-${index}`}
+                      className={
+                        segment.stream === "stderr"
+                          ? "tool-timeline-shell-segment tool-timeline-shell-segment-stderr"
+                          : "tool-timeline-shell-segment tool-timeline-shell-segment-stdout"
+                      }
+                      data-stream={segment.stream}
+                    >
+                      {segment.text}
+                    </span>
+                  ))}
+                </>
+              ) : output ? (
+                `\n\n${output}`
+              ) : null}
+            </pre>
           </div>
         </section>
       )

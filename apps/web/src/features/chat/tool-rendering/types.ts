@@ -1,3 +1,4 @@
+import type { ToolOutputSegment } from "@/lib/types"
 import type { ReactNode } from "react"
 
 export type ToolRenderData = {
@@ -5,6 +6,7 @@ export type ToolRenderData = {
   arguments: Record<string, unknown>
   details?: Record<string, unknown>
   outputContent: string
+  outputSegments?: ToolOutputSegment[]
   succeeded: boolean
 }
 

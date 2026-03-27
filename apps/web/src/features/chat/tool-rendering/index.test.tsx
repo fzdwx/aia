@@ -609,9 +609,8 @@ describe("tool renderer registry", () => {
     expect(html).toContain("tool-timeline-shell-detail")
     expect(html).toContain("tool-timeline-shell-body")
     expect(html).toContain("tool-timeline-shell-pre")
-    expect(html).toContain(
-      "$ cargo check -p agent-runtime\n\nFinished dev [unoptimized] target(s)"
-    )
+    expect(html).toContain("tool-timeline-shell-command")
+    expect(html).toContain("$ cargo check -p agent-runtime")
     expect(html).toContain("Finished dev [unoptimized] target(s)")
     expect(html).not.toContain("Result")
   })
@@ -632,7 +631,8 @@ describe("tool renderer registry", () => {
     })
 
     const html = renderWithTheme(details)
-    expect(html).toContain("$ cargo check -p agent-runtime\n\nwarning summary")
+    expect(html).toContain("tool-timeline-shell-command")
+    expect(html).toContain("$ cargo check -p agent-runtime")
     expect(html).toContain("warning summary")
     expect(html).toContain("warning: unused import")
     expect(html).not.toContain("Result")
@@ -786,6 +786,32 @@ describe("tool renderer registry", () => {
     expect(html).toContain(">+2<")
     expect(html).toContain(">-0<")
     expect(html).toContain("tool-timeline-pierre-root-patch")
+  })
+
+  test("renders shell details from streaming output segments", () => {
+    const details = toolRendererRegistry.renderDetails({
+      toolName: "Shell",
+      arguments: {
+        command: "cargo test --workspace",
+        description: "Runs workspace tests",
+      },
+      outputContent: "",
+      outputSegments: [
+        { stream: "stdout", text: "running tests\n" },
+        { stream: "stderr", text: "warning: noisy\n" },
+        { stream: "stdout", text: "all passed\n" },
+      ],
+      succeeded: true,
+    })
+
+    const html = renderWithTheme(details)
+    expect(html).toContain("tool-timeline-shell-command")
+    expect(html).toContain("tool-timeline-shell-segment-stdout")
+    expect(html).toContain("tool-timeline-shell-segment-stderr")
+    expect(html).toContain("$ cargo test --workspace")
+    expect(html).toContain("running tests")
+    expect(html).toContain("warning: noisy")
+    expect(html).toContain("all passed")
   })
 
   test("renders ApplyPatch move detail with basename-first hierarchy", () => {

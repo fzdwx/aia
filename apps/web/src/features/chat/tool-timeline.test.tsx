@@ -410,6 +410,40 @@ describe("tool timeline", () => {
     expect(runningHtml).not.toContain("Running tools")
   })
 
+  test("auto-expands shell rows when details are available", () => {
+    const html = renderWithTheme(
+      <ToolGroup
+        items={[
+          {
+            id: "tool-shell-auto-expand-1",
+            toolName: "Shell",
+            arguments: {
+              command: "cargo test --workspace",
+              description: "Runs workspace tests",
+            },
+            startedAtMs: 100,
+            finishedAtMs: 220,
+            succeeded: true,
+            outputContent: "running tests\nall passed",
+            details: {
+              command: "cargo test --workspace",
+              stdout: "running tests\nall passed",
+              stderr: "",
+              exit_code: 0,
+            },
+          },
+        ]}
+      />
+    )
+
+    expect(html).toContain('data-show-caret="true"')
+    expect(html).toContain('aria-expanded="true"')
+    expect(html).toContain('data-slot="tool-row-details"')
+    expect(html).toContain('$ cargo test --workspace')
+    expect(html).toContain("running tests")
+    expect(html).toContain("all passed")
+  })
+
   test("renders running tools with live subtitle and duration", () => {
     const now = Date.now()
     const shellHtml = renderWithTheme(
@@ -988,8 +1022,10 @@ describe("tool timeline", () => {
     const source = loadToolRowPolicySource()
 
     expect(source).toContain("const INLINE_DETAIL_TOOLS = new Set<string>()")
-    expect(source).toContain("function shouldShowToolRowCaret()")
-    expect(source).toContain("return false")
+    expect(source).toContain("function shouldAutoExpandToolRow(item: ToolRowItem)")
+    expect(source).toContain('return normalizeToolName(item.toolName) === "Shell"')
+    expect(source).toContain("function shouldShowToolRowCaret(item: ToolRowItem)")
+    expect(source).toContain("return shouldAutoExpandToolRow(item)")
   })
 
   test("does not render caret containers for tool rows or context groups", () => {

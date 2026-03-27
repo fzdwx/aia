@@ -6,8 +6,8 @@ use brush_core::openfiles::OpenFiles;
 use brush_core::traps::TrapSignal;
 
 use super::capture::{
-    SHELL_EVENT_POLL_INTERVAL, ShellControlMessage, ShellEvent, SignalOnDrop, cleanup_capture_file,
-    create_output_capture, spawn_capture_reader,
+    SHELL_EVENT_POLL_INTERVAL, ShellControlMessage, ShellEvent, create_output_capture,
+    spawn_capture_reader,
 };
 
 const EMBEDDED_SHELL_NAME: &str = "brush";
@@ -27,29 +27,23 @@ pub(super) async fn run_embedded_brush(
 ) -> Result<EmbeddedShellExecution, CoreError> {
     let stdout_capture = create_output_capture(ToolOutputStream::Stdout)?;
     let stderr_capture = create_output_capture(ToolOutputStream::Stderr)?;
-    let stdout_path = stdout_capture.path.clone();
-    let stderr_path = stderr_capture.path.clone();
-    let (capture_done_tx, capture_done_rx) = tokio::sync::watch::channel(false);
 
     let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
     let stdout_handle = spawn_capture_reader(
-        stdout_capture.path.clone(),
+        stdout_capture.reader,
         ToolOutputStream::Stdout,
         event_tx.clone(),
-        capture_done_rx.clone(),
     );
     let stderr_handle = spawn_capture_reader(
-        stderr_capture.path.clone(),
+        stderr_capture.reader,
         ToolOutputStream::Stderr,
         event_tx.clone(),
-        capture_done_rx,
     );
 
     let shell_command = command.to_owned();
     let shell_cwd = cwd.to_path_buf();
     let shell_tx = event_tx.clone();
     let shell_handle = tokio::spawn(async move {
-        let _capture_done_signal = SignalOnDrop::new(capture_done_tx);
         let result = run_embedded_brush_in_task(
             shell_command,
             shell_cwd,
@@ -104,8 +98,6 @@ pub(super) async fn run_embedded_brush(
     stdout_handle.await.map_err(|_| CoreError::new("stdout capture task panicked"))?;
     stderr_handle.await.map_err(|_| CoreError::new("stderr capture task panicked"))?;
     shell_handle.await.map_err(|_| CoreError::new("embedded shell task panicked"))?;
-    cleanup_capture_file(&stdout_path);
-    cleanup_capture_file(&stderr_path);
 
     let exit_code =
         finished.unwrap_or_else(|| Err(CoreError::new("embedded shell exited without status")))?;
@@ -116,8 +108,8 @@ pub(super) async fn run_embedded_brush(
 async fn run_embedded_brush_in_task(
     command: String,
     cwd: PathBuf,
-    stdout_writer: std::fs::File,
-    stderr_writer: std::fs::File,
+    stdout_writer: std::io::PipeWriter,
+    stderr_writer: std::io::PipeWriter,
     shell_tx: tokio::sync::mpsc::UnboundedSender<ShellEvent>,
 ) -> Result<i32, CoreError> {
     let mut shell = brush_core::Shell::builder()

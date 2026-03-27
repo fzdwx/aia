@@ -1120,6 +1120,23 @@ body {
     overflow-wrap: anywhere;
   }
 
+  .tool-timeline-shell-command {
+    color: color-mix(in oklch, var(--text-base) 88%, transparent);
+    font-weight: 500;
+  }
+
+  .tool-timeline-shell-segment {
+    white-space: pre-wrap;
+  }
+
+  .tool-timeline-shell-segment-stdout {
+    color: color-mix(in oklch, var(--text-strong) 92%, transparent);
+  }
+
+  .tool-timeline-shell-segment-stderr {
+    color: color-mix(in oklch, var(--destructive) 82%, var(--text-strong));
+  }
+
   .tool-timeline-shell-detail .tool-timeline-shell-pre::-webkit-scrollbar {
     width: 0;
     height: 0;

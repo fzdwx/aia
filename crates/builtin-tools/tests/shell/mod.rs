@@ -110,3 +110,28 @@ fn embedded_brush_runtime_honors_abort_signal() {
         .collect::<String>();
     assert!(!stdout.contains("done"));
 }
+
+#[test]
+fn embedded_brush_runtime_emits_multiple_deltas_for_incremental_output() {
+    let mut deltas = Vec::new();
+    let execution = run_async(run_embedded_brush(
+        "printf 'a'; sleep 0.1; printf 'b'; sleep 0.1; printf 'c'",
+        Path::new("."),
+        &AbortSignal::new(),
+        &mut |delta| deltas.push(delta),
+    ))
+    .expect("embedded brush execution should succeed");
+
+    assert_eq!(execution.stdout, "abc");
+    assert_eq!(execution.stderr, "");
+    assert_eq!(execution.exit_code, 0);
+
+    let stdout_deltas = deltas
+        .iter()
+        .filter(|delta| matches!(delta.stream, ToolOutputStream::Stdout))
+        .map(|delta| delta.text.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(stdout_deltas.len() >= 2);
+    assert_eq!(stdout_deltas.concat(), "abc");
+}

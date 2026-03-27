@@ -45,6 +45,10 @@ export function currentTurnToStreamingTurn(
               startedAtMs: block.tool.started_at_ms ?? undefined,
               finishedAtMs: block.tool.finished_at_ms ?? undefined,
               output: block.tool.output,
+              outputSegments:
+                block.tool.output.length > 0
+                  ? [{ stream: "stdout", text: block.tool.output }]
+                  : undefined,
               completed: block.tool.completed,
               resultContent: block.tool.result_content ?? undefined,
               resultDetails: block.tool.result_details ?? undefined,
@@ -183,6 +187,10 @@ export function applyStreamEventToBlocks(
         tool: {
           ...block.tool,
           output: block.tool.output + data.text,
+          outputSegments: [
+            ...(block.tool.outputSegments ?? []),
+            { stream: data.stream, text: data.text },
+          ],
         },
       }
     } else {
@@ -196,6 +204,7 @@ export function applyStreamEventToBlocks(
           detectedAtMs: startedAtMs,
           startedAtMs,
           output: data.text,
+          outputSegments: [{ stream: data.stream, text: data.text }],
           completed: false,
         },
       })

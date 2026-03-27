@@ -1,4 +1,8 @@
-import type { StreamingToolOutput, ToolInvocationLifecycle } from "@/lib/types"
+import type {
+  StreamingToolOutput,
+  ToolInvocationLifecycle,
+  ToolOutputSegment,
+} from "@/lib/types"
 
 import { formatReadLineRange } from "./read-range"
 import { formatSearchInvocation } from "./search-invocation"
@@ -12,6 +16,7 @@ export type ToolRowItem = {
   finishedAtMs?: number
   succeeded: boolean
   outputContent: string
+  outputSegments?: ToolOutputSegment[]
   details?: Record<string, unknown>
 }
 
@@ -95,6 +100,7 @@ export function fromInvocation(inv: ToolInvocationLifecycle): ToolRowItem {
       finishedAtMs: inv.finished_at_ms,
       succeeded: true,
       outputContent: outcome.result.content,
+      outputSegments: undefined,
       details: outcome.result.details,
     }
   }
@@ -107,6 +113,7 @@ export function fromInvocation(inv: ToolInvocationLifecycle): ToolRowItem {
     finishedAtMs: inv.finished_at_ms,
     succeeded: false,
     outputContent: outcome.status === "failed" ? outcome.message : "",
+    outputSegments: undefined,
   }
 }
 
@@ -120,6 +127,7 @@ export function fromStreamingTool(tool: StreamingToolOutput): ToolRowItem {
     finishedAtMs: tool.finishedAtMs,
     succeeded: !tool.failed,
     outputContent: tool.resultContent ?? tool.output,
+    outputSegments: tool.outputSegments,
     details: tool.resultDetails,
   }
 }
@@ -176,6 +184,10 @@ export function coalesceStreamingToolOutputs(
         existing.output.length >= tool.output.length
           ? existing.output
           : tool.output,
+      outputSegments: [
+        ...(existing.outputSegments ?? []),
+        ...(tool.outputSegments ?? []),
+      ],
       completed: existing.completed || tool.completed,
       resultContent: hasText(existing.resultContent)
         ? existing.resultContent

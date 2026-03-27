@@ -19,6 +19,7 @@ import {
 import { ContextToolGroup } from "./tool-timeline/context-group"
 import {
   getFallbackSubtitle,
+  shouldAutoExpandToolRow,
   shouldInlineToolDetails,
   shouldRenderToolItem,
   shouldShowToolRowCaret,
@@ -43,6 +44,7 @@ function ToolTrigger({
     arguments: item.arguments,
     details: item.details,
     outputContent: item.outputContent,
+    outputSegments: item.outputSegments,
     succeeded: item.succeeded,
   }
   const displayName = getToolDisplayName(item.toolName)
@@ -96,7 +98,8 @@ function ToolTrigger({
 }
 
 function ToolRow({ item }: { item: ToolRowItem }) {
-  const [showDetails, setShowDetails] = useState(false)
+  const autoExpand = shouldAutoExpandToolRow(item)
+  const [showDetails, setShowDetails] = useState(autoExpand)
   useDurationTicker(item.finishedAtMs == null)
   const isRunning = item.finishedAtMs == null
   const durationStartMs =
@@ -109,6 +112,7 @@ function ToolRow({ item }: { item: ToolRowItem }) {
     arguments: item.arguments,
     details: item.details,
     outputContent: item.outputContent,
+    outputSegments: item.outputSegments,
     succeeded: item.succeeded,
   }
   const inlineDetails = shouldInlineToolDetails(item)
@@ -117,6 +121,12 @@ function ToolRow({ item }: { item: ToolRowItem }) {
   const detailsContent = inlineDetails ? null : renderToolDetailsPanel(item)
   const hasDetails = detailsContent != null
   const detailsId = `tool-details-${item.id}`
+
+  useEffect(() => {
+    if (autoExpand && hasDetails) {
+      setShowDetails(true)
+    }
+  }, [autoExpand, hasDetails])
 
   return (
     <div data-component="tool-row">
@@ -130,7 +140,7 @@ function ToolRow({ item }: { item: ToolRowItem }) {
         aria-controls={hasDetails ? detailsId : undefined}
         aria-disabled={!hasDetails}
         data-expandable={hasDetails}
-        data-show-caret={shouldShowToolRowCaret() || undefined}
+        data-show-caret={shouldShowToolRowCaret(item) || undefined}
         data-component="tool-row-trigger"
         className={cn(
           "focus-visible:outline-none",

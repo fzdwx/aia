@@ -186,6 +186,11 @@ export type CurrentToolOutput = {
   failed: boolean | null
 }
 
+export type ToolOutputSegment = {
+  stream: "stdout" | "stderr"
+  text: string
+}
+
 export type CurrentTurnBlock =
   | { kind: "thinking"; content: string }
   | { kind: "tool"; tool: CurrentToolOutput }
@@ -213,6 +218,7 @@ export type StreamingToolOutput = {
   startedAtMs?: number
   finishedAtMs?: number
   output: string
+  outputSegments?: ToolOutputSegment[]
   completed: boolean
   resultContent?: string
   resultDetails?: Record<string, unknown>
