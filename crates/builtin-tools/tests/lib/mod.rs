@@ -1,6 +1,6 @@
 use agent_core::{
-    AbortSignal, QuestionRequest, Tool, ToolCall, ToolCallOutcome, ToolDefinition,
-    ToolExecutionContext, ToolExecutor,
+    AbortSignal, QuestionAnswer, QuestionRequest, QuestionResult, QuestionResultStatus, Tool,
+    ToolCall, ToolCallOutcome, ToolDefinition, ToolExecutionContext, ToolExecutor,
 };
 use agent_prompts::tool_descriptions::shell_tool_description;
 use std::collections::BTreeSet;
@@ -8,6 +8,7 @@ use std::collections::BTreeSet;
 use super::{
     ApplyPatchTool, CodeSearchTool, EditTool, GlobTool, GrepTool, QuestionTool, ReadTool,
     ShellTool, TapeHandoffTool, TapeInfoTool, WebSearchTool, WriteTool, build_tool_registry,
+    question_tool_result_from_request,
 };
 use crate::apply_patch::ApplyPatchToolArgs;
 use crate::codesearch::CodeSearchToolArgs;
@@ -251,4 +252,91 @@ async fn question_tool_returns_suspended_request_instead_of_completed_result() {
     assert_eq!(decoded.turn_id, "turn-test");
     assert_eq!(decoded.invocation_id, call.invocation_id);
     assert_eq!(decoded.questions.len(), 1);
+}
+
+#[test]
+fn question_tool_result_from_request_preserves_invocation_and_details() {
+    let request = QuestionRequest {
+        request_id: "qreq-1".into(),
+        invocation_id: "call-1".into(),
+        turn_id: "turn-1".into(),
+        questions: vec![agent_core::QuestionItem {
+            id: "database".into(),
+            question: "Use which database?".into(),
+            kind: agent_core::QuestionKind::Choice,
+            required: true,
+            multi_select: false,
+            options: vec![agent_core::QuestionOption {
+                id: "sqlite".into(),
+                label: "SQLite".into(),
+                description: None,
+            }],
+            placeholder: None,
+            recommended_option_id: Some("sqlite".into()),
+            recommendation_reason: Some("best local default".into()),
+        }],
+    };
+    let result = QuestionResult {
+        status: QuestionResultStatus::Answered,
+        request_id: request.request_id.clone(),
+        answers: vec![QuestionAnswer {
+            question_id: "database".into(),
+            selected_option_ids: vec!["sqlite".into()],
+            text: None,
+        }],
+        reason: None,
+    };
+
+    let tool_result =
+        question_tool_result_from_request(&request, &result).expect("tool result should build");
+
+    assert_eq!(tool_result.tool_name, "Question");
+    assert_eq!(tool_result.invocation_id, request.invocation_id);
+    assert!(tool_result.content.contains("answered"));
+    assert_eq!(
+        tool_result
+            .details
+            .as_ref()
+            .and_then(|details: &serde_json::Value| details.get("request_id")),
+        Some(&serde_json::json!("qreq-1"))
+    );
+}
+
+#[test]
+fn question_tool_result_from_request_rejects_unknown_question_ids() {
+    let request = QuestionRequest {
+        request_id: "qreq-1".into(),
+        invocation_id: "call-1".into(),
+        turn_id: "turn-1".into(),
+        questions: vec![agent_core::QuestionItem {
+            id: "database".into(),
+            question: "Use which database?".into(),
+            kind: agent_core::QuestionKind::Choice,
+            required: true,
+            multi_select: false,
+            options: vec![agent_core::QuestionOption {
+                id: "sqlite".into(),
+                label: "SQLite".into(),
+                description: None,
+            }],
+            placeholder: None,
+            recommended_option_id: None,
+            recommendation_reason: None,
+        }],
+    };
+    let result = QuestionResult {
+        status: QuestionResultStatus::Answered,
+        request_id: request.request_id.clone(),
+        answers: vec![QuestionAnswer {
+            question_id: "language".into(),
+            selected_option_ids: vec!["rust".into()],
+            text: None,
+        }],
+        reason: None,
+    };
+
+    let error = question_tool_result_from_request(&request, &result)
+        .expect_err("unknown answers should be rejected");
+
+    assert!(error.to_string().contains("language"));
 }

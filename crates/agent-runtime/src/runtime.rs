@@ -193,7 +193,10 @@ where
             .definitions()
             .into_iter()
             .filter(|definition| {
-                !definition.interactive || self.interaction_capabilities.can_use_question_tool()
+                !definition.interactive
+                    || self
+                        .interaction_capabilities
+                        .can_use_interactive_tool(definition.interactive_kind.as_deref())
             })
             .filter(|definition| !self.disabled_tools.contains(&definition.name))
             .collect()

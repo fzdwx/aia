@@ -18,6 +18,7 @@ superseded_by: null
 当前实现采用三层边界：
 
 - `builtin-tools` 定义 `Question` 工具，并在执行时返回结构化 `PendingToolRequest(kind = question)`
+- `builtin-tools` 同时持有 `QuestionRequest -> ToolResult` 的结果物化与回答校验逻辑
 - `agent-runtime` 只负责通用挂起原语：`tool_request_pending`、`turn_suspended`、`resume_turn_after_tool_result(...)`
 - `apps/agent-server` 负责把通用挂起请求翻译成 question 控制面事实：`question_requested`、`question_resolved`、`GET|PUT|DELETE /api/session/question`
 
@@ -52,7 +53,7 @@ superseded_by: null
 
 ### 1. 能力权威来源
 
-`SessionInteractionCapabilities` 仍然是 `Question` 是否对模型可见的唯一权威来源。
+`SessionInteractionCapabilities` 仍然是交互式工具是否对模型可见的唯一权威来源；其中 `Question` 当前只是第一个真实使用 `interactive kind = question` 的内建工具。
 
 职责分工保持为：
 
@@ -61,6 +62,12 @@ superseded_by: null
 - `apps/web` 或其他客户端只消费这份能力做交互呈现
 
 当前约束仍然成立：不支持交互式组件的 session 不暴露 `Question`。
+
+与此同时，共享能力模型已开始从 `supports_question_tool` 收口到更通用的 `supported_interaction_kinds`：
+
+- runtime 在过滤 interactive tool 时优先看工具声明的 `interactive_kind`
+- `supports_question_tool` 当前仅作为 `question` 的兼容映射保留
+- 后续新增 interactive tool 时，不应再添加新的 `supports_xxx_tool` 平行布尔位
 
 ### 2. `Question` 是普通 interactive builtin tool
 
@@ -132,7 +139,7 @@ runtime 不再直接：
 - server 把该通用挂起请求解码为 `QuestionRequest`
 - server 追加 `question_requested`
 - `GET /api/session/question` 读取当前 pending question
-- `PUT /api/session/question` 追加 `question_resolved + tool_result(Question)` 并驱动恢复
+- `PUT /api/session/question` 先调用 `builtin-tools` 的 `Question` 结果物化/校验逻辑，再追加 `question_resolved + tool_result(Question)` 并驱动恢复
 - `DELETE /api/session/question` 归一化为 `cancelled` 结果，仍走同一条落盘路径
 
 这保证了 question 的控制面事实只在桥接层拥有，而不会回流污染 runtime。
@@ -156,7 +163,7 @@ runtime 不再直接：
 推荐理解为：
 
 - runtime 负责记录“这个工具调用被挂起了”
-- server 负责记录“这个挂起请求其实是一个 question，并且已经被回答/取消了”
+- server 负责记录“这个挂起请求其实是一个 question，并且已经被回答/取消了”；但 `tool_result(Question)` 的具体形状与答案有效性仍由 `builtin-tools` 定义
 
 ### 7. 恢复逻辑
 

@@ -109,6 +109,8 @@ README 里真正难的是这些能力：
 - 工具不可用、执行失败、结果错配会被收敛为结构化失败调用结果并落入磁带，而不是立即中止整个会话
 - 工具执行结果已统一抽象为 `ToolCallOutcome::{Completed,Suspended}`：runtime 只理解“完成”与“挂起等待外部输入”这类通用控制流，不再内建 `Question` 之类交互语义
 - runtime 自身只记录通用 `tool_request_pending` / `turn_suspended` 事实并提供恢复原 turn 的通用入口；像 `question_requested` / `question_resolved` 这类交互式控制面事实由 `apps/agent-server` 在桥接层补写和恢复
+- `Question` 的请求构造、回答校验与最终 `tool_result(Question)` 物化现统一收口在 `builtin-tools::question`；`apps/agent-server` 只负责从通用挂起事实解码 pending question、维护控制面与驱动恢复，不再自行解释 `QuestionResult` 语义
+- `SessionInteractionCapabilities` 现已开始从单一 `supports_question_tool` 过渡到更通用的 `supported_interaction_kinds`；runtime 可见性过滤优先按 interactive kind 判断，旧的 `supports_question_tool` 暂时只保留给 `question` 做兼容映射，避免第二种交互型工具继续被塞进 question 专用开关里
 - 工具相关运行时事件直接携带结构化调用/结果载荷
 - 整轮 turn 会进一步聚合为轮次块事件，便于客户端直接渲染时间线
 - 历史轮次可从磁带 entries 按 `meta.run_id` 分组重建，不依赖磁带内 TurnRecord

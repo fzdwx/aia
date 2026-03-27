@@ -20,6 +20,7 @@ use agent_core::{
 };
 use agent_runtime::AgentRuntime;
 use agent_store::{AiaStore, SessionRecord, generate_session_id};
+use builtin_tools::question_tool_result_from_request;
 use provider_registry::ProviderRegistry;
 use session_tape::{SessionProviderBinding, SessionTape, TapeEntry};
 use tokio::sync::mpsc;
@@ -36,9 +37,7 @@ pub use handle::SessionManagerHandle;
 use prompt::build_session_system_prompt;
 use provider_sync::{ProviderSyncService, ReturnedRuntimeSync};
 pub(crate) use query_ops::SessionQueryService;
-pub(crate) use question_tool_bridge::{
-    pending_question_request_from_runtime_tape, question_tool_call, question_tool_result,
-};
+pub(crate) use question_tool_bridge::pending_question_request_from_runtime_tape;
 use turn_execution::{RuntimeEventProjector, TurnExecutionService, collect_runtime_events};
 pub use types::SessionManagerConfig;
 #[cfg(test)]
@@ -478,8 +477,8 @@ impl SessionManagerLoop {
                 |error| RuntimeWorkerError::internal(format!("session append failed: {error}")),
             )?;
 
-            let tool_call = question_tool_call(&pending_request);
-            let tool_result = question_tool_result(&tool_call, &result)?;
+            let tool_result = question_tool_result_from_request(&pending_request, &result)
+                .map_err(|error| RuntimeWorkerError::bad_request(error.to_string()))?;
             tape.append_entry(
                 session_tape::TapeEntry::tool_result(&tool_result)
                     .with_run_id(&pending_request.turn_id),

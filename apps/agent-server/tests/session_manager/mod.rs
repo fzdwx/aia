@@ -8,12 +8,12 @@ use crate::sse::TurnStatus;
 use agent_core::{
     QuestionAnswer, QuestionResult, QuestionResultStatus, RequestTimeoutConfig, StreamEvent,
 };
+use builtin_tools::{question_tool_call, question_tool_result_from_request};
 
 use super::{
     CurrentTurnSnapshot, SessionManagerConfig, SessionQueryService, SessionSlot,
-    SessionSlotFactory, SlotExecutionState, SlotStatus, collect_runtime_events, question_tool_call,
-    question_tool_result, read_lock, spawn_session_manager, update_current_turn_from_stream,
-    update_current_turn_status, write_lock,
+    SessionSlotFactory, SlotExecutionState, SlotStatus, collect_runtime_events, read_lock,
+    spawn_session_manager, update_current_turn_from_stream, update_current_turn_status, write_lock,
 };
 
 fn run_async<T>(future: impl Future<Output = T>) -> T {
@@ -242,7 +242,8 @@ fn question_tool_bridge_helpers_preserve_invocation_and_result_shape() {
     };
 
     let call = question_tool_call(&request);
-    let tool_result = question_tool_result(&call, &result).expect("tool result should build");
+    let tool_result =
+        question_tool_result_from_request(&request, &result).expect("tool result should build");
 
     assert_eq!(call.tool_name, "Question");
     assert_eq!(call.invocation_id, request.invocation_id);

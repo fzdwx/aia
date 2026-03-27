@@ -1,15 +1,9 @@
 use std::collections::BTreeSet;
 
-use agent_core::{PendingToolRequest, QuestionRequest, QuestionResult, ToolCall, ToolResult};
+use agent_core::{PendingToolRequest, QuestionRequest};
 use session_tape::SessionTape;
 
 use crate::runtime_worker::RuntimeWorkerError;
-
-pub(crate) fn question_tool_call(request: &QuestionRequest) -> ToolCall {
-    ToolCall::new("Question")
-        .with_invocation_id(request.invocation_id.clone())
-        .with_arguments_value(serde_json::json!({ "questions": request.questions }))
-}
 
 pub(crate) fn question_request_from_pending_tool_request(
     request: &PendingToolRequest,
@@ -69,17 +63,4 @@ pub(crate) fn pending_question_request_from_runtime_tape(
     }
 
     Ok(None)
-}
-
-pub(crate) fn question_tool_result(
-    call: &ToolCall,
-    result: &QuestionResult,
-) -> Result<ToolResult, RuntimeWorkerError> {
-    let content = serde_json::to_string(result).map_err(|error| {
-        RuntimeWorkerError::internal(format!("question result encode failed: {error}"))
-    })?;
-    let details = serde_json::to_value(result).map_err(|error| {
-        RuntimeWorkerError::internal(format!("question result serialize failed: {error}"))
-    })?;
-    Ok(ToolResult::from_call(call, content).with_details(details))
 }

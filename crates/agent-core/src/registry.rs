@@ -47,7 +47,13 @@ impl ToolExecutor for ToolRegistry {
     fn definitions(&self) -> Vec<ToolDefinition> {
         self.tools
             .values()
-            .map(|tool| tool.definition().with_interactive(tool.is_interactive_tool()))
+            .map(|tool| {
+                let mut definition = tool.definition().with_interactive(tool.is_interactive_tool());
+                if let Some(kind) = tool.interactive_kind() {
+                    definition = definition.with_interactive_kind(kind);
+                }
+                definition
+            })
             .collect()
     }
 

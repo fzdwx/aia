@@ -278,9 +278,47 @@ fn session_interaction_capabilities_仅在交互式会话中允许_question_tool
         !SessionInteractionCapabilities {
             supports_interactive_components: true,
             supports_question_tool: false,
+            supported_interaction_kinds: Vec::new(),
         }
         .can_use_question_tool()
     );
+
+    assert!(
+        SessionInteractionCapabilities {
+            supports_interactive_components: true,
+            supports_question_tool: false,
+            supported_interaction_kinds: vec!["question".into()],
+        }
+        .can_use_question_tool()
+    );
+}
+
+#[test]
+fn session_interaction_capabilities_按_interactive_kind_判断兼容性() {
+    let capabilities = SessionInteractionCapabilities {
+        supports_interactive_components: true,
+        supports_question_tool: false,
+        supported_interaction_kinds: vec!["approval".into(), "question".into()],
+    };
+
+    assert!(capabilities.can_use_interactive_tool(Some("question")));
+    assert!(capabilities.can_use_interactive_tool(Some("approval")));
+    assert!(!capabilities.can_use_interactive_tool(Some("credential")));
+    assert!(capabilities.can_use_interactive_tool(None));
+}
+
+#[test]
+fn session_interaction_capabilities_兼容旧版_question_capability_序列化形状() {
+    let capabilities =
+        serde_json::from_value::<SessionInteractionCapabilities>(serde_json::json!({
+            "supports_interactive_components": true,
+            "supports_question_tool": true
+        }))
+        .expect("legacy capability payload should deserialize");
+
+    assert!(capabilities.can_use_question_tool());
+    assert!(capabilities.can_use_interactive_tool(Some("question")));
+    assert!(capabilities.supported_interaction_kinds.is_empty());
 }
 
 #[test]
@@ -334,15 +372,17 @@ fn pending_tool_request_保持稳定序列化形状() {
 #[test]
 fn tool_call_outcome_保持_completed_与_suspended_稳定形状() {
     let call = ToolCall::new("question");
-    let completed = ToolCallOutcome::Completed(ToolResult::from_call(&call, "ok"));
-    let suspended = ToolCallOutcome::Suspended(PendingToolRequest {
-        request_id: "preq_456".into(),
-        invocation_id: call.invocation_id.clone(),
-        turn_id: "turn_456".into(),
-        tool_name: call.tool_name.clone(),
-        kind: "question".into(),
-        payload: serde_json::json!({ "questions": [] }),
-    });
+    let completed = ToolCallOutcome::Completed { result: ToolResult::from_call(&call, "ok") };
+    let suspended = ToolCallOutcome::Suspended {
+        request: PendingToolRequest {
+            request_id: "preq_456".into(),
+            invocation_id: call.invocation_id.clone(),
+            turn_id: "turn_456".into(),
+            tool_name: call.tool_name.clone(),
+            kind: "question".into(),
+            payload: serde_json::json!({ "questions": [] }),
+        },
+    };
 
     let completed_value = serde_json::to_value(&completed).expect("completed should serialize");
     let suspended_value = serde_json::to_value(&suspended).expect("suspended should serialize");
@@ -470,7 +510,7 @@ impl Tool for EchoTool {
         _context: &ToolExecutionContext,
     ) -> Result<ToolCallOutcome, CoreError> {
         let text = tool_call.str_arg("text")?;
-        Ok(ToolCallOutcome::Completed(ToolResult::from_call(tool_call, text)))
+        Ok(ToolCallOutcome::Completed { result: ToolResult::from_call(tool_call, text) })
     }
 }
 
@@ -492,14 +532,16 @@ impl Tool for SuspendTool {
         _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         _context: &ToolExecutionContext,
     ) -> Result<ToolCallOutcome, CoreError> {
-        Ok(ToolCallOutcome::Suspended(PendingToolRequest {
-            request_id: "preq_test".into(),
-            invocation_id: tool_call.invocation_id.clone(),
-            turn_id: "turn_test".into(),
-            tool_name: tool_call.tool_name.clone(),
-            kind: "question".into(),
-            payload: serde_json::json!({ "questions": [] }),
-        }))
+        Ok(ToolCallOutcome::Suspended {
+            request: PendingToolRequest {
+                request_id: "preq_test".into(),
+                invocation_id: tool_call.invocation_id.clone(),
+                turn_id: "turn_test".into(),
+                tool_name: tool_call.tool_name.clone(),
+                kind: "question".into(),
+                payload: serde_json::json!({ "questions": [] }),
+            },
+        })
     }
 }
 
@@ -527,8 +569,10 @@ async fn 注册表按名称分派工具调用() {
     };
     let result = ToolExecutor::call(&registry, &call, &mut |_| {}, &ctx).await.unwrap();
     match result {
-        ToolCallOutcome::Completed(result) => assert_eq!(result.content, "你好"),
-        ToolCallOutcome::Suspended(_) => panic!("echo tool should complete immediately"),
+        ToolCallOutcome::Completed { result } => assert_eq!(result.content, "你好"),
+        ToolCallOutcome::Suspended { request: _ } => {
+            panic!("echo tool should complete immediately")
+        }
     }
 }
 
@@ -548,8 +592,8 @@ async fn 注册表可返回挂起中的工具调用结果() {
 
     let result = ToolExecutor::call(&registry, &call, &mut |_| {}, &ctx).await.unwrap();
     match result {
-        ToolCallOutcome::Completed(_) => panic!("suspend tool should suspend"),
-        ToolCallOutcome::Suspended(request) => {
+        ToolCallOutcome::Completed { result: _ } => panic!("suspend tool should suspend"),
+        ToolCallOutcome::Suspended { request } => {
             assert_eq!(request.tool_name, "Suspend");
             assert_eq!(request.kind, "question");
         }
@@ -584,6 +628,64 @@ fn 空注册表返回空定义列表() {
     let registry = ToolRegistry::new();
     assert!(registry.is_empty());
     assert!(registry.definitions().is_empty());
+}
+
+struct InteractiveQuestionTool;
+
+#[async_trait]
+impl Tool for InteractiveQuestionTool {
+    fn name(&self) -> &str {
+        "InteractiveQuestion"
+    }
+
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new("InteractiveQuestion", "交互式问题工具")
+    }
+
+    fn is_interactive_tool(&self) -> bool {
+        true
+    }
+
+    fn interactive_kind(&self) -> Option<&str> {
+        Some("question")
+    }
+
+    async fn call(
+        &self,
+        tool_call: &ToolCall,
+        _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
+        _context: &ToolExecutionContext,
+    ) -> Result<ToolCallOutcome, CoreError> {
+        Ok(ToolCallOutcome::Suspended {
+            request: PendingToolRequest {
+                request_id: "preq_test_question".into(),
+                invocation_id: tool_call.invocation_id.clone(),
+                turn_id: "turn_test".into(),
+                tool_name: tool_call.tool_name.clone(),
+                kind: "question".into(),
+                payload: serde_json::json!({ "questions": [] }),
+            },
+        })
+    }
+}
+
+#[test]
+fn 注册表会携带_interactive_kind_定义() {
+    let mut registry = ToolRegistry::new();
+    registry.register(Box::new(InteractiveQuestionTool));
+
+    let defs = registry.definitions();
+    assert_eq!(defs.len(), 1);
+    assert!(defs[0].interactive);
+    assert_eq!(defs[0].interactive_kind.as_deref(), Some("question"));
+}
+
+#[test]
+fn tool_definition_with_interactive_kind_会自动标记为_interactive() {
+    let definition = ToolDefinition::new("Approval", "审批工具").with_interactive_kind("approval");
+
+    assert!(definition.interactive);
+    assert_eq!(definition.interactive_kind.as_deref(), Some("approval"));
 }
 
 #[test]

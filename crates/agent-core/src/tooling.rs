@@ -16,6 +16,8 @@ pub struct ToolDefinition {
     pub parameters: Value,
     #[serde(default)]
     pub interactive: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interactive_kind: Option<String>,
 }
 
 pub trait ToolArgsSchema {
@@ -175,11 +177,18 @@ impl ToolDefinition {
                 "additionalProperties": false,
             }),
             interactive: false,
+            interactive_kind: None,
         }
     }
 
     pub fn with_interactive(mut self, interactive: bool) -> Self {
         self.interactive = interactive;
+        self
+    }
+
+    pub fn with_interactive_kind(mut self, interactive_kind: impl Into<String>) -> Self {
+        self.interactive = true;
+        self.interactive_kind = Some(interactive_kind.into());
         self
     }
 

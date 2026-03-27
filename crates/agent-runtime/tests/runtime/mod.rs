@@ -12,6 +12,7 @@ use agent_core::{
     ToolExecutor, ToolOutputDelta, ToolRegistry, ToolResult,
 };
 use async_trait::async_trait;
+use builtin_tools::question_tool_result_from_request;
 use serde_json::json;
 use session_tape::SessionTape;
 
@@ -760,6 +761,42 @@ fn 非交互式_runtime_即使_builtin_registry_包含_question_也会隐藏它(
     assert!(!visible.iter().any(|definition| definition.name == "Question"));
 }
 
+#[test]
+fn runtime_会按_supported_interaction_kinds_暴露交互工具() {
+    let identity = ModelIdentity::new("local", "stub", ModelDisposition::Balanced);
+    let runtime = AgentRuntime::new(StubModel, builtin_tools::build_tool_registry(), identity)
+        .with_interaction_capabilities(agent_core::SessionInteractionCapabilities {
+            supports_interactive_components: true,
+            supports_question_tool: false,
+            supported_interaction_kinds: vec!["question".into()],
+        });
+
+    let visible = runtime.visible_tools();
+    assert!(visible.iter().any(|definition| {
+        definition.name == "Question"
+            && definition.interactive
+            && definition.interactive_kind.as_deref() == Some("question")
+    }));
+}
+
+#[test]
+fn runtime_仍兼容旧版_question_capability_布尔开关() {
+    let identity = ModelIdentity::new("local", "stub", ModelDisposition::Balanced);
+    let runtime = AgentRuntime::new(StubModel, builtin_tools::build_tool_registry(), identity)
+        .with_interaction_capabilities(agent_core::SessionInteractionCapabilities {
+            supports_interactive_components: true,
+            supports_question_tool: true,
+            supported_interaction_kinds: Vec::new(),
+        });
+
+    let visible = runtime.visible_tools();
+    assert!(visible.iter().any(|definition| {
+        definition.name == "Question"
+            && definition.interactive
+            && definition.interactive_kind.as_deref() == Some("question")
+    }));
+}
+
 fn latest_pending_tool_request<M>(runtime: &AgentRuntime<M, ToolRegistry>) -> PendingToolRequest
 where
     M: LanguageModel,
@@ -856,16 +893,16 @@ fn 挂起工具补上_tool_result_后可恢复原轮次() {
     };
 
     runtime.tape_mut().record_question_resolved(&result);
-    let call = ToolCall::new("Question")
-        .with_invocation_id(pending.invocation_id.clone())
-        .with_arguments_value(serde_json::json!({ "questions": pending_request.questions }));
-    let content = serde_json::to_string(&result).expect("question result should encode");
-    let details = serde_json::to_value(&result).expect("question result should serialize");
+    let request = QuestionRequest {
+        request_id: pending.request_id.clone(),
+        invocation_id: pending.invocation_id.clone(),
+        turn_id: pending.turn_id.clone(),
+        questions: pending_request.questions,
+    };
+    let tool_result =
+        question_tool_result_from_request(&request, &result).expect("question result should build");
     runtime.tape_mut().append_entry(
-        session_tape::TapeEntry::tool_result(
-            &ToolResult::from_call(&call, content).with_details(details),
-        )
-        .with_run_id(&pending.turn_id),
+        session_tape::TapeEntry::tool_result(&tool_result).with_run_id(&pending.turn_id),
     );
 
     let resumed = run_async(runtime.resume_turn_after_tool_result(

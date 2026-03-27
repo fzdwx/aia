@@ -45,6 +45,10 @@ pub trait Tool: Send + Sync {
         false
     }
 
+    fn interactive_kind(&self) -> Option<&str> {
+        None
+    }
+
     async fn call(
         &self,
         tool_call: &crate::ToolCall,

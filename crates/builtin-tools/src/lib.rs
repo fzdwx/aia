@@ -17,7 +17,9 @@ pub use codesearch::CodeSearchTool;
 pub use edit::EditTool;
 pub use glob::GlobTool;
 pub use grep::GrepTool;
-pub use question::{QuestionTool, question_request_from_call};
+pub use question::{
+    QuestionTool, question_request_from_call, question_tool_call, question_tool_result_from_request,
+};
 pub use read::ReadTool;
 pub use shell::ShellTool;
 pub use tape::{TapeHandoffTool, TapeInfoTool};

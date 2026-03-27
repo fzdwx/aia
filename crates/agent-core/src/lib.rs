@@ -21,7 +21,7 @@ pub use completion::{
 };
 pub use conversation::{ConversationItem, Message, Role};
 pub use error::CoreError;
-pub use interaction::SessionInteractionCapabilities;
+pub use interaction::{QUESTION_INTERACTION_KIND, SessionInteractionCapabilities};
 pub use question::{
     QuestionAnswer, QuestionItem, QuestionKind, QuestionOption, QuestionRequest, QuestionResult,
     QuestionResultStatus,

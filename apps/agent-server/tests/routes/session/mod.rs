@@ -13,7 +13,7 @@ use crate::routes::test_support::{
     test_state_with_session_manager, test_state_with_session_manager_setup,
 };
 use agent_core::{
-    QuestionAnswer, QuestionItem, QuestionKind, QuestionRequest, QuestionResult,
+    QuestionAnswer, QuestionItem, QuestionKind, QuestionOption, QuestionRequest, QuestionResult,
     QuestionResultStatus,
 };
 
@@ -52,7 +52,11 @@ fn sample_question_request() -> QuestionRequest {
             kind: QuestionKind::Choice,
             required: true,
             multi_select: false,
-            options: Vec::new(),
+            options: vec![QuestionOption {
+                id: "sqlite".into(),
+                label: "SQLite".into(),
+                description: None,
+            }],
             placeholder: None,
             recommended_option_id: None,
             recommendation_reason: None,
