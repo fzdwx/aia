@@ -19,7 +19,6 @@ import {
 import { ContextToolGroup } from "./tool-timeline/context-group"
 import {
   getFallbackSubtitle,
-  shouldAutoExpandToolRow,
   shouldInlineToolDetails,
   shouldRenderToolItem,
   shouldShowToolRowCaret,
@@ -98,8 +97,7 @@ function ToolTrigger({
 }
 
 function ToolRow({ item }: { item: ToolRowItem }) {
-  const autoExpand = shouldAutoExpandToolRow(item)
-  const [showDetails, setShowDetails] = useState(autoExpand)
+  const [showDetails, setShowDetails] = useState(false)
   useDurationTicker(item.finishedAtMs == null)
   const isRunning = item.finishedAtMs == null
   const durationStartMs =
@@ -122,12 +120,6 @@ function ToolRow({ item }: { item: ToolRowItem }) {
   const hasDetails = detailsContent != null
   const detailsId = `tool-details-${item.id}`
 
-  useEffect(() => {
-    if (autoExpand && hasDetails) {
-      setShowDetails(true)
-    }
-  }, [autoExpand, hasDetails])
-
   return (
     <div data-component="tool-row">
       <button
@@ -140,7 +132,7 @@ function ToolRow({ item }: { item: ToolRowItem }) {
         aria-controls={hasDetails ? detailsId : undefined}
         aria-disabled={!hasDetails}
         data-expandable={hasDetails}
-        data-show-caret={shouldShowToolRowCaret(item) || undefined}
+        data-show-caret={shouldShowToolRowCaret() || undefined}
         data-component="tool-row-trigger"
         className={cn(
           "focus-visible:outline-none",

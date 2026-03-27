@@ -36,10 +36,7 @@ pub(super) fn spawn_capture_reader(
                 Ok(size) => {
                     let text = String::from_utf8_lossy(&buffer[..size]).into_owned();
                     if sender
-                        .send(ShellEvent::Output(ToolOutputDelta {
-                            stream: stream.clone(),
-                            text,
-                        }))
+                        .send(ShellEvent::Output(ToolOutputDelta { stream: stream.clone(), text }))
                         .is_err()
                     {
                         return;
@@ -55,14 +52,9 @@ pub(super) fn spawn_capture_reader(
 }
 
 pub(super) fn create_output_capture(stream: ToolOutputStream) -> Result<OutputCapture, CoreError> {
-    std::io::pipe()
-        .map(|(reader, writer)| OutputCapture { reader, writer })
-        .map_err(|error| {
-            CoreError::new(format!(
-                "failed to create {} output pipe: {error}",
-                stream_label(&stream)
-            ))
-        })
+    std::io::pipe().map(|(reader, writer)| OutputCapture { reader, writer }).map_err(|error| {
+        CoreError::new(format!("failed to create {} output pipe: {error}", stream_label(&stream)))
+    })
 }
 
 fn stream_label(stream: &ToolOutputStream) -> &'static str {

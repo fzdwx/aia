@@ -321,14 +321,57 @@ export async function switchProvider(name: string): Promise<ProviderInfo> {
 export function connectEvents(onEvent: (event: SseEvent) => void): () => void {
   const es = new EventSource("/api/events")
 
+  function maybeEmitEnvelopeError(raw: Record<string, unknown>): boolean {
+    const error = raw.error
+    if (!error || typeof error !== "object") return false
+
+    const message =
+      "message" in error && typeof error.message === "string"
+        ? error.message
+        : null
+    if (!message) return false
+
+    const sessionId =
+      "session_id" in error && typeof error.session_id === "string"
+        ? error.session_id
+        : null
+    const turnId =
+      "turn_id" in error && typeof error.turn_id === "string"
+        ? error.turn_id
+        : null
+    const errorType =
+      "type" in error && typeof error.type === "string" ? error.type : null
+
+    onEvent({
+      type: "error",
+      data: {
+        session_id: sessionId,
+        turn_id: turnId,
+        message,
+        error_type: errorType,
+      },
+    })
+    return true
+  }
+
   function handle(type: SseEvent["type"]) {
     return (e: MessageEvent) => {
       try {
         const data = JSON.parse(e.data as string) as Record<string, unknown>
+        if (type === "error" && maybeEmitEnvelopeError(data)) return
         onEvent({ type, data } as SseEvent)
       } catch {
         // skip malformed
       }
+    }
+  }
+
+  function handleDefaultMessage(e: MessageEvent) {
+    try {
+      const data = JSON.parse(e.data as string) as Record<string, unknown>
+      if (maybeEmitEnvelopeError(data)) return
+    } catch {
+      // skip malformed
     }
   }
 
@@ -339,6 +382,7 @@ export function connectEvents(onEvent: (event: SseEvent) => void): () => void {
   es.addEventListener("context_compressed", handle("context_compressed"))
   es.addEventListener("sync_required", handle("sync_required"))
   es.addEventListener("error", handle("error"))
+  es.addEventListener("message", handleDefaultMessage)
   es.addEventListener("session_created", handle("session_created"))
   es.addEventListener("session_deleted", handle("session_deleted"))
   es.addEventListener("turn_cancelled", handle("turn_cancelled"))

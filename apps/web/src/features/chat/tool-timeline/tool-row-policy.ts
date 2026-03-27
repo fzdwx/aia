@@ -145,10 +145,6 @@ export function shouldInlineToolDetails(item: ToolRowItem) {
   return INLINE_DETAIL_TOOLS.has(normalizeToolName(item.toolName))
 }
 
-export function shouldAutoExpandToolRow(item: ToolRowItem) {
-  return normalizeToolName(item.toolName) === "Shell"
-}
-
-export function shouldShowToolRowCaret(item: ToolRowItem) {
-  return shouldAutoExpandToolRow(item)
+export function shouldShowToolRowCaret() {
+  return false
 }

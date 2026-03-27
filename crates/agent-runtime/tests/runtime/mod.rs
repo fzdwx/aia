@@ -1,6 +1,6 @@
 use std::{
     future::Future,
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard, mpsc},
     time::{Duration, UNIX_EPOCH},
 };
 
@@ -438,6 +438,26 @@ impl SerialWriteToolModel {
     }
 }
 
+struct PascalCaseShellToolModel {
+    seen_requests: Mutex<Vec<CompletionRequest>>,
+}
+
+impl PascalCaseShellToolModel {
+    fn new() -> Self {
+        Self { seen_requests: Mutex::new(Vec::new()) }
+    }
+}
+
+struct ParallelShellModel {
+    seen_requests: Mutex<Vec<CompletionRequest>>,
+}
+
+impl ParallelShellModel {
+    fn new() -> Self {
+        Self { seen_requests: Mutex::new(Vec::new()) }
+    }
+}
+
 #[async_trait]
 impl LanguageModel for SerialWriteToolModel {
     type Error = CoreError;
@@ -471,6 +491,67 @@ impl LanguageModel for SerialWriteToolModel {
     }
 }
 
+#[async_trait]
+impl LanguageModel for PascalCaseShellToolModel {
+    type Error = CoreError;
+
+    async fn complete_streaming(
+        &self,
+        request: CompletionRequest,
+        _abort: &AbortSignal,
+        _sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
+    ) -> Result<Completion, Self::Error> {
+        let step = mutex_lock(&self.seen_requests).len();
+        mutex_lock(&self.seen_requests).push(request);
+        if step == 0 {
+            Ok(Completion {
+                segments: vec![CompletionSegment::ToolUse(
+                    ToolCall::new("Shell").with_argument("command", "printf '片段'"),
+                )],
+                stop_reason: CompletionStopReason::ToolUse,
+                usage: None,
+                response_body: None,
+                http_status_code: None,
+            })
+        } else {
+            Ok(Completion::text("Shell 已完成"))
+        }
+    }
+}
+
+#[async_trait]
+impl LanguageModel for ParallelShellModel {
+    type Error = CoreError;
+
+    async fn complete_streaming(
+        &self,
+        request: CompletionRequest,
+        _abort: &AbortSignal,
+        _sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
+    ) -> Result<Completion, Self::Error> {
+        let step = mutex_lock(&self.seen_requests).len();
+        mutex_lock(&self.seen_requests).push(request);
+        if step == 0 {
+            Ok(Completion {
+                segments: vec![
+                    CompletionSegment::ToolUse(
+                        ToolCall::new("Shell").with_argument("command", "first"),
+                    ),
+                    CompletionSegment::ToolUse(
+                        ToolCall::new("Shell").with_argument("command", "second"),
+                    ),
+                ],
+                stop_reason: CompletionStopReason::ToolUse,
+                usage: None,
+                response_body: None,
+                http_status_code: None,
+            })
+        } else {
+            Ok(Completion::text("并行 Shell 已完成"))
+        }
+    }
+}
+
 struct TimingTools {
     events: Arc<Mutex<Vec<String>>>,
 }
@@ -497,6 +578,64 @@ impl ToolExecutor for TimingTools {
         tokio::time::sleep(std::time::Duration::from_millis(30)).await;
         mutex_lock(&self.events).push(format!("end:{}", call.tool_name));
         Ok(ToolResult::from_call(call, format!("done:{}", call.tool_name)))
+    }
+}
+
+struct StreamingShellTimingTools {
+    output_emitted: mpsc::Sender<()>,
+    release_finish: Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
+}
+
+#[async_trait]
+impl ToolExecutor for StreamingShellTimingTools {
+    type Error = CoreError;
+
+    fn definitions(&self) -> Vec<ToolDefinition> {
+        vec![ToolDefinition::new("Shell", "执行终端命令")]
+    }
+
+    async fn call(
+        &self,
+        call: &ToolCall,
+        output: &mut (dyn FnMut(ToolOutputDelta) + Send),
+        _context: &ToolExecutionContext,
+    ) -> Result<ToolResult, Self::Error> {
+        output(ToolOutputDelta {
+            stream: agent_core::ToolOutputStream::Stdout,
+            text: "片段".into(),
+        });
+        let _ = self.output_emitted.send(());
+        let release_finish =
+            mutex_lock(&self.release_finish).take().expect("释放通道应只被消费一次");
+        release_finish.await.expect("测试应在收到增量后放行工具结束");
+        Ok(ToolResult::from_call(call, "片段"))
+    }
+}
+
+struct ParallelShellTimingTools {
+    events: Arc<Mutex<Vec<String>>>,
+}
+
+#[async_trait]
+impl ToolExecutor for ParallelShellTimingTools {
+    type Error = CoreError;
+
+    fn definitions(&self) -> Vec<ToolDefinition> {
+        vec![ToolDefinition::new("Shell", "执行终端命令")]
+    }
+
+    async fn call(
+        &self,
+        call: &ToolCall,
+        _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
+        _context: &ToolExecutionContext,
+    ) -> Result<ToolResult, Self::Error> {
+        let command =
+            call.arguments.get("command").and_then(|value| value.as_str()).unwrap_or("unknown");
+        mutex_lock(&self.events).push(format!("start:{command}"));
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        mutex_lock(&self.events).push(format!("end:{command}"));
+        Ok(ToolResult::from_call(call, command))
     }
 }
 struct StopReasonDrivenModel {
@@ -1032,6 +1171,82 @@ fn 写入类工具会保持串行执行() {
         events.iter().position(|item| item == "start:read").expect("应记录 read start");
     assert!(start_write < end_write);
     assert!(end_write < start_read, "read 应在 write 完成后才开始");
+}
+
+#[test]
+fn 串行工具判定会归一化大小写与分隔符() {
+    for tool_name in [
+        "Write",
+        "Edit",
+        "ApplyPatch",
+        "apply_patch",
+        "apply-patch",
+        "TapeInfo",
+        "tape_info",
+        "TapeHandoff",
+        "tape-handoff",
+    ] {
+        assert!(
+            !super::tool_calls::can_run_in_parallel(&ToolCall::new(tool_name)),
+            "{tool_name} 应被识别为串行工具"
+        );
+    }
+}
+
+#[test]
+fn shell_工具会被允许并行执行() {
+    let identity = ModelIdentity::new("local", "parallel-shell-tools", ModelDisposition::Balanced);
+    let model = ParallelShellModel::new();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let tools = ParallelShellTimingTools { events: events.clone() };
+    let mut runtime = AgentRuntime::new(model, tools, identity);
+
+    let output = run_turn(&mut runtime, "并行执行 Shell").expect("应成功完成");
+
+    assert_eq!(output.assistant_text, "并行 Shell 已完成");
+    let events = mutex_lock(&events).clone();
+    let start_first =
+        events.iter().position(|item| item == "start:first").expect("应记录 first start");
+    let start_second =
+        events.iter().position(|item| item == "start:second").expect("应记录 second start");
+    let end_first = events.iter().position(|item| item == "end:first").expect("应记录 first end");
+    let end_second =
+        events.iter().position(|item| item == "end:second").expect("应记录 second end");
+    assert!(start_first < end_first);
+    assert!(start_second < end_second);
+    assert!(start_second < end_first, "second 应在 first 完成前已开始");
+}
+
+#[test]
+fn 大写_shell_在并行路径里也会实时发出输出增量() {
+    let identity = ModelIdentity::new("local", "pascal-shell", ModelDisposition::Balanced);
+    let model = PascalCaseShellToolModel::new();
+    let (output_emitted_tx, output_emitted_rx) = mpsc::channel();
+    let (release_finish_tx, release_finish_rx) = tokio::sync::oneshot::channel();
+    let tools = StreamingShellTimingTools {
+        output_emitted: output_emitted_tx,
+        release_finish: Mutex::new(Some(release_finish_rx)),
+    };
+    let mut runtime = AgentRuntime::new(model, tools, identity);
+    let (delta_observed_tx, delta_observed_rx) = mpsc::channel();
+
+    let handle = std::thread::spawn(move || {
+        let control = TurnControl::new(AbortSignal::new());
+        run_async(runtime.handle_turn_streaming("执行 Shell", control, &mut |event| {
+            if matches!(event, agent_core::StreamEvent::ToolOutputDelta { .. }) {
+                let _ = delta_observed_tx.send(());
+            }
+        }))
+    });
+
+    output_emitted_rx.recv().expect("工具应先发出输出增量");
+    delta_observed_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("收到工具侧增量后，运行时应已立刻向外转发");
+    release_finish_tx.send(()).expect("应允许工具继续完成");
+
+    let output = handle.join().expect("线程应成功结束").expect("应成功完成");
+    assert_eq!(output.assistant_text, "Shell 已完成");
 }
 
 #[test]

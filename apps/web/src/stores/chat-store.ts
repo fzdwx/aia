@@ -675,7 +675,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           break
         }
         case "error": {
-          if (event.data.session_id !== activeId) break
+          if (event.data.session_id && event.data.session_id !== activeId) break
           const latestTurn = get().turns[get().turns.length - 1]
           if (
             !get().streamingTurn &&

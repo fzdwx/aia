@@ -153,7 +153,12 @@ export type SseEvent =
     }
   | {
       type: "error"
-      data: { session_id: string; turn_id?: string | null; message: string }
+      data: {
+        session_id?: string | null
+        turn_id?: string | null
+        message: string
+        error_type?: string | null
+      }
     }
   | {
       type: "session_created"

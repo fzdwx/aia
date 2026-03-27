@@ -29,16 +29,10 @@ pub(super) async fn run_embedded_brush(
     let stderr_capture = create_output_capture(ToolOutputStream::Stderr)?;
 
     let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
-    let stdout_handle = spawn_capture_reader(
-        stdout_capture.reader,
-        ToolOutputStream::Stdout,
-        event_tx.clone(),
-    );
-    let stderr_handle = spawn_capture_reader(
-        stderr_capture.reader,
-        ToolOutputStream::Stderr,
-        event_tx.clone(),
-    );
+    let stdout_handle =
+        spawn_capture_reader(stdout_capture.reader, ToolOutputStream::Stdout, event_tx.clone());
+    let stderr_handle =
+        spawn_capture_reader(stderr_capture.reader, ToolOutputStream::Stderr, event_tx.clone());
 
     let shell_command = command.to_owned();
     let shell_cwd = cwd.to_path_buf();

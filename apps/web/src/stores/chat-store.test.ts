@@ -625,6 +625,33 @@ describe("chat store submitTurn", () => {
     })
   })
 
+  test("shows global SSE errors even when session_id is missing", () => {
+    useChatStore.setState({
+      activeSessionId: "session-1",
+      chatState: "active",
+      streamingTurn: {
+        userMessage: "hello world",
+        status: "working",
+        blocks: [{ type: "text", content: "partial answer" }],
+      },
+      error: null,
+    })
+
+    useChatStore.getState().handleSseEvent({
+      type: "error",
+      data: {
+        session_id: null,
+        turn_id: null,
+        message: "Concurrency limit exceeded for user, please retry later",
+      },
+    })
+
+    const state = useChatStore.getState()
+    expect(state.chatState).toBe("idle")
+    expect(state.streamingTurn).toBe(null)
+    expect(state.error).toBe("Concurrency limit exceeded for user, please retry later")
+  })
+
   test("stores context compression notice for active session", () => {
     useChatStore.setState({
       activeSessionId: "session-1",

@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react"
+
 import type { ToolOutputSegment } from "@/lib/types"
 import { getToolDisplayPath, normalizeToolArguments } from "@/lib/tool-display"
 
@@ -44,6 +46,70 @@ function firstShellLine(data: {
   return firstLine ? truncateInline(firstLine, 96) : null
 }
 
+function ShellOutputBody({
+  command,
+  output,
+  segments,
+}: {
+  command: string
+  output: string | null
+  segments: ToolOutputSegment[]
+}) {
+  const preRef = useRef<HTMLPreElement | null>(null)
+  const shouldFollowRef = useRef(true)
+
+  useEffect(() => {
+    const element = preRef.current
+    if (!element) return
+
+    const handleScroll = () => {
+      const distance =
+        element.scrollHeight - element.scrollTop - element.clientHeight
+      shouldFollowRef.current = distance <= 12
+    }
+
+    handleScroll()
+    element.addEventListener("scroll", handleScroll)
+    return () => {
+      element.removeEventListener("scroll", handleScroll)
+    }
+  }, [])
+
+  useEffect(() => {
+    const element = preRef.current
+    if (!element || !shouldFollowRef.current) return
+    element.scrollTop = element.scrollHeight
+  }, [segments, output])
+
+  const hasStreamingSegments = segments.length > 0
+
+  return (
+    <pre ref={preRef} className="tool-timeline-shell-pre">
+      <span className="tool-timeline-shell-command">$ {command}</span>
+      {hasStreamingSegments ? (
+        <>
+          {"\n\n"}
+          {segments.map((segment, index) => (
+            <span
+              key={`${segment.stream}-${index}`}
+              className={
+                segment.stream === "stderr"
+                  ? "tool-timeline-shell-segment tool-timeline-shell-segment-stderr"
+                  : "tool-timeline-shell-segment tool-timeline-shell-segment-stdout"
+              }
+              data-stream={segment.stream}
+            >
+              {segment.text}
+            </span>
+          ))}
+        </>
+      ) : output ? (
+        `\n\n${output}`
+      ) : null}
+    </pre>
+  )
+}
+
 export function createShellRenderer(): ToolRenderer {
   return {
     matches: (toolName) => toolName === "Shell",
@@ -85,7 +151,6 @@ export function createShellRenderer(): ToolRenderer {
 
       const output = buildShellOutput(data)
       const segments = data.outputSegments ?? []
-      const hasStreamingSegments = segments.length > 0
 
       return (
         <section
@@ -94,29 +159,7 @@ export function createShellRenderer(): ToolRenderer {
           data-tool-detail-tone="output"
         >
           <div className="tool-timeline-detail-body tool-timeline-shell-body">
-            <pre className="tool-timeline-shell-pre">
-              <span className="tool-timeline-shell-command">$ {command}</span>
-              {hasStreamingSegments ? (
-                <>
-                  {"\n\n"}
-                  {segments.map((segment, index) => (
-                    <span
-                      key={`${segment.stream}-${index}`}
-                      className={
-                        segment.stream === "stderr"
-                          ? "tool-timeline-shell-segment tool-timeline-shell-segment-stderr"
-                          : "tool-timeline-shell-segment tool-timeline-shell-segment-stdout"
-                      }
-                      data-stream={segment.stream}
-                    >
-                      {segment.text}
-                    </span>
-                  ))}
-                </>
-              ) : output ? (
-                `\n\n${output}`
-              ) : null}
-            </pre>
+            <ShellOutputBody command={command} output={output} segments={segments} />
           </div>
         </section>
       )

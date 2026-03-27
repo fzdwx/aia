@@ -814,6 +814,18 @@ describe("tool renderer registry", () => {
     expect(html).toContain("all passed")
   })
 
+  test("keeps shell output auto-follow logic inside renderer-owned component", () => {
+    const source = readFileSync(
+      new URL("./renderers/shell.tsx", import.meta.url),
+      "utf8"
+    ).replace(/\s+/g, " ")
+
+    expect(source).toContain("function ShellOutputBody(")
+    expect(source).toContain("const preRef = useRef<HTMLPreElement | null>(null)")
+    expect(source).toContain("shouldFollowRef.current = distance <= 12")
+    expect(source).toContain("element.scrollTop = element.scrollHeight")
+  })
+
   test("renders ApplyPatch move detail with basename-first hierarchy", () => {
     const details = toolRendererRegistry.renderDetails({
       toolName: "ApplyPatch",
