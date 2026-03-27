@@ -1,6 +1,9 @@
 use std::{future::Future, path::Path};
 
-use agent_core::{AbortSignal, Tool, ToolCall, ToolExecutionContext, ToolOutputStream};
+use agent_core::{
+    AbortSignal, Tool, ToolCall, ToolCallOutcome, ToolExecutionContext, ToolOutputStream,
+    ToolResult,
+};
 
 use super::{ShellTool, execution::run_embedded_brush};
 
@@ -10,6 +13,15 @@ fn run_async<T>(future: impl Future<Output = T>) -> T {
         .build()
         .expect("test runtime should build");
     runtime.block_on(future)
+}
+
+fn completed_result(outcome: ToolCallOutcome) -> ToolResult {
+    match outcome {
+        ToolCallOutcome::Completed { result } => result,
+        ToolCallOutcome::Suspended { request } => {
+            panic!("tool unexpectedly suspended: {}#{}", request.tool_name, request.invocation_id)
+        }
+    }
 }
 
 #[test]
@@ -58,10 +70,11 @@ async fn shell_call_keeps_stdout_stderr_and_exit_code_in_details() {
     };
     let mut deltas = Vec::new();
 
-    let result = tool
-        .call(&call, &mut |delta| deltas.push(delta), &context)
-        .await
-        .expect("shell tool should return a result");
+    let result = completed_result(
+        tool.call(&call, &mut |delta| deltas.push(delta), &context)
+            .await
+            .expect("shell tool should return a result"),
+    );
 
     let details = result.details.expect("shell result should include details");
     assert_eq!(details["stdout"], "out");

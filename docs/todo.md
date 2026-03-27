@@ -17,7 +17,7 @@
 **新增 tape_info / tape_handoff 工具**：
 - `tape_info`：返回上下文统计（entries、anchors、pressure_ratio 等），让 agent 感知上下文用量
 - `tape_handoff`：agent 主动创建 anchor 截断历史，传入 summary 作为最小继承状态
-- 两个工具当前已通过 runtime tool registry 正式注册，不再是简单 runtime 字符串拦截
+- 两个工具当前已作为普通 builtin tool 正式注册，并通过 `ToolExecutionContext.runtime` 获取运行时上下文
 
 **自动压缩（安全回退）保留**：
 - 压力 ≥80% 时 pre-turn 自动压缩

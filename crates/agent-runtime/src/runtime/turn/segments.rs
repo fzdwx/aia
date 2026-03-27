@@ -1,7 +1,7 @@
 use agent_core::{
     AbortSignal, Completion, CompletionSegment, CompletionStopReason, LanguageModel,
-    LlmTraceRequestContext, Message, Role, StreamEvent, ToolExecutionContext, ToolExecutor,
-    ToolOutputDelta,
+    LlmTraceRequestContext, Message, PendingToolRequest, Role, StreamEvent, ToolCallOutcome,
+    ToolExecutionContext, ToolExecutor, ToolOutputDelta,
 };
 use futures::future::join_all;
 use session_tape::TapeEntry;
@@ -11,14 +11,13 @@ use crate::{RuntimeEvent, TurnBlock};
 use super::super::{
     AgentRuntime, RuntimeError,
     helpers::{build_tool_trace_context, now_timestamp_ms},
-    tape_tools,
     tool_calls::{ExecuteToolCallContext, can_run_in_parallel},
 };
 use super::types::TurnBuffers;
 
 pub(super) enum CompletionProcessingResult {
     Continue { saw_tool_calls: bool },
-    WaitingForQuestion,
+    Suspended { request: PendingToolRequest },
 }
 
 impl<M, T> AgentRuntime<M, T>
@@ -66,7 +65,14 @@ where
                 CompletionSegment::ToolUse(call) => Some(call),
                 CompletionSegment::Thinking(_) | CompletionSegment::Text(_) => None,
             })
-            .all(|call| can_run_in_parallel(call) && !tape_tools::is_runtime_tool(&call.tool_name));
+            .all(|call| {
+                can_run_in_parallel(call)
+                    && self
+                        .visible_tools()
+                        .into_iter()
+                        .find(|definition| definition.name == call.tool_name)
+                        .is_none_or(|definition| !definition.interactive)
+            });
 
         let mut parallel_calls = Vec::new();
 
@@ -111,25 +117,6 @@ where
                         self.append_tape_entry(TapeEntry::tool_call(call).with_run_id(turn_id))?;
                     buffers.source_entry_ids.push(tool_call_entry_id);
 
-                    if tape_tools::is_question_tool_call(call) {
-                        let request = tape_tools::question_request_from_call(call, turn_id)
-                            .map_err(RuntimeError::tool)?;
-                        let question_entry_id = self.append_tape_entry(
-                            TapeEntry::event(
-                                "question_requested",
-                                Some(serde_json::to_value(&request).map_err(|error| {
-                                    RuntimeError::session(format!(
-                                        "failed to serialize question request: {error}"
-                                    ))
-                                })?),
-                            )
-                            .with_run_id(turn_id)
-                            .with_meta("source_entry_ids", serde_json::json!([tool_call_entry_id])),
-                        )?;
-                        buffers.source_entry_ids.push(question_entry_id);
-                        return Ok(CompletionProcessingResult::WaitingForQuestion);
-                    }
-
                     if tool_calls_are_parallel {
                         parallel_calls.push((
                             assistant_entry_id,
@@ -147,7 +134,7 @@ where
                             &mut buffers.source_entry_ids,
                             abort_signal.clone(),
                         );
-                        let invocation = match override_result {
+                        let execution = match override_result {
                             Some(result) => {
                                 let started_at_ms = now_timestamp_ms();
                                 on_delta(context.started_event(started_at_ms));
@@ -165,10 +152,21 @@ where
                             }
                             None => self.execute_tool_call(context, on_delta).await?,
                         };
-                        buffers.blocks.push(TurnBlock::ToolInvocation {
-                            invocation: Box::new(invocation.clone()),
-                        });
-                        buffers.tool_invocations.push(invocation);
+                        match execution {
+                            super::super::tool_calls::ToolCallExecutionResult::Completed(
+                                invocation,
+                            ) => {
+                                buffers.blocks.push(TurnBlock::ToolInvocation {
+                                    invocation: Box::new(invocation.clone()),
+                                });
+                                buffers.tool_invocations.push(invocation);
+                            }
+                            super::super::tool_calls::ToolCallExecutionResult::Suspended(
+                                request,
+                            ) => {
+                                return Ok(CompletionProcessingResult::Suspended { request });
+                            }
+                        }
                     }
                 }
                 CompletionSegment::Thinking(_) | CompletionSegment::Text(_) => {}
@@ -263,24 +261,37 @@ where
                             )
                             .await
                         {
-                            Ok(result) => {
-                                if result.invocation_id != call.invocation_id
-                                    || result.tool_name != call.tool_name
-                                {
+                            Ok(outcome) => match outcome {
+                                ToolCallOutcome::Completed { result } => {
+                                    if result.invocation_id != call.invocation_id
+                                        || result.tool_name != call.tool_name
+                                    {
+                                        super::super::tool_calls::PreparedToolCallOutcome::Failed {
+                                            started_at_ms,
+                                            tool_trace_context,
+                                            event_name: "tool_result_rejected",
+                                            runtime_error: RuntimeError::tool_result_mismatch(
+                                                &call, &result,
+                                            ),
+                                        }
+                                    } else {
+                                        super::super::tool_calls::PreparedToolCallOutcome::Completed {
+                                            started_at_ms,
+                                            tool_trace_context,
+                                            result,
+                                            failed: abort_signal.is_aborted(),
+                                        }
+                                    }
+                                }
+                                ToolCallOutcome::Suspended { request } => {
                                     super::super::tool_calls::PreparedToolCallOutcome::Failed {
                                         started_at_ms,
                                         tool_trace_context,
-                                        event_name: "tool_result_rejected",
-                                        runtime_error: RuntimeError::tool_result_mismatch(
-                                            &call, &result,
-                                        ),
-                                    }
-                                } else {
-                                    super::super::tool_calls::PreparedToolCallOutcome::Completed {
-                                        started_at_ms,
-                                        tool_trace_context,
-                                        result,
-                                        failed: abort_signal.is_aborted(),
+                                        event_name: "tool_request_rejected",
+                                        runtime_error: RuntimeError::tool(format!(
+                                            "parallel tool call unexpectedly suspended: {}#{}",
+                                            request.tool_name, request.invocation_id,
+                                        )),
                                     }
                                 }
                             }
@@ -310,6 +321,10 @@ where
                         started_at_ms,
                         ..
                     }
+                    | super::super::tool_calls::PreparedToolCallOutcome::Suspended {
+                        started_at_ms,
+                        ..
+                    }
                     | super::super::tool_calls::PreparedToolCallOutcome::Failed {
                         started_at_ms,
                         ..
@@ -328,7 +343,7 @@ where
                         text: delta.text,
                     });
                 }
-                let invocation = self.commit_prepared_tool_call(
+                let execution = self.commit_prepared_tool_call(
                     &mut ExecuteToolCallContext::new(
                         turn_id,
                         llm_trace_context,
@@ -341,10 +356,17 @@ where
                     prepared,
                     on_delta,
                 )?;
-                buffers
-                    .blocks
-                    .push(TurnBlock::ToolInvocation { invocation: Box::new(invocation.clone()) });
-                buffers.tool_invocations.push(invocation);
+                match execution {
+                    super::super::tool_calls::ToolCallExecutionResult::Completed(invocation) => {
+                        buffers.blocks.push(TurnBlock::ToolInvocation {
+                            invocation: Box::new(invocation.clone()),
+                        });
+                        buffers.tool_invocations.push(invocation);
+                    }
+                    super::super::tool_calls::ToolCallExecutionResult::Suspended(request) => {
+                        return Ok(CompletionProcessingResult::Suspended { request });
+                    }
+                }
             }
         }
 

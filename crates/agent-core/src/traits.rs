@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 
 use crate::{
-    AbortSignal, Completion, CompletionRequest, CoreError, StreamEvent, ToolDefinition,
-    ToolExecutionContext, ToolOutputDelta, ToolResult,
+    AbortSignal, Completion, CompletionRequest, CoreError, StreamEvent, ToolCallOutcome,
+    ToolDefinition, ToolExecutionContext, ToolOutputDelta,
 };
 
 #[async_trait]
@@ -32,7 +32,7 @@ pub trait ToolExecutor: Send + Sync {
         call: &crate::ToolCall,
         output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
-    ) -> Result<ToolResult, Self::Error>;
+    ) -> Result<ToolCallOutcome, Self::Error>;
 }
 
 #[async_trait]
@@ -41,10 +41,14 @@ pub trait Tool: Send + Sync {
 
     fn definition(&self) -> ToolDefinition;
 
+    fn is_interactive_tool(&self) -> bool {
+        false
+    }
+
     async fn call(
         &self,
         tool_call: &crate::ToolCall,
         output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
-    ) -> Result<ToolResult, CoreError>;
+    ) -> Result<ToolCallOutcome, CoreError>;
 }

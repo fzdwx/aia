@@ -53,6 +53,7 @@ dependencies = [
  "agent-prompts",
  "aia-config",
  "async-trait",
+ "builtin-tools",
  "futures",
  "serde",
  "serde_json",

@@ -7,7 +7,8 @@ mod tests;
 use std::path::Path;
 
 use agent_core::{
-    CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
+    CoreError, Tool, ToolCall, ToolCallOutcome, ToolDefinition, ToolExecutionContext,
+    ToolOutputDelta, ToolResult,
 };
 use agent_core_macros::ToolArgsSchema as DeriveToolArgsSchema;
 use agent_prompts::tool_descriptions::shell_tool_description;
@@ -44,14 +45,14 @@ impl Tool for ShellTool {
         call: &ToolCall,
         output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
-    ) -> Result<ToolResult, CoreError> {
+    ) -> Result<ToolCallOutcome, CoreError> {
         let args: ShellToolArgs = call.parse_arguments()?;
         let command = args.command;
         let _description = args.description;
         let cwd = context.workspace_root.as_deref().unwrap_or_else(|| Path::new("."));
 
         if context.abort.is_aborted() {
-            return Ok(ToolResult::from_call(call, "[aborted]"));
+            return Ok(ToolCallOutcome::completed(ToolResult::from_call(call, "[aborted]")));
         }
 
         let execution = run_embedded_brush(&command, cwd, &context.abort, output).await?;
@@ -64,11 +65,13 @@ impl Tool for ShellTool {
             result_text.push_str(&format!("\n[exit code: {}]", execution.exit_code));
         }
 
-        Ok(ToolResult::from_call(call, result_text).with_details(serde_json::json!({
-            "command": command,
-            "exit_code": execution.exit_code,
-            "stdout": execution.stdout,
-            "stderr": execution.stderr,
-        })))
+        Ok(ToolCallOutcome::completed(ToolResult::from_call(call, result_text).with_details(
+            serde_json::json!({
+                "command": command,
+                "exit_code": execution.exit_code,
+                "stdout": execution.stdout,
+                "stderr": execution.stderr,
+            }),
+        )))
     }
 }

@@ -8,7 +8,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use agent_core::{AbortSignal, Tool, ToolCall, ToolExecutionContext};
+use agent_core::{AbortSignal, Tool, ToolCall, ToolCallOutcome, ToolExecutionContext, ToolResult};
 
 use super::WriteTool;
 
@@ -47,6 +47,17 @@ fn test_context(workspace_root: &Path) -> ToolExecutionContext {
     }
 }
 
+fn completed_result(outcome: ToolCallOutcome) -> Result<ToolResult, Box<dyn Error>> {
+    match outcome {
+        ToolCallOutcome::Completed { result } => Ok(result),
+        ToolCallOutcome::Suspended { request } => Err(format!(
+            "tool unexpectedly suspended: {}#{}",
+            request.tool_name, request.invocation_id
+        )
+        .into()),
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn write_tool_creates_parent_directories_and_reports_line_count() -> Result<(), Box<dyn Error>>
 {
@@ -57,10 +68,11 @@ async fn write_tool_creates_parent_directories_and_reports_line_count() -> Resul
         "content": "alpha\nbeta\n"
     }));
 
-    let result = tool
-        .call(&call, &mut |_| {}, &test_context(dir.path()))
-        .await
-        .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
+    let result = completed_result(
+        tool.call(&call, &mut |_| {}, &test_context(dir.path()))
+            .await
+            .map_err(|error| -> Box<dyn Error> { Box::new(error) })?,
+    )?;
 
     let written_path = dir.path().join("nested/notes.txt");
     let stored = fs::read_to_string(&written_path)?;

@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use agent_core::{
-    AbortSignal, CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta,
-    ToolResult,
+    AbortSignal, CoreError, Tool, ToolCall, ToolCallOutcome, ToolDefinition, ToolExecutionContext,
+    ToolOutputDelta, ToolResult,
 };
 use agent_prompts::tool_descriptions::websearch_tool_description;
 use async_trait::async_trait;
@@ -140,7 +140,7 @@ impl Tool for WebSearchTool {
         call: &ToolCall,
         _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
-    ) -> Result<ToolResult, CoreError> {
+    ) -> Result<ToolCallOutcome, CoreError> {
         let args: WebSearchToolArgs = call.parse_arguments()?;
         let query = args.query.trim();
         if query.is_empty() {
@@ -157,14 +157,16 @@ impl Tool for WebSearchTool {
         let search_type = args.search_type.unwrap_or(WebSearchType::Auto);
 
         if context.abort.is_aborted() {
-            return Ok(ToolResult::from_call(call, "[aborted]").with_details(serde_json::json!({
-                "query": query,
-                "numResults": args.num_results,
-                "livecrawl": livecrawl,
-                "type": search_type,
-                "contextMaxCharacters": args.context_max_characters,
-                "aborted": true,
-            })));
+            return Ok(ToolCallOutcome::completed(
+                ToolResult::from_call(call, "[aborted]").with_details(serde_json::json!({
+                    "query": query,
+                    "numResults": args.num_results,
+                    "livecrawl": livecrawl,
+                    "type": search_type,
+                    "contextMaxCharacters": args.context_max_characters,
+                    "aborted": true,
+                })),
+            ));
         }
 
         let client = Client::builder().timeout(REQUEST_TIMEOUT).build().map_err(|error| {
@@ -185,25 +187,28 @@ impl Tool for WebSearchTool {
         {
             WebSearchOutcome::Completed(content) => {
                 let result_found = content != EMPTY_RESULT_MESSAGE;
-                Ok(ToolResult::from_call(call, content).with_details(serde_json::json!({
-                    "query": query,
-                    "numResults": args.num_results,
-                    "livecrawl": livecrawl,
-                    "type": search_type,
-                    "contextMaxCharacters": args.context_max_characters,
-                    "result_found": result_found,
-                    "provider": "exa",
-                })))
+                Ok(ToolCallOutcome::completed(ToolResult::from_call(call, content).with_details(
+                    serde_json::json!({
+                        "query": query,
+                        "numResults": args.num_results,
+                        "livecrawl": livecrawl,
+                        "type": search_type,
+                        "contextMaxCharacters": args.context_max_characters,
+                        "result_found": result_found,
+                        "provider": "exa",
+                    }),
+                )))
             }
-            WebSearchOutcome::Cancelled => Ok(ToolResult::from_call(call, "[aborted]")
-                .with_details(serde_json::json!({
+            WebSearchOutcome::Cancelled => Ok(ToolCallOutcome::completed(
+                ToolResult::from_call(call, "[aborted]").with_details(serde_json::json!({
                     "query": query,
                     "numResults": args.num_results,
                     "livecrawl": livecrawl,
                     "type": search_type,
                     "contextMaxCharacters": args.context_max_characters,
                     "aborted": true,
-                }))),
+                })),
+            )),
         }
     }
 }

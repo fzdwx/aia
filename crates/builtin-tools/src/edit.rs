@@ -1,5 +1,6 @@
 use agent_core::{
-    CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
+    CoreError, Tool, ToolCall, ToolCallOutcome, ToolDefinition, ToolExecutionContext,
+    ToolOutputDelta, ToolResult,
 };
 use agent_core_macros::ToolArgsSchema as DeriveToolArgsSchema;
 use agent_prompts::tool_descriptions::edit_tool_description;
@@ -41,7 +42,7 @@ impl Tool for EditTool {
         call: &ToolCall,
         _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
-    ) -> Result<ToolResult, CoreError> {
+    ) -> Result<ToolCallOutcome, CoreError> {
         let args: EditToolArgs = call.parse_arguments()?;
         let path = context.resolve_path(&args.file_path);
 
@@ -61,13 +62,15 @@ impl Tool for EditTool {
                 let new_lines = args.new_string.lines().count();
                 let diff = build_edit_diff(&args.old_string, &args.new_string);
                 let file_path = path.display().to_string();
-                Ok(ToolResult::from_call(call, format!("Edited {file_path}")).with_details(
-                    serde_json::json!({
-                        "file_path": file_path,
-                        "added": new_lines,
-                        "removed": old_lines,
-                        "diff": diff,
-                    }),
+                Ok(ToolCallOutcome::completed(
+                    ToolResult::from_call(call, format!("Edited {file_path}")).with_details(
+                        serde_json::json!({
+                            "file_path": file_path,
+                            "added": new_lines,
+                            "removed": old_lines,
+                            "diff": diff,
+                        }),
+                    ),
                 ))
             }
             n => Err(CoreError::new(format!(

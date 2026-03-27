@@ -14,6 +14,8 @@ pub struct ToolDefinition {
     pub name: String,
     pub description: String,
     pub parameters: Value,
+    #[serde(default)]
+    pub interactive: bool,
 }
 
 pub trait ToolArgsSchema {
@@ -172,7 +174,13 @@ impl ToolDefinition {
                 "required": [],
                 "additionalProperties": false,
             }),
+            interactive: false,
         }
+    }
+
+    pub fn with_interactive(mut self, interactive: bool) -> Self {
+        self.interactive = interactive;
+        self
     }
 
     pub fn with_parameter(
@@ -399,6 +407,40 @@ pub struct ToolResult {
     pub response_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub details: Option<Value>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PendingToolRequest {
+    pub request_id: String,
+    pub invocation_id: String,
+    pub turn_id: String,
+    pub tool_name: String,
+    pub kind: String,
+    pub payload: Value,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ToolCallOutcome {
+    Completed { result: ToolResult },
+    Suspended { request: PendingToolRequest },
+}
+
+impl ToolCallOutcome {
+    pub fn completed(result: ToolResult) -> Self {
+        Self::Completed { result }
+    }
+
+    pub fn suspended(request: PendingToolRequest) -> Self {
+        Self::Suspended { request }
+    }
+
+    pub fn into_completed_result(self) -> Option<ToolResult> {
+        match self {
+            Self::Completed { result } => Some(result),
+            Self::Suspended { request: _ } => None,
+        }
+    }
 }
 
 impl ToolResult {

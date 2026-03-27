@@ -7,7 +7,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use agent_core::{AbortSignal, Tool, ToolCall, ToolExecutionContext};
+use agent_core::{AbortSignal, Tool, ToolCall, ToolCallOutcome, ToolExecutionContext, ToolResult};
 
 use super::GlobTool;
 
@@ -50,6 +50,17 @@ fn result_paths(result: &str) -> BTreeSet<String> {
     result.lines().filter(|line| !line.is_empty()).map(ToOwned::to_owned).collect()
 }
 
+fn completed_result(outcome: ToolCallOutcome) -> Result<ToolResult, Box<dyn Error>> {
+    match outcome {
+        ToolCallOutcome::Completed { result } => Ok(result),
+        ToolCallOutcome::Suspended { request } => Err(format!(
+            "tool unexpectedly suspended: {}#{}",
+            request.tool_name, request.invocation_id
+        )
+        .into()),
+    }
+}
+
 #[test]
 fn glob_tool_definition_mentions_gitignore_and_common_ignores() {
     let definition = GlobTool.definition();
@@ -77,10 +88,11 @@ async fn glob_tool_respects_gitignore_and_skips_common_directories() -> Result<(
     let call = ToolCall::new("glob").with_arguments_value(serde_json::json!({
         "pattern": "**/*.rs"
     }));
-    let result = tool
-        .call(&call, &mut |_| {}, &test_context(dir.path()))
-        .await
-        .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
+    let result = completed_result(
+        tool.call(&call, &mut |_| {}, &test_context(dir.path()))
+            .await
+            .map_err(|error| -> Box<dyn Error> { Box::new(error) })?,
+    )?;
 
     let paths = result_paths(&result.content);
     assert!(paths.contains(&dir.path().join("kept.rs").display().to_string()));
@@ -113,10 +125,11 @@ async fn glob_tool_reports_truncation_when_limit_is_smaller_than_matches()
         "pattern": "**/*.rs",
         "limit": 2
     }));
-    let result = tool
-        .call(&call, &mut |_| {}, &test_context(dir.path()))
-        .await
-        .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
+    let result = completed_result(
+        tool.call(&call, &mut |_| {}, &test_context(dir.path()))
+            .await
+            .map_err(|error| -> Box<dyn Error> { Box::new(error) })?,
+    )?;
 
     assert_eq!(result.content.lines().count(), 2);
     let details = match result.details {
@@ -142,8 +155,8 @@ async fn glob_tool_returns_aborted_result_when_signal_is_pre_cancelled()
     let call = ToolCall::new("glob").with_arguments_value(serde_json::json!({
         "pattern": "**/*.rs"
     }));
-    let result = tool
-        .call(
+    let result = completed_result(
+        tool.call(
             &call,
             &mut |_| {},
             &ToolExecutionContext {
@@ -155,7 +168,8 @@ async fn glob_tool_returns_aborted_result_when_signal_is_pre_cancelled()
             },
         )
         .await
-        .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
+        .map_err(|error| -> Box<dyn Error> { Box::new(error) })?,
+    )?;
 
     assert_eq!(result.content, "[aborted]");
     let details = result.details.ok_or("glob aborted result should include details")?;

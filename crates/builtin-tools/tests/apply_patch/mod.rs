@@ -6,7 +6,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use agent_core::{AbortSignal, Tool, ToolCall, ToolExecutionContext};
+use agent_core::{AbortSignal, Tool, ToolCall, ToolCallOutcome, ToolExecutionContext, ToolResult};
 
 use super::ApplyPatchTool;
 
@@ -56,6 +56,17 @@ fn test_context(workspace_root: &Path) -> ToolExecutionContext {
     }
 }
 
+fn completed_result(outcome: ToolCallOutcome) -> Result<ToolResult, Box<dyn Error>> {
+    match outcome {
+        ToolCallOutcome::Completed { result } => Ok(result),
+        ToolCallOutcome::Suspended { request } => Err(format!(
+            "tool unexpectedly suspended: {}#{}",
+            request.tool_name, request.invocation_id
+        )
+        .into()),
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn apply_patch_tool_updates_file() -> Result<(), Box<dyn Error>> {
     let dir = TestDir::new()?;
@@ -67,10 +78,11 @@ async fn apply_patch_tool_updates_file() -> Result<(), Box<dyn Error>> {
         "patch": "*** Begin Patch\n*** Update File: notes.txt\n@@\n before\n alpha\n-beta\n+gamma\n after\n*** End Patch"
     }));
 
-    let result = tool
-        .call(&call, &mut |_| {}, &test_context(dir.path()))
-        .await
-        .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
+    let result = completed_result(
+        tool.call(&call, &mut |_| {}, &test_context(dir.path()))
+            .await
+            .map_err(|error| -> Box<dyn Error> { Box::new(error) })?,
+    )?;
 
     assert_eq!(fs::read_to_string(&path)?, "before\nalpha\ngamma\nafter\n");
     assert_eq!(result.content, "Applied patch to 1 file");
@@ -142,10 +154,11 @@ async fn apply_patch_tool_adds_and_deletes_files() -> Result<(), Box<dyn Error>>
         "patch": "*** Begin Patch\n*** Add File: nested/new.txt\n+first\n+second\n*** Delete File: old.txt\n*** End Patch"
     }));
 
-    let result = tool
-        .call(&call, &mut |_| {}, &test_context(dir.path()))
-        .await
-        .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
+    let result = completed_result(
+        tool.call(&call, &mut |_| {}, &test_context(dir.path()))
+            .await
+            .map_err(|error| -> Box<dyn Error> { Box::new(error) })?,
+    )?;
 
     assert_eq!(fs::read_to_string(dir.path().join("nested/new.txt"))?, "first\nsecond\n");
     assert!(!deleted.exists());
@@ -172,10 +185,11 @@ async fn apply_patch_tool_moves_file_without_content_changes() -> Result<(), Box
         "patch": "*** Begin Patch\n*** Update File: old.txt\n*** Move to: nested/new.txt\n*** End Patch"
     }));
 
-    let result = tool
-        .call(&call, &mut |_| {}, &test_context(dir.path()))
-        .await
-        .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
+    let result = completed_result(
+        tool.call(&call, &mut |_| {}, &test_context(dir.path()))
+            .await
+            .map_err(|error| -> Box<dyn Error> { Box::new(error) })?,
+    )?;
 
     assert!(!source.exists());
     assert_eq!(fs::read_to_string(&target)?, "legacy\n");

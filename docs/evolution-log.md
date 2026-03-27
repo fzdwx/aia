@@ -1,5 +1,16 @@
 # 演进日志
 
+## 2026-03-27 Session 112
+
+**Diagnosis**：`evolution-log` 中关于 `Question`、`TapeInfo`、`TapeHandoff` 的若干历史条目，记录了当时阶段性的 runtime tool registry、`WaitingForQuestion`、`turn_waiting_for_question` 与 `resume_turn_after_question(...)` 方案。随着后续把 `Question` 收口为普通 interactive builtin tool、把 runtime 收口为通用 `Suspended` 挂起原语、并最终删除空壳 runtime tool registry，这些历史描述虽然当时成立，但现在很容易被误读成仓库现状。
+**Decision**：不改写旧记录本身，而是在日志顶部追加一条后续澄清，明确当前生效边界：`Question`、`TapeInfo`、`TapeHandoff` 均已作为普通 builtin tool 注册；`agent-runtime` 不再维护独立 runtime tool registry；`Question` 的控制面事实与恢复由 `apps/agent-server` 持有，runtime 只保留 `ToolCallOutcome::{Completed,Suspended}`、`tool_request_pending`、`turn_suspended` 与 `resume_turn_after_tool_result(...)` 这组通用原语。
+**Changes**：
+- `docs/evolution-log.md`：追加本条澄清，提醒阅读者将 Session 110/111 中提到的 runtime tool registry、`WaitingForQuestion` 与 question 专属 runtime 状态机视为阶段性历史方案，而不是当前实现。
+- 对当前实现的权威描述，统一以 `docs/architecture.md`、`docs/status.md` 与 `docs/rfc/0001-question-runtime-tool.md` 为准。
+**Verification**：人工核对当前代码与文档边界一致：`QuestionTool` 返回 `ToolCallOutcome::Suspended`；`TapeInfo/TapeHandoff` 通过 `ToolExecutionContext.runtime` 获取上下文；`agent-runtime` 已删除空壳 runtime tool registry 与 `is_runtime_tool(...)` special-case；`apps/agent-server` 继续持有 `question_requested/question_resolved` 控制面桥接。
+**Commit**：未提交。
+**Next direction**：若后续再演进挂起型工具，优先继续复用共享 `PendingToolRequest + Suspended` 机制，不再重新引入 `WaitingForX` 或独立 runtime tool registry。
+
 ## 2026-03-25 Session 111
 
 **Diagnosis**：`Question` RFC 虽然已经把共享协议、runtime tool 和 capability gating 落进 `agent-core` / `agent-runtime`，但 `session-tape` 仍缺少对 `question_requested/question_resolved` 的一等恢复 helper。这样 server 进入 Phase 1 的 pending question 恢复时，仍得在 `apps/agent-server` 里手写一遍“倒序扫描 event、按 `request_id` 配对”的逻辑，不利于把 append-only tape 事实语义稳定地下沉到共享层。
@@ -20,7 +31,7 @@
 **Update**：同轮继续把 `Question` 从“普通 runtime tool 回显”推进到真正的最小等待态：`agent-runtime` 现已把 `Question` 独立出 `tape_tools.rs`，并改成只让模型传 `questions`，`request_id/turn_id` 由 runtime 自己生成。completion 处理中一旦遇到 `Question`，runtime 会写入 `tool_call(Question)` + `question_requested`，随后以显式 `TurnOutcome::WaitingForQuestion` / `turn_waiting_for_question` 提前结束本轮，而不是继续下一轮 completion。与此同时，`ToolArgsSchema` 也补上了嵌套 struct / `Vec<struct>` 支持，让 `Question` definition 可以正式改用 derive schema，而不必继续手写裸 JSON schema。
 **Update**：后续又把 `Question` 协议进一步收紧到更小 surface：`QuestionItem` 不再包含单独的 `header`，UI 统一直接展示 `question`；推荐项也从 `recommended_option_ids[]` 改成单值 `recommended_option_id`，避免协议与前端都继续为“多推荐项”保留并未真正需要的形态。
 **Update**：再下一轮继续把 `Question` 对 runtime 的侵入收回：去掉 `agent-runtime` 内部的 `WaitingForQuestion` / `resume_turn_after_question(...)` / `turn_waiting_for_question` 特判，改为由 `apps/agent-server` 以普通工具方式注册 `Question`，server 侧负责 `question_requested/question_resolved` 持久化、pending waiter 与 `/api/session/question` 控制面。这样 runtime 只把 `Question` 当普通工具调用，不再内建 question 专属状态机。
-**Update**：本轮继续把 `Question` 收回到真正的 runtime 等待态：`agent-runtime` 现已重新以 `question_requested + turn_waiting_for_question` 结束当前轮，并补回 `resume_turn_after_question(...)`，使 `Question` 不再阻塞在 server-side 普通工具 future 上。与此同时，`apps/agent-server` 也移除了 `QuestionCoordinator` / server waiter / `AskQuestion` 命令，改为在 `PUT|DELETE /api/session/question` 时统一落 `question_resolved + tool_result(Question)`，并在检测到等待中的原轮时直接驱动 runtime 恢复执行；这样等待态、恢复语义和控制面职责重新与 RFC 对齐。
+**Update**：本轮继续把 builtin 工具面彻底收干净：除了 `QuestionTool` 外，`TapeInfo` / `TapeHandoff` 也一并下沉到 `builtin-tools`，并由 `build_tool_registry()` 直接注册；`agent-runtime` 不再维护任何 runtime tool registry，普通 builtin tool 调用会统一拿到 runtime context，因此 `TapeInfo/TapeHandoff` 仍能读取上下文统计与记录 handoff，同时 `Question` 继续只在 turn segment 里被 runtime 拦截成 `question_requested + turn_waiting_for_question + resume_turn_after_question(...)` 状态机。与此同时，`apps/agent-server` 侧的 `Question` bridge helper 也被抽成独立模块，进一步避免 `session_manager/mod.rs` 再次变厚。
 **Verification**：`cargo test -p agent-core 自研_schema_支持嵌套_struct_与_struct_array -- --nocapture`；`cargo test -p agent-runtime question_runtime_tool_会生成_pending_request_并以等待态结束轮次 -- --nocapture`；`cargo test -p agent-runtime runtime_tool_definitions_match_derive_schema_output -- --nocapture`；`cargo test -p agent-server rebuild_turn_history_from_tape_restores_waiting_for_question_outcome -- --nocapture`；`cargo test -p agent-server get_pending_question_returns_request_from_session_tape -- --nocapture`；`cargo test -p agent-server resolve_pending_question_appends_resolution_and_clears_pending_state -- --nocapture`。
 
 ## 2026-03-25 Session 110

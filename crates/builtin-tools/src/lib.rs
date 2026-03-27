@@ -4,8 +4,10 @@ mod edit;
 mod exa;
 mod glob;
 mod grep;
+mod question;
 mod read;
 mod shell;
+mod tape;
 mod walk;
 mod websearch;
 mod write;
@@ -15,8 +17,10 @@ pub use codesearch::CodeSearchTool;
 pub use edit::EditTool;
 pub use glob::GlobTool;
 pub use grep::GrepTool;
+pub use question::{QuestionTool, question_request_from_call};
 pub use read::ReadTool;
 pub use shell::ShellTool;
+pub use tape::{TapeHandoffTool, TapeInfoTool};
 pub use websearch::WebSearchTool;
 pub use write::WriteTool;
 
@@ -37,6 +41,9 @@ pub fn build_tool_registry() -> ToolRegistry {
     registry.register(Box::new(GrepTool));
     registry.register(Box::new(CodeSearchTool));
     registry.register(Box::new(WebSearchTool));
+    registry.register(Box::new(QuestionTool));
+    registry.register(Box::new(TapeInfoTool));
+    registry.register(Box::new(TapeHandoffTool));
     registry
 }
 

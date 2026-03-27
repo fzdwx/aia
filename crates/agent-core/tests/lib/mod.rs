@@ -308,6 +308,51 @@ fn question_result_保持稳定序列化形状() {
 }
 
 #[test]
+fn pending_tool_request_保持稳定序列化形状() {
+    let request = PendingToolRequest {
+        request_id: "preq_123".into(),
+        invocation_id: "tool-call_123".into(),
+        turn_id: "turn_123".into(),
+        tool_name: "Question".into(),
+        kind: "question".into(),
+        payload: serde_json::json!({
+            "questions": [{ "id": "database", "question": "Use which database?" }]
+        }),
+    };
+
+    let value = serde_json::to_value(&request).expect("pending tool request should serialize");
+    assert_eq!(value["request_id"], serde_json::json!("preq_123"));
+    assert_eq!(value["tool_name"], serde_json::json!("Question"));
+    assert_eq!(value["kind"], serde_json::json!("question"));
+    assert_eq!(
+        serde_json::from_value::<PendingToolRequest>(value)
+            .expect("pending tool request should deserialize"),
+        request
+    );
+}
+
+#[test]
+fn tool_call_outcome_保持_completed_与_suspended_稳定形状() {
+    let call = ToolCall::new("question");
+    let completed = ToolCallOutcome::Completed(ToolResult::from_call(&call, "ok"));
+    let suspended = ToolCallOutcome::Suspended(PendingToolRequest {
+        request_id: "preq_456".into(),
+        invocation_id: call.invocation_id.clone(),
+        turn_id: "turn_456".into(),
+        tool_name: call.tool_name.clone(),
+        kind: "question".into(),
+        payload: serde_json::json!({ "questions": [] }),
+    });
+
+    let completed_value = serde_json::to_value(&completed).expect("completed should serialize");
+    let suspended_value = serde_json::to_value(&suspended).expect("suspended should serialize");
+
+    assert_eq!(completed_value["status"], serde_json::json!("completed"));
+    assert_eq!(suspended_value["status"], serde_json::json!("suspended"));
+    assert_eq!(suspended_value["request"]["kind"], serde_json::json!("question"));
+}
+
+#[test]
 fn system_time_before_unix_epoch_falls_back_to_zero_duration() {
     let before_epoch = UNIX_EPOCH - Duration::from_secs(1);
 
@@ -423,9 +468,38 @@ impl Tool for EchoTool {
         tool_call: &ToolCall,
         _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         _context: &ToolExecutionContext,
-    ) -> Result<ToolResult, CoreError> {
+    ) -> Result<ToolCallOutcome, CoreError> {
         let text = tool_call.str_arg("text")?;
-        Ok(ToolResult::from_call(tool_call, text))
+        Ok(ToolCallOutcome::Completed(ToolResult::from_call(tool_call, text)))
+    }
+}
+
+struct SuspendTool;
+
+#[async_trait]
+impl Tool for SuspendTool {
+    fn name(&self) -> &str {
+        "Suspend"
+    }
+
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new("Suspend", "挂起工具")
+    }
+
+    async fn call(
+        &self,
+        tool_call: &ToolCall,
+        _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
+        _context: &ToolExecutionContext,
+    ) -> Result<ToolCallOutcome, CoreError> {
+        Ok(ToolCallOutcome::Suspended(PendingToolRequest {
+            request_id: "preq_test".into(),
+            invocation_id: tool_call.invocation_id.clone(),
+            turn_id: "turn_test".into(),
+            tool_name: tool_call.tool_name.clone(),
+            kind: "question".into(),
+            payload: serde_json::json!({ "questions": [] }),
+        }))
     }
 }
 
@@ -452,7 +526,34 @@ async fn 注册表按名称分派工具调用() {
         runtime: None,
     };
     let result = ToolExecutor::call(&registry, &call, &mut |_| {}, &ctx).await.unwrap();
-    assert_eq!(result.content, "你好");
+    match result {
+        ToolCallOutcome::Completed(result) => assert_eq!(result.content, "你好"),
+        ToolCallOutcome::Suspended(_) => panic!("echo tool should complete immediately"),
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn 注册表可返回挂起中的工具调用结果() {
+    let mut registry = ToolRegistry::new();
+    registry.register(Box::new(SuspendTool));
+
+    let call = ToolCall::new("Suspend");
+    let ctx = ToolExecutionContext {
+        run_id: "r1".into(),
+        session_id: None,
+        workspace_root: None,
+        abort: AbortSignal::new(),
+        runtime: None,
+    };
+
+    let result = ToolExecutor::call(&registry, &call, &mut |_| {}, &ctx).await.unwrap();
+    match result {
+        ToolCallOutcome::Completed(_) => panic!("suspend tool should suspend"),
+        ToolCallOutcome::Suspended(request) => {
+            assert_eq!(request.tool_name, "Suspend");
+            assert_eq!(request.kind, "question");
+        }
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]

@@ -1,7 +1,8 @@
 use std::{io::ErrorKind, path::Path};
 
 use agent_core::{
-    CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
+    CoreError, Tool, ToolCall, ToolCallOutcome, ToolDefinition, ToolExecutionContext,
+    ToolOutputDelta, ToolResult,
 };
 use agent_core_macros::ToolArgsSchema as DeriveToolArgsSchema;
 use agent_prompts::tool_descriptions::read_tool_description;
@@ -38,7 +39,7 @@ impl Tool for ReadTool {
         call: &ToolCall,
         _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
-    ) -> Result<ToolResult, CoreError> {
+    ) -> Result<ToolCallOutcome, CoreError> {
         let args: ReadToolArgs = call.parse_arguments()?;
         let offset = args.offset.unwrap_or(0);
         let limit = args.limit.unwrap_or(2000);
@@ -51,14 +52,14 @@ impl Tool for ReadTool {
             let byte_len = bytes.len();
             let data_url = format!("data:{mime_type};base64,{}", BASE64_STANDARD.encode(bytes));
 
-            return Ok(ToolResult::from_call(call, data_url.clone()).with_details(
-                serde_json::json!({
+            return Ok(ToolCallOutcome::completed(
+                ToolResult::from_call(call, data_url.clone()).with_details(serde_json::json!({
                     "file_path": path.display().to_string(),
                     "is_image": true,
                     "mime_type": mime_type,
                     "bytes": byte_len,
                     "encoding": "data_url",
-                }),
+                })),
             ));
         }
 
@@ -84,12 +85,14 @@ impl Tool for ReadTool {
 
         let lines_read = selected.lines().count();
 
-        Ok(ToolResult::from_call(call, selected).with_details(serde_json::json!({
-            "file_path": path.display().to_string(),
-            "is_image": false,
-            "lines_read": lines_read,
-            "total_lines": total_lines,
-        })))
+        Ok(ToolCallOutcome::completed(ToolResult::from_call(call, selected).with_details(
+            serde_json::json!({
+                "file_path": path.display().to_string(),
+                "is_image": false,
+                "lines_read": lines_read,
+                "total_lines": total_lines,
+            }),
+        )))
     }
 }
 

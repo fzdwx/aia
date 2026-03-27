@@ -1,6 +1,4 @@
-use agent_core::{
-    CompletionStopReason, LanguageModel, Message, QuestionResult, Role, StreamEvent, ToolExecutor,
-};
+use agent_core::{CompletionStopReason, LanguageModel, Message, Role, StreamEvent, ToolExecutor};
 use session_tape::TapeEntry;
 
 use crate::{RuntimeEvent, TurnControl, TurnOutput};
@@ -57,17 +55,17 @@ where
         Err(runtime_error)
     }
 
-    fn restore_waiting_turn(
+    fn restore_suspended_turn(
         &self,
         turn_id: &str,
     ) -> Result<(u64, String, TurnBuffers), RuntimeError> {
         let entries = self.tape().entries();
         let has_waiting_event = entries.iter().rev().any(|entry| {
-            entry.event_name() == Some("turn_waiting_for_question")
+            entry.event_name() == Some("turn_suspended")
                 && entry.meta.get("run_id").and_then(|value| value.as_str()) == Some(turn_id)
         });
         if !has_waiting_event {
-            return Err(RuntimeError::session("missing turn_waiting_for_question event"));
+            return Err(RuntimeError::session("missing turn_suspended event"));
         }
 
         let mut started_at_ms = 0_u64;
@@ -271,13 +269,16 @@ where
                 }
             };
 
-            if matches!(processing_result, CompletionProcessingResult::WaitingForQuestion) {
-                self.finish_waiting_for_question_turn(buffers.into_success_context(
-                    turn_id.clone(),
-                    started_at_ms,
-                    user_message.content.clone(),
-                    completion.usage.clone(),
-                ))?;
+            if let CompletionProcessingResult::Suspended { request } = processing_result {
+                self.finish_suspended_turn(
+                    buffers.into_success_context(
+                        turn_id.clone(),
+                        started_at_ms,
+                        user_message.content.clone(),
+                        completion.usage.clone(),
+                    ),
+                    &request,
+                )?;
 
                 return Ok(TurnOutput {
                     assistant_text,
@@ -374,16 +375,15 @@ where
         .await
     }
 
-    pub async fn resume_turn_after_question(
+    pub async fn resume_turn_after_tool_result(
         &mut self,
         turn_id: &str,
-        _result: &QuestionResult,
         control: TurnControl,
         on_delta: impl FnMut(StreamEvent) + Send,
     ) -> Result<TurnOutput, RuntimeError> {
         self.ensure_agent_started()?;
 
-        let (started_at_ms, user_message, buffers) = self.restore_waiting_turn(turn_id)?;
+        let (started_at_ms, user_message, buffers) = self.restore_suspended_turn(turn_id)?;
         let resumed_user_message = Message::new(Role::User, user_message);
 
         self.drive_turn_loop(

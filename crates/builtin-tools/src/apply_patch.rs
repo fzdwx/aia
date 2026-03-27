@@ -1,5 +1,6 @@
 use agent_core::{
-    CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
+    CoreError, Tool, ToolCall, ToolCallOutcome, ToolDefinition, ToolExecutionContext,
+    ToolOutputDelta, ToolResult,
 };
 use agent_core_macros::ToolArgsSchema as DeriveToolArgsSchema;
 use agent_prompts::tool_descriptions::apply_patch_tool_description;
@@ -113,7 +114,7 @@ impl Tool for ApplyPatchTool {
         call: &ToolCall,
         _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
-    ) -> Result<ToolResult, CoreError> {
+    ) -> Result<ToolCallOutcome, CoreError> {
         let patch = call.parse_arguments::<ApplyPatchToolArgs>()?.patch_text()?;
         let parsed = parse_apply_patch(&patch)?;
         let summary = apply_parsed_patch(context, parsed).await?;
@@ -123,17 +124,19 @@ impl Tool for ApplyPatchTool {
             + summary.moved_files;
         let noun = if total_files == 1 { "file" } else { "files" };
 
-        Ok(ToolResult::from_call(call, format!("Applied patch to {total_files} {noun}"))
-            .with_details(json!({
-                "files_updated": summary.updated_files,
-                "files_added": summary.added_files,
-                "files_deleted": summary.deleted_files,
-                "files_moved": summary.moved_files,
-                "lines_added": summary.lines_added,
-                "lines_removed": summary.lines_removed,
-                "operations": summary.operations,
-                "files": summary.files,
-            })))
+        Ok(ToolCallOutcome::completed(
+            ToolResult::from_call(call, format!("Applied patch to {total_files} {noun}"))
+                .with_details(json!({
+                    "files_updated": summary.updated_files,
+                    "files_added": summary.added_files,
+                    "files_deleted": summary.deleted_files,
+                    "files_moved": summary.moved_files,
+                    "lines_added": summary.lines_added,
+                    "lines_removed": summary.lines_removed,
+                    "operations": summary.operations,
+                    "files": summary.files,
+                })),
+        ))
     }
 }
 

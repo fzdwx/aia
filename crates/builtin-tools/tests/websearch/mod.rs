@@ -6,7 +6,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use agent_core::{AbortSignal, Tool, ToolCall, ToolExecutionContext};
+use agent_core::{AbortSignal, Tool, ToolCall, ToolCallOutcome, ToolExecutionContext, ToolResult};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
@@ -45,6 +45,17 @@ impl Drop for TestDir {
     }
 }
 
+fn completed_result(outcome: ToolCallOutcome) -> Result<ToolResult, Box<dyn Error>> {
+    match outcome {
+        ToolCallOutcome::Completed { result } => Ok(result),
+        ToolCallOutcome::Suspended { request } => Err(format!(
+            "tool unexpectedly suspended: {}#{}",
+            request.tool_name, request.invocation_id
+        )
+        .into()),
+    }
+}
+
 #[test]
 fn websearch_tool_definition_mentions_exa_and_current_year() {
     let definition = WebSearchTool.definition();
@@ -78,8 +89,8 @@ async fn websearch_tool_returns_aborted_result_when_signal_is_pre_cancelled()
     let call = ToolCall::new("websearch").with_arguments_value(serde_json::json!({
         "query": "AI news 2026"
     }));
-    let result = tool
-        .call(
+    let result = completed_result(
+        tool.call(
             &call,
             &mut |_| {},
             &ToolExecutionContext {
@@ -91,7 +102,8 @@ async fn websearch_tool_returns_aborted_result_when_signal_is_pre_cancelled()
             },
         )
         .await
-        .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
+        .map_err(|error| -> Box<dyn Error> { Box::new(error) })?,
+    )?;
 
     assert_eq!(result.content, "[aborted]");
     let details = result.details.ok_or("websearch aborted result should include details")?;

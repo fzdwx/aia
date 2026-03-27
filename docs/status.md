@@ -24,8 +24,8 @@
 - 最新 provider 持久化收口：provider 注册表已继续从单行 JSON 快照收口到 `agent-store` 的规范化 SQLite 结构：`providers` 承接 provider 基本资料，`provider_models` 承接“一 provider 多 model”清单；`apps/agent-server` 启动与 provider CRUD 都直接读写这两张表。与此同时，provider 侧 `ModelConfig.reasoning_effort` 已移除，思考等级只继续保留在 session tape 的 `provider_binding` / session settings 这一层。
 - 最新 provider 默认模型语义收口：provider 档案不再单独持久化额外的默认模型字段；当前默认模型统一取 `models` 列表首项，而 `agent-store` 会按 `provider_models.created_at` 倒序恢复模型顺序，避免再维护第二套“模型列表 + 额外活动模型”状态。
 - 最新驱动接口收口：`agent-prompts` 现已补上共享 `SystemPromptConfig + build_system_prompt(...)` 组合入口，`agent-runtime` 新增 `RuntimeHooks`，把 `before_agent_start`、`input`、`before_provider_request`、`tool_call`、`tool_result`、`turn_start/turn_end` 这组真正会影响外部客户端驱动面的生命周期钩子收口为稳定接口；`apps/agent-server` 的 `SessionManagerConfig` 也已直接承接这两类共享配置，让 session manager 不再把 system prompt 写死在 app 壳内部。
-- 最新 `Question` 等待态收口：`Question` 已重新落回 `agent-runtime` 的 runtime tool registry，并恢复为显式 `WaitingForQuestion` 轮次语义。runtime 现在会在模型调用 `Question` 时生成 `QuestionRequest`、追加 `question_requested + turn_waiting_for_question`，然后结束当前轮为等待态；用户通过 `PUT/DELETE /api/session/question` 提交结果后，server 负责把 `question_resolved + tool_result(Question)` 落盘，再驱动 runtime 恢复原 turn 继续执行。
-- 最新 `Question` server 边界收紧：`apps/agent-server` 已移除 `ServerQuestionTool`、`QuestionCoordinator` 和 server-side waiter，不再自己拥有 Question 工具语义；它现在只保留 pending question 控制面、SSE/当前轮投影、以及 resolve/cancel 后的 turn 恢复桥接。单个问题项继续只保留 `question` 展示文案，推荐项继续使用单值 `recommended_option_id`。
+- 最新工具挂起语义收口：`Question`、`TapeInfo`、`TapeHandoff` 的工具定义、参数 schema、参数解析和注册面现在都已下沉到 `builtin-tools`；`build_tool_registry()` 会直接注册这三类工具，而 `Tool` trait 现已统一返回 `ToolCallOutcome::{Completed,Suspended}`。其中 `QuestionTool` 不再由 `agent-runtime` 特判生成 `question_requested + turn_waiting_for_question + resume_turn_after_question(...)`，而是作为普通 interactive builtin tool 返回结构化 `PendingToolRequest(kind=question)`；`agent-runtime` 只保留通用 `tool_request_pending + turn_suspended + resume_turn_after_tool_result(...)` 挂起/恢复原语，并继续统一向 builtin tool 注入 runtime context。
+- 最新 `Question` server 边界收紧：`apps/agent-server` 现已接管 `Question` 的语义协调层：runtime 归还挂起 turn 后，server 会从通用 `tool_request_pending` 里解出 `QuestionRequest`，补写 `question_requested` 事实、维持 pending question 控制面，并在 resolve/cancel 后追加 `question_resolved + tool_result(Question)` 再驱动 runtime 继续原 turn。这样 question 的恢复、待答状态和控制面不再留在 runtime 内部。单个问题项继续只保留 `question` 展示文案，推荐项继续使用单值 `recommended_option_id`。
 - 最新 bootstrap 收口：`apps/agent-server` 现已补成 `lib + bin` 双入口，外部嵌入方不再需要手写 `SessionManagerConfig` 或复制启动装配，而是可以直接走 `bootstrap_state_with_options(ServerBootstrapOptions)` 把 `data_dir/workspace_root/user_agent/request_timeout/system_prompt/runtime_hooks` 一次性注入到共享 control-plane façade；与此同时，HTTP 监听地址也已从 bootstrap 状态装配中分离为独立 `ServerRunOptions`，嵌入方或 CLI 可在 `run_server_with_options(...)` / `--bind <addr>` 阶段覆写，而不必回退到更低层自己手拼 listener。
 - 最新工具扩展：`builtin-tools` 已新增 `codesearch`，按 `opencode` 的 `codesearch.ts` 语义接入 Exa Code API（`https://mcp.exa.ai/mcp`），支持 `query + tokensNum(1000-50000, default 5000)`，返回最新库/API 代码示例与文档上下文；共享工具描述、注册表与回归测试也已同步补齐。
 - 最新工具扩展补齐：`builtin-tools` 现又新增 `websearch`，按 `opencode` 的 `websearch.ts` 语义接入 Exa Web Search（同走 `https://mcp.exa.ai/mcp`），支持 `query`、`numResults`、`livecrawl`、`type` 与 `contextMaxCharacters`；其中共享描述会把“当前年份”替换为 `2026`，提醒模型在搜索最新资讯时显式带上今年年份。
@@ -146,7 +146,7 @@
 - 完成 `llm-trace` 本地 event timeline 落盘：记录 request started、首个 reasoning/text delta、tool-call detected、response completed/failed
 - 完成 runtime tool span 的后端真实落盘：工具执行不再只是前端临时推导节点
 - 完成流式工具事件语义拆分：`tool_call_detected` 与 `tool_call_started` 不再混用
-- 完成 `tape_info` / `tape_handoff` 从 runtime 特判式实现收口到 `Tool` trait + runtime tool registry
+- 完成 `tape_info` / `tape_handoff` 从 runtime 特判式实现收口到 `Tool` trait + runtime tool registry（后续已继续演进为普通 builtin tool + `ToolExecutionContext.runtime`，当前现状以顶部“最新”条目与 `docs/architecture.md` 为准）
 - 完成真实 token usage 贯通到 turn 主链、session history 与 Web 展示
 - 完成自动上下文压缩触发修正与 `context_compressed` 可观测性补齐
 - 完成提交前的后端自动压缩收口：高压力下会先 idle auto-compress 再启动 turn
@@ -195,15 +195,15 @@
 - 完成 `agent-store` / `agent-server` 的一轮 session helper 收口：`AiaStore::first_session_id()` 与 `SessionRecord::new(...)` 已下沉到共享 store/types 层，server 启动和路由默认 session 解析不再为“取第一条 session”整表加载，也不再在多个壳层重复手拼 `SessionRecord`
 - 完成 trace overview 的 loop 级存储收口：`agent-store` 在 span 入库时同步维护 `llm_trace_loops` 聚合表，`/api/traces/overview` 现在直接按 agent loop 返回分页项，不再把单次模型调用误当作最终列表语义，也不再依赖前端临时按 `trace_id` 二次拼装
 - 完成 `apps/agent-server` current-turn 投影 helper 收口：live stream 更新与 tape 快照重建共享 `runtime_worker::projection` 中的 `CurrentTurnBlock` / `CurrentToolOutput` 投影 helper，不再在 `session_manager::current_turn` 与 `runtime_worker::snapshots` 各自维护一套对象归一化、tool block 构造和状态推断逻辑
-- 完成 `agent-runtime` / `openai-adapter` 的并行工具调用首轮落地：共享 `CompletionRequest` 新增 `parallel_tool_calls`，Responses / Chat Completions 请求会显式发送该字段；runtime 对同一批工具调用开始按策略执行——`read` / `glob` / `grep` 等只读类工具可并行准备与执行，而 `shell` / `write` / `edit` / runtime tools 继续保持串行，避免文件系统冲突与交互副作用
+- 完成 `agent-runtime` / `openai-adapter` 的并行工具调用首轮落地：共享 `CompletionRequest` 新增 `parallel_tool_calls`，Responses / Chat Completions 请求会显式发送该字段；runtime 对同一批工具调用开始按策略执行——`read` / `glob` / `grep` 等只读类工具可并行准备与执行，而 `shell` / `write` / `edit` 与交互/副作用类工具继续保持串行，避免文件系统冲突与交互副作用
 - 完成独立内建 `apply_patch` 工具：`edit` 保持单文件精确唯一替换语义不变，同时新增短名稳定的 `apply_patch` 工具承接 `*** Begin Patch` / `*** End Patch` 风格多文件补丁，支持 `Update File`、`Add File`、`Delete File`，让 Codex/Claude 风格补丁映射无需借道 shell，也避免把两种编辑语义继续混在同一个工具里；其每文件结果元数据现也已收口为共享强类型结构，而不是继续在实现里手写 `serde_json::Value`
 - 完成 SSE 落后客户端显式重同步：`apps/agent-server` 的 `/api/events` 在 `broadcast` 消费者落后时会发出 `sync_required` 事件，而不是静默丢弃；`apps/web` 收到后会主动补拉 session 列表与当前 session 的历史、当前 turn、上下文压力，避免事件流与本地 UI 状态无声漂移
 - 完成工具参数 schema 共享 helper 收口：`agent-core::ToolDefinition` 除支持手写 JSON 外，也支持基于自研最小 `ToolArgsSchema` trait 与 derive 宏生成统一参数 schema；当前 `builtin-tools`、runtime tape tools 与测试中的常规参数结构体已切到 `#[derive(ToolArgsSchema)]` 自动生成，`ApplyPatchToolArgs` 也已收口为单 struct + 别名字段模型来复用这条能力；该 helper 继续只覆盖当前真实需要的 object/properties/required/additionalProperties/description/minimum/minProperties 子集，避免再引入外部反射式 schema 依赖
 - 补齐 `ToolArgsSchema` 用户态清单文档：新增 `docs/tool-schema-derive.md`，明确支持的字段类型、结构边界、`tool_schema(...)` 可用键与 `serde` 协作范围，避免把可发现性完全寄托在编辑器对 derive helper attribute 的内部键提示上
 - 扩展 `ToolArgsSchema` derive 高频能力：当前已补 `bool` / `Option<bool>`、有符号整数族、`Vec<String>` / `Option<Vec<String>>`，以及字段级 `minimum` / `maximum` 数值约束，让下一批简单工具参数不必再回退到手写 schema
 - 完成 `ToolArgsSchema` compile-fail 诊断回归：`agent-core` 现用 `trybuild` 锁住容器级/字段级非法 `tool_schema(...)` 键与无符号负数约束等关键错误文案，避免 derive 宏后续扩展时悄悄把用户态诊断弄差
-- 完成真实工具调用到 typed args 的统一收口：`agent-core::ToolCall` 新增共享 `parse_arguments()`，当前 `builtin-tools` 与 runtime tools 的 `call()` 已改为直接反序列化结构化参数，而不再手工散落 `str_arg/opt_*_arg/arguments.get(...)` 取值
-- 完成真实工具 description 的集中管理：`agent-prompts` 现通过 `prompts/tool/` 目录下的 Markdown 文件统一管理内建工具与 runtime tools 的共享 description，`builtin-tools` / `agent-runtime` 的真实 `ToolDefinition` 已改为复用这些文本，不再各 crate 自带字面量
+- 完成真实工具调用到 typed args 的统一收口：`agent-core::ToolCall` 新增共享 `parse_arguments()`，当前真实工具的 `call()` 已改为直接反序列化结构化参数，而不再手工散落 `str_arg/opt_*_arg/arguments.get(...)` 取值
+- 完成真实工具 description 的集中管理：`agent-prompts` 现通过 `prompts/tool/` 目录下的 Markdown 文件统一管理真实工具的共享 description，`builtin-tools` / `agent-runtime` 的 `ToolDefinition` 已改为复用这些文本，不再各 crate 自带字面量
 - 完成 `agent-store` async façade 收口：session / trace 的 SQLite 访问已通过共享 async store API 暴露给 `apps/agent-server` 与 `ServerModel`，trace/session 路由、session manager 初始化与 turn/tool trace 落盘不再在 async 路径里直接调用同步 store 方法
 - 完成 `agent-store` SQLite 锁中毒恢复：trace/session 读写与 schema 初始化不再因 `Mutex<Connection>` poisoned 而 panic
 - 完成 `aia-config` 共享配置 crate：把 `.aia` 路径、默认 session 标题、server 默认地址 / 事件缓冲 / 请求超时、统一 user agent 组装，以及 trace / span / prompt-cache 稳定前缀从 `apps/agent-server` 与相关共享 crate 中收口

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use agent_core::{LanguageModel, StreamEvent, ToolExecutor, ToolResult};
+use agent_core::{LanguageModel, PendingToolRequest, StreamEvent, ToolExecutor, ToolResult};
 use serde_json::json;
 use session_tape::TapeEntry;
 
@@ -9,7 +9,7 @@ use crate::{RuntimeEvent, ToolInvocationLifecycle, ToolInvocationOutcome};
 use super::super::{
     AgentRuntime, RuntimeError,
     helpers::{build_tool_source_entry_ids, now_timestamp_ms},
-    tape_tools,
+    runtime_context_bridge,
 };
 use super::types::{FailedToolCallContext, ToolCallLifecycleContext};
 
@@ -21,7 +21,7 @@ where
     pub(super) fn apply_runtime_tool_handoffs(
         &mut self,
         _turn_id: &str,
-        runtime_bridge: &Arc<tape_tools::RuntimeToolContextBridge>,
+        runtime_bridge: &Arc<runtime_context_bridge::RuntimeToolContextBridge>,
     ) -> Result<(), RuntimeError> {
         for (name, summary) in runtime_bridge.drain_handoffs() {
             self.record_handoff(name, json!({ "summary": summary }), "ai")?;
@@ -63,6 +63,29 @@ where
             Some(context.event_name),
             on_delta,
         )
+    }
+
+    pub(super) fn record_suspended_tool_call(
+        &mut self,
+        context: ToolCallLifecycleContext<'_>,
+        request: PendingToolRequest,
+    ) -> Result<PendingToolRequest, RuntimeError> {
+        let request_payload = serde_json::to_value(&request).map_err(|error| {
+            RuntimeError::session(format!("failed to serialize pending tool request: {error}"))
+        })?;
+        let request_entry_id = self.append_tape_entry(
+            TapeEntry::event("tool_request_pending", Some(request_payload))
+                .with_run_id(context.turn_id)
+                .with_meta(
+                    "source_entry_ids",
+                    json!({
+                        "assistant_entry_id": context.assistant_entry_id,
+                        "tool_call_entry_id": context.tool_call_entry_id,
+                    }),
+                ),
+        )?;
+        context.source_entry_ids.push(request_entry_id);
+        Ok(request)
     }
 
     fn record_tool_invocation(

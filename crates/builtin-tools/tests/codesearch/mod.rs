@@ -6,7 +6,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use agent_core::{AbortSignal, Tool, ToolCall, ToolExecutionContext};
+use agent_core::{AbortSignal, Tool, ToolCall, ToolCallOutcome, ToolExecutionContext, ToolResult};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
@@ -39,6 +39,17 @@ impl TestDir {
 impl Drop for TestDir {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+fn completed_result(outcome: ToolCallOutcome) -> Result<ToolResult, Box<dyn Error>> {
+    match outcome {
+        ToolCallOutcome::Completed { result } => Ok(result),
+        ToolCallOutcome::Suspended { request } => Err(format!(
+            "tool unexpectedly suspended: {}#{}",
+            request.tool_name, request.invocation_id
+        )
+        .into()),
     }
 }
 
@@ -84,8 +95,8 @@ async fn codesearch_tool_returns_aborted_result_when_signal_is_pre_cancelled()
     let call = ToolCall::new("codesearch").with_arguments_value(serde_json::json!({
         "query": "React useState hook examples"
     }));
-    let result = tool
-        .call(
+    let result = completed_result(
+        tool.call(
             &call,
             &mut |_| {},
             &ToolExecutionContext {
@@ -97,7 +108,8 @@ async fn codesearch_tool_returns_aborted_result_when_signal_is_pre_cancelled()
             },
         )
         .await
-        .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
+        .map_err(|error| -> Box<dyn Error> { Box::new(error) })?,
+    )?;
 
     assert_eq!(result.content, "[aborted]");
     let details = result.details.ok_or("codesearch aborted result should include details")?;

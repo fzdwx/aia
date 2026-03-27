@@ -7,8 +7,9 @@ use std::{
 use agent_core::{
     AbortSignal, Completion, CompletionRequest, CompletionSegment, CompletionStopReason,
     CompletionUsage, ConversationItem, CoreError, LanguageModel, Message, ModelDisposition,
-    ModelIdentity, QuestionAnswer, QuestionResult, QuestionResultStatus, Role, ToolCall,
-    ToolDefinition, ToolExecutionContext, ToolExecutor, ToolOutputDelta, ToolResult,
+    ModelIdentity, PendingToolRequest, QuestionAnswer, QuestionRequest, QuestionResult,
+    QuestionResultStatus, Role, ToolCall, ToolCallOutcome, ToolDefinition, ToolExecutionContext,
+    ToolExecutor, ToolOutputDelta, ToolRegistry, ToolResult,
 };
 use async_trait::async_trait;
 use serde_json::json;
@@ -307,7 +308,7 @@ impl ToolExecutor for FailingTools {
         _call: &ToolCall,
         _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         _context: &ToolExecutionContext,
-    ) -> Result<ToolResult, Self::Error> {
+    ) -> Result<ToolCallOutcome, Self::Error> {
         Err(CoreError::new("工具炸了"))
     }
 }
@@ -491,11 +492,14 @@ impl ToolExecutor for TimingTools {
         call: &ToolCall,
         _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         _context: &ToolExecutionContext,
-    ) -> Result<ToolResult, Self::Error> {
+    ) -> Result<ToolCallOutcome, Self::Error> {
         mutex_lock(&self.events).push(format!("start:{}", call.tool_name));
         tokio::time::sleep(std::time::Duration::from_millis(30)).await;
         mutex_lock(&self.events).push(format!("end:{}", call.tool_name));
-        Ok(ToolResult::from_call(call, format!("done:{}", call.tool_name)))
+        Ok(ToolCallOutcome::completed(ToolResult::from_call(
+            call,
+            format!("done:{}", call.tool_name),
+        )))
     }
 }
 struct StopReasonDrivenModel {
@@ -556,8 +560,8 @@ impl ToolExecutor for StubTools {
         call: &ToolCall,
         _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         _context: &ToolExecutionContext,
-    ) -> Result<ToolResult, Self::Error> {
-        Ok(ToolResult::from_call(call, "未实现"))
+    ) -> Result<ToolCallOutcome, Self::Error> {
+        Ok(ToolCallOutcome::completed(ToolResult::from_call(call, "未实现")))
     }
 }
 
@@ -576,14 +580,14 @@ impl ToolExecutor for MismatchedTools {
         _call: &ToolCall,
         _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         _context: &ToolExecutionContext,
-    ) -> Result<ToolResult, Self::Error> {
-        Ok(ToolResult {
+    ) -> Result<ToolCallOutcome, Self::Error> {
+        Ok(ToolCallOutcome::completed(ToolResult {
             invocation_id: "wrong-id".into(),
             tool_name: "search".into(),
             content: "未实现".into(),
             response_id: None,
             details: None,
-        })
+        }))
     }
 }
 
@@ -602,14 +606,14 @@ impl ToolExecutor for BlockingCancelAwareTools {
         call: &ToolCall,
         _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
-    ) -> Result<ToolResult, Self::Error> {
+    ) -> Result<ToolCallOutcome, Self::Error> {
         for _ in 0..200 {
             if context.abort.is_aborted() {
-                return Ok(ToolResult::from_call(call, "[aborted]"));
+                return Ok(ToolCallOutcome::completed(ToolResult::from_call(call, "[aborted]")));
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
-        Ok(ToolResult::from_call(call, "finished without cancellation"))
+        Ok(ToolCallOutcome::completed(ToolResult::from_call(call, "finished without cancellation")))
     }
 }
 
@@ -745,29 +749,54 @@ fn 运行时可在工具执行期间取消当前轮() {
 }
 
 #[test]
-fn question_runtime_tool_会生成_pending_request_并以等待态结束轮次() {
+fn 非交互式_runtime_即使_builtin_registry_包含_question_也会隐藏它() {
+    let identity = ModelIdentity::new("local", "stub", ModelDisposition::Balanced);
+    let runtime = AgentRuntime::new(StubModel, builtin_tools::build_tool_registry(), identity)
+        .with_interaction_capabilities(
+            agent_core::SessionInteractionCapabilities::non_interactive(),
+        );
+
+    let visible = runtime.visible_tools();
+    assert!(!visible.iter().any(|definition| definition.name == "Question"));
+}
+
+fn latest_pending_tool_request<M>(runtime: &AgentRuntime<M, ToolRegistry>) -> PendingToolRequest
+where
+    M: LanguageModel,
+{
+    let entry = runtime
+        .tape()
+        .entries()
+        .iter()
+        .rev()
+        .find(|entry: &&session_tape::TapeEntry| entry.event_name() == Some("tool_request_pending"))
+        .expect("pending tool request event should exist");
+    let value = entry.event_data().cloned().expect("pending tool request should have payload");
+    serde_json::from_value(value).expect("pending tool request should decode")
+}
+
+#[test]
+fn runtime_在工具挂起时记录_pending_request_并以_suspended_结束轮次() {
     let identity = ModelIdentity::new("local", "question", ModelDisposition::Balanced);
-    let mut runtime = AgentRuntime::new(QuestionToolModel, StubTools, identity);
+    let mut runtime =
+        AgentRuntime::new(QuestionToolModel, builtin_tools::build_tool_registry(), identity);
     let subscriber = runtime.subscribe();
 
     let output = run_turn(&mut runtime, "需要你决定数据库").expect("question turn should finish");
 
     assert_eq!(output.assistant_text, "");
-    let pending = runtime
-        .tape()
-        .try_pending_question_request()
-        .expect("pending question should decode")
-        .expect("pending question should exist");
+    let pending = latest_pending_tool_request(&runtime);
     assert!(pending.request_id.starts_with("qreq_"));
     assert!(pending.turn_id.starts_with("turn-"));
     assert!(pending.invocation_id.starts_with("tool-call-"));
-    assert_eq!(pending.questions.len(), 1);
+    assert_eq!(pending.tool_name, "Question");
+    assert_eq!(pending.kind, "question");
     assert!(
         runtime
             .tape()
             .entries()
             .iter()
-            .any(|entry| { entry.event_name() == Some("question_requested") })
+            .any(|entry| { entry.event_name() == Some("tool_request_pending") })
     );
     assert!(
         !runtime
@@ -781,7 +810,14 @@ fn question_runtime_tool_会生成_pending_request_并以等待态结束轮次()
             .tape()
             .entries()
             .iter()
-            .any(|entry| { entry.event_name() == Some("turn_waiting_for_question") })
+            .any(|entry| { entry.event_name() == Some("turn_suspended") })
+    );
+    assert!(
+        !runtime
+            .tape()
+            .entries()
+            .iter()
+            .any(|entry| { entry.event_name() == Some("question_requested") })
     );
 
     let events = runtime.collect_events(subscriber).expect("events should collect");
@@ -792,23 +828,21 @@ fn question_runtime_tool_会生成_pending_request_并以等待态结束轮次()
             _ => None,
         })
         .expect("turn lifecycle should exist");
-    assert_eq!(lifecycle.outcome, TurnOutcome::WaitingForQuestion);
+    assert_eq!(lifecycle.outcome, TurnOutcome::Suspended);
 }
 
 #[test]
-fn question_answer_result_can_resume_original_turn() {
+fn 挂起工具补上_tool_result_后可恢复原轮次() {
     let identity = ModelIdentity::new("local", "question-resume", ModelDisposition::Balanced);
     let model = ResumeAfterQuestionModel::new();
-    let mut runtime = AgentRuntime::new(model, StubTools, identity);
+    let mut runtime = AgentRuntime::new(model, builtin_tools::build_tool_registry(), identity);
 
     let first = run_turn(&mut runtime, "需要你决定数据库").expect("question turn should finish");
     assert_eq!(first.assistant_text, "");
 
-    let pending = runtime
-        .tape()
-        .try_pending_question_request()
-        .expect("pending question should decode")
-        .expect("pending question should exist");
+    let pending = latest_pending_tool_request(&runtime);
+    let pending_request: QuestionRequest = serde_json::from_value(pending.payload.clone())
+        .expect("question request payload should decode");
 
     let result = QuestionResult {
         status: QuestionResultStatus::Answered,
@@ -824,7 +858,7 @@ fn question_answer_result_can_resume_original_turn() {
     runtime.tape_mut().record_question_resolved(&result);
     let call = ToolCall::new("Question")
         .with_invocation_id(pending.invocation_id.clone())
-        .with_arguments_value(serde_json::json!({ "questions": pending.questions }));
+        .with_arguments_value(serde_json::json!({ "questions": pending_request.questions }));
     let content = serde_json::to_string(&result).expect("question result should encode");
     let details = serde_json::to_value(&result).expect("question result should serialize");
     runtime.tape_mut().append_entry(
@@ -834,9 +868,8 @@ fn question_answer_result_can_resume_original_turn() {
         .with_run_id(&pending.turn_id),
     );
 
-    let resumed = run_async(runtime.resume_turn_after_question(
+    let resumed = run_async(runtime.resume_turn_after_tool_result(
         &pending.turn_id,
-        &result,
         TurnControl::new(AbortSignal::new()),
         |_| {},
     ))
@@ -1054,8 +1087,8 @@ fn 运行时工具失败事件保留失败结果() {
 #[test]
 fn 运行时会记录用户与助手消息() {
     let identity = ModelIdentity::new("local", "stub", ModelDisposition::Balanced);
-    let mut runtime =
-        AgentRuntime::new(StubModel, StubTools, identity).with_instructions("保持简洁");
+    let mut runtime = AgentRuntime::new(StubModel, builtin_tools::build_tool_registry(), identity)
+        .with_instructions("保持简洁");
 
     let output = run_turn(&mut runtime, "你好").expect("运行成功");
 
@@ -2393,7 +2426,12 @@ fn tape_info_结果包含结构化_details() {
             }
         })),
     ));
-    let mut runtime = AgentRuntime::with_tape(TapeInfoModel::new(), StubTools, identity, tape);
+    let mut runtime = AgentRuntime::with_tape(
+        TapeInfoModel::new(),
+        builtin_tools::build_tool_registry(),
+        identity,
+        tape,
+    );
 
     let _ = run_turn(&mut runtime, "读取 tape info").expect("应成功完成");
 
@@ -2479,7 +2517,7 @@ fn tape_info_工具返回上下文统计() {
     let identity = ModelIdentity::new("local", "tape-info", ModelDisposition::Balanced)
         .with_limit(Some(agent_core::ModelLimit { context: Some(100_000), output: Some(8192) }));
     let model = TapeInfoModel::new();
-    let mut runtime = AgentRuntime::new(model, StubTools, identity);
+    let mut runtime = AgentRuntime::new(model, builtin_tools::build_tool_registry(), identity);
 
     let output = run_turn(&mut runtime, "查看上下文状态").expect("应成功完成");
 
@@ -2499,7 +2537,8 @@ fn tape_handoff_工具创建锚点() {
     let mut tape = SessionTape::new();
     tape.append(Message::new(Role::User, "历史消息"));
     tape.append(Message::new(Role::Assistant, "历史回答"));
-    let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape);
+    let mut runtime =
+        AgentRuntime::with_tape(model, builtin_tools::build_tool_registry(), identity, tape);
 
     let output = run_turn(&mut runtime, "创建检查点").expect("应成功完成");
 
@@ -2520,7 +2559,8 @@ fn runtime_tool_bridge_创建锚点后后续请求会过滤孤立_tool_result() 
     let mut tape = SessionTape::new();
     tape.append(Message::new(Role::User, "历史消息"));
     tape.append(Message::new(Role::Assistant, "历史回答"));
-    let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape);
+    let mut runtime =
+        AgentRuntime::with_tape(model, builtin_tools::build_tool_registry(), identity, tape);
 
     let output = run_turn(&mut runtime, "创建检查点").expect("应成功完成");
 

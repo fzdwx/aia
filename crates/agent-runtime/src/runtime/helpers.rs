@@ -40,13 +40,6 @@ pub(super) fn next_compression_id() -> String {
     format!("compression-{now_ms}-{id}")
 }
 
-pub(super) fn next_question_request_id() -> String {
-    static NEXT_QUESTION_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
-    let id = NEXT_QUESTION_REQUEST_ID.fetch_add(1, Ordering::Relaxed);
-    let now_ms = duration_since_unix_epoch(SystemTime::now()).as_millis();
-    format!("qreq_{now_ms}_{id}")
-}
-
 pub(super) fn now_timestamp_ms() -> u64 {
     duration_since_unix_epoch(SystemTime::now()).as_millis() as u64
 }

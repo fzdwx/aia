@@ -1,4 +1,6 @@
-use agent_core::{AbortSignal, LlmTraceRequestContext, StreamEvent, ToolCall, ToolResult};
+use agent_core::{
+    AbortSignal, LlmTraceRequestContext, PendingToolRequest, StreamEvent, ToolCall, ToolResult,
+};
 
 use crate::ToolTraceContext;
 
@@ -34,12 +36,21 @@ pub(crate) enum PreparedToolCallOutcome {
         result: ToolResult,
         failed: bool,
     },
+    Suspended {
+        started_at_ms: u64,
+        request: PendingToolRequest,
+    },
     Failed {
         started_at_ms: u64,
         tool_trace_context: Option<ToolTraceContext>,
         event_name: &'static str,
         runtime_error: super::super::RuntimeError,
     },
+}
+
+pub(crate) enum ToolCallExecutionResult {
+    Completed(crate::ToolInvocationLifecycle),
+    Suspended(PendingToolRequest),
 }
 
 impl ExecuteToolCallContext<'_> {

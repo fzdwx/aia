@@ -65,7 +65,7 @@ README 里真正难的是这些能力：
 - 模型能力与人格标签
 - `LanguageModel` 已收口为单一流式入口：`complete_streaming(request, abort, sink)`；同步/非流式消费方通过空 sink 消费最终 `Completion`，避免 `complete` / `complete_streaming_with_abort` 三套入口长期并存
 - 工具定义、工具调用、统一工具规范
-- `ToolDefinition` 参数 schema 既支持手写 JSON 构造，也支持基于 `agent-core` 内部最小 `ToolArgsSchema` trait 与 derive 宏的共享生成 helper；当前内建工具与 runtime tools 的常规参数结构体已可直接通过 `#[derive(ToolArgsSchema)]` 自动生成 schema，而复杂或兼容性特殊的场景仍可继续手写裸 JSON，以保证外部工具契约稳定、可读且不泄漏内部类型细节；真实工具调用继续经由共享 `ToolCall::parse_arguments()` 做结构化取参，避免 schema 与运行时取参长期漂移；当前 derive 已覆盖布尔值、有符号/无符号整数、`Vec<String>` 与字段级整数约束，详见 `docs/tool-schema-derive.md`
+- `ToolDefinition` 参数 schema 既支持手写 JSON 构造，也支持基于 `agent-core` 内部最小 `ToolArgsSchema` trait 与 derive 宏的共享生成 helper；当前真实工具的常规参数结构体已可直接通过 `#[derive(ToolArgsSchema)]` 自动生成 schema，而复杂或兼容性特殊的场景仍可继续手写裸 JSON，以保证外部工具契约稳定、可读且不泄漏内部类型细节；真实工具调用继续经由共享 `ToolCall::parse_arguments()` 做结构化取参，避免 schema 与运行时取参长期漂移；当前 derive 已覆盖布尔值、有符号/无符号整数、`Vec<String>` 与字段级整数约束，详见 `docs/tool-schema-derive.md`
 - 运行时需要的请求与响应载荷
 - 结构化会话条目：普通消息、工具调用、工具结果
 
@@ -107,6 +107,8 @@ README 里真正难的是这些能力：
 - 多步循环上限不再是唯一硬编码常数；运行时保留默认安全护栏，并允许调用侧按场景覆盖
 - 当多步循环到达最后预算步时，会切换到文本收尾模式并禁用工具，优先争取干净结束
 - 工具不可用、执行失败、结果错配会被收敛为结构化失败调用结果并落入磁带，而不是立即中止整个会话
+- 工具执行结果已统一抽象为 `ToolCallOutcome::{Completed,Suspended}`：runtime 只理解“完成”与“挂起等待外部输入”这类通用控制流，不再内建 `Question` 之类交互语义
+- runtime 自身只记录通用 `tool_request_pending` / `turn_suspended` 事实并提供恢复原 turn 的通用入口；像 `question_requested` / `question_resolved` 这类交互式控制面事实由 `apps/agent-server` 在桥接层补写和恢复
 - 工具相关运行时事件直接携带结构化调用/结果载荷
 - 整轮 turn 会进一步聚合为轮次块事件，便于客户端直接渲染时间线
 - 历史轮次可从磁带 entries 按 `meta.run_id` 分组重建，不依赖磁带内 TurnRecord
@@ -120,13 +122,13 @@ README 里真正难的是这些能力：
 - `agent-runtime` 对外 turn API 也已继续收口为单一异步入口 `handle_turn_streaming(user_input, control, sink)`：旧的同步 `handle_turn` 和历史命名 `handle_turn_streaming_with_control_async` 已移除，server 与测试消费方统一经由这条异步流式主链驱动 turn
 - `agent-runtime` 的上下文压缩入口也已只保留异步 `auto_compress_now()`：旧的同步包装和内部 `block_on_sync` helper 已移除，避免 runtime 在共享层继续暴露“同步外壳 + 内部临时 runtime”模式
 - `auto_compress_now()` 触发的压缩请求现在也会生成独立的 LLM trace context，不再只发 SSE 压缩通知而没有可持久化诊断记录；Web 侧通过单独的 compression 日志视图查看这类请求，而不是把它们并入常规对话 trace 列表
-- `agent-runtime::runtime::tool_calls` 内部也已收口 runtime tool / 普通 tool 共用的生命周期记账路径：结果条目落盘、事件发布与 `ToolInvocationLifecycle` 组装不再在两条分支里各自复制，减少后续继续扩展工具语义时的分支漂移
-- `agent-runtime::runtime::tool_calls` 现也已按职责拆为 `tool_calls::{execute,lifecycle,types}`：工具调用主流程、生命周期落盘/事件发布与共享上下文类型分离，`ExecuteToolCallContext::new(...)` / `lifecycle_context(...)` 负责收口重复的 started event 与 lifecycle context 样板，避免 runtime tool / 普通 tool 分支继续在单文件里来回复制上下文拼装
+- `agent-runtime::runtime::tool_calls` 内部已收口为单一工具执行主链：结果条目落盘、事件发布与 `ToolInvocationLifecycle` 组装不再区分空壳 runtime tool registry 与普通 tool 分支，后续扩展工具语义只继续围绕共享 `ToolCallOutcome::{Completed,Suspended}` 演进
+- `agent-runtime::runtime::tool_calls` 现也已按职责拆为 `tool_calls::{execute,lifecycle,types}`：工具调用主流程、生命周期落盘/事件发布与共享上下文类型分离，`ExecuteToolCallContext::new(...)` / `lifecycle_context(...)` 负责收口重复的 started event 与 lifecycle context 样板，避免主链继续在单文件里来回复制上下文拼装
 - `agent-runtime` 在原有 `RuntimeEvent` 订阅流之外，现已额外暴露 `RuntimeHooks` 作为“驱动面”而不是“回放面”：`before_agent_start`、`input`、`before_provider_request`、`tool_call`、`tool_result`、`turn_start/turn_end` 这组 hook 用于外部 client 在不重写 agent loop 的前提下覆写 system prompt、注入 provider request 上下文、短路工具执行或改写工具结果；原 `RuntimeEvent` 继续只承担已发生事实的投影/订阅职责
 - 时间辅助函数不假设系统时间恒定晚于 `UNIX_EPOCH`，异常场景下会安全回退
-- `TapeInfo` / `TapeHandoff` 已通过真正的 runtime tool registry 暴露，而不是字符串特判
+- `TapeInfo` / `TapeHandoff` 已作为普通 builtin tool 暴露，并通过 `ToolExecutionContext.runtime` 读取运行时上下文；runtime 已不再保留独立 runtime tool registry 空壳
 
-当前内建编码工具契约维持统一 PascalCase 集合：`Shell`、`Read`、`Write`、`Edit`、`ApplyPatch`、`Glob`、`Grep`、`CodeSearch`、`WebSearch`，运行时工具为 `TapeInfo`、`TapeHandoff`。其中 `Shell` 是模型可见的稳定工具名，底层执行器可在边缘实现中替换；当前实现使用 `brush` 作为 shell 运行时，而不是把具体 shell 名称泄漏进统一工具协议。`Edit` 继续只承担“精确唯一字符串替换”这一单文件编辑语义，而多文件补丁编辑则由独立的 `ApplyPatch` 工具承接，支持 `apply_patch` 风格的 `Update File` / `Add File` / `Delete File`，让外部 Codex/Claude 风格补丁映射不必再借道 shell。
+当前内建编码工具契约维持统一 PascalCase 集合：`Shell`、`Read`、`Write`、`Edit`、`ApplyPatch`、`Glob`、`Grep`、`CodeSearch`、`WebSearch`、`Question`、`TapeInfo`、`TapeHandoff`。其中 `Shell` 是模型可见的稳定工具名，底层执行器可在边缘实现中替换；当前实现使用 `brush` 作为 shell 运行时，而不是把具体 shell 名称泄漏进统一工具协议。`Edit` 继续只承担“精确唯一字符串替换”这一单文件编辑语义，而多文件补丁编辑则由独立的 `ApplyPatch` 工具承接，支持 `apply_patch` 风格的 `Update File` / `Add File` / `Delete File`，让外部 Codex/Claude 风格补丁映射不必再借道 shell。
 
 `builtin-tools::shell` 内部也已进一步按职责拆分：根模块只保留 `ShellTool` 契约与结果组装，capture 文件/事件泵与 embedded brush 执行主流程分别下沉到 `shell::{capture,execution}`，避免异步执行细节继续堆在单个超大文件里。
 

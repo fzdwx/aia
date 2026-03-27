@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use agent_core::{QuestionRequest, QuestionResult, StreamEvent, ToolRegistry};
+use agent_core::{StreamEvent, ToolRegistry};
 use agent_runtime::{AgentRuntime, ContextStats, RuntimeEvent, RuntimeSubscriberId, TurnLifecycle};
 use tokio::sync::{broadcast, mpsc};
 
@@ -15,8 +15,9 @@ use crate::{
 
 use super::{
     CurrentStatusInner, RuntimeReturn, SessionId, SessionManagerConfig, SessionSlot,
-    ToolTraceRecorder, next_server_turn_id, now_timestamp_ms, read_lock,
-    update_current_turn_from_stream, update_current_turn_status, write_lock,
+    ToolTraceRecorder, next_server_turn_id, now_timestamp_ms,
+    pending_question_request_from_runtime_tape, read_lock, update_current_turn_from_stream,
+    update_current_turn_status, write_lock,
 };
 
 pub(super) struct TurnExecutionService<'a> {
@@ -98,8 +99,7 @@ impl<'a> TurnExecutionService<'a> {
     pub(super) async fn resume_question_turn(
         &mut self,
         session_id: &str,
-        request: QuestionRequest,
-        result: QuestionResult,
+        waiting_turn_id: String,
     ) -> Result<(), RuntimeWorkerError> {
         let slot = self.slots.get_mut(session_id).ok_or_else(|| {
             RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
@@ -108,7 +108,7 @@ impl<'a> TurnExecutionService<'a> {
         let existing_current = read_lock(&slot.current_turn).clone();
         let history_user_message = read_lock(&slot.history)
             .iter()
-            .find(|turn| turn.turn_id == request.turn_id)
+            .find(|turn| turn.turn_id == waiting_turn_id)
             .map(|turn| turn.user_message.clone())
             .unwrap_or_default();
         let session_turn_id = existing_current
@@ -133,8 +133,7 @@ impl<'a> TurnExecutionService<'a> {
         let worker = TurnWorker::resume(
             runtime,
             subscriber,
-            request.turn_id.clone(),
-            result,
+            waiting_turn_id,
             turn_control,
             TurnWorkerContext {
                 broadcast_tx: self.config.broadcast_tx.clone(),
@@ -227,7 +226,7 @@ pub(super) struct TurnWorker {
 
 enum TurnWorkerMode {
     Submit { prompt: String },
-    Resume { waiting_turn_id: String, result: QuestionResult },
+    Resume { waiting_turn_id: String },
 }
 
 impl TurnWorker {
@@ -245,14 +244,13 @@ impl TurnWorker {
         runtime: AgentRuntime<ServerModel, ToolRegistry>,
         subscriber: RuntimeSubscriberId,
         waiting_turn_id: String,
-        result: QuestionResult,
         turn_control: agent_runtime::TurnControl,
         context: TurnWorkerContext,
     ) -> Self {
         Self {
             runtime,
             subscriber,
-            mode: TurnWorkerMode::Resume { waiting_turn_id, result },
+            mode: TurnWorkerMode::Resume { waiting_turn_id },
             turn_control,
             context,
         }
@@ -301,11 +299,10 @@ impl TurnWorker {
                     })
                     .await
             }
-            TurnWorkerMode::Resume { waiting_turn_id, result } => {
+            TurnWorkerMode::Resume { waiting_turn_id } => {
                 self.runtime
-                    .resume_turn_after_question(
+                    .resume_turn_after_tool_result(
                         waiting_turn_id,
-                        result,
                         self.turn_control.clone(),
                         |event| {
                             let new_status = match &event {
@@ -367,11 +364,17 @@ impl TurnWorker {
                 )
                 .project(events);
                 if let Some(turn) = turn {
-                    keep_current_turn =
-                        turn.outcome == agent_runtime::TurnOutcome::WaitingForQuestion;
+                    keep_current_turn = turn.outcome == agent_runtime::TurnOutcome::Suspended
+                        && pending_question_request_from_runtime_tape(self.runtime.tape())
+                            .ok()
+                            .flatten()
+                            .is_some();
                     let turn_for_traces = turn.clone();
-                    let waiting_current_turn = keep_current_turn
-                        .then(|| current_turn_snapshot_from_lifecycle(&turn_for_traces));
+                    let waiting_current_turn = keep_current_turn.then(|| {
+                        read_lock(&self.context.current_turn_snapshot).clone().unwrap_or_else(
+                            || current_turn_snapshot_from_lifecycle(&turn_for_traces),
+                        )
+                    });
                     {
                         let mut history = write_lock(&self.context.history_snapshot);
                         if let Some(index) =
@@ -391,7 +394,8 @@ impl TurnWorker {
                     tokio::spawn(async move {
                         trace_recorder.persist_turn_spans(&turn_for_traces).await;
                     });
-                    if let Some(current) = waiting_current_turn {
+                    if let Some(mut current) = waiting_current_turn {
+                        current.status = TurnStatus::WaitingForQuestion;
                         *write_lock(&self.context.current_turn_snapshot) = Some(current);
                         let _ = self.context.broadcast_tx.send(SsePayload::Status {
                             session_id: self.context.session_id.clone(),

@@ -1,6 +1,7 @@
 use serde_json::json;
 use session_tape::TapeEntry;
 
+use agent_core::PendingToolRequest;
 use agent_core::{LanguageModel, ToolExecutor};
 
 use crate::{TurnBlock, TurnLifecycle, TurnOutcome};
@@ -99,7 +100,7 @@ where
         context: TurnSuccessContext,
     ) -> Result<(), RuntimeError> {
         let waiting_event_id = self.append_tape_entry(
-            TapeEntry::event("turn_waiting_for_question", Some(json!({ "status": "waiting" })))
+            TapeEntry::event("turn_suspended", Some(json!({ "status": "suspended" })))
                 .with_run_id(&context.turn_id)
                 .with_meta("source_entry_ids", json!(context.source_entry_ids.clone())),
         )?;
@@ -117,10 +118,18 @@ where
             tool_invocations: context.tool_invocations,
             usage: context.summary.usage,
             failure_message: None,
-            outcome: TurnOutcome::WaitingForQuestion,
+            outcome: TurnOutcome::Suspended,
         };
         self.publish_turn_lifecycle(turn.clone());
         self.notify_turn_end(&turn);
         Ok(())
+    }
+
+    pub(super) fn finish_suspended_turn(
+        &mut self,
+        context: TurnSuccessContext,
+        _request: &PendingToolRequest,
+    ) -> Result<(), RuntimeError> {
+        self.finish_waiting_for_question_turn(context)
     }
 }

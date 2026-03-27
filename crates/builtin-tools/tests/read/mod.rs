@@ -6,7 +6,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use agent_core::{AbortSignal, Tool, ToolCall, ToolExecutionContext};
+use agent_core::{AbortSignal, Tool, ToolCall, ToolCallOutcome, ToolExecutionContext, ToolResult};
 
 use super::ReadTool;
 
@@ -45,6 +45,17 @@ fn test_context(workspace_root: &Path) -> ToolExecutionContext {
     }
 }
 
+fn completed_result(outcome: ToolCallOutcome) -> Result<ToolResult, Box<dyn Error>> {
+    match outcome {
+        ToolCallOutcome::Completed { result } => Ok(result),
+        ToolCallOutcome::Suspended { request } => Err(format!(
+            "tool unexpectedly suspended: {}#{}",
+            request.tool_name, request.invocation_id
+        )
+        .into()),
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn read_tool_reads_large_file_window_with_line_numbers() -> Result<(), Box<dyn Error>> {
     let dir = TestDir::new()?;
@@ -58,10 +69,11 @@ async fn read_tool_reads_large_file_window_with_line_numbers() -> Result<(), Box
         "offset": 1995,
         "limit": 3
     }));
-    let result = tool
-        .call(&call, &mut |_| {}, &test_context(dir.path()))
-        .await
-        .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
+    let result = completed_result(
+        tool.call(&call, &mut |_| {}, &test_context(dir.path()))
+            .await
+            .map_err(|error| -> Box<dyn Error> { Box::new(error) })?,
+    )?;
 
     assert_eq!(result.content, "  1996\tline 1996\n  1997\tline 1997\n  1998\tline 1998");
 
@@ -92,10 +104,11 @@ async fn read_tool_returns_image_as_base64_data_url() -> Result<(), Box<dyn Erro
     let tool = ReadTool;
     let call =
         ToolCall::new("read").with_arguments_value(serde_json::json!({ "file_path": "pixel.png" }));
-    let result = tool
-        .call(&call, &mut |_| {}, &test_context(dir.path()))
-        .await
-        .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
+    let result = completed_result(
+        tool.call(&call, &mut |_| {}, &test_context(dir.path()))
+            .await
+            .map_err(|error| -> Box<dyn Error> { Box::new(error) })?,
+    )?;
 
     assert!(result.content.starts_with("data:image/png;base64,"));
 

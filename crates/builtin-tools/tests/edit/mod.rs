@@ -6,7 +6,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use agent_core::{AbortSignal, Tool, ToolCall, ToolExecutionContext};
+use agent_core::{AbortSignal, Tool, ToolCall, ToolCallOutcome, ToolExecutionContext, ToolResult};
 
 use super::EditTool;
 
@@ -45,6 +45,17 @@ fn test_context(workspace_root: &Path) -> ToolExecutionContext {
     }
 }
 
+fn completed_result(outcome: ToolCallOutcome) -> Result<ToolResult, Box<dyn Error>> {
+    match outcome {
+        ToolCallOutcome::Completed { result } => Ok(result),
+        ToolCallOutcome::Suspended { request } => Err(format!(
+            "tool unexpectedly suspended: {}#{}",
+            request.tool_name, request.invocation_id
+        )
+        .into()),
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn edit_tool_replaces_unique_multiline_match() -> Result<(), Box<dyn Error>> {
     let dir = TestDir::new()?;
@@ -58,10 +69,11 @@ async fn edit_tool_replaces_unique_multiline_match() -> Result<(), Box<dyn Error
         "new_string": "gamma\ndelta\nepsilon"
     }));
 
-    let result = tool
-        .call(&call, &mut |_| {}, &test_context(dir.path()))
-        .await
-        .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
+    let result = completed_result(
+        tool.call(&call, &mut |_| {}, &test_context(dir.path()))
+            .await
+            .map_err(|error| -> Box<dyn Error> { Box::new(error) })?,
+    )?;
 
     let stored = fs::read_to_string(&path)?;
     assert_eq!(stored, "before\ngamma\ndelta\nepsilon\nafter\n");

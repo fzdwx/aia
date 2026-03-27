@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
 use agent_core::{
-    CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
+    CoreError, Tool, ToolCall, ToolCallOutcome, ToolDefinition, ToolExecutionContext,
+    ToolOutputDelta, ToolResult,
 };
 use agent_core_macros::ToolArgsSchema as DeriveToolArgsSchema;
 use agent_prompts::tool_descriptions::grep_tool_description;
@@ -55,7 +56,7 @@ impl Tool for GrepTool {
         call: &ToolCall,
         _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
-    ) -> Result<ToolResult, CoreError> {
+    ) -> Result<ToolCallOutcome, CoreError> {
         let args: GrepToolArgs = call.parse_arguments()?;
         let pattern = args.pattern;
         let limit = args.limit.unwrap_or(DEFAULT_MATCH_LIMIT).min(MAX_MATCH_LIMIT);
@@ -69,34 +70,38 @@ impl Tool for GrepTool {
         let abort = context.abort.clone();
 
         if abort.is_aborted() {
-            return Ok(ToolResult::from_call(call, "[aborted]").with_details(serde_json::json!({
-                "pattern": pattern,
-                "matches": 0,
-                "returned": 0,
-                "limit": limit,
-                "truncated": false,
-                "aborted": true,
-            })));
-        }
-
-        match run_grep_search(pattern.clone(), base, glob_filter, limit, abort).await? {
-            GrepSearchOutcome::Completed(result) => Ok(ToolResult::from_call(call, result.content)
-                .with_details(serde_json::json!({
-                    "pattern": pattern,
-                    "matches": result.match_count,
-                    "returned": result.returned,
-                    "limit": limit,
-                    "truncated": result.truncated,
-                }))),
-            GrepSearchOutcome::Cancelled => Ok(ToolResult::from_call(call, "[aborted]")
-                .with_details(serde_json::json!({
+            return Ok(ToolCallOutcome::completed(
+                ToolResult::from_call(call, "[aborted]").with_details(serde_json::json!({
                     "pattern": pattern,
                     "matches": 0,
                     "returned": 0,
                     "limit": limit,
                     "truncated": false,
                     "aborted": true,
-                }))),
+                })),
+            ));
+        }
+
+        match run_grep_search(pattern.clone(), base, glob_filter, limit, abort).await? {
+            GrepSearchOutcome::Completed(result) => Ok(ToolCallOutcome::completed(
+                ToolResult::from_call(call, result.content).with_details(serde_json::json!({
+                    "pattern": pattern,
+                    "matches": result.match_count,
+                    "returned": result.returned,
+                    "limit": limit,
+                    "truncated": result.truncated,
+                })),
+            )),
+            GrepSearchOutcome::Cancelled => Ok(ToolCallOutcome::completed(
+                ToolResult::from_call(call, "[aborted]").with_details(serde_json::json!({
+                    "pattern": pattern,
+                    "matches": 0,
+                    "returned": 0,
+                    "limit": limit,
+                    "truncated": false,
+                    "aborted": true,
+                })),
+            )),
         }
     }
 }

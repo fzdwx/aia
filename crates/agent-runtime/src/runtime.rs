@@ -5,7 +5,7 @@ mod finalize;
 mod helpers;
 mod hooks;
 mod request;
-mod tape_tools;
+mod runtime_context_bridge;
 #[cfg(test)]
 #[path = "../tests/runtime/mod.rs"]
 mod tests;
@@ -189,14 +189,14 @@ where
     }
 
     pub fn visible_tools(&self) -> Vec<ToolDefinition> {
-        let mut tools: Vec<ToolDefinition> = self
-            .tools
+        self.tools
             .definitions()
             .into_iter()
+            .filter(|definition| {
+                !definition.interactive || self.interaction_capabilities.can_use_question_tool()
+            })
             .filter(|definition| !self.disabled_tools.contains(&definition.name))
-            .collect();
-        tools.extend(tape_tools::runtime_tool_definitions_for(&self.interaction_capabilities));
-        tools
+            .collect()
     }
 
     pub fn handoff(&mut self, name: impl Into<String>, state: serde_json::Value) -> Handoff {

@@ -5,12 +5,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::runtime_worker::RunningTurnHandle;
 use crate::sse::TurnStatus;
-use agent_core::{RequestTimeoutConfig, StreamEvent};
+use agent_core::{
+    QuestionAnswer, QuestionResult, QuestionResultStatus, RequestTimeoutConfig, StreamEvent,
+};
 
 use super::{
     CurrentTurnSnapshot, SessionManagerConfig, SessionQueryService, SessionSlot,
-    SessionSlotFactory, SlotExecutionState, SlotStatus, collect_runtime_events, read_lock,
-    spawn_session_manager, update_current_turn_from_stream, update_current_turn_status, write_lock,
+    SessionSlotFactory, SlotExecutionState, SlotStatus, collect_runtime_events, question_tool_call,
+    question_tool_result, read_lock, spawn_session_manager, update_current_turn_from_stream,
+    update_current_turn_status, write_lock,
 };
 
 fn run_async<T>(future: impl Future<Output = T>) -> T {
@@ -197,12 +200,59 @@ fn session_slot_begin_turn_transitions_to_running_state() {
 }
 
 #[test]
-fn idle_session_slot_only_exposes_single_question_runtime_tool() {
+fn idle_session_slot_only_exposes_single_question_tool() {
     let slot = build_idle_slot("slot-question-runtime-tool");
     let runtime = slot.runtime().expect("idle slot should retain runtime");
     let visible_tools = runtime.visible_tools();
 
     assert_eq!(visible_tools.iter().filter(|definition| definition.name == "Question").count(), 1);
+}
+
+#[test]
+fn question_tool_bridge_helpers_preserve_invocation_and_result_shape() {
+    let request = agent_core::QuestionRequest {
+        request_id: "qreq-1".into(),
+        invocation_id: "call-1".into(),
+        turn_id: "turn-1".into(),
+        questions: vec![agent_core::QuestionItem {
+            id: "database".into(),
+            question: "Use which database?".into(),
+            kind: agent_core::QuestionKind::Choice,
+            required: true,
+            multi_select: false,
+            options: vec![agent_core::QuestionOption {
+                id: "sqlite".into(),
+                label: "SQLite".into(),
+                description: None,
+            }],
+            placeholder: None,
+            recommended_option_id: Some("sqlite".into()),
+            recommendation_reason: Some("best local default".into()),
+        }],
+    };
+    let result = QuestionResult {
+        status: QuestionResultStatus::Answered,
+        request_id: request.request_id.clone(),
+        answers: vec![QuestionAnswer {
+            question_id: "database".into(),
+            selected_option_ids: vec!["sqlite".into()],
+            text: None,
+        }],
+        reason: None,
+    };
+
+    let call = question_tool_call(&request);
+    let tool_result = question_tool_result(&call, &result).expect("tool result should build");
+
+    assert_eq!(call.tool_name, "Question");
+    assert_eq!(call.invocation_id, request.invocation_id);
+    assert_eq!(tool_result.tool_name, "Question");
+    assert_eq!(tool_result.invocation_id, call.invocation_id);
+    assert!(tool_result.content.contains("answered"));
+    assert_eq!(
+        tool_result.details.as_ref().and_then(|details| details.get("request_id")),
+        Some(&serde_json::json!("qreq-1"))
+    );
 }
 
 #[test]

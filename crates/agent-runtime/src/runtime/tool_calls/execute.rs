@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use agent_core::{
-    LanguageModel, RuntimeToolContext, StreamEvent, ToolExecutionContext, ToolExecutor,
-    ToolOutputDelta, ToolResult,
+    LanguageModel, RuntimeToolContext, StreamEvent, ToolCallOutcome, ToolExecutionContext,
+    ToolExecutor, ToolOutputDelta, ToolResult,
 };
 
 use crate::{ToolInvocationLifecycle, ToolTraceContext};
@@ -11,9 +11,11 @@ use crate::{ToolInvocationLifecycle, ToolTraceContext};
 use super::super::{
     AgentRuntime, RuntimeError,
     helpers::{build_tool_trace_context, now_timestamp_ms},
-    tape_tools,
+    runtime_context_bridge,
 };
-use super::types::{ExecuteToolCallContext, FailedToolCallContext, PreparedToolCallOutcome};
+use super::types::{
+    ExecuteToolCallContext, FailedToolCallContext, PreparedToolCallOutcome, ToolCallExecutionResult,
+};
 
 impl<M, T> AgentRuntime<M, T>
 where
@@ -24,7 +26,7 @@ where
         &mut self,
         context: ExecuteToolCallContext<'_>,
         on_delta: &mut (dyn FnMut(StreamEvent) + Send),
-    ) -> Result<ToolInvocationLifecycle, RuntimeError> {
+    ) -> Result<ToolCallExecutionResult, RuntimeError> {
         let mut context = context;
         let started_at_ms = now_timestamp_ms();
         on_delta(context.started_event(started_at_ms));
@@ -38,6 +40,8 @@ where
         started_at_ms: u64,
         on_delta: &mut (dyn FnMut(StreamEvent) + Send),
     ) -> PreparedToolCallOutcome {
+        let runtime_bridge = runtime_context_bridge::RuntimeToolContextBridge::new(self);
+        let runtime_context: Arc<dyn RuntimeToolContext> = runtime_bridge.clone();
         let tool_trace_context =
             context.parent_trace_context.map(|trace| build_tool_trace_context(trace, context.call));
         let available_tool_names = self
@@ -65,24 +69,6 @@ where
             };
         }
 
-        if tape_tools::is_runtime_tool(&context.call.tool_name) {
-            let prepared = match self.invoke_runtime_tool(context).await {
-                Ok(result) => PreparedToolCallOutcome::Completed {
-                    started_at_ms,
-                    tool_trace_context,
-                    result,
-                    failed: context.abort_signal.is_aborted(),
-                },
-                Err(runtime_error) => PreparedToolCallOutcome::Failed {
-                    started_at_ms,
-                    tool_trace_context,
-                    event_name: "tool_call_failed",
-                    runtime_error,
-                },
-            };
-            return prepared;
-        }
-
         match self
             .tools
             .call(
@@ -99,27 +85,65 @@ where
                     session_id: self.session_id.clone(),
                     workspace_root: self.workspace_root.clone(),
                     abort: context.abort_signal.clone(),
-                    runtime: None,
+                    runtime: Some(runtime_context),
                 },
             )
             .await
         {
-            Ok(result) => {
-                if result.invocation_id != context.call.invocation_id
-                    || result.tool_name != context.call.tool_name
+            Ok(outcome) => {
+                if let Err(runtime_error) =
+                    self.apply_runtime_tool_handoffs(context.turn_id, &runtime_bridge)
                 {
-                    PreparedToolCallOutcome::Failed {
+                    return PreparedToolCallOutcome::Failed {
                         started_at_ms,
                         tool_trace_context,
-                        event_name: "tool_result_rejected",
-                        runtime_error: RuntimeError::tool_result_mismatch(context.call, &result),
+                        event_name: "tool_call_failed",
+                        runtime_error,
+                    };
+                }
+                match outcome {
+                    ToolCallOutcome::Completed { result } => {
+                        if result.invocation_id != context.call.invocation_id
+                            || result.tool_name != context.call.tool_name
+                        {
+                            PreparedToolCallOutcome::Failed {
+                                started_at_ms,
+                                tool_trace_context,
+                                event_name: "tool_result_rejected",
+                                runtime_error: RuntimeError::tool_result_mismatch(
+                                    context.call,
+                                    &result,
+                                ),
+                            }
+                        } else {
+                            PreparedToolCallOutcome::Completed {
+                                started_at_ms,
+                                tool_trace_context,
+                                result,
+                                failed: context.abort_signal.is_aborted(),
+                            }
+                        }
                     }
-                } else {
-                    PreparedToolCallOutcome::Completed {
-                        started_at_ms,
-                        tool_trace_context,
-                        result,
-                        failed: context.abort_signal.is_aborted(),
+                    ToolCallOutcome::Suspended { request } => {
+                        if request.invocation_id != context.call.invocation_id
+                            || request.tool_name != context.call.tool_name
+                            || request.turn_id != context.turn_id
+                        {
+                            PreparedToolCallOutcome::Failed {
+                                started_at_ms,
+                                tool_trace_context,
+                                event_name: "tool_request_rejected",
+                                runtime_error: RuntimeError::tool(format!(
+                                    "pending tool request mismatch: call {}#{}, request {}#{}",
+                                    context.call.tool_name,
+                                    context.call.invocation_id,
+                                    request.tool_name,
+                                    request.invocation_id,
+                                )),
+                            }
+                        } else {
+                            PreparedToolCallOutcome::Suspended { started_at_ms, request }
+                        }
                     }
                 }
             }
@@ -137,61 +161,42 @@ where
         context: &mut ExecuteToolCallContext<'_>,
         prepared: PreparedToolCallOutcome,
         on_delta: &mut (dyn FnMut(StreamEvent) + Send),
-    ) -> Result<ToolInvocationLifecycle, RuntimeError> {
+    ) -> Result<ToolCallExecutionResult, RuntimeError> {
         match prepared {
             PreparedToolCallOutcome::Completed {
                 started_at_ms,
                 tool_trace_context,
                 result,
                 failed,
-            } => self.record_completed_tool_call_for_context(
-                context,
-                started_at_ms,
-                tool_trace_context,
-                result,
-                failed,
-                on_delta,
-            ),
+            } => self
+                .record_completed_tool_call_for_context(
+                    context,
+                    started_at_ms,
+                    tool_trace_context,
+                    result,
+                    failed,
+                    on_delta,
+                )
+                .map(ToolCallExecutionResult::Completed),
+            PreparedToolCallOutcome::Suspended { started_at_ms, request } => self
+                .record_suspended_tool_call_for_context(context, started_at_ms, request)
+                .map(ToolCallExecutionResult::Suspended),
             PreparedToolCallOutcome::Failed {
                 started_at_ms,
                 tool_trace_context,
                 event_name,
                 runtime_error,
-            } => self.record_failed_tool_call_for_context(
-                context,
-                started_at_ms,
-                tool_trace_context,
-                event_name,
-                runtime_error,
-                on_delta,
-            ),
+            } => self
+                .record_failed_tool_call_for_context(
+                    context,
+                    started_at_ms,
+                    tool_trace_context,
+                    event_name,
+                    runtime_error,
+                    on_delta,
+                )
+                .map(ToolCallExecutionResult::Completed),
         }
-    }
-
-    async fn invoke_runtime_tool(
-        &mut self,
-        context: &ExecuteToolCallContext<'_>,
-    ) -> Result<ToolResult, RuntimeError> {
-        let runtime_tools =
-            tape_tools::build_runtime_tool_registry(self.interaction_capabilities());
-        let runtime_bridge = tape_tools::RuntimeToolContextBridge::new(self);
-        let runtime_context: Arc<dyn RuntimeToolContext> = runtime_bridge.clone();
-        let result = runtime_tools
-            .call(
-                context.call,
-                &mut |_| {},
-                &ToolExecutionContext {
-                    run_id: context.turn_id.to_string(),
-                    session_id: self.session_id.clone(),
-                    workspace_root: self.workspace_root.clone(),
-                    abort: context.abort_signal.clone(),
-                    runtime: Some(runtime_context),
-                },
-            )
-            .await
-            .map_err(RuntimeError::tool)?;
-        self.apply_runtime_tool_handoffs(context.turn_id, &runtime_bridge)?;
-        Ok(result)
     }
 
     fn record_completed_tool_call_for_context(
@@ -228,5 +233,14 @@ where
             runtime_error,
             on_delta,
         )
+    }
+
+    fn record_suspended_tool_call_for_context(
+        &mut self,
+        context: &mut ExecuteToolCallContext<'_>,
+        started_at_ms: u64,
+        request: agent_core::PendingToolRequest,
+    ) -> Result<agent_core::PendingToolRequest, RuntimeError> {
+        self.record_suspended_tool_call(context.lifecycle_context(started_at_ms, None), request)
     }
 }

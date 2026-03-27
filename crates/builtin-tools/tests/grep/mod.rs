@@ -7,7 +7,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use agent_core::{AbortSignal, Tool, ToolCall, ToolExecutionContext};
+use agent_core::{AbortSignal, Tool, ToolCall, ToolCallOutcome, ToolExecutionContext, ToolResult};
 
 use super::GrepTool;
 
@@ -50,6 +50,17 @@ fn result_paths(result: &str) -> BTreeSet<String> {
     result.lines().filter(|line| !line.is_empty()).map(ToOwned::to_owned).collect()
 }
 
+fn completed_result(outcome: ToolCallOutcome) -> Result<ToolResult, Box<dyn Error>> {
+    match outcome {
+        ToolCallOutcome::Completed { result } => Ok(result),
+        ToolCallOutcome::Suspended { request } => Err(format!(
+            "tool unexpectedly suspended: {}#{}",
+            request.tool_name, request.invocation_id
+        )
+        .into()),
+    }
+}
+
 #[test]
 fn grep_tool_definition_mentions_gitignore_and_common_ignores() {
     let definition = GrepTool.definition();
@@ -76,10 +87,11 @@ async fn grep_tool_respects_gitignore_and_glob_filter() -> Result<(), Box<dyn Er
         "pattern": "needle",
         "glob": "*.rs"
     }));
-    let result = tool
-        .call(&call, &mut |_| {}, &test_context(dir.path()))
-        .await
-        .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
+    let result = completed_result(
+        tool.call(&call, &mut |_| {}, &test_context(dir.path()))
+            .await
+            .map_err(|error| -> Box<dyn Error> { Box::new(error) })?,
+    )?;
 
     let paths = result_paths(&result.content);
     assert!(paths.contains(&dir.path().join("keep.rs").display().to_string()));
@@ -112,10 +124,11 @@ async fn grep_tool_skips_binary_files_and_reports_truncation() -> Result<(), Box
         "pattern": "needle",
         "limit": 1
     }));
-    let result = tool
-        .call(&call, &mut |_| {}, &test_context(dir.path()))
-        .await
-        .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
+    let result = completed_result(
+        tool.call(&call, &mut |_| {}, &test_context(dir.path()))
+            .await
+            .map_err(|error| -> Box<dyn Error> { Box::new(error) })?,
+    )?;
 
     let paths = result_paths(&result.content);
     assert_eq!(paths.len(), 1);
@@ -144,8 +157,8 @@ async fn grep_tool_returns_aborted_result_when_signal_is_pre_cancelled()
     let call = ToolCall::new("grep").with_arguments_value(serde_json::json!({
         "pattern": "needle"
     }));
-    let result = tool
-        .call(
+    let result = completed_result(
+        tool.call(
             &call,
             &mut |_| {},
             &ToolExecutionContext {
@@ -157,7 +170,8 @@ async fn grep_tool_returns_aborted_result_when_signal_is_pre_cancelled()
             },
         )
         .await
-        .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
+        .map_err(|error| -> Box<dyn Error> { Box::new(error) })?,
+    )?;
 
     assert_eq!(result.content, "[aborted]");
     let details = result.details.ok_or("grep aborted result should include details")?;

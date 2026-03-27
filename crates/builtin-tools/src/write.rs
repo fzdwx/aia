@@ -1,5 +1,6 @@
 use agent_core::{
-    CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
+    CoreError, Tool, ToolCall, ToolCallOutcome, ToolDefinition, ToolExecutionContext,
+    ToolOutputDelta, ToolResult,
 };
 use agent_core_macros::ToolArgsSchema as DeriveToolArgsSchema;
 use agent_prompts::tool_descriptions::write_tool_description;
@@ -33,7 +34,7 @@ impl Tool for WriteTool {
         call: &ToolCall,
         _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
-    ) -> Result<ToolResult, CoreError> {
+    ) -> Result<ToolCallOutcome, CoreError> {
         let args: WriteToolArgs = call.parse_arguments()?;
         let path = context.resolve_path(&args.file_path);
 
@@ -49,11 +50,13 @@ impl Tool for WriteTool {
             .await
             .map_err(|e| CoreError::new(format!("failed to write {}: {e}", path.display())))?;
 
-        Ok(ToolResult::from_call(call, format!("Wrote {bytes} bytes to {}", path.display()))
-            .with_details(serde_json::json!({
-                "file_path": path.display().to_string(),
-                "lines": lines,
-            })))
+        Ok(ToolCallOutcome::completed(
+            ToolResult::from_call(call, format!("Wrote {bytes} bytes to {}", path.display()))
+                .with_details(serde_json::json!({
+                    "file_path": path.display().to_string(),
+                    "lines": lines,
+                })),
+        ))
     }
 }
 

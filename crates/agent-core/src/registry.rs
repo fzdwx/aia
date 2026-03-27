@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use async_trait::async_trait;
 
 use crate::{
-    CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolExecutor, ToolOutputDelta,
-    ToolResult,
+    CoreError, Tool, ToolCall, ToolCallOutcome, ToolDefinition, ToolExecutionContext, ToolExecutor,
+    ToolOutputDelta,
 };
 
 pub struct ToolRegistry {
@@ -45,7 +45,10 @@ impl ToolExecutor for ToolRegistry {
     type Error = CoreError;
 
     fn definitions(&self) -> Vec<ToolDefinition> {
-        self.tools.values().map(|tool| tool.definition()).collect()
+        self.tools
+            .values()
+            .map(|tool| tool.definition().with_interactive(tool.is_interactive_tool()))
+            .collect()
     }
 
     async fn call(
@@ -53,7 +56,7 @@ impl ToolExecutor for ToolRegistry {
         call: &ToolCall,
         output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
-    ) -> Result<ToolResult, CoreError> {
+    ) -> Result<ToolCallOutcome, CoreError> {
         match self.tools.get(&call.tool_name) {
             Some(tool) => tool.call(call, output, context).await,
             None => Err(CoreError::new(format!("unknown tool: {}", call.tool_name))),

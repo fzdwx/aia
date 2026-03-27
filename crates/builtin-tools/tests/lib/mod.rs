@@ -1,18 +1,23 @@
-use agent_core::{Tool, ToolDefinition, ToolExecutor};
+use agent_core::{
+    AbortSignal, QuestionRequest, Tool, ToolCall, ToolCallOutcome, ToolDefinition,
+    ToolExecutionContext, ToolExecutor,
+};
 use agent_prompts::tool_descriptions::shell_tool_description;
 use std::collections::BTreeSet;
 
 use super::{
-    ApplyPatchTool, CodeSearchTool, EditTool, GlobTool, GrepTool, ReadTool, ShellTool,
-    WebSearchTool, WriteTool, build_tool_registry,
+    ApplyPatchTool, CodeSearchTool, EditTool, GlobTool, GrepTool, QuestionTool, ReadTool,
+    ShellTool, TapeHandoffTool, TapeInfoTool, WebSearchTool, WriteTool, build_tool_registry,
 };
 use crate::apply_patch::ApplyPatchToolArgs;
 use crate::codesearch::CodeSearchToolArgs;
 use crate::edit::EditToolArgs;
 use crate::glob::GlobToolArgs;
 use crate::grep::GrepToolArgs;
+use crate::question::QuestionToolArgs;
 use crate::read::ReadToolArgs;
 use crate::shell::ShellToolArgs;
+use crate::tape::{TapeHandoffToolArgs, TapeInfoToolArgs};
 use crate::websearch::WebSearchToolArgs;
 use crate::write::WriteToolArgs;
 
@@ -25,11 +30,23 @@ fn registry_exposes_only_new_tool_names() {
         .map(|definition| definition.name)
         .collect::<BTreeSet<_>>();
 
-    let expected =
-        ["Shell", "Read", "Write", "Edit", "ApplyPatch", "Glob", "Grep", "CodeSearch", "WebSearch"]
-            .into_iter()
-            .map(str::to_owned)
-            .collect::<BTreeSet<_>>();
+    let expected = [
+        "Shell",
+        "Read",
+        "Write",
+        "Edit",
+        "ApplyPatch",
+        "Glob",
+        "Grep",
+        "CodeSearch",
+        "WebSearch",
+        "Question",
+        "TapeInfo",
+        "TapeHandoff",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect::<BTreeSet<_>>();
 
     assert_eq!(names, expected);
     assert!(!names.contains("bash"));
@@ -148,4 +165,90 @@ fn builtin_tool_definitions_match_derive_schema_output() {
     .expect("websearch args should deserialize");
     assert_eq!(parsed.num_results, 5);
     assert_eq!(parsed.context_max_characters, Some(8000));
+
+    let question = QuestionTool.definition();
+    assert_eq!(question.name, "Question");
+    assert_eq!(
+        question.parameters,
+        ToolDefinition::new("Question", "ignored")
+            .with_parameters_schema::<QuestionToolArgs>()
+            .parameters
+    );
+
+    let tape_info = TapeInfoTool.definition();
+    assert_eq!(
+        tape_info.parameters,
+        ToolDefinition::new("TapeInfo", "ignored")
+            .with_parameters_schema::<TapeInfoToolArgs>()
+            .parameters
+    );
+
+    let tape_handoff = TapeHandoffTool.definition();
+    assert_eq!(
+        tape_handoff.parameters,
+        ToolDefinition::new("TapeHandoff", "ignored")
+            .with_parameters_schema::<TapeHandoffToolArgs>()
+            .parameters
+    );
+}
+
+#[test]
+fn builtin_registry_now_directly_exposes_question() {
+    let registry = build_tool_registry();
+    let names = registry
+        .definitions()
+        .into_iter()
+        .map(|definition| definition.name)
+        .collect::<BTreeSet<_>>();
+
+    assert!(names.contains("Question"));
+    assert!(names.contains("TapeInfo"));
+    assert!(names.contains("TapeHandoff"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn question_tool_returns_suspended_request_instead_of_completed_result() {
+    let tool = QuestionTool;
+    let call = ToolCall::new("Question").with_arguments_value(serde_json::json!({
+        "questions": [{
+            "id": "database",
+            "question": "Use which database?",
+            "kind": "choice",
+            "required": true,
+            "multi_select": false,
+            "options": [{ "id": "sqlite", "label": "SQLite" }],
+            "recommended_option_id": "sqlite",
+            "recommendation_reason": "best local default"
+        }]
+    }));
+
+    let outcome = tool
+        .call(
+            &call,
+            &mut |_| {},
+            &ToolExecutionContext {
+                run_id: "turn-test".into(),
+                session_id: Some("session-test".into()),
+                workspace_root: None,
+                abort: AbortSignal::new(),
+                runtime: None,
+            },
+        )
+        .await
+        .expect("question tool should succeed");
+
+    let ToolCallOutcome::Suspended { request } = outcome else {
+        panic!("question tool should suspend instead of completing immediately");
+    };
+
+    assert_eq!(request.tool_name, "Question");
+    assert_eq!(request.turn_id, "turn-test");
+    assert_eq!(request.invocation_id, call.invocation_id);
+    assert_eq!(request.kind, "question");
+
+    let decoded: QuestionRequest =
+        serde_json::from_value(request.payload).expect("payload should decode as question request");
+    assert_eq!(decoded.turn_id, "turn-test");
+    assert_eq!(decoded.invocation_id, call.invocation_id);
+    assert_eq!(decoded.questions.len(), 1);
 }
