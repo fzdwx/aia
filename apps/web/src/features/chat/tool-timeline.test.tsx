@@ -461,6 +461,32 @@ describe("tool timeline", () => {
     expect(readHtml).toContain("L2~21")
   })
 
+  test("renders running shell subtitle directly from started-event arguments", () => {
+    const html = renderWithTheme(
+      <StreamingToolGroup
+        toolOutputs={[
+          {
+            invocationId: "streaming-shell-args-1",
+            toolName: "Shell",
+            arguments: {
+              command: "cargo test --workspace",
+              description: "Runs Rust workspace tests again",
+            },
+            detectedAtMs: Date.now() - 3000,
+            startedAtMs: Date.now() - 2500,
+            output: "",
+            completed: false,
+          },
+        ]}
+      />
+    )
+
+    expect(html).toContain("Shell")
+    expect(html).toContain("Runs Rust workspace tests again")
+    expect(html).toContain('data-slot="tool-subtitle"')
+    expect(html).toContain('data-slot="tool-duration"')
+  })
+
   test("does not show live duration before a serial tool actually starts", () => {
     const now = Date.now()
     const html = renderWithTheme(
@@ -518,6 +544,29 @@ describe("tool timeline", () => {
     expect(html).toContain("first useful line")
     expect(html).toContain('data-slot="tool-subtitle"')
     expect(html).toContain('data-slot="tool-duration"')
+  })
+
+  test("renders completed fallback tools with first output line as subtitle", () => {
+    const html = renderWithTheme(
+      <StreamingToolGroup
+        toolOutputs={[
+          {
+            invocationId: "streaming-unknown-complete-1",
+            toolName: "Shell",
+            arguments: {},
+            detectedAtMs: Date.now() - 3000,
+            finishedAtMs: Date.now() - 100,
+            output: "",
+            resultContent: "Runs frontend full checks again\nall good",
+            completed: true,
+          },
+        ]}
+      />
+    )
+
+    expect(html).toContain("Shell")
+    expect(html).toContain("Runs frontend full checks again")
+    expect(html).toContain('data-slot="tool-subtitle"')
   })
 
   test("renders TapeInfo as a non-expandable inline summary row", () => {

@@ -21,6 +21,10 @@ function firstNonEmptyLine(value: string): string | null {
   return line ?? null
 }
 
+function toolFirstVisibleLine(item: ToolRowItem): string | null {
+  return firstNonEmptyLine(item.outputContent)
+}
+
 function hasMeaningfulValue(value: unknown): boolean {
   if (value == null) return false
   if (typeof value === "string") return value.trim().length > 0
@@ -126,8 +130,8 @@ export function getFallbackSubtitle(item: ToolRowItem): string | null {
       : FAILED_TOOL_RESULT_FALLBACK
   }
 
-  if (item.finishedAtMs == null && hasText(item.outputContent)) {
-    return firstNonEmptyLine(item.outputContent)
+  if (toolFirstVisibleLine(item)) {
+    return toolFirstVisibleLine(item)
   }
 
   if (item.finishedAtMs != null && !hasVisibleToolDetails(item)) {
