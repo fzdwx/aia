@@ -649,7 +649,9 @@ describe("chat store submitTurn", () => {
     const state = useChatStore.getState()
     expect(state.chatState).toBe("idle")
     expect(state.streamingTurn).toBe(null)
-    expect(state.error).toBe("Concurrency limit exceeded for user, please retry later")
+    expect(state.error).toBe(
+      "Concurrency limit exceeded for user, please retry later"
+    )
   })
 
   test("stores context compression notice for active session", () => {
