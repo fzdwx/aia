@@ -26,6 +26,10 @@ fn response_stream_error(event: &Value) -> Option<String> {
         .or_else(|| event["response"]["status"].as_str().map(|status| format!("response {status}")))
 }
 
+fn is_top_level_error_envelope(event: &Value) -> bool {
+    event.get("type").is_none() && event.get("error").is_some()
+}
+
 #[derive(Default)]
 pub(super) struct ResponsesStreamingState {
     text_buf: String,
@@ -79,6 +83,12 @@ impl StreamingState for ResponsesStreamingState {
         event: &Value,
         sink: &mut (dyn FnMut(StreamEvent) + Send),
     ) -> Result<(), OpenAiAdapterError> {
+        if is_top_level_error_envelope(event) {
+            let message = response_stream_error(event)
+                .unwrap_or_else(|| "OpenAI Responses stream failed".to_string());
+            return Err(OpenAiAdapterError::new(message));
+        }
+
         match event["type"].as_str() {
             Some("response.created") => {
                 self.response_id = event["response"]["id"].as_str().map(ToString::to_string);

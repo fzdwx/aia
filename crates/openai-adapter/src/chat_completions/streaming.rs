@@ -73,6 +73,16 @@ impl StreamingState for ChatCompletionsStreamingState {
         event: &Value,
         sink: &mut (dyn FnMut(StreamEvent) + Send),
     ) -> Result<(), OpenAiAdapterError> {
+        if event.get("type").is_none()
+            && let Some(message) = event
+                .get("error")
+                .and_then(|value| value.get("message"))
+                .and_then(|value| value.as_str())
+                .filter(|text| !text.trim().is_empty())
+        {
+            return Err(OpenAiAdapterError::new(message.to_string()));
+        }
+
         if self.usage.is_none() {
             self.usage = OpenAiChatCompletionsModel::map_usage(
                 serde_json::from_value(event["usage"].clone()).ok(),
