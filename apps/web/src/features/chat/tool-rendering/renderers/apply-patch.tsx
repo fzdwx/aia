@@ -361,6 +361,7 @@ function toPatchOperations(value: string): ApplyPatchOperation[] {
 export function createApplyPatchRenderer(): ToolRenderer {
   return {
     matches: (toolName) => toolName === "ApplyPatch",
+    detailsPanelMode: "renderer-only-flat",
     renderTitle(data) {
       const args = normalizeToolArguments(data.arguments)
       const patch = getStringValue(args, "patch", "patchText")

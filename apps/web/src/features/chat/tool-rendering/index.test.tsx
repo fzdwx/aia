@@ -833,11 +833,11 @@ describe("tool renderer registry", () => {
 
   test("keeps shell output auto-follow logic inside renderer-owned component", () => {
     const source = readFileSync(
-      new URL("./renderers/shell.tsx", import.meta.url),
+      new URL("./renderers/shell-output-body.tsx", import.meta.url),
       "utf8"
     ).replace(/\s+/g, " ")
 
-    expect(source).toContain("function ShellOutputBody(")
+    expect(source).toContain("export function ShellOutputBody(")
     expect(source).toContain(
       "const preRef = useRef<HTMLPreElement | null>(null)"
     )
@@ -846,16 +846,22 @@ describe("tool renderer registry", () => {
   })
 
   test("auto-scrolls running shell output to latest line when details mount", () => {
-    const source = readFileSync(
+    const componentSource = readFileSync(
+      new URL("./renderers/shell-output-body.tsx", import.meta.url),
+      "utf8"
+    ).replace(/\s+/g, " ")
+    const rendererSource = readFileSync(
       new URL("./renderers/shell.tsx", import.meta.url),
       "utf8"
     ).replace(/\s+/g, " ")
 
-    expect(source).toContain("isRunning: boolean")
-    expect(source).toContain("if (isRunning) {")
-    expect(source).toContain("shouldFollowRef.current = true")
-    expect(source).toContain("element.scrollTop = element.scrollHeight")
-    expect(source).toContain("isRunning={data.isRunning ?? false}")
+    expect(componentSource).toContain("isRunning: boolean")
+    expect(componentSource).toContain("if (isRunning) {")
+    expect(componentSource).toContain("shouldFollowRef.current = true")
+    expect(componentSource).toContain(
+      "element.scrollTop = element.scrollHeight"
+    )
+    expect(rendererSource).toContain("isRunning={data.isRunning ?? false}")
   })
 
   test("passes streaming shell segments through tool details panel", () => {
@@ -1131,28 +1137,35 @@ describe("tool renderer registry", () => {
     expect(subtitle).toBe("Condensed handoff summary for the next wake.")
   })
 
-  test("renders TapeHandoff details as summary plus content sections", () => {
+  test("renders TapeHandoff details with shell-styled summary and markdown body", () => {
     const details = toolRendererRegistry.renderDetails({
       toolName: "TapeHandoff",
       arguments: {
         name: "session-cut",
         summary: "Condensed handoff summary for the next wake.",
       },
-      outputContent:
-        "Carry over unresolved TODO items and resume from anchor A42.",
+      outputContent: [
+        "## Resume plan",
+        "",
+        "- Carry over unresolved TODO items.",
+        "- Resume from anchor `A42`.",
+      ].join("\n"),
       succeeded: true,
     })
 
     expect(details).not.toBe(null)
     const html = renderWithTheme(details)
-    expect(html).toContain("Summary")
     expect(html).toContain("Condensed handoff summary for the next wake.")
-    expect(html).toContain("Content")
-    expect(html).toContain(
-      "Carry over unresolved TODO items and resume from anchor A42."
-    )
+    expect(html).toContain("tool-timeline-shell-detail")
+    expect(html).toContain("tool-timeline-shell-body")
+    expect(html).toContain("markdown-content")
+    expect(html).toContain("Resume plan")
+    expect(html).toContain("Carry over unresolved TODO items.")
+    expect(html).toContain("Resume from anchor")
     expect(html).not.toContain("Input")
     expect(html).not.toContain("Result")
+    expect(html).not.toContain("Content")
+    expect(html).not.toContain('tool-timeline-detail-title">Summary')
   })
 
   test("renders TapeInfo as inline summary metadata without details", () => {

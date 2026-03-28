@@ -240,6 +240,7 @@ function getQuestionContent(data: {
 export function createQuestionRenderer(): ToolRenderer {
   return {
     matches: (toolName) => toolName === "Question" || toolName === "question",
+    detailsPanelMode: "renderer-only",
     renderTitle(data) {
       const args = normalizeToolArguments(data.arguments)
       const questions = parseQuestionItems(args)

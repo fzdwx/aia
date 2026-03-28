@@ -1,3 +1,4 @@
+import { MarkdownContent } from "@/components/markdown-content"
 import { normalizeToolArguments } from "@/lib/tool-display"
 
 import type { ToolRenderer } from "../types"
@@ -19,6 +20,7 @@ function getTapePressureSummary(details: Record<string, unknown> | undefined) {
 export function createTapeInfoRenderer(): ToolRenderer {
   return {
     matches: (toolName) => toolName === "TapeInfo",
+    detailsPanelMode: "none",
     renderTitle(data) {
       return getTapePressureSummary(data.details)
     },
@@ -68,6 +70,7 @@ export function createTapeInfoRenderer(): ToolRenderer {
 export function createTapeHandoffRenderer(): ToolRenderer {
   return {
     matches: (toolName) => toolName === "TapeHandoff",
+    detailsPanelMode: "renderer-only-flat",
     renderTitle(data) {
       const args = normalizeToolArguments(data.arguments)
       return getStringValue(args, "name") ?? "handoff"
@@ -86,25 +89,35 @@ export function createTapeHandoffRenderer(): ToolRenderer {
         getStringValue(args, "summary") ??
         getStringValue(data.details, "summary")
       const hasOutput = data.outputContent.trim().length > 0
-
       if (!summary && !hasOutput) return null
 
       return (
         <>
           {summary ? (
-            <ToolDetailSection title="Summary">
-              <p className="text-caption leading-body-sm text-pretty text-foreground/86">
-                {summary}
-              </p>
-            </ToolDetailSection>
+            <section
+              className="tool-timeline-detail-section tool-timeline-shell-detail"
+              data-tool-detail-kind="content"
+              data-tool-detail-tone="output"
+            >
+              <div className="tool-timeline-detail-body tool-timeline-shell-body">
+                <MarkdownContent
+                  className="text-body-sm leading-body-sm pr-10 text-pretty text-foreground/92"
+                  content={summary}
+                />
+              </div>
+            </section>
           ) : null}
           {hasOutput ? (
-            <ToolDetailSection title={data.succeeded ? "Content" : "Failure"}>
-              <ExpandableOutput
-                value={data.outputContent}
-                failed={!data.succeeded}
+            data.succeeded ? (
+              <MarkdownContent
+                content={data.outputContent}
+                className="text-body-sm leading-6 text-foreground/92"
               />
-            </ToolDetailSection>
+            ) : (
+              <ToolDetailSection title="Failure">
+                <ExpandableOutput value={data.outputContent} failed />
+              </ToolDetailSection>
+            )
           ) : null}
         </>
       )

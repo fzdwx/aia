@@ -10,20 +10,12 @@ import { normalizeToolName } from "@/features/chat/tool-timeline-helpers"
 
 import { toolTimelineCopy } from "@/features/chat/tool-timeline-copy"
 
-const FLAT_DETAIL_SURFACE_TOOLS = new Set(["Edit", "Write", "ApplyPatch"])
 const NON_DEFAULT_TOOL_NAMES = new Set([
   "Read",
-  "Write",
-  "Edit",
   "CodeSearch",
   "WebSearch",
   "Glob",
   "Grep",
-  "Shell",
-  "ApplyPatch",
-  "question",
-  "TapeInfo",
-  "TapeHandoff",
 ])
 const OMITTED_ARGUMENT_KEYS = new Set([
   "content",
@@ -49,15 +41,6 @@ const OMITTED_DETAIL_KEYS = new Set([
 
 export function renderToolDetailsPanel(item: ToolRowItem) {
   const normalizedToolName = normalizeToolName(item.toolName)
-
-  if (normalizedToolName === "TapeInfo") {
-    return null
-  }
-
-  const requestOmitKeys =
-    normalizedToolName === "Shell"
-      ? new Set([...OMITTED_ARGUMENT_KEYS, "command", "description"])
-      : OMITTED_ARGUMENT_KEYS
   const renderData = {
     toolName: item.toolName,
     arguments: item.arguments,
@@ -67,9 +50,21 @@ export function renderToolDetailsPanel(item: ToolRowItem) {
     succeeded: item.succeeded,
     isRunning: item.finishedAtMs == null,
   }
+  const renderer = toolRendererRegistry.resolve(item.toolName)
   const detailsContent = toolRendererRegistry.renderDetails(renderData)
+  const detailsPanelMode = renderer.detailsPanelMode ?? "default"
 
-  if (normalizedToolName === "TapeHandoff") {
+  if (detailsPanelMode === "none") {
+    return null
+  }
+
+  if (detailsPanelMode === "renderer-only") {
+    if (detailsContent == null) return null
+
+    return <ToolDetailSurface>{detailsContent}</ToolDetailSurface>
+  }
+
+  if (detailsPanelMode === "renderer-only-flat") {
     if (detailsContent == null) return null
 
     return (
@@ -80,7 +75,7 @@ export function renderToolDetailsPanel(item: ToolRowItem) {
   }
 
   const requestEntries = buildDetailEntries(item.arguments, {
-    omitKeys: requestOmitKeys,
+    omitKeys: OMITTED_ARGUMENT_KEYS,
   })
   const resultEntries = buildDetailEntries(item.details, {
     omitKeys: OMITTED_DETAIL_KEYS,
@@ -89,27 +84,6 @@ export function renderToolDetailsPanel(item: ToolRowItem) {
 
   if (usesDefaultRenderer && detailsContent != null) {
     return <ToolDetailSurface>{detailsContent}</ToolDetailSurface>
-  }
-
-  if (normalizedToolName === "Shell") {
-    if (detailsContent == null) return null
-
-    return (
-      <ToolDetailSurface className="tool-timeline-detail-surface-flat">
-        {detailsContent}
-      </ToolDetailSurface>
-    )
-  }
-
-  if (
-    FLAT_DETAIL_SURFACE_TOOLS.has(normalizeToolName(item.toolName)) &&
-    detailsContent != null
-  ) {
-    return (
-      <ToolDetailSurface className="tool-timeline-detail-surface-flat">
-        {detailsContent}
-      </ToolDetailSurface>
-    )
   }
 
   if (

@@ -8,6 +8,10 @@ const EMPTY_QUESTION_RESULT_FALLBACK = "No additional details."
 const IGNORED_QUESTION_RESULT_FALLBACK = "Question ignored."
 const INLINE_DETAIL_TOOLS = new Set<string>()
 
+function isQuestionTool(item: ToolRowItem): boolean {
+  return normalizeToolName(item.toolName).toLowerCase() === "question"
+}
+
 function hasText(value: string | undefined | null): value is string {
   return typeof value === "string" && value.trim().length > 0
 }
@@ -66,7 +70,7 @@ function getBooleanRecordValue(
 }
 
 export function isIgnoredQuestion(item: ToolRowItem): boolean {
-  if (normalizeToolName(item.toolName) !== "question") return false
+  if (!isQuestionTool(item)) return false
 
   const status = getStringRecordValue(item.details, "status", "state")
   const action = getStringRecordValue(item.details, "action")
@@ -98,7 +102,7 @@ export function hasQuestionResolution(item: ToolRowItem): boolean {
 }
 
 export function shouldRenderToolItem(item: ToolRowItem): boolean {
-  if (normalizeToolName(item.toolName) !== "question") return true
+  if (!isQuestionTool(item)) return true
   if (!item.succeeded) return true
   if (isIgnoredQuestion(item)) return true
 
@@ -110,7 +114,7 @@ export function hasVisibleToolDetails(item: ToolRowItem): boolean {
 }
 
 export function getFallbackSubtitle(item: ToolRowItem): string | null {
-  if (normalizeToolName(item.toolName) === "question") {
+  if (isQuestionTool(item)) {
     if (isIgnoredQuestion(item)) return IGNORED_QUESTION_RESULT_FALLBACK
     if (!item.succeeded) {
       return hasText(item.outputContent)

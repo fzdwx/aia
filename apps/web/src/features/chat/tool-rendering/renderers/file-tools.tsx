@@ -91,6 +91,7 @@ export function createReadRenderer(): ToolRenderer {
 export function createWriteRenderer(): ToolRenderer {
   return {
     matches: (toolName) => toolName === "Write",
+    detailsPanelMode: "renderer-only-flat",
     renderTitle(data) {
       const args = normalizeToolArguments(data.arguments)
       const path = getToolDisplayPath(data.toolName, data.details, args)
@@ -123,6 +124,7 @@ export function createWriteRenderer(): ToolRenderer {
 export function createEditRenderer(): ToolRenderer {
   return {
     matches: (toolName) => toolName === "Edit",
+    detailsPanelMode: "renderer-only-flat",
     renderTitle(data) {
       const args = normalizeToolArguments(data.arguments)
       const path = getToolDisplayPath(data.toolName, data.details, args)

@@ -28,11 +28,7 @@ import {
   buildToolEvents,
   summarizeEvent,
 } from "./lib/trace-timeline"
-import {
-  collectAssistantPreview,
-  collectSystemPrompts,
-  collectToolNames,
-} from "./lib/trace-preview"
+import { collectAssistantPreview, collectToolNames } from "./lib/trace-preview"
 
 export type InspectorTab = "content" | "overview" | "events"
 
@@ -207,6 +203,7 @@ function ExpandableTextBlock({
       </pre>
       {needsCollapse ? (
         <button
+          type="button"
           onClick={() => setOpen((current) => !current)}
           className="text-meta font-medium text-muted-foreground transition-colors hover:text-foreground"
         >
@@ -296,10 +293,20 @@ export function LoopInspector({
   group: TraceLoopGroup
   tab: InspectorTab
 }) {
+  const rootNode = group.timeline[0]
+  const systemPromptPreview =
+    rootNode?.kind === "agent_root" ? rootNode.systemPromptPreview : null
+
   if (tab === "content") {
     return (
       <div className="space-y-3">
         <Section title="Input">
+          <FieldBlock label="System prompt">
+            <TextBlock
+              value={systemPromptPreview}
+              className="trace-accent-surface"
+            />
+          </FieldBlock>
           <FieldBlock label="User message">
             <TextBlock value={group.userMessage} className="bg-background/80" />
           </FieldBlock>
@@ -373,7 +380,6 @@ export function LlmInspector({
   loading: boolean
   onOpenPayload: () => void
 }) {
-  const systemPrompts = useMemo(() => collectSystemPrompts(trace), [trace])
   const toolNames = useMemo(() => collectToolNames(trace), [trace])
   const assistantPreview = useMemo(
     () => collectAssistantPreview(trace),
@@ -403,22 +409,6 @@ export function LlmInspector({
           }
         >
           <div className="space-y-3">
-            <FieldBlock label="System prompts">
-              {systemPrompts.length === 0 ? (
-                <p className="text-caption text-muted-foreground">-</p>
-              ) : (
-                <div className="space-y-2">
-                  {systemPrompts.map((prompt, index) => (
-                    <TextBlock
-                      key={`${index}-${prompt.slice(0, 24)}`}
-                      value={prompt}
-                      className="trace-accent-surface"
-                    />
-                  ))}
-                </div>
-              )}
-            </FieldBlock>
-
             <FieldBlock label="User message">
               <TextBlock value={group.userMessage} />
             </FieldBlock>

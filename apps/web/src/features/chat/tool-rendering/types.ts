@@ -13,6 +13,7 @@ export type ToolRenderData = {
 
 export type ToolRenderer = {
   matches: (toolName: string) => boolean
+  detailsPanelMode?: "default" | "renderer-only" | "renderer-only-flat" | "none"
   renderTitle: (data: ToolRenderData) => string
   renderSubtitle?: (data: ToolRenderData) => string | null
   renderMeta?: (data: ToolRenderData) => ReactNode | null

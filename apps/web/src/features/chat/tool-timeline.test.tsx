@@ -691,7 +691,7 @@ describe("tool timeline", () => {
     expect(html).not.toContain('data-slot="tool-row-details"')
   })
 
-  test("renders TapeHandoff details without generic Input/Result sections", () => {
+  test("renders TapeHandoff details without generic or summary headings", () => {
     const html = renderWithTheme(
       <>
         {renderToolDetailsPanel({
@@ -704,8 +704,12 @@ describe("tool timeline", () => {
           startedAtMs: 100,
           finishedAtMs: 140,
           succeeded: true,
-          outputContent:
-            "Carry over unresolved TODO items and resume from anchor A42.",
+          outputContent: [
+            "## Resume plan",
+            "",
+            "- Carry over unresolved TODO items.",
+            "- Resume from anchor `A42`.",
+          ].join("\n"),
           details: {
             summary: "Condensed handoff summary for the next wake.",
           },
@@ -713,14 +717,17 @@ describe("tool timeline", () => {
       </>
     )
 
-    expect(html).toContain("Summary")
     expect(html).toContain("Condensed handoff summary for the next wake.")
-    expect(html).toContain("Content")
-    expect(html).toContain(
-      "Carry over unresolved TODO items and resume from anchor A42."
-    )
+    expect(html).toContain("tool-timeline-shell-detail")
+    expect(html).toContain("tool-timeline-shell-body")
+    expect(html).toContain("markdown-content")
+    expect(html).toContain("Resume plan")
+    expect(html).toContain("Carry over unresolved TODO items.")
+    expect(html).toContain("Resume from anchor")
     expect(html).not.toContain("Input")
     expect(html).not.toContain("Result")
+    expect(html).not.toContain("Content")
+    expect(html).not.toContain('tool-timeline-detail-title">Summary')
   })
 
   test("keeps fallback tool detail rendering on the renderer-owned path", () => {
@@ -834,6 +841,66 @@ describe("tool timeline", () => {
 
     expect(html).not.toContain("Override existing config?")
     expect(html).not.toContain('data-component="tool-row"')
+  })
+
+  test("hides pending uppercase Question tools until they have a stable outcome", () => {
+    const html = renderWithTheme(
+      <StreamingToolGroup
+        toolOutputs={[
+          {
+            invocationId: "streaming-Question-1",
+            toolName: "Question",
+            arguments: {
+              question: "Override existing config?",
+            },
+            detectedAtMs: Date.now() - 100,
+            output: "",
+            completed: false,
+          },
+        ]}
+      />
+    )
+
+    expect(html).not.toContain("Override existing config?")
+    expect(html).not.toContain('data-component="tool-row"')
+  })
+
+  test("renders uppercase Question details without generic Input section", () => {
+    const html = renderWithTheme(
+      <>
+        {renderToolDetailsPanel({
+          id: "tool-question-1",
+          toolName: "Question",
+          arguments: {
+            questions: [
+              {
+                id: "q1",
+                question: "你最近大概处于哪种状态？",
+                kind: "choice",
+              },
+            ],
+          },
+          startedAtMs: 100,
+          finishedAtMs: 140,
+          succeeded: true,
+          outputContent: "",
+          details: {
+            status: "answered",
+            answers: [
+              {
+                question_id: "q1",
+                text: "在冲项目",
+                selected_option_ids: [],
+              },
+            ],
+          },
+        })}
+      </>
+    )
+
+    expect(html).toContain("你最近大概处于哪种状态？")
+    expect(html).toContain("在冲项目")
+    expect(html).not.toContain("Input")
   })
 
   test("renders english fallbacks for empty outputs and silent failures", () => {
@@ -952,7 +1019,13 @@ describe("tool timeline", () => {
   test("renders shell details on the flat path without generic request or result sections", () => {
     const source = loadToolDetailsPanelSource()
 
-    expect(source).toContain('if (normalizedToolName === "Shell")')
+    expect(source).toContain(
+      "const renderer = toolRendererRegistry.resolve(item.toolName)"
+    )
+    expect(source).toContain(
+      'const detailsPanelMode = renderer.detailsPanelMode ?? "default"'
+    )
+    expect(source).toContain('if (detailsPanelMode === "renderer-only-flat")')
     expect(source).toContain(
       '<ToolDetailSurface className="tool-timeline-detail-surface-flat">'
     )
