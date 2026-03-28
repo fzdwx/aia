@@ -3,6 +3,7 @@ use std::sync::{Arc, RwLock};
 
 use agent_core::{StreamEvent, ToolRegistry};
 use agent_runtime::{AgentRuntime, ContextStats, RuntimeEvent, RuntimeSubscriberId, TurnLifecycle};
+use agent_store::SessionRecord;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::{
@@ -12,9 +13,9 @@ use crate::{
 };
 
 use super::{
-    CurrentStatusInner, RuntimeReturn, SessionId, SessionManagerConfig, SessionSlot,
-    ToolTraceRecorder, next_server_turn_id, now_timestamp_ms, update_current_turn_from_stream,
-    update_current_turn_status, write_lock,
+    CurrentStatusInner, RuntimeReturn, SessionAutoRenameService, SessionId, SessionManagerConfig,
+    SessionSlot, ToolTraceRecorder, next_server_turn_id, now_timestamp_ms,
+    update_current_turn_from_stream, update_current_turn_status, write_lock,
 };
 
 pub(super) struct TurnExecutionService<'a> {
@@ -45,7 +46,15 @@ impl<'a> TurnExecutionService<'a> {
         *write_lock(&slot.context_stats) = runtime.context_stats();
         let turn_control = running_turn.control.clone();
 
-        let _ = self.config.store.update_session_async(session_id.to_string(), None, None).await;
+        let activity_record = self
+            .config
+            .store
+            .touch_session_last_active_async(session_id.to_string())
+            .await
+            .map_err(|error| {
+                RuntimeWorkerError::internal(format!("session activity update failed: {error}"))
+            })?
+            .ok_or_else(|| RuntimeWorkerError::not_found(format!("session not found: {session_id}")))?;
 
         let turn_id = next_server_turn_id();
         let current_turn = CurrentTurnSnapshot {
@@ -69,6 +78,8 @@ impl<'a> TurnExecutionService<'a> {
                 history_snapshot: slot.history.clone(),
                 context_stats_snapshot: slot.context_stats.clone(),
                 trace_recorder: ToolTraceRecorder::new(self.config.store.clone()),
+                registry: self.config.registry.clone(),
+                sessions_dir: self.config.sessions_dir.clone(),
                 session_id: session_id_owned.clone(),
                 turn_id: turn_id.clone(),
             },
@@ -79,6 +90,7 @@ impl<'a> TurnExecutionService<'a> {
             session_id: session_id_owned.clone(),
             current_turn,
         });
+        let _ = self.config.broadcast_tx.send(session_updated_payload(activity_record));
         let _ = self.config.broadcast_tx.send(SsePayload::Status {
             session_id: session_id_owned,
             turn_id: turn_id.clone(),
@@ -97,6 +109,18 @@ impl<'a> TurnExecutionService<'a> {
 pub(super) struct RuntimeEventProjector<'a> {
     broadcast_tx: &'a broadcast::Sender<SsePayload>,
     session_id: &'a str,
+}
+
+fn session_updated_payload(record: SessionRecord) -> SsePayload {
+    SsePayload::SessionUpdated {
+        session_id: record.id,
+        title: record.title,
+        title_source: record.title_source,
+        auto_rename_policy: record.auto_rename_policy,
+        updated_at: record.updated_at,
+        last_active_at: record.last_active_at,
+        model: record.model,
+    }
 }
 
 impl<'a> RuntimeEventProjector<'a> {
@@ -140,6 +164,8 @@ pub(super) struct TurnWorkerContext {
     pub(super) history_snapshot: Arc<RwLock<Vec<TurnLifecycle>>>,
     pub(super) context_stats_snapshot: Arc<RwLock<ContextStats>>,
     pub(super) trace_recorder: ToolTraceRecorder,
+    pub(super) registry: provider_registry::ProviderRegistry,
+    pub(super) sessions_dir: std::path::PathBuf,
     pub(super) session_id: SessionId,
     pub(super) turn_id: String,
 }
@@ -244,11 +270,24 @@ impl TurnWorker {
                     let _ = self.context.broadcast_tx.send(SsePayload::TurnCompleted {
                         session_id: self.context.session_id.clone(),
                         turn_id: self.context.turn_id.clone(),
-                        turn,
+                        turn: turn.clone(),
                     });
                     let trace_recorder = self.context.trace_recorder.clone();
+                    let turn_for_trace_persist = turn_for_traces.clone();
                     tokio::spawn(async move {
-                        trace_recorder.persist_turn_spans(&turn_for_traces).await;
+                        trace_recorder.persist_turn_spans(&turn_for_trace_persist).await;
+                    });
+                    let auto_rename = SessionAutoRenameService {
+                        store: self.context.trace_recorder.store(),
+                        registry: self.context.registry.clone(),
+                        broadcast_tx: self.context.broadcast_tx.clone(),
+                        sessions_dir: self.context.sessions_dir.clone(),
+                    };
+                    let session_id = self.context.session_id.clone();
+                    tokio::spawn(async move {
+                        auto_rename
+                            .maybe_schedule_after_turn(&session_id, &turn_for_traces, true)
+                            .await;
                     });
                 }
             }

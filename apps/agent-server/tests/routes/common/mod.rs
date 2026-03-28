@@ -1,4 +1,4 @@
-use agent_store::SessionRecord;
+use agent_store::{SessionAutoRenamePolicy, SessionRecord, SessionTitleSource};
 use axum::http::StatusCode;
 
 use super::{json_response, resolve_session_id};
@@ -31,8 +31,11 @@ async fn resolve_session_id_falls_back_to_first_stored_session() {
         .create_session(&SessionRecord {
             id: "session-1".into(),
             title: "First".into(),
+            title_source: SessionTitleSource::Manual,
+            auto_rename_policy: SessionAutoRenamePolicy::Enabled,
             created_at: "2026-03-16T00:00:00Z".into(),
             updated_at: "2026-03-16T00:00:00Z".into(),
+            last_active_at: "2026-03-16T00:00:00Z".into(),
             model: "bootstrap".into(),
         })
         .expect("first session should save");
@@ -41,8 +44,11 @@ async fn resolve_session_id_falls_back_to_first_stored_session() {
         .create_session(&SessionRecord {
             id: "session-2".into(),
             title: "Second".into(),
+            title_source: SessionTitleSource::Manual,
+            auto_rename_policy: SessionAutoRenamePolicy::Enabled,
             created_at: "2026-03-16T00:00:01Z".into(),
             updated_at: "2026-03-16T00:00:01Z".into(),
+            last_active_at: "2026-03-16T00:00:01Z".into(),
             model: "bootstrap".into(),
         })
         .expect("second session should save");

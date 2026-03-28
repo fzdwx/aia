@@ -27,3 +27,31 @@ fn render_replaces_all_placeholders() {
 fn render_panics_on_missing_var_in_debug() {
     render("Hello {{name}}", &[]);
 }
+
+#[test]
+fn title_generator_prompt_renders_structured_context() {
+    let prompt = crate::render_title_generator_prompt(crate::TitleGeneratorPromptContext {
+        current_title: "New session".into(),
+        title_source: "default".into(),
+        recent_user_turns: vec![
+            "debug 500 errors in production".into(),
+            "why is app.js failing".into(),
+        ],
+    });
+
+    assert!(prompt.contains("You are a title generator."));
+    assert!(prompt.contains("Current title: New session"));
+    assert!(prompt.contains("Title source: default"));
+    assert!(prompt.contains("1. debug 500 errors in production"));
+    assert!(prompt.contains("2. why is app.js failing"));
+    assert!(!prompt.contains("{{"));
+}
+
+#[test]
+fn title_generator_prompt_template_matches_embedded_template() {
+    let prompt = crate::title_generator_prompt_template();
+
+    assert_eq!(prompt, include_str!("../../prompts/title-generator.md").trim());
+    assert!(prompt.contains("Generate a brief title that would help the user find this conversation later."));
+    assert!(prompt.contains("{{conversation_excerpt}}"));
+}

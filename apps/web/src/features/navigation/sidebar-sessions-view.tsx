@@ -8,8 +8,35 @@ const SIDEBAR_ACTION_BUTTON =
 const SIDEBAR_SESSION_ITEM =
   "sidebar-session-item group flex w-full items-center gap-1 rounded-lg"
 
+function formatLastActiveAt(timestamp: string) {
+  if (!timestamp) return ""
+
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) return ""
+
+  const diffMs = Date.now() - date.getTime()
+  const diffMinutes = Math.floor(diffMs / 60000)
+  if (diffMinutes <= 0) return "just now"
+  if (diffMinutes < 60)
+    return `${diffMinutes} minute${diffMinutes === 1 ? "" : "s"} ago`
+
+  const diffHours = Math.floor(diffMinutes / 60)
+  if (diffHours < 24)
+    return `${diffHours} hour${diffHours === 1 ? "" : "s"} ago`
+
+  const diffDays = Math.floor(diffHours / 24)
+  if (diffDays < 7)
+    return `${diffDays} day${diffDays === 1 ? "" : "s"} ago`
+
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  })
+}
+
 export function SidebarSessions() {
   const sessions = useChatStore((s) => s.sessions)
+  const sessionTitleAnimations = useChatStore((s) => s.sessionTitleAnimations)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const sessionHydrating = useChatStore((s) => s.sessionHydrating)
   const createSession = useChatStore((s) => s.createSession)
@@ -34,7 +61,11 @@ export function SidebarSessions() {
           {sessions.map((session) => {
             const isActive = session.id === activeSessionId
             const isSwitchingTo = isActive && sessionHydrating
-            const sessionLabel = session.title || session.id
+            const animation = sessionTitleAnimations[session.id]
+            const sessionLabel =
+              (animation?.animating ? animation.renderedTitle : session.title) ||
+              session.id
+            const lastActiveLabel = formatLastActiveAt(session.last_active_at)
 
             return (
               <div
@@ -53,8 +84,15 @@ export function SidebarSessions() {
                   {isActive ? (
                     <span className="inline-block size-1.5 shrink-0 rounded-full bg-foreground/60" />
                   ) : null}
-                  <span className="min-w-0 flex-1 truncate">
-                    {sessionLabel}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">
+                      {sessionLabel}
+                      {lastActiveLabel ? (
+                        <span className="text-meta ml-2 inline text-muted-foreground/72">
+                          {lastActiveLabel}
+                        </span>
+                      ) : null}
+                    </span>
                   </span>
                   {isSwitchingTo ? (
                     <span className="text-meta shrink-0 text-muted-foreground/72">

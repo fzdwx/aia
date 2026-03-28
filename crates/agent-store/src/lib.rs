@@ -11,7 +11,9 @@ use rusqlite::Connection;
 pub use channel::{
     ChannelMessageReceipt, ChannelSessionBinding, ExternalConversationKey, StoredChannelProfile,
 };
-pub use session::{SessionRecord, generate_session_id, iso8601_now};
+pub use session::{
+    SessionAutoRenamePolicy, SessionRecord, SessionTitleSource, generate_session_id, iso8601_now,
+};
 pub use trace::{
     LlmTraceDashboard, LlmTraceDashboardActivityPoint, LlmTraceDashboardRange,
     LlmTraceDashboardSummary, LlmTraceDashboardTrendPoint, LlmTraceEvent, LlmTraceListItem,

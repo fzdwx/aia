@@ -14,6 +14,10 @@ impl ToolTraceRecorder {
         Self { store }
     }
 
+    pub(crate) fn store(&self) -> Arc<AiaStore> {
+        self.store.clone()
+    }
+
     pub(crate) async fn persist_turn_spans(&self, turn: &TurnLifecycle) {
         for invocation in &turn.tool_invocations {
             let Some(context) = invocation.trace_context.as_ref() else {

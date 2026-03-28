@@ -118,10 +118,24 @@ export type ProviderInfo = {
 export type SessionListItem = {
   id: string
   title: string
+  title_source: SessionTitleSource
+  auto_rename_policy: SessionAutoRenamePolicy
   created_at: string
   updated_at: string
+  last_active_at: string
   model: string
 }
+
+export type SessionTitleSource =
+  | "default"
+  | "auto"
+  | "manual"
+  | "channel"
+
+export type SessionAutoRenamePolicy =
+  | "enabled"
+  | "disabled"
+  | "inherit"
 
 export type ContextCompressionNotice = {
   session_id: string
@@ -163,6 +177,18 @@ export type SseEvent =
   | {
       type: "session_created"
       data: { session_id: string; title: string }
+    }
+  | {
+      type: "session_updated"
+      data: {
+        session_id: string
+        title: string
+        title_source: SessionTitleSource
+        auto_rename_policy: SessionAutoRenamePolicy
+        updated_at: string
+        last_active_at: string
+        model: string
+      }
     }
   | { type: "session_deleted"; data: { session_id: string } }
   | { type: "turn_cancelled"; data: { session_id: string; turn_id: string } }

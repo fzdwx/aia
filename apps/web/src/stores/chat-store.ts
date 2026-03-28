@@ -42,6 +42,7 @@ const INITIAL_SESSION_HISTORY_PAGE_SIZE = 1
 const DEFERRED_SECOND_TURN_PAGE_SIZE = SESSION_HISTORY_PAGE_SIZE
 const MAX_CACHED_SESSION_SNAPSHOTS = 24
 export const NEW_PROVIDER_SETTINGS_KEY = "__new_provider__"
+const SESSION_TITLE_ANIMATION_TICK_MS = 36
 
 const defaultIdleScheduler = createIdleScheduler()
 
@@ -53,6 +54,12 @@ type SessionSnapshot = {
   chatState: ChatState
   contextPressure: number | null
   lastCompression: ContextCompressionNotice | null
+}
+
+type SessionTitleAnimation = {
+  targetTitle: string
+  renderedTitle: string
+  animating: boolean
 }
 
 const EMPTY_SESSION_SNAPSHOT: SessionSnapshot = {
@@ -171,6 +178,7 @@ function trimSessionSnapshotsToKnownSessions(
 
 type ChatStore = {
   sessions: SessionListItem[]
+  sessionTitleAnimations: Record<string, SessionTitleAnimation>
   activeSessionId: string | null
   sessionHydrating: boolean
   turns: TurnLifecycle[]
@@ -198,8 +206,81 @@ type ChatStore = {
 let latestSessionLoadId = 0
 let pendingHistoryHydrationAbort: AbortController | null = null
 let pendingHistoryHydrationIdleHandle: IdleHandle | null = null
+const sessionTitleAnimationTimers = new Map<string, number>()
 let scheduleIdleWork: IdleScheduler = defaultIdleScheduler.schedule
 let cancelIdleWork: IdleCanceller = defaultIdleScheduler.cancel
+
+function clearSessionTitleAnimationTimer(sessionId: string) {
+  const timer = sessionTitleAnimationTimers.get(sessionId)
+  if (timer == null) return
+  globalThis.clearTimeout(timer)
+  sessionTitleAnimationTimers.delete(sessionId)
+}
+
+function scheduleSessionTitleAnimationTick(sessionId: string) {
+  clearSessionTitleAnimationTimer(sessionId)
+  const timer = globalThis.setTimeout(() => {
+    const state = useChatStore.getState()
+    const animation = state.sessionTitleAnimations[sessionId]
+    if (!animation?.animating) {
+      clearSessionTitleAnimationTimer(sessionId)
+      return
+    }
+
+    const nextLength = Math.min(
+      animation.renderedTitle.length + 1,
+      animation.targetTitle.length
+    )
+    const nextRenderedTitle = animation.targetTitle.slice(0, nextLength)
+    const done = nextRenderedTitle === animation.targetTitle
+
+    useChatStore.setState((current) => ({
+      sessionTitleAnimations: {
+        ...current.sessionTitleAnimations,
+        [sessionId]: {
+          targetTitle: animation.targetTitle,
+          renderedTitle: nextRenderedTitle,
+          animating: !done,
+        },
+      },
+    }))
+
+    if (done) {
+      clearSessionTitleAnimationTimer(sessionId)
+      return
+    }
+    scheduleSessionTitleAnimationTick(sessionId)
+  }, SESSION_TITLE_ANIMATION_TICK_MS)
+  sessionTitleAnimationTimers.set(sessionId, timer)
+}
+
+function startSessionTitleAnimation(sessionId: string, previousTitle: string, nextTitle: string) {
+  useChatStore.setState((state) => ({
+    sessionTitleAnimations: {
+      ...state.sessionTitleAnimations,
+      [sessionId]: {
+        targetTitle: nextTitle,
+        renderedTitle: previousTitle.slice(0, 1),
+        animating: true,
+      },
+    },
+  }))
+  scheduleSessionTitleAnimationTick(sessionId)
+}
+
+function settleSessionTitleAnimation(sessionId: string, title: string) {
+  clearSessionTitleAnimationTimer(sessionId)
+  useChatStore.setState((state) => ({
+    sessionTitleAnimations: {
+      ...state.sessionTitleAnimations,
+      [sessionId]: {
+        targetTitle: title,
+        renderedTitle: title,
+        animating: false,
+      },
+    },
+  }))
+}
 
 export function __setIdleSchedulerForTests(
   scheduler: {
@@ -432,6 +513,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
   return {
     sessions: [],
+    sessionTitleAnimations: {},
     activeSessionId: null,
     sessionHydrating: false,
     turns: [],
@@ -450,7 +532,20 @@ export const useChatStore = create<ChatStore>((set, get) => {
       apiFetchSessions()
         .then((sessions) => {
           const activeId = sessions[0]?.id ?? null
-          set({ sessions, activeSessionId: activeId })
+          set({
+            sessions,
+            sessionTitleAnimations: Object.fromEntries(
+              sessions.map((session) => [
+                session.id,
+                {
+                  targetTitle: session.title,
+                  renderedTitle: session.title,
+                  animating: false,
+                },
+              ])
+            ),
+            activeSessionId: activeId,
+          })
           if (activeId) {
             void hydrateSession(activeId)
             void hydrateSessionSettingsForSession(activeId)
@@ -768,20 +863,53 @@ export const useChatStore = create<ChatStore>((set, get) => {
           get().fetchSessions()
           break
         }
+        case "session_updated": {
+          const updatedId = event.data.session_id
+          const previous = get().sessions.find((session) => session.id === updatedId)
+          const titleChanged = previous?.title != null && previous.title !== event.data.title
+          set((state) => ({
+            sessions: state.sessions.map((session) =>
+              session.id === updatedId
+                ? {
+                    ...session,
+                    title: event.data.title,
+                    title_source: event.data.title_source,
+                    auto_rename_policy: event.data.auto_rename_policy,
+                    updated_at: event.data.updated_at,
+                    last_active_at: event.data.last_active_at,
+                    model: event.data.model,
+                  }
+                : session
+            ),
+          }))
+          if (titleChanged && previous) {
+            startSessionTitleAnimation(updatedId, previous.title, event.data.title)
+          } else {
+            settleSessionTitleAnimation(updatedId, event.data.title)
+          }
+          break
+        }
         case "session_deleted": {
           const deletedId = event.data.session_id
           const wasActive = get().activeSessionId === deletedId
           let nextActiveId: string | null = null
+          clearSessionTitleAnimationTimer(deletedId)
 
           set((state) => {
             const sessions = state.sessions.filter((s) => s.id !== deletedId)
+            const { [deletedId]: _deletedAnimation, ...remainingAnimations } =
+              state.sessionTitleAnimations
             const nextSnapshots = trimSessionSnapshotsToKnownSessions(
               state._sessionSnapshots,
               sessions
             )
 
             if (!wasActive) {
-              return { sessions, _sessionSnapshots: nextSnapshots }
+              return {
+                sessions,
+                sessionTitleAnimations: remainingAnimations,
+                _sessionSnapshots: nextSnapshots,
+              }
             }
 
             nextActiveId = sessions[0]?.id ?? null
@@ -795,6 +923,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
               ...applySessionSnapshot(nextSnapshot, nextActiveId != null),
               historyLoadingMore: false,
               _pendingPrompt: null,
+              sessionTitleAnimations: remainingAnimations,
               _sessionSnapshots: nextSnapshots,
             }
           })
@@ -921,6 +1050,27 @@ export const useChatStore = create<ChatStore>((set, get) => {
       const sessions = await apiFetchSessions()
       set((state) => ({
         sessions,
+        sessionTitleAnimations: Object.fromEntries(
+          sessions.map((session) => {
+            const existing = state.sessionTitleAnimations[session.id]
+            return [
+              session.id,
+              existing
+                ? {
+                    targetTitle: session.title,
+                    renderedTitle: existing.animating
+                      ? existing.renderedTitle
+                      : session.title,
+                    animating: existing.animating && existing.targetTitle === session.title,
+                  }
+                : {
+                    targetTitle: session.title,
+                    renderedTitle: session.title,
+                    animating: false,
+                  },
+            ]
+          })
+        ),
         _sessionSnapshots: trimSessionSnapshotsToKnownSessions(
           state._sessionSnapshots,
           sessions
@@ -932,6 +1082,14 @@ export const useChatStore = create<ChatStore>((set, get) => {
       const session = await apiCreateSession()
       set((state) => ({
         sessions: [...state.sessions, session],
+        sessionTitleAnimations: {
+          ...state.sessionTitleAnimations,
+          [session.id]: {
+            targetTitle: session.title,
+            renderedTitle: session.title,
+            animating: false,
+          },
+        },
         _sessionSnapshots: trimSessionSnapshotsToKnownSessions(
           state._sessionSnapshots,
           [...state.sessions, session]
@@ -1004,11 +1162,18 @@ export const useChatStore = create<ChatStore>((set, get) => {
       cancelPendingHistoryHydration()
       const deletedWasActive = get().activeSessionId === id
       await apiDeleteSession(id)
+      clearSessionTitleAnimationTimer(id)
       const state = get()
       const remaining = state.sessions.filter((s) => s.id !== id)
       const nextSnapshots = { ...state._sessionSnapshots }
+      const nextAnimations = { ...state.sessionTitleAnimations }
       delete nextSnapshots[id]
-      set({ sessions: remaining, _sessionSnapshots: nextSnapshots })
+      delete nextAnimations[id]
+      set({
+        sessions: remaining,
+        sessionTitleAnimations: nextAnimations,
+        _sessionSnapshots: nextSnapshots,
+      })
 
       if (deletedWasActive) {
         const next = remaining[0]

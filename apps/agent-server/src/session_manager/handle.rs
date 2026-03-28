@@ -1,5 +1,5 @@
 use agent_runtime::{ContextStats, TurnLifecycle};
-use agent_store::SessionRecord;
+use agent_store::{SessionAutoRenamePolicy, SessionRecord, SessionTitleSource};
 use async_trait::async_trait;
 use channel_bridge::{ChannelBridgeError, ChannelSessionInfo, ChannelSessionService};
 use std::path::{Path, PathBuf};
@@ -46,7 +46,28 @@ impl SessionManagerHandle {
         &self,
         title: Option<String>,
     ) -> Result<SessionRecord, RuntimeWorkerError> {
-        self.request(|reply| SessionCommand::CreateSession { title, reply }).await
+        self.request(|reply| SessionCommand::CreateSession {
+            title,
+            title_source: None,
+            auto_rename_policy: None,
+            reply,
+        })
+        .await
+    }
+
+    pub async fn create_session_with_metadata(
+        &self,
+        title: Option<String>,
+        title_source: SessionTitleSource,
+        auto_rename_policy: SessionAutoRenamePolicy,
+    ) -> Result<SessionRecord, RuntimeWorkerError> {
+        self.request(|reply| SessionCommand::CreateSession {
+            title,
+            title_source: Some(title_source),
+            auto_rename_policy: Some(auto_rename_policy),
+            reply,
+        })
+        .await
     }
 
     pub async fn list_sessions(&self) -> Result<Vec<SessionRecord>, RuntimeWorkerError> {
@@ -192,7 +213,12 @@ impl ChannelSessionService for SessionManagerHandle {
     }
 
     async fn create_session(&self, title: String) -> Result<String, ChannelBridgeError> {
-        SessionManagerHandle::create_session(self, Some(title))
+        SessionManagerHandle::create_session_with_metadata(
+            self,
+            Some(title),
+            SessionTitleSource::Channel,
+            SessionAutoRenamePolicy::Disabled,
+        )
             .await
             .map(|session| session.id)
             .map_err(|error| ChannelBridgeError::new(error.message))

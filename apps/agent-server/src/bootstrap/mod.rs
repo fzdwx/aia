@@ -5,7 +5,9 @@ use std::{
 
 use agent_core::RequestTimeoutConfig;
 use agent_runtime::RuntimeHooks;
-use agent_store::{AiaStore, SessionRecord, generate_session_id};
+use agent_store::{
+    AiaStore, SessionAutoRenamePolicy, SessionRecord, SessionTitleSource, generate_session_id,
+};
 use channel_bridge::ChannelProfileRegistry;
 use provider_registry::ProviderRegistry;
 
@@ -174,10 +176,12 @@ impl ServerBootstrap {
             .active_provider()
             .and_then(|provider| provider.default_model_id().map(str::to_string))
             .unwrap_or_default();
-        let record = SessionRecord::new(
+        let record = SessionRecord::new_with_metadata(
             session_id,
             aia_config::DEFAULT_SESSION_TITLE.to_string(),
             model_name,
+            SessionTitleSource::Default,
+            SessionAutoRenamePolicy::Enabled,
         );
         resources
             .store

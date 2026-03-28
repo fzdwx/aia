@@ -16,6 +16,7 @@ use agent_core::{
     QuestionAnswer, QuestionItem, QuestionKind, QuestionRequest, QuestionResult,
     QuestionResultStatus,
 };
+use agent_store::{SessionAutoRenamePolicy, SessionTitleSource};
 
 fn sample_registry() -> ProviderRegistry {
     let mut registry = ProviderRegistry::default();
@@ -134,8 +135,11 @@ async fn session_list_projection_marks_missing_slot_model_unavailable() {
                 .create_session(&agent_store::SessionRecord {
                     id: "session-missing-slot".into(),
                     title: "Session Missing Slot".into(),
+                    title_source: SessionTitleSource::Manual,
+                    auto_rename_policy: SessionAutoRenamePolicy::Enabled,
                     created_at: "2026-03-21T00:00:00Z".into(),
                     updated_at: "2026-03-21T00:00:00Z".into(),
+                    last_active_at: "2026-03-21T00:00:00Z".into(),
                     model: "stale-store-model".into(),
                 })
                 .expect("session record should be inserted directly into store");

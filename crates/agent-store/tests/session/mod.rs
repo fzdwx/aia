@@ -22,6 +22,9 @@ fn crud_operations_work() {
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0].id, "20260315_abcd1234");
     assert_eq!(sessions[0].title, "Test session");
+    assert_eq!(sessions[0].title_source, SessionTitleSource::Manual);
+    assert_eq!(sessions[0].auto_rename_policy, SessionAutoRenamePolicy::Enabled);
+    assert_eq!(sessions[0].last_active_at, sessions[0].created_at);
 
     let found = store.get_session("20260315_abcd1234").expect("get");
     assert!(found.is_some());
@@ -52,8 +55,11 @@ fn update_session_model_only_updates_model_and_timestamp() {
     let record = SessionRecord {
         id: "20260315_modelonly".to_string(),
         title: "Model only".to_string(),
+        title_source: SessionTitleSource::Manual,
+        auto_rename_policy: SessionAutoRenamePolicy::Enabled,
         created_at: "2026-03-15T00:00:00Z".to_string(),
         updated_at: "2026-03-15T00:00:00Z".to_string(),
+        last_active_at: "2026-03-15T00:00:00Z".to_string(),
         model: "gpt-4.1".to_string(),
     };
     store.create_session(&record).expect("create");
@@ -74,8 +80,11 @@ fn update_session_without_fields_still_touches_updated_at() {
     let record = SessionRecord {
         id: "20260315_touch".to_string(),
         title: "Touch only".to_string(),
+        title_source: SessionTitleSource::Manual,
+        auto_rename_policy: SessionAutoRenamePolicy::Enabled,
         created_at: "2026-03-15T00:00:00Z".to_string(),
         updated_at: "2026-03-15T00:00:00Z".to_string(),
+        last_active_at: "2026-03-15T00:00:00Z".to_string(),
         model: "gpt-4.1".to_string(),
     };
     store.create_session(&record).expect("create");
@@ -114,8 +123,11 @@ fn first_session_id_returns_earliest_created_session() {
         .create_session(&SessionRecord {
             id: "20260315_second".to_string(),
             title: "Second".to_string(),
+            title_source: SessionTitleSource::Manual,
+            auto_rename_policy: SessionAutoRenamePolicy::Enabled,
             created_at: "2026-03-15T00:00:01Z".to_string(),
             updated_at: "2026-03-15T00:00:01Z".to_string(),
+            last_active_at: "2026-03-15T00:00:01Z".to_string(),
             model: "gpt-4.1".to_string(),
         })
         .expect("create second");
@@ -123,8 +135,11 @@ fn first_session_id_returns_earliest_created_session() {
         .create_session(&SessionRecord {
             id: "20260315_first".to_string(),
             title: "First".to_string(),
+            title_source: SessionTitleSource::Manual,
+            auto_rename_policy: SessionAutoRenamePolicy::Enabled,
             created_at: "2026-03-15T00:00:00Z".to_string(),
             updated_at: "2026-03-15T00:00:00Z".to_string(),
+            last_active_at: "2026-03-15T00:00:00Z".to_string(),
             model: "gpt-4.1".to_string(),
         })
         .expect("create first");
@@ -146,6 +161,112 @@ async fn async_session_methods_work() {
 
     let first = store.first_session_id_async().await.expect("first async");
     assert_eq!(first.as_deref(), Some("20260317_async"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn completed_user_turn_counter_schedules_auto_rename_when_threshold_hit() {
+    let store = Arc::new(AiaStore::in_memory().expect("store init"));
+    let record = SessionRecord::new_with_metadata(
+        "20260317_auto",
+        "New session",
+        "gpt-5.4",
+        SessionTitleSource::Default,
+        SessionAutoRenamePolicy::Enabled,
+    );
+
+    store.create_session_async(record.clone()).await.expect("create async");
+    store
+        .with_conn(|conn| {
+            conn.execute(
+                "UPDATE sessions SET rename_after_user_turns = 1 WHERE id = ?1",
+                [record.id.as_str()],
+            )?;
+            Ok(())
+        })
+        .expect("threshold setup should succeed");
+
+    let scheduled = store
+        .note_completed_user_turn_for_auto_rename_async(record.id.clone(), true)
+        .await
+        .expect("counter update should succeed");
+
+    assert!(scheduled.is_some());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn apply_auto_rename_title_updates_title_source_and_timestamp() {
+    let store = Arc::new(AiaStore::in_memory().expect("store init"));
+    let record = SessionRecord::new_with_metadata(
+        "20260317_rename",
+        "New session",
+        "gpt-5.4",
+        SessionTitleSource::Default,
+        SessionAutoRenamePolicy::Enabled,
+    );
+    let updated_at = record.updated_at.clone();
+
+    store.create_session_async(record.clone()).await.expect("create async");
+    let updated = store
+        .apply_auto_rename_title_async(record.id.clone(), "设计 Session 自动重命名 RFC")
+        .await
+        .expect("rename should succeed")
+        .expect("session should be updated");
+
+    assert_eq!(updated.title, "设计 Session 自动重命名 RFC");
+    assert_eq!(updated.title_source, SessionTitleSource::Auto);
+    assert!(updated.updated_at >= updated_at);
+}
+
+#[test]
+fn session_schema_migration_backfills_session_metadata() {
+    let store = AiaStore::in_memory().expect("store init");
+
+    store
+        .with_conn(|conn| {
+            conn.execute_batch(
+                "DROP TABLE sessions;
+                 CREATE TABLE sessions (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    model TEXT NOT NULL DEFAULT ''
+                 );",
+            )?;
+            conn.execute(
+                "INSERT INTO sessions (id, title, created_at, updated_at, model) VALUES (?1, ?2, ?3, ?4, ?5)",
+                (
+                    "legacy-default",
+                    "New session",
+                    "2026-03-15T00:00:00Z",
+                    "2026-03-15T00:00:01Z",
+                    "bootstrap",
+                ),
+            )?;
+            conn.execute(
+                "INSERT INTO sessions (id, title, created_at, updated_at, model) VALUES (?1, ?2, ?3, ?4, ?5)",
+                (
+                    "legacy-manual",
+                    "Real title",
+                    "2026-03-15T00:00:02Z",
+                    "2026-03-15T00:00:03Z",
+                    "bootstrap",
+                ),
+            )?;
+            Ok(())
+        })
+        .expect("legacy schema should be written");
+
+    store.init_session_schema().expect("migration should succeed");
+    let sessions = store.list_sessions().expect("sessions should load");
+
+    assert_eq!(sessions.len(), 2);
+    assert_eq!(sessions[0].title_source, SessionTitleSource::Default);
+    assert_eq!(sessions[0].auto_rename_policy, SessionAutoRenamePolicy::Enabled);
+    assert_eq!(sessions[0].last_active_at, "2026-03-15T00:00:01Z");
+    assert_eq!(sessions[1].title_source, SessionTitleSource::Manual);
+    assert_eq!(sessions[1].auto_rename_policy, SessionAutoRenamePolicy::Enabled);
+    assert_eq!(sessions[1].last_active_at, "2026-03-15T00:00:03Z");
 }
 
 #[test]

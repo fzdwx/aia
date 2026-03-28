@@ -22,6 +22,8 @@ function requireResolver<T>(
 }
 
 const initialState = {
+  sessions: [],
+  sessionTitleAnimations: {},
   activeSessionId: "session-1",
   sessionHydrating: false,
   turns: [],
@@ -685,15 +687,21 @@ describe("chat store submitTurn", () => {
             {
               id: "session-1",
               title: "当前会话",
+              title_source: "manual",
+              auto_rename_policy: "enabled",
               created_at: "2026-03-17T00:00:00Z",
               updated_at: "2026-03-17T00:00:00Z",
+              last_active_at: "2026-03-17T00:00:00Z",
               model: "gpt-4.1-mini",
             },
             {
               id: "session-2",
               title: "补拉回来的新会话",
+              title_source: "manual",
+              auto_rename_policy: "enabled",
               created_at: "2026-03-17T00:01:00Z",
               updated_at: "2026-03-17T00:01:00Z",
+              last_active_at: "2026-03-17T00:01:00Z",
               model: "gpt-4.1-mini",
             },
           ]),
@@ -771,8 +779,11 @@ describe("chat store submitTurn", () => {
         {
           id: "session-1",
           title: "当前会话",
+          title_source: "manual",
+          auto_rename_policy: "enabled",
           created_at: "2026-03-17T00:00:00Z",
           updated_at: "2026-03-17T00:00:00Z",
+          last_active_at: "2026-03-17T00:00:00Z",
           model: "gpt-4.1-mini",
         },
       ],
@@ -1455,15 +1466,21 @@ describe("chat store submitTurn", () => {
         {
           id: "session-1",
           title: "当前会话",
+          title_source: "manual",
+          auto_rename_policy: "enabled",
           created_at: "2026-03-17T00:00:00Z",
           updated_at: "2026-03-17T00:00:00Z",
+          last_active_at: "2026-03-17T00:00:00Z",
           model: "gpt-4.1-mini",
         },
         {
           id: "session-2",
           title: "下一个会话",
+          title_source: "manual",
+          auto_rename_policy: "enabled",
           created_at: "2026-03-17T00:01:00Z",
           updated_at: "2026-03-17T00:01:00Z",
+          last_active_at: "2026-03-17T00:01:00Z",
           model: "gpt-4.1-mini",
         },
       ],
@@ -1518,6 +1535,91 @@ describe("chat store submitTurn", () => {
     expect(state.turns).toHaveLength(1)
     expect(state.turns[0]?.turn_id).toBe("turn-session-2")
     expect(state.chatState).toBe("idle")
+  })
+
+  test("session_updated incrementally patches existing session metadata", () => {
+    useChatStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "旧标题",
+          title_source: "default",
+          auto_rename_policy: "enabled",
+          created_at: "2026-03-17T00:00:00Z",
+          updated_at: "2026-03-17T00:00:00Z",
+          last_active_at: "2026-03-17T00:00:00Z",
+          model: "gpt-4.1-mini",
+        },
+      ],
+    })
+
+    useChatStore.getState().handleSseEvent({
+      type: "session_updated",
+      data: {
+        session_id: "session-1",
+        title: "新标题",
+        title_source: "auto",
+        auto_rename_policy: "enabled",
+        updated_at: "2026-03-17T00:10:00Z",
+        last_active_at: "2026-03-17T00:09:00Z",
+        model: "gpt-5",
+      },
+    })
+
+    expect(useChatStore.getState().sessions[0]).toEqual({
+      id: "session-1",
+      title: "新标题",
+      title_source: "auto",
+      auto_rename_policy: "enabled",
+      created_at: "2026-03-17T00:00:00Z",
+      updated_at: "2026-03-17T00:10:00Z",
+      last_active_at: "2026-03-17T00:09:00Z",
+      model: "gpt-5",
+    })
+    expect(useChatStore.getState().sessionTitleAnimations["session-1"]?.animating).toBe(true)
+  })
+
+  test("session_updated with unchanged title only refreshes activity without animation", () => {
+    useChatStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "稳定标题",
+          title_source: "auto",
+          auto_rename_policy: "enabled",
+          created_at: "2026-03-17T00:00:00Z",
+          updated_at: "2026-03-17T00:00:00Z",
+          last_active_at: "2026-03-17T00:00:00Z",
+          model: "gpt-4.1-mini",
+        },
+      ],
+      sessionTitleAnimations: {
+        "session-1": {
+          targetTitle: "稳定标题",
+          renderedTitle: "稳定标题",
+          animating: false,
+        },
+      },
+    })
+
+    useChatStore.getState().handleSseEvent({
+      type: "session_updated",
+      data: {
+        session_id: "session-1",
+        title: "稳定标题",
+        title_source: "auto",
+        auto_rename_policy: "enabled",
+        updated_at: "2026-03-17T00:10:00Z",
+        last_active_at: "2026-03-17T00:09:00Z",
+        model: "gpt-5",
+      },
+    })
+
+    expect(useChatStore.getState().sessionTitleAnimations["session-1"]).toEqual({
+      targetTitle: "稳定标题",
+      renderedTitle: "稳定标题",
+      animating: false,
+    })
   })
 
   test("loadOlderTurns deduplicates overlapping page boundaries", async () => {
@@ -1675,8 +1777,11 @@ describe("chat store submitTurn", () => {
         {
           id: "session-1",
           title: "Session 1",
+          title_source: "manual",
+          auto_rename_policy: "enabled",
           created_at: "2026-03-21T00:00:00Z",
           updated_at: "2026-03-21T00:00:00Z",
+          last_active_at: "2026-03-21T00:00:00Z",
           model: "gpt-5",
         },
       ],

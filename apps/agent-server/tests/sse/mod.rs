@@ -1,5 +1,6 @@
 use agent_core::StreamEvent;
 use agent_runtime::{TurnLifecycle, TurnOutcome};
+use agent_store::{SessionAutoRenamePolicy, SessionTitleSource};
 
 use crate::runtime_worker::CurrentTurnSnapshot;
 
@@ -102,6 +103,21 @@ fn session_created_payload_can_convert_to_event() {
     let event = SsePayload::SessionCreated {
         session_id: "s1".into(),
         title: aia_config::DEFAULT_SESSION_TITLE.into(),
+    }
+    .into_axum_event();
+    assert!(event.is_ok());
+}
+
+#[test]
+fn session_updated_payload_can_convert_to_event() {
+    let event = SsePayload::SessionUpdated {
+        session_id: "s1".into(),
+        title: "Rust 会话重命名".into(),
+        title_source: SessionTitleSource::Auto,
+        auto_rename_policy: SessionAutoRenamePolicy::Enabled,
+        updated_at: "2026-03-28T13:20:00Z".into(),
+        last_active_at: "2026-03-28T13:18:42Z".into(),
+        model: "gpt-4.1".into(),
     }
     .into_axum_event();
     assert!(event.is_ok());

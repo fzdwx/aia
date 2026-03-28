@@ -4,6 +4,7 @@ mod prompt;
 mod provider_sync;
 mod query_ops;
 mod server_runtime_tool_host;
+mod auto_rename;
 #[cfg(test)]
 #[path = "../../tests/session_manager/mod.rs"]
 mod tests;
@@ -20,7 +21,9 @@ use agent_core::{
     QuestionRequest, QuestionResult, QuestionResultStatus, ReasoningEffort,
 };
 use agent_runtime::AgentRuntime;
-use agent_store::{AiaStore, SessionRecord, generate_session_id};
+use agent_store::{
+    AiaStore, SessionAutoRenamePolicy, SessionRecord, SessionTitleSource, generate_session_id,
+};
 use provider_registry::ProviderRegistry;
 use session_tape::{SessionProviderBinding, SessionTape, TapeEntry};
 use tokio::sync::mpsc;
@@ -34,6 +37,7 @@ use current_turn::{
     update_current_turn_from_stream, update_current_turn_status,
 };
 pub use handle::SessionManagerHandle;
+use auto_rename::SessionAutoRenameService;
 use prompt::build_session_system_prompt;
 use provider_sync::{ProviderSyncService, ReturnedRuntimeSync};
 pub(crate) use query_ops::SessionQueryService;
@@ -180,8 +184,13 @@ impl SessionManagerLoop {
             SessionCommand::ListSessions { reply } => {
                 let _ = reply.send(self.list_sessions().await);
             }
-            SessionCommand::CreateSession { title, reply } => {
-                let _ = reply.send(self.create_session(title).await);
+            SessionCommand::CreateSession {
+                title,
+                title_source,
+                auto_rename_policy,
+                reply,
+            } => {
+                let _ = reply.send(self.create_session(title, title_source, auto_rename_policy).await);
             }
             SessionCommand::DeleteSession { session_id, reply } => {
                 let _ = reply.send(self.delete_session(&session_id).await);
@@ -338,11 +347,28 @@ impl SessionManagerLoop {
     async fn create_session(
         &mut self,
         title: Option<String>,
+        title_source: Option<SessionTitleSource>,
+        auto_rename_policy: Option<SessionAutoRenamePolicy>,
     ) -> Result<SessionRecord, RuntimeWorkerError> {
         let session_id = generate_session_id();
         let title = title.unwrap_or_else(|| aia_config::DEFAULT_SESSION_TITLE.to_string());
         let model_name = read_lock(&self.config.provider_info_snapshot).model.clone();
-        let record = SessionRecord::new(session_id.clone(), title.clone(), model_name);
+        let (title_source, auto_rename_policy) = if let (Some(title_source), Some(auto_rename_policy)) =
+            (title_source, auto_rename_policy)
+        {
+            (title_source, auto_rename_policy)
+        } else if title == aia_config::DEFAULT_SESSION_TITLE {
+            (SessionTitleSource::Default, SessionAutoRenamePolicy::Enabled)
+        } else {
+            (SessionTitleSource::Manual, SessionAutoRenamePolicy::Enabled)
+        };
+        let record = SessionRecord::new_with_metadata(
+            session_id.clone(),
+            title.clone(),
+            model_name,
+            title_source,
+            auto_rename_policy,
+        );
 
         self.config.store.create_session_async(record.clone()).await.map_err(|error| {
             RuntimeWorkerError::internal(format!("session db insert failed: {error}"))

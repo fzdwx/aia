@@ -1,5 +1,6 @@
 use agent_core::StreamEvent;
 use agent_runtime::TurnLifecycle;
+use agent_store::{SessionAutoRenamePolicy, SessionTitleSource};
 use axum::response::sse::Event;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -28,6 +29,15 @@ pub enum SsePayload {
     SyncRequired { reason: String, skipped_messages: u64 },
     Error { session_id: String, turn_id: Option<String>, message: String },
     SessionCreated { session_id: String, title: String },
+    SessionUpdated {
+        session_id: String,
+        title: String,
+        title_source: SessionTitleSource,
+        auto_rename_policy: SessionAutoRenamePolicy,
+        updated_at: String,
+        last_active_at: String,
+        model: String,
+    },
     SessionDeleted { session_id: String },
     TurnCancelled { session_id: String, turn_id: String },
 }
@@ -86,6 +96,17 @@ struct TurnCompletedData {
 struct SessionCreatedData {
     session_id: String,
     title: String,
+}
+
+#[derive(Serialize)]
+struct SessionUpdatedData {
+    session_id: String,
+    title: String,
+    title_source: SessionTitleSource,
+    auto_rename_policy: SessionAutoRenamePolicy,
+    updated_at: String,
+    last_active_at: String,
+    model: String,
 }
 
 #[derive(Serialize)]
@@ -150,6 +171,26 @@ impl SsePayload {
                     &SessionCreatedData { session_id, title },
                 )))
             }
+            Self::SessionUpdated {
+                session_id,
+                title,
+                title_source,
+                auto_rename_policy,
+                updated_at,
+                last_active_at,
+                model,
+            } => Ok(Event::default().event("session_updated").data(serialize_sse_data(
+                "session_updated",
+                &SessionUpdatedData {
+                    session_id,
+                    title,
+                    title_source,
+                    auto_rename_policy,
+                    updated_at,
+                    last_active_at,
+                    model,
+                },
+            ))),
             Self::SessionDeleted { session_id } => Ok(Event::default()
                 .event("session_deleted")
                 .data(serialize_sse_data("session_deleted", &SessionDeletedData { session_id }))),

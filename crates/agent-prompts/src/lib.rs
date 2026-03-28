@@ -1,7 +1,11 @@
 mod system_prompt;
+mod title_generator;
 pub mod tool_descriptions;
 
 pub use system_prompt::{SystemPromptBlock, SystemPromptConfig, build_system_prompt};
+pub use title_generator::{
+    TitleGeneratorPromptContext, render_title_generator_prompt, title_generator_prompt_template,
+};
 
 const AIA_AGENTS_TEMPLATE: &str = include_str!("../prompts/aia-agents.md");
 

@@ -63,8 +63,11 @@ describe("session settings store", () => {
         {
           id: "session-1",
           title: "Session 1",
+          title_source: "manual",
+          auto_rename_policy: "enabled",
           created_at: "2026-03-21T00:00:00Z",
           updated_at: "2026-03-21T00:00:00Z",
+          last_active_at: "2026-03-21T00:00:00Z",
           model: "gpt-5",
         },
       ],

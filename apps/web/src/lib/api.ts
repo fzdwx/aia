@@ -384,6 +384,7 @@ export function connectEvents(onEvent: (event: SseEvent) => void): () => void {
   es.addEventListener("error", handle("error"))
   es.addEventListener("message", handleDefaultMessage)
   es.addEventListener("session_created", handle("session_created"))
+  es.addEventListener("session_updated", handle("session_updated"))
   es.addEventListener("session_deleted", handle("session_deleted"))
   es.addEventListener("turn_cancelled", handle("turn_cancelled"))
 

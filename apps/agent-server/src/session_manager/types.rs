@@ -222,6 +222,8 @@ pub(crate) enum SessionCommand {
     },
     CreateSession {
         title: Option<String>,
+        title_source: Option<agent_store::SessionTitleSource>,
+        auto_rename_policy: Option<agent_store::SessionAutoRenamePolicy>,
         reply: oneshot::Sender<Result<SessionRecord, RuntimeWorkerError>>,
     },
     DeleteSession {
