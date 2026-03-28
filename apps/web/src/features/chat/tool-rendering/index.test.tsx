@@ -1107,7 +1107,7 @@ describe("tool renderer registry", () => {
     expect(html).toContain("leading-6 font-medium text-foreground")
   })
 
-  test("renders TapeHandoff title from name and summary", () => {
+  test("renders TapeHandoff title and subtitle with summary-first hierarchy", () => {
     const title = toolRendererRegistry.renderTitle({
       toolName: "TapeHandoff",
       arguments: {
@@ -1117,14 +1117,58 @@ describe("tool renderer registry", () => {
       outputContent: "",
       succeeded: true,
     })
+    const subtitle = toolRendererRegistry.renderSubtitle({
+      toolName: "TapeHandoff",
+      arguments: {
+        name: "session-cut",
+        summary: "Condensed handoff summary for the next wake.",
+      },
+      outputContent: "",
+      succeeded: true,
+    })
 
-    expect(title).toBe(
-      "session-cut — Condensed handoff summary for the next wake."
+    expect(title).toBe("session-cut")
+    expect(subtitle).toBe("Condensed handoff summary for the next wake.")
+  })
+
+  test("renders TapeHandoff details as summary plus content sections", () => {
+    const details = toolRendererRegistry.renderDetails({
+      toolName: "TapeHandoff",
+      arguments: {
+        name: "session-cut",
+        summary: "Condensed handoff summary for the next wake.",
+      },
+      outputContent:
+        "Carry over unresolved TODO items and resume from anchor A42.",
+      succeeded: true,
+    })
+
+    expect(details).not.toBe(null)
+    const html = renderWithTheme(details)
+    expect(html).toContain("Summary")
+    expect(html).toContain("Condensed handoff summary for the next wake.")
+    expect(html).toContain("Content")
+    expect(html).toContain(
+      "Carry over unresolved TODO items and resume from anchor A42."
     )
+    expect(html).not.toContain("Input")
+    expect(html).not.toContain("Result")
   })
 
   test("renders TapeInfo as inline summary metadata without details", () => {
     const title = toolRendererRegistry.renderTitle({
+      toolName: "TapeInfo",
+      arguments: {},
+      details: {
+        total_entries: 12,
+        anchor_count: 1,
+        entries_since_last_anchor: 4,
+        pressure_ratio: 0.7,
+      },
+      outputContent: '{"pressure_ratio":0.7}',
+      succeeded: true,
+    })
+    const subtitle = toolRendererRegistry.renderSubtitle({
       toolName: "TapeInfo",
       arguments: {},
       details: {
@@ -1162,6 +1206,7 @@ describe("tool renderer registry", () => {
     })
 
     expect(title).toBe("pressure 70.0%")
+    expect(subtitle).toBe("pressure 70.0%")
     expect(meta).not.toBe(null)
     const html = renderToStaticMarkup(<>{meta}</>)
     expect(html).toContain("12 entries")

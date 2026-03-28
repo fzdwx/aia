@@ -254,7 +254,11 @@ function scheduleSessionTitleAnimationTick(sessionId: string) {
   sessionTitleAnimationTimers.set(sessionId, timer)
 }
 
-function startSessionTitleAnimation(sessionId: string, previousTitle: string, nextTitle: string) {
+function startSessionTitleAnimation(
+  sessionId: string,
+  previousTitle: string,
+  nextTitle: string
+) {
   useChatStore.setState((state) => ({
     sessionTitleAnimations: {
       ...state.sessionTitleAnimations,
@@ -865,8 +869,11 @@ export const useChatStore = create<ChatStore>((set, get) => {
         }
         case "session_updated": {
           const updatedId = event.data.session_id
-          const previous = get().sessions.find((session) => session.id === updatedId)
-          const titleChanged = previous?.title != null && previous.title !== event.data.title
+          const previous = get().sessions.find(
+            (session) => session.id === updatedId
+          )
+          const titleChanged =
+            previous?.title != null && previous.title !== event.data.title
           set((state) => ({
             sessions: state.sessions.map((session) =>
               session.id === updatedId
@@ -883,7 +890,11 @@ export const useChatStore = create<ChatStore>((set, get) => {
             ),
           }))
           if (titleChanged && previous) {
-            startSessionTitleAnimation(updatedId, previous.title, event.data.title)
+            startSessionTitleAnimation(
+              updatedId,
+              previous.title,
+              event.data.title
+            )
           } else {
             settleSessionTitleAnimation(updatedId, event.data.title)
           }
@@ -1061,7 +1072,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
                     renderedTitle: existing.animating
                       ? existing.renderedTitle
                       : session.title,
-                    animating: existing.animating && existing.targetTitle === session.title,
+                    animating:
+                      existing.animating &&
+                      existing.targetTitle === session.title,
                   }
                 : {
                     targetTitle: session.title,

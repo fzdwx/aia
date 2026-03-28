@@ -68,6 +68,17 @@ export function renderToolDetailsPanel(item: ToolRowItem) {
     isRunning: item.finishedAtMs == null,
   }
   const detailsContent = toolRendererRegistry.renderDetails(renderData)
+
+  if (normalizedToolName === "TapeHandoff") {
+    if (detailsContent == null) return null
+
+    return (
+      <ToolDetailSurface className="tool-timeline-detail-surface-flat">
+        {detailsContent}
+      </ToolDetailSurface>
+    )
+  }
+
   const requestEntries = buildDetailEntries(item.arguments, {
     omitKeys: requestOmitKeys,
   })

@@ -1576,7 +1576,9 @@ describe("chat store submitTurn", () => {
       last_active_at: "2026-03-17T00:09:00Z",
       model: "gpt-5",
     })
-    expect(useChatStore.getState().sessionTitleAnimations["session-1"]?.animating).toBe(true)
+    expect(
+      useChatStore.getState().sessionTitleAnimations["session-1"]?.animating
+    ).toBe(true)
   })
 
   test("session_updated with unchanged title only refreshes activity without animation", () => {
@@ -1615,11 +1617,13 @@ describe("chat store submitTurn", () => {
       },
     })
 
-    expect(useChatStore.getState().sessionTitleAnimations["session-1"]).toEqual({
-      targetTitle: "稳定标题",
-      renderedTitle: "稳定标题",
-      animating: false,
-    })
+    expect(useChatStore.getState().sessionTitleAnimations["session-1"]).toEqual(
+      {
+        targetTitle: "稳定标题",
+        renderedTitle: "稳定标题",
+        animating: false,
+      }
+    )
   })
 
   test("loadOlderTurns deduplicates overlapping page boundaries", async () => {

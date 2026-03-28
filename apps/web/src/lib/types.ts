@@ -126,16 +126,9 @@ export type SessionListItem = {
   model: string
 }
 
-export type SessionTitleSource =
-  | "default"
-  | "auto"
-  | "manual"
-  | "channel"
+export type SessionTitleSource = "default" | "auto" | "manual" | "channel"
 
-export type SessionAutoRenamePolicy =
-  | "enabled"
-  | "disabled"
-  | "inherit"
+export type SessionAutoRenamePolicy = "enabled" | "disabled" | "inherit"
 
 export type ContextCompressionNotice = {
   session_id: string

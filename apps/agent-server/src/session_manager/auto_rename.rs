@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
 use agent_core::{
-    AbortSignal, CompletionRequest, ConversationItem, LanguageModel, LlmTraceRequestContext,
-    Message, Role,
+    AbortSignal, CompletionRequest, LanguageModel, LlmTraceRequestContext,
 };
 use agent_runtime::TurnLifecycle;
 use agent_store::{
@@ -122,8 +121,8 @@ impl SessionAutoRenameService {
         );
         let request = CompletionRequest {
             model: identity,
-            instructions: None,
-            conversation: vec![ConversationItem::Message(Message::new(Role::System, prompt))],
+            instructions: Some(prompt),
+            conversation: vec![],
             max_output_tokens: Some(32),
             available_tools: vec![],
             parallel_tool_calls: Some(false),

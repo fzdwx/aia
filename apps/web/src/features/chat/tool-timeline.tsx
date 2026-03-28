@@ -52,7 +52,10 @@ function ToolTrigger({
   const meta = toolRendererRegistry.renderMeta(renderData)
   const renderedSubtitle = toolRendererRegistry.renderSubtitle(renderData)
   const normalizedToolName = normalizeToolName(item.toolName)
-  const prefersRenderedSubtitle = normalizedToolName === "Shell"
+  const prefersRenderedSubtitle =
+    normalizedToolName === "Shell" ||
+    normalizedToolName === "TapeInfo" ||
+    normalizedToolName === "TapeHandoff"
   const subtitle =
     (prefersRenderedSubtitle ? renderedSubtitle : getFallbackSubtitle(item)) ??
     (prefersRenderedSubtitle ? getFallbackSubtitle(item) : renderedSubtitle) ??

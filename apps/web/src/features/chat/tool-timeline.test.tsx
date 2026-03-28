@@ -8,6 +8,7 @@ import { ThemeProvider } from "@/components/theme-provider"
 import { buildDetailEntries } from "./tool-rendering/helpers"
 import { ExpandableOutput, ToolDetailSection } from "./tool-rendering/ui"
 import { StreamingToolGroup, ToolGroup } from "./tool-timeline"
+import { renderToolDetailsPanel } from "./tool-timeline/tool-details-panel"
 import { isContextExplorationTool } from "./tool-timeline-helpers"
 
 function renderWithTheme(content: ReactElement) {
@@ -685,8 +686,41 @@ describe("tool timeline", () => {
     expect(html).toContain("12 entries")
     expect(html).toContain("1 anchor")
     expect(html).toContain("+4 since anchor")
+    expect(html).not.toContain("&quot;total_entries&quot;")
     expect(html).not.toContain("aria-expanded")
     expect(html).not.toContain('data-slot="tool-row-details"')
+  })
+
+  test("renders TapeHandoff details without generic Input/Result sections", () => {
+    const html = renderWithTheme(
+      <>
+        {renderToolDetailsPanel({
+          id: "tool-tape-handoff-1",
+          toolName: "TapeHandoff",
+          arguments: {
+            name: "session-cut",
+            summary: "Condensed handoff summary for the next wake.",
+          },
+          startedAtMs: 100,
+          finishedAtMs: 140,
+          succeeded: true,
+          outputContent:
+            "Carry over unresolved TODO items and resume from anchor A42.",
+          details: {
+            summary: "Condensed handoff summary for the next wake.",
+          },
+        })}
+      </>
+    )
+
+    expect(html).toContain("Summary")
+    expect(html).toContain("Condensed handoff summary for the next wake.")
+    expect(html).toContain("Content")
+    expect(html).toContain(
+      "Carry over unresolved TODO items and resume from anchor A42."
+    )
+    expect(html).not.toContain("Input")
+    expect(html).not.toContain("Result")
   })
 
   test("keeps fallback tool detail rendering on the renderer-owned path", () => {

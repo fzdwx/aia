@@ -16,17 +16,14 @@ function formatLastActiveAt(timestamp: string) {
 
   const diffMs = Date.now() - date.getTime()
   const diffMinutes = Math.floor(diffMs / 60000)
-  if (diffMinutes <= 0) return "just now"
-  if (diffMinutes < 60)
-    return `${diffMinutes} minute${diffMinutes === 1 ? "" : "s"} ago`
+  if (diffMinutes <= 0) return "now"
+  if (diffMinutes < 60) return `${diffMinutes}m`
 
   const diffHours = Math.floor(diffMinutes / 60)
-  if (diffHours < 24)
-    return `${diffHours} hour${diffHours === 1 ? "" : "s"} ago`
+  if (diffHours < 24) return `${diffHours}h`
 
   const diffDays = Math.floor(diffHours / 24)
-  if (diffDays < 7)
-    return `${diffDays} day${diffDays === 1 ? "" : "s"} ago`
+  if (diffDays < 7) return `${diffDays}d`
 
   return date.toLocaleDateString("en-US", {
     month: "short",
@@ -63,8 +60,9 @@ export function SidebarSessions() {
             const isSwitchingTo = isActive && sessionHydrating
             const animation = sessionTitleAnimations[session.id]
             const sessionLabel =
-              (animation?.animating ? animation.renderedTitle : session.title) ||
-              session.id
+              (animation?.animating
+                ? animation.renderedTitle
+                : session.title) || session.id
             const lastActiveLabel = formatLastActiveAt(session.last_active_at)
 
             return (
@@ -84,34 +82,31 @@ export function SidebarSessions() {
                   {isActive ? (
                     <span className="inline-block size-1.5 shrink-0 rounded-full bg-foreground/60" />
                   ) : null}
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate">
-                      {sessionLabel}
-                      {lastActiveLabel ? (
-                        <span className="text-meta ml-2 inline text-muted-foreground/72">
-                          {lastActiveLabel}
-                        </span>
-                      ) : null}
-                    </span>
-                  </span>
+                  <span className="min-w-0 flex-1 truncate">{sessionLabel}</span>
                   {isSwitchingTo ? (
                     <span className="text-meta shrink-0 text-muted-foreground/72">
                       Loading…
                     </span>
+                  ) : !isActive && lastActiveLabel ? (
+                    <span className="text-meta shrink-0 text-muted-foreground/72">
+                      {lastActiveLabel}
+                    </span>
                   ) : null}
                 </button>
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    void deleteSession(session.id)
-                  }}
-                  disabled={isSwitchingTo}
-                  aria-label={`Delete session ${sessionLabel}`}
-                  className="sidebar-session-delete mr-1 shrink-0 disabled:opacity-30"
-                >
-                  <X className="size-3" />
-                </button>
+                {isActive ? (
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      void deleteSession(session.id)
+                    }}
+                    disabled={isSwitchingTo}
+                    aria-label={`Delete session ${sessionLabel}`}
+                    className="sidebar-session-delete mr-1 shrink-0 disabled:opacity-30"
+                  >
+                    <X className="size-3" />
+                  </button>
+                ) : null}
               </div>
             )
           })}

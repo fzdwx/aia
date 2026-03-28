@@ -9,14 +9,21 @@ import {
 } from "../helpers"
 import { ExpandableOutput, ToolDetailSection } from "../ui"
 
+function getTapePressureSummary(details: Record<string, unknown> | undefined) {
+  const pressureRatio = getNumberValue(details, "pressure_ratio")
+  return pressureRatio != null
+    ? `pressure ${(pressureRatio * 100).toFixed(1)}%`
+    : "context usage"
+}
+
 export function createTapeInfoRenderer(): ToolRenderer {
   return {
     matches: (toolName) => toolName === "TapeInfo",
     renderTitle(data) {
-      const pressureRatio = getNumberValue(data.details, "pressure_ratio")
-      return pressureRatio != null
-        ? `pressure ${(pressureRatio * 100).toFixed(1)}%`
-        : "context usage"
+      return getTapePressureSummary(data.details)
+    },
+    renderSubtitle(data) {
+      return getTapePressureSummary(data.details)
     },
     renderMeta(data) {
       const totalEntries = getNumberValue(data.details, "total_entries")
@@ -63,23 +70,44 @@ export function createTapeHandoffRenderer(): ToolRenderer {
     matches: (toolName) => toolName === "TapeHandoff",
     renderTitle(data) {
       const args = normalizeToolArguments(data.arguments)
+      return getStringValue(args, "name") ?? "handoff"
+    },
+    renderSubtitle(data) {
+      const args = normalizeToolArguments(data.arguments)
       const summary = getStringValue(args, "summary")
-      return [
-        getStringValue(args, "name") ?? "handoff",
-        summary ? truncateInline(summary, 72) : "",
-      ]
-        .filter(Boolean)
-        .join(" — ")
+      if (summary) return truncateInline(summary, 96)
+
+      const name = getStringValue(args, "name")
+      return name ? truncateInline(name, 72) : null
     },
     renderDetails(data) {
-      return data.outputContent ? (
-        <ToolDetailSection title={data.succeeded ? "Content" : "Failure"}>
-          <ExpandableOutput
-            value={data.outputContent}
-            failed={!data.succeeded}
-          />
-        </ToolDetailSection>
-      ) : null
+      const args = normalizeToolArguments(data.arguments)
+      const summary =
+        getStringValue(args, "summary") ??
+        getStringValue(data.details, "summary")
+      const hasOutput = data.outputContent.trim().length > 0
+
+      if (!summary && !hasOutput) return null
+
+      return (
+        <>
+          {summary ? (
+            <ToolDetailSection title="Summary">
+              <p className="text-caption leading-body-sm text-pretty text-foreground/86">
+                {summary}
+              </p>
+            </ToolDetailSection>
+          ) : null}
+          {hasOutput ? (
+            <ToolDetailSection title={data.succeeded ? "Content" : "Failure"}>
+              <ExpandableOutput
+                value={data.outputContent}
+                failed={!data.succeeded}
+              />
+            </ToolDetailSection>
+          ) : null}
+        </>
+      )
     },
   }
 }
