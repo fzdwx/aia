@@ -44,6 +44,7 @@ import {
   loopWindowMs,
   relativeOffsetLabel,
 } from "./lib/trace-panel-formatters"
+import { collectSystemPrompts } from "./lib/trace-preview"
 import {
   buildTimelineTreeRows,
   findActiveNode,
@@ -351,9 +352,31 @@ export function TracePanel() {
     () => findActiveNode(activeGroup, resolvedSelectedNodeId),
     [activeGroup, resolvedSelectedNodeId]
   )
+  const enhancedActiveGroup = useMemo(() => {
+    if (!activeGroup) return null
+
+    const firstLlmTrace = selectedLoop?.trace_details.find(
+      (trace) => trace.request_kind !== "tool"
+    )
+    const systemPromptPreview = firstLlmTrace
+      ? (collectSystemPrompts(firstLlmTrace)[0] ?? null)
+      : null
+
+    if (!systemPromptPreview) return activeGroup
+
+    return {
+      ...activeGroup,
+      timeline: activeGroup.timeline.map((node, index) =>
+        index === 0 && node.kind === "agent_root"
+          ? { ...node, systemPromptPreview }
+          : node
+      ),
+    }
+  }, [activeGroup, selectedLoop?.trace_details])
   const treeRows = useMemo(
-    () => (activeGroup ? buildTimelineTreeRows(activeGroup) : []),
-    [activeGroup]
+    () =>
+      enhancedActiveGroup ? buildTimelineTreeRows(enhancedActiveGroup) : [],
+    [enhancedActiveGroup]
   )
 
   useEffect(() => {

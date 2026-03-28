@@ -82,7 +82,9 @@ export function SidebarSessions() {
                   {isActive ? (
                     <span className="inline-block size-1.5 shrink-0 rounded-full bg-foreground/60" />
                   ) : null}
-                  <span className="min-w-0 flex-1 truncate">{sessionLabel}</span>
+                  <span className="min-w-0 flex-1 truncate">
+                    {sessionLabel}
+                  </span>
                   {isSwitchingTo ? (
                     <span className="text-meta shrink-0 text-muted-foreground/72">
                       Loading…

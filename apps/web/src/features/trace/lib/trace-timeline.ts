@@ -41,7 +41,9 @@ export function nodeTitle(node: LoopTimelineNode) {
 export function nodeSubtitle(node: LoopTimelineNode) {
   switch (node.kind) {
     case "agent_root":
-      return "root span"
+      return node.systemPromptPreview
+        ? `system · ${truncate(node.systemPromptPreview, 120)}`
+        : "root span"
     case "llm_span":
       return node.trace.total_tokens != null && node.trace.total_tokens > 0
         ? `${node.trace.model} · ${formatCount(node.trace.total_tokens)} tok`

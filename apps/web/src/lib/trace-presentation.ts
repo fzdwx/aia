@@ -1,4 +1,10 @@
 import type { TraceListItem, TraceLoopItem, TurnLifecycle } from "@/lib/types"
+import {
+  asArray,
+  asRecord,
+  asString,
+  extractTraceText,
+} from "@/lib/trace-inspection"
 
 export type LoopStatus = "completed" | "failed" | "partial"
 
@@ -13,6 +19,7 @@ export type AgentRootNode = {
   durationMs: number
   status: LoopStatus
   userMessage: string | null
+  systemPromptPreview: string | null
 }
 
 export type LlmSpanNode = {
@@ -183,6 +190,36 @@ function countChildTools(llmTrace: TraceListItem, toolTraces: TraceListItem[]) {
     .length
 }
 
+function extractSystemPromptPreview(trace: TraceListItem | undefined) {
+  if (!trace) return null
+
+  const request = asRecord(
+    (trace as TraceListItem & { provider_request?: unknown }).provider_request
+  )
+  if (!request) return null
+
+  const instructions = asString(request.instructions)
+  if (instructions) return instructions
+
+  const messages = asArray(request.messages)
+  for (const item of messages) {
+    const record = asRecord(item)
+    if (record?.role !== "system") continue
+    const content = extractTraceText(record.content)
+    if (content) return content
+  }
+
+  const input = asArray(request.input)
+  for (const item of input) {
+    const record = asRecord(item)
+    if (record?.role !== "system") continue
+    const content = extractTraceText(record.content)
+    if (content) return content
+  }
+
+  return null
+}
+
 export function buildTraceLoopGroups(
   loops: TraceLoopItem[],
   turns: TurnLifecycle[]
@@ -226,6 +263,7 @@ export function buildTraceLoopGroups(
             latestLlmTrace?.user_message ??
             latestTrace.user_message ??
             null,
+          systemPromptPreview: extractSystemPromptPreview(llmTraces[0]),
         },
       ]
 

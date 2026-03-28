@@ -8,7 +8,6 @@ import {
   getStringValue,
   truncateInline,
 } from "../helpers"
-import { ExpandableOutput, ToolDetailSection } from "../ui"
 
 function getTapePressureSummary(details: Record<string, unknown> | undefined) {
   const pressureRatio = getNumberValue(details, "pressure_ratio")
@@ -76,12 +75,7 @@ export function createTapeHandoffRenderer(): ToolRenderer {
       return getStringValue(args, "name") ?? "handoff"
     },
     renderSubtitle(data) {
-      const args = normalizeToolArguments(data.arguments)
-      const summary = getStringValue(args, "summary")
-      if (summary) return truncateInline(summary, 96)
-
-      const name = getStringValue(args, "name")
-      return name ? truncateInline(name, 72) : null
+      return  truncateInline(getStringValue(data.arguments, "name")??data.outputContent, 72)
     },
     renderDetails(data) {
       const args = normalizeToolArguments(data.arguments)
@@ -106,18 +100,6 @@ export function createTapeHandoffRenderer(): ToolRenderer {
                 />
               </div>
             </section>
-          ) : null}
-          {hasOutput ? (
-            data.succeeded ? (
-              <MarkdownContent
-                content={data.outputContent}
-                className="text-body-sm leading-6 text-foreground/92"
-              />
-            ) : (
-              <ToolDetailSection title="Failure">
-                <ExpandableOutput value={data.outputContent} failed />
-              </ToolDetailSection>
-            )
           ) : null}
         </>
       )
