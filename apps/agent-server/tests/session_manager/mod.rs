@@ -406,6 +406,51 @@ fn tool_call_started_upgrades_existing_detected_tool_block() {
 }
 
 #[test]
+fn tool_call_started_overrides_placeholder_timestamp_created_by_output_delta() {
+    let snapshot = Arc::new(RwLock::new(Some(CurrentTurnSnapshot {
+        turn_id: "turn-1".into(),
+        started_at_ms: 100,
+        user_message: "跑测试".into(),
+        status: TurnStatus::Working,
+        blocks: Vec::new(),
+    })));
+
+    update_current_turn_from_stream(
+        &snapshot,
+        &StreamEvent::ToolOutputDelta {
+            invocation_id: "call-shell-1".into(),
+            stream: agent_core::ToolOutputStream::Stdout,
+            text: "running 32 tests".into(),
+        },
+    );
+    update_current_turn_from_stream(
+        &snapshot,
+        &StreamEvent::ToolCallStarted {
+            invocation_id: "call-shell-1".into(),
+            tool_name: "Shell".into(),
+            arguments: serde_json::json!({
+                "command": "pnpm run test",
+                "description": "running 32 tests"
+            }),
+            started_at_ms: 260,
+        },
+    );
+
+    let current = read_lock(&snapshot);
+    let current = current.as_ref().expect("current turn snapshot should exist");
+    assert_eq!(current.blocks.len(), 1);
+
+    let crate::runtime_worker::CurrentTurnBlock::Tool { tool } = &current.blocks[0] else {
+        panic!("expected tool block");
+    };
+
+    assert_eq!(tool.invocation_id, "call-shell-1");
+    assert_eq!(tool.tool_name, "Shell");
+    assert_eq!(tool.output, "running 32 tests");
+    assert_eq!(tool.started_at_ms, Some(260));
+}
+
+#[test]
 fn session_slot_finish_turn_restores_idle_state_and_clears_pending_binding() {
     let mut slot = build_idle_slot("slot-finish-turn");
     let (runtime, subscriber, _running_turn) =

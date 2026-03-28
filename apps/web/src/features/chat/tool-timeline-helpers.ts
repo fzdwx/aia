@@ -123,7 +123,7 @@ export function fromStreamingTool(tool: StreamingToolOutput): ToolRowItem {
     toolName: tool.toolName,
     arguments: tool.arguments,
     detectedAtMs: tool.detectedAtMs,
-    startedAtMs: tool.startedAtMs ?? tool.detectedAtMs,
+    startedAtMs: tool.startedAtMs,
     finishedAtMs: tool.finishedAtMs,
     succeeded: !tool.failed,
     outputContent: tool.resultContent ?? tool.output,

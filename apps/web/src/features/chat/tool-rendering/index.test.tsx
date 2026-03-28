@@ -184,6 +184,23 @@ describe("tool renderer registry", () => {
     expect(title).toBe('"renderMeta" --glob "*.ts" apps/web/src')
   })
 
+  test("renders shell subtitle from description instead of first output line", () => {
+    const subtitle = toolRendererRegistry.renderSubtitle({
+      toolName: "Shell",
+      arguments: {
+        command: "pnpm run test",
+        description: "running 32 tests",
+      },
+      details: {
+        command: "aia@0.0.1 test /home/like/projects/aia/apps/web",
+      },
+      outputContent: "aia@0.0.1 test /home/like/projects/aia/apps/web\nPASS",
+      succeeded: true,
+    })
+
+    expect(subtitle).toBe("running 32 tests")
+  })
+
   test("renders grep tool meta from details", () => {
     const meta = toolRendererRegistry.renderMeta({
       toolName: "Grep",
@@ -821,7 +838,9 @@ describe("tool renderer registry", () => {
     ).replace(/\s+/g, " ")
 
     expect(source).toContain("function ShellOutputBody(")
-    expect(source).toContain("const preRef = useRef<HTMLPreElement | null>(null)")
+    expect(source).toContain(
+      "const preRef = useRef<HTMLPreElement | null>(null)"
+    )
     expect(source).toContain("shouldFollowRef.current = distance <= 12")
     expect(source).toContain("element.scrollTop = element.scrollHeight")
   })

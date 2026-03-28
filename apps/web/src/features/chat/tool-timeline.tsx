@@ -50,11 +50,12 @@ function ToolTrigger({
   const title = toolRendererRegistry.renderTitle(renderData)
   const meta = toolRendererRegistry.renderMeta(renderData)
   const renderedSubtitle = toolRendererRegistry.renderSubtitle(renderData)
-  const subtitle =
-    getFallbackSubtitle(item) ??
-    renderedSubtitle ??
-    (title && title !== displayName ? title : null)
   const normalizedToolName = normalizeToolName(item.toolName)
+  const prefersRenderedSubtitle = normalizedToolName === "Shell"
+  const subtitle =
+    (prefersRenderedSubtitle ? renderedSubtitle : getFallbackSubtitle(item)) ??
+    (prefersRenderedSubtitle ? getFallbackSubtitle(item) : renderedSubtitle) ??
+    (title && title !== displayName ? title : null)
   const isFileTool =
     normalizedToolName === "Read" ||
     normalizedToolName === "Write" ||
@@ -100,8 +101,12 @@ function ToolRow({ item }: { item: ToolRowItem }) {
   const [showDetails, setShowDetails] = useState(false)
   useDurationTicker(item.finishedAtMs == null)
   const isRunning = item.finishedAtMs == null
-  const durationStartMs =
-    item.startedAtMs ?? (isRunning ? undefined : item.detectedAtMs)
+  const normalizedToolName = normalizeToolName(item.toolName)
+  const durationStartMs = isRunning
+    ? normalizedToolName === "Shell"
+      ? item.startedAtMs
+      : (item.startedAtMs ?? item.detectedAtMs)
+    : (item.startedAtMs ?? item.detectedAtMs)
   const duration = formatDurationMs(durationStartMs, item.finishedAtMs, {
     live: isRunning,
   })

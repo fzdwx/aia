@@ -616,6 +616,11 @@ struct ParallelShellTimingTools {
     events: Arc<Mutex<Vec<String>>>,
 }
 
+struct ParallelShellCompletionTools {
+    fast_finished: mpsc::Sender<()>,
+    release_slow: Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
+}
+
 #[async_trait]
 impl ToolExecutor for ParallelShellTimingTools {
     type Error = CoreError;
@@ -636,6 +641,34 @@ impl ToolExecutor for ParallelShellTimingTools {
         tokio::time::sleep(Duration::from_millis(30)).await;
         mutex_lock(&self.events).push(format!("end:{command}"));
         Ok(ToolResult::from_call(call, command))
+    }
+}
+
+#[async_trait]
+impl ToolExecutor for ParallelShellCompletionTools {
+    type Error = CoreError;
+
+    fn definitions(&self) -> Vec<ToolDefinition> {
+        vec![ToolDefinition::new("Shell", "执行终端命令")]
+    }
+
+    async fn call(
+        &self,
+        call: &ToolCall,
+        _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
+        _context: &ToolExecutionContext,
+    ) -> Result<ToolResult, Self::Error> {
+        let command =
+            call.arguments.get("command").and_then(|value| value.as_str()).unwrap_or("unknown");
+        if command == "first" {
+            let _ = self.fast_finished.send(());
+            return Ok(ToolResult::from_call(call, "first"));
+        }
+
+        let release_slow =
+            mutex_lock(&self.release_slow).take().expect("慢任务释放通道应只被消费一次");
+        release_slow.await.expect("测试应在观察到快任务完成事件后放行慢任务");
+        Ok(ToolResult::from_call(call, "second"))
     }
 }
 struct StopReasonDrivenModel {
@@ -1247,6 +1280,45 @@ fn 大写_shell_在并行路径里也会实时发出输出增量() {
 
     let output = handle.join().expect("线程应成功结束").expect("应成功完成");
     assert_eq!(output.assistant_text, "Shell 已完成");
+}
+
+#[test]
+fn 并行_shell_会在各自完成时单独发出完成事件() {
+    let identity =
+        ModelIdentity::new("local", "parallel-shell-completion", ModelDisposition::Balanced);
+    let model = ParallelShellModel::new();
+    let (fast_finished_tx, fast_finished_rx) = mpsc::channel();
+    let (release_slow_tx, release_slow_rx) = tokio::sync::oneshot::channel();
+    let tools = ParallelShellCompletionTools {
+        fast_finished: fast_finished_tx,
+        release_slow: Mutex::new(Some(release_slow_rx)),
+    };
+    let mut runtime = AgentRuntime::new(model, tools, identity);
+    let (completed_tx, completed_rx) = mpsc::channel();
+
+    let handle = std::thread::spawn(move || {
+        let control = TurnControl::new(AbortSignal::new());
+        run_async(runtime.handle_turn_streaming("并行执行 Shell", control, &mut |event| {
+            if let agent_core::StreamEvent::ToolCallCompleted { content, .. } = event {
+                let _ = completed_tx.send(content);
+            }
+        }))
+    });
+
+    fast_finished_rx.recv().expect("快任务应先执行完成");
+    let first_completed = completed_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("快任务完成后应先收到自己的完成事件");
+    assert_eq!(first_completed, "first");
+
+    release_slow_tx.send(()).expect("应允许慢任务继续完成");
+    let second_completed = completed_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("慢任务完成后应收到自己的完成事件");
+    assert_eq!(second_completed, "second");
+
+    let output = handle.join().expect("线程应成功结束").expect("应成功完成");
+    assert_eq!(output.assistant_text, "并行 Shell 已完成");
 }
 
 #[test]

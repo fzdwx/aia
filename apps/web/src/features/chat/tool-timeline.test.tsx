@@ -487,7 +487,33 @@ describe("tool timeline", () => {
     expect(html).toContain('data-slot="tool-duration"')
   })
 
-  test("does not show live duration before a serial tool actually starts", () => {
+  test("prefers shell description over first output line in row subtitles", () => {
+    const html = renderWithTheme(
+      <StreamingToolGroup
+        toolOutputs={[
+          {
+            invocationId: "streaming-shell-subtitle-1",
+            toolName: "Shell",
+            arguments: {
+              command: "pnpm run test",
+              description: "running 32 tests",
+            },
+            detectedAtMs: Date.now() - 41_100,
+            startedAtMs: Date.now() - 41_000,
+            output: "aia@0.0.1 test /home/like/projects/aia/apps/web",
+            completed: false,
+          },
+        ]}
+      />
+    )
+
+    expect(html).toContain("running 32 tests")
+    expect(html).not.toContain(
+      ">aia@0.0.1 test /home/like/projects/aia/apps/web<"
+    )
+  })
+
+  test("does not show live duration before a shell actually starts", () => {
     const now = Date.now()
     const html = renderWithTheme(
       <StreamingToolGroup
@@ -521,7 +547,68 @@ describe("tool timeline", () => {
 
     expect(html).toContain("Runs Rust workspace tests")
     expect(html).toContain("Runs frontend full checks")
-    expect(html.match(/data-slot="tool-duration"/g)?.length ?? 0).toBe(2)
+    expect(html.match(/data-slot="tool-duration"/g)?.length ?? 0).toBe(1)
+  })
+
+  test("uses per-shell startedAtMs for parallel running durations", () => {
+    const now = Date.now()
+    const html = renderWithTheme(
+      <StreamingToolGroup
+        toolOutputs={[
+          {
+            invocationId: "parallel-shell-1",
+            toolName: "Shell",
+            arguments: {
+              command: "pnpm run test",
+              description: "running 32 tests",
+            },
+            detectedAtMs: now - 41_100,
+            startedAtMs: now - 41_100,
+            output: "aia@0.0.1 test /home/like/projects/aia/apps/web",
+            completed: false,
+          },
+          {
+            invocationId: "parallel-shell-2",
+            toolName: "Shell",
+            arguments: {
+              command: "pnpm run test",
+              description: "running 32 tests",
+            },
+            detectedAtMs: now - 41_100,
+            startedAtMs: now - 2_100,
+            output: "aia@0.0.1 test /home/like/projects/aia/apps/web",
+            completed: false,
+          },
+        ]}
+      />
+    )
+
+    expect(html).toContain("41.1 s")
+    expect(html).toContain("2.1 s")
+  })
+
+  test("does not show live duration for shell before startedAtMs arrives", () => {
+    const now = Date.now()
+    const html = renderWithTheme(
+      <StreamingToolGroup
+        toolOutputs={[
+          {
+            invocationId: "streaming-shell-pending-1",
+            toolName: "Shell",
+            arguments: {
+              command: "pnpm run check",
+              description: "Runs frontend full checks",
+            },
+            detectedAtMs: now - 16_400,
+            output: "",
+            completed: false,
+          },
+        ]}
+      />
+    )
+
+    expect(html).toContain("Runs frontend full checks")
+    expect(html).not.toContain('data-slot="tool-duration"')
   })
 
   test("renders running fallback tools with first output line as subtitle", () => {

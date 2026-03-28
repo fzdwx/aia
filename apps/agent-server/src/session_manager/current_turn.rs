@@ -105,7 +105,11 @@ pub(crate) fn update_current_turn_from_stream(
             if let Some(tool) = find_tool_output_mut(&mut current.blocks, invocation_id) {
                 tool.tool_name = tool_name.clone();
                 tool.arguments = normalize_object_value(arguments);
-                tool.started_at_ms = Some(tool.started_at_ms.unwrap_or(*started_at_ms));
+                tool.started_at_ms = Some(
+                    tool.started_at_ms
+                        .map(|existing| existing.min(*started_at_ms))
+                        .unwrap_or(*started_at_ms),
+                );
             } else {
                 current.blocks.push(live_tool_block(
                     invocation_id.clone(),
@@ -127,7 +131,7 @@ pub(crate) fn update_current_turn_from_stream(
                     serde_json::json!({}),
                     text.clone(),
                     now_timestamp_ms(),
-                    true,
+                    false,
                 ));
             }
         }

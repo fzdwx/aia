@@ -1,7 +1,7 @@
 use agent_core::{
     AbortSignal, Completion, CompletionSegment, CompletionStopReason, LanguageModel,
-    LlmTraceRequestContext, Message, Role, StreamEvent, ToolExecutionContext, ToolExecutor,
-    ToolOutputDelta,
+    LlmTraceRequestContext, Message, Role, StreamEvent, ToolCall, ToolExecutionContext,
+    ToolExecutor, ToolOutputDelta,
 };
 use futures::stream::{FuturesUnordered, StreamExt};
 use session_tape::TapeEntry;
@@ -26,6 +26,12 @@ enum ParallelToolStreamMessage {
         invocation_id: String,
         stream: agent_core::ToolOutputStream,
         text: String,
+    },
+    Finished {
+        assistant_entry_id: Option<u64>,
+        tool_call_entry_id: u64,
+        call: ToolCall,
+        prepared: super::super::tool_calls::PreparedToolCallOutcome,
     },
 }
 
@@ -208,107 +214,95 @@ where
                         started_at_ms,
                     });
 
-                    if let Some(result) = override_result {
-                        return (
-                            assistant_entry_id,
-                            tool_call_entry_id,
-                            call,
-                            super::super::tool_calls::PreparedToolCallOutcome::Completed {
-                                started_at_ms,
-                                tool_trace_context,
-                                result,
-                                failed: abort_signal.is_aborted(),
-                            },
-                        );
-                    }
-
-                    if abort_signal.is_aborted() {
-                        return (
-                            assistant_entry_id,
-                            tool_call_entry_id,
-                            call,
-                            super::super::tool_calls::PreparedToolCallOutcome::Failed {
-                                started_at_ms,
-                                tool_trace_context,
-                                event_name: "tool_call_cancelled",
-                                runtime_error: RuntimeError::cancelled(),
-                            },
-                        );
-                    }
-
-                    if !visible_tool_names.contains(&call.tool_name) {
+                    let prepared = if let Some(result) = override_result {
+                        super::super::tool_calls::PreparedToolCallOutcome::Completed {
+                            started_at_ms,
+                            tool_trace_context,
+                            result,
+                            failed: abort_signal.is_aborted(),
+                        }
+                    } else if abort_signal.is_aborted() {
+                        super::super::tool_calls::PreparedToolCallOutcome::Failed {
+                            started_at_ms,
+                            tool_trace_context,
+                            event_name: "tool_call_cancelled",
+                            runtime_error: RuntimeError::cancelled(),
+                        }
+                    } else if !visible_tool_names.contains(&call.tool_name) {
                         let unavailable_name = call.tool_name.clone();
-                        return (
-                            assistant_entry_id,
-                            tool_call_entry_id,
-                            call,
-                            super::super::tool_calls::PreparedToolCallOutcome::Failed {
-                                started_at_ms,
-                                tool_trace_context,
-                                event_name: "tool_call_rejected",
-                                runtime_error: RuntimeError::tool_unavailable(unavailable_name),
-                            },
-                        );
-                    }
-
-                    let invocation_id = call.invocation_id.clone();
-                    let prepared = match tools
-                        .call(
-                            &call,
-                            &mut |delta: ToolOutputDelta| {
-                                let _ = stream_tx.send(ParallelToolStreamMessage::Delta {
-                                    invocation_id: invocation_id.clone(),
-                                    stream: delta.stream,
-                                    text: delta.text,
-                                });
-                            },
-                            &ToolExecutionContext {
-                                run_id: turn_id_owned,
-                                session_id,
-                                workspace_root,
-                                abort: abort_signal.clone(),
-                                runtime: None,
-                                runtime_host: None,
-                            },
-                        )
-                        .await
-                    {
-                        Ok(result) => {
-                            if result.invocation_id != call.invocation_id
-                                || result.tool_name != call.tool_name
-                            {
+                        super::super::tool_calls::PreparedToolCallOutcome::Failed {
+                            started_at_ms,
+                            tool_trace_context,
+                            event_name: "tool_call_rejected",
+                            runtime_error: RuntimeError::tool_unavailable(unavailable_name),
+                        }
+                    } else {
+                        let invocation_id = call.invocation_id.clone();
+                        match tools
+                            .call(
+                                &call,
+                                &mut |delta: ToolOutputDelta| {
+                                    let _ = stream_tx.send(ParallelToolStreamMessage::Delta {
+                                        invocation_id: invocation_id.clone(),
+                                        stream: delta.stream,
+                                        text: delta.text,
+                                    });
+                                },
+                                &ToolExecutionContext {
+                                    run_id: turn_id_owned,
+                                    session_id,
+                                    workspace_root,
+                                    abort: abort_signal.clone(),
+                                    runtime: None,
+                                    runtime_host: None,
+                                },
+                            )
+                            .await
+                        {
+                            Ok(result) => {
+                                if result.invocation_id != call.invocation_id
+                                    || result.tool_name != call.tool_name
+                                {
+                                    super::super::tool_calls::PreparedToolCallOutcome::Failed {
+                                        started_at_ms,
+                                        tool_trace_context,
+                                        event_name: "tool_result_rejected",
+                                        runtime_error: RuntimeError::tool_result_mismatch(
+                                            &call, &result,
+                                        ),
+                                    }
+                                } else {
+                                    super::super::tool_calls::PreparedToolCallOutcome::Completed {
+                                        started_at_ms,
+                                        tool_trace_context,
+                                        result,
+                                        failed: abort_signal.is_aborted(),
+                                    }
+                                }
+                            }
+                            Err(error) => {
                                 super::super::tool_calls::PreparedToolCallOutcome::Failed {
                                     started_at_ms,
                                     tool_trace_context,
-                                    event_name: "tool_result_rejected",
-                                    runtime_error: RuntimeError::tool_result_mismatch(
-                                        &call, &result,
-                                    ),
-                                }
-                            } else {
-                                super::super::tool_calls::PreparedToolCallOutcome::Completed {
-                                    started_at_ms,
-                                    tool_trace_context,
-                                    result,
-                                    failed: abort_signal.is_aborted(),
+                                    event_name: "tool_call_failed",
+                                    runtime_error: RuntimeError::tool(error),
                                 }
                             }
                         }
-                        Err(error) => super::super::tool_calls::PreparedToolCallOutcome::Failed {
-                            started_at_ms,
-                            tool_trace_context,
-                            event_name: "tool_call_failed",
-                            runtime_error: RuntimeError::tool(error),
-                        },
                     };
 
-                    (assistant_entry_id, tool_call_entry_id, call, prepared)
+                    let _ = stream_tx.send(ParallelToolStreamMessage::Finished {
+                        assistant_entry_id,
+                        tool_call_entry_id,
+                        call,
+                        prepared,
+                    });
                 });
             }
             drop(stream_tx);
 
-            let mut prepared_results = Vec::new();
-            while !in_flight.is_empty() {
+            let mut completed_invocations = Vec::new();
+            loop {
                 tokio::select! {
                     Some(message) = stream_rx.recv() => {
                         match message {
@@ -332,50 +326,36 @@ where
                                 stream,
                                 text,
                             }),
+                            ParallelToolStreamMessage::Finished {
+                                assistant_entry_id,
+                                tool_call_entry_id,
+                                call,
+                                prepared,
+                            } => {
+                                let invocation = self.commit_prepared_tool_call(
+                                    &mut ExecuteToolCallContext::new(
+                                        turn_id,
+                                        llm_trace_context,
+                                        assistant_entry_id,
+                                        tool_call_entry_id,
+                                        &call,
+                                        &mut buffers.source_entry_ids,
+                                        abort_signal.clone(),
+                                    ),
+                                    prepared,
+                                    on_delta,
+                                )?;
+                                completed_invocations.push((tool_call_entry_id, invocation));
+                            }
                         }
                     }
-                    Some(prepared_result) = in_flight.next() => {
-                        prepared_results.push(prepared_result);
-                    }
+                    Some(_) = in_flight.next() => {}
+                    else => break,
                 }
             }
 
-            while let Some(message) = stream_rx.recv().await {
-                match message {
-                    ParallelToolStreamMessage::Started {
-                        invocation_id,
-                        tool_name,
-                        arguments,
-                        started_at_ms,
-                    } => on_delta(StreamEvent::ToolCallStarted {
-                        invocation_id,
-                        tool_name,
-                        arguments,
-                        started_at_ms,
-                    }),
-                    ParallelToolStreamMessage::Delta { invocation_id, stream, text } => {
-                        on_delta(StreamEvent::ToolOutputDelta { invocation_id, stream, text })
-                    }
-                }
-            }
-
-            let mut prepared_results = prepared_results;
-            prepared_results.sort_by_key(|(_, tool_call_entry_id, _, _)| *tool_call_entry_id);
-
-            for (assistant_entry_id, tool_call_entry_id, call, prepared) in prepared_results {
-                let invocation = self.commit_prepared_tool_call(
-                    &mut ExecuteToolCallContext::new(
-                        turn_id,
-                        llm_trace_context,
-                        assistant_entry_id,
-                        tool_call_entry_id,
-                        &call,
-                        &mut buffers.source_entry_ids,
-                        abort_signal.clone(),
-                    ),
-                    prepared,
-                    on_delta,
-                )?;
+            completed_invocations.sort_by_key(|(tool_call_entry_id, _)| *tool_call_entry_id);
+            for (_, invocation) in completed_invocations {
                 buffers
                     .blocks
                     .push(TurnBlock::ToolInvocation { invocation: Box::new(invocation.clone()) });
