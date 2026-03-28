@@ -8,6 +8,7 @@ export type ToolRenderData = {
   outputContent: string
   outputSegments?: ToolOutputSegment[]
   succeeded: boolean
+  isRunning?: boolean
 }
 
 export type ToolRenderer = {

@@ -897,6 +897,18 @@ describe("tool timeline", () => {
     expect(contextSource).toContain("const CONTEXT_GROUP_TRANSITION =")
   })
 
+  test("keeps expanded shell rows controlled across active to completed regrouping", () => {
+    const source = loadToolTimelineSource()
+
+    expect(source).toContain(
+      "const [expandedToolIds, setExpandedToolIds] = useState"
+    )
+    expect(source).toContain("expandedToolIds={expandedToolIds}")
+    expect(source).toContain("onExpandedChange={handleExpandedChange}")
+    expect(source).toContain("expanded={expandedToolIds?.has(item.id)}")
+    expect(source).toContain("onExpandedChange(item.id, !showDetails)")
+  })
+
   test("keeps timeline groups free of the pierre provider wrapper", () => {
     const source = loadToolTimelineSource()
 

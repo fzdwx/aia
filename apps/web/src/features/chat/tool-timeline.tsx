@@ -45,6 +45,7 @@ function ToolTrigger({
     outputContent: item.outputContent,
     outputSegments: item.outputSegments,
     succeeded: item.succeeded,
+    isRunning,
   }
   const displayName = getToolDisplayName(item.toolName)
   const title = toolRendererRegistry.renderTitle(renderData)
@@ -97,8 +98,17 @@ function ToolTrigger({
   )
 }
 
-function ToolRow({ item }: { item: ToolRowItem }) {
-  const [showDetails, setShowDetails] = useState(false)
+function ToolRow({
+  item,
+  expanded,
+  onExpandedChange,
+}: {
+  item: ToolRowItem
+  expanded?: boolean
+  onExpandedChange?: (id: string, expanded: boolean) => void
+}) {
+  const [localShowDetails, setLocalShowDetails] = useState(false)
+  const showDetails = expanded ?? localShowDetails
   useDurationTicker(item.finishedAtMs == null)
   const isRunning = item.finishedAtMs == null
   const normalizedToolName = normalizeToolName(item.toolName)
@@ -117,6 +127,7 @@ function ToolRow({ item }: { item: ToolRowItem }) {
     outputContent: item.outputContent,
     outputSegments: item.outputSegments,
     succeeded: item.succeeded,
+    isRunning,
   }
   const inlineDetails = shouldInlineToolDetails(item)
     ? toolRendererRegistry.renderDetails(renderData)
@@ -131,7 +142,11 @@ function ToolRow({ item }: { item: ToolRowItem }) {
         type="button"
         onClick={() => {
           if (!hasDetails) return
-          setShowDetails(!showDetails)
+          if (onExpandedChange) {
+            onExpandedChange(item.id, !showDetails)
+            return
+          }
+          setLocalShowDetails(!localShowDetails)
         }}
         aria-expanded={hasDetails ? showDetails : undefined}
         aria-controls={hasDetails ? detailsId : undefined}
@@ -177,10 +192,14 @@ export function ToolGroup({
   items,
   status = "completed",
   keepContextGroupsOpen = false,
+  expandedToolIds,
+  onExpandedChange,
 }: {
   items: ToolRowItem[]
   status?: "running" | "completed"
   keepContextGroupsOpen?: boolean
+  expandedToolIds?: ReadonlySet<string>
+  onExpandedChange?: (id: string, expanded: boolean) => void
 }) {
   const visibleItems = items.filter(shouldRenderToolItem)
   const isContextGroup = visibleItems.every((item) =>
@@ -212,7 +231,12 @@ export function ToolGroup({
     return (
       <div data-component="tool-group" data-variant="standalone">
         {visibleItems.map((item) => (
-          <ToolRow key={item.id} item={item} />
+          <ToolRow
+            key={item.id}
+            item={item}
+            expanded={expandedToolIds?.has(item.id)}
+            onExpandedChange={onExpandedChange}
+          />
         ))}
       </div>
     )
@@ -238,7 +262,32 @@ export function StreamingToolGroup({
   const coalescedToolOutputs = coalesceStreamingToolOutputs(toolOutputs)
   const completed = coalescedToolOutputs.filter((t) => t.completed)
   const active = coalescedToolOutputs.filter((t) => !t.completed)
+  const [expandedToolIds, setExpandedToolIds] = useState<Set<string>>(new Set())
   useDurationTicker(active.length > 0)
+
+  useEffect(() => {
+    const visibleIds = new Set(
+      coalescedToolOutputs.map((tool) => tool.invocationId)
+    )
+    setExpandedToolIds((current) => {
+      const next = new Set(
+        [...current].filter((invocationId) => visibleIds.has(invocationId))
+      )
+      return next.size === current.size ? current : next
+    })
+  }, [coalescedToolOutputs])
+
+  const handleExpandedChange = (id: string, expanded: boolean) => {
+    setExpandedToolIds((current) => {
+      const next = new Set(current)
+      if (expanded) {
+        next.add(id)
+      } else {
+        next.delete(id)
+      }
+      return next
+    })
+  }
 
   if (coalescedToolOutputs.length === 0) return null
 
@@ -249,6 +298,8 @@ export function StreamingToolGroup({
           key="completed"
           items={completed.map(fromStreamingTool)}
           keepContextGroupsOpen={keepContextGroupsOpen}
+          expandedToolIds={expandedToolIds}
+          onExpandedChange={handleExpandedChange}
         />
       )}
 
@@ -258,6 +309,8 @@ export function StreamingToolGroup({
           items={active.map(fromStreamingTool)}
           status="running"
           keepContextGroupsOpen={keepContextGroupsOpen}
+          expandedToolIds={expandedToolIds}
+          onExpandedChange={handleExpandedChange}
         />
       )}
     </div>

@@ -63,7 +63,9 @@ export function renderToolDetailsPanel(item: ToolRowItem) {
     arguments: item.arguments,
     details: item.details,
     outputContent: item.outputContent,
+    outputSegments: item.outputSegments,
     succeeded: item.succeeded,
+    isRunning: item.finishedAtMs == null,
   }
   const detailsContent = toolRendererRegistry.renderDetails(renderData)
   const requestEntries = buildDetailEntries(item.arguments, {

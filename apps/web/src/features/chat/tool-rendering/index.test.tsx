@@ -845,6 +845,29 @@ describe("tool renderer registry", () => {
     expect(source).toContain("element.scrollTop = element.scrollHeight")
   })
 
+  test("auto-scrolls running shell output to latest line when details mount", () => {
+    const source = readFileSync(
+      new URL("./renderers/shell.tsx", import.meta.url),
+      "utf8"
+    ).replace(/\s+/g, " ")
+
+    expect(source).toContain("isRunning: boolean")
+    expect(source).toContain("if (isRunning) {")
+    expect(source).toContain("shouldFollowRef.current = true")
+    expect(source).toContain("element.scrollTop = element.scrollHeight")
+    expect(source).toContain("isRunning={data.isRunning ?? false}")
+  })
+
+  test("passes streaming shell segments through tool details panel", () => {
+    const source = readFileSync(
+      new URL("../tool-timeline/tool-details-panel.tsx", import.meta.url),
+      "utf8"
+    ).replace(/\s+/g, " ")
+
+    expect(source).toContain("outputSegments: item.outputSegments")
+    expect(source).toContain("isRunning: item.finishedAtMs == null")
+  })
+
   test("renders ApplyPatch move detail with basename-first hierarchy", () => {
     const details = toolRendererRegistry.renderDetails({
       toolName: "ApplyPatch",

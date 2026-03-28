@@ -50,17 +50,30 @@ function ShellOutputBody({
   command,
   output,
   segments,
+  isRunning,
 }: {
   command: string
   output: string | null
   segments: ToolOutputSegment[]
+  isRunning: boolean
 }) {
   const preRef = useRef<HTMLPreElement | null>(null)
   const shouldFollowRef = useRef(true)
+  const followTrigger =
+    segments.length > 0
+      ? segments
+          .map((segment) => `${segment.stream}:${segment.text}`)
+          .join("\u0000")
+      : (output ?? "")
 
   useEffect(() => {
     const element = preRef.current
     if (!element) return
+
+    if (isRunning) {
+      shouldFollowRef.current = true
+      element.scrollTop = element.scrollHeight
+    }
 
     const handleScroll = () => {
       const distance =
@@ -73,15 +86,17 @@ function ShellOutputBody({
     return () => {
       element.removeEventListener("scroll", handleScroll)
     }
-  }, [])
+  }, [isRunning])
 
   useEffect(() => {
+    void followTrigger
     const element = preRef.current
     if (!element || !shouldFollowRef.current) return
     element.scrollTop = element.scrollHeight
-  }, [segments, output])
+  }, [followTrigger])
 
   const hasStreamingSegments = segments.length > 0
+  let segmentOffset = 0
 
   return (
     <pre ref={preRef} className="tool-timeline-shell-pre">
@@ -89,19 +104,24 @@ function ShellOutputBody({
       {hasStreamingSegments ? (
         <>
           {"\n\n"}
-          {segments.map((segment, index) => (
-            <span
-              key={`${segment.stream}-${index}`}
-              className={
-                segment.stream === "stderr"
-                  ? "tool-timeline-shell-segment tool-timeline-shell-segment-stderr"
-                  : "tool-timeline-shell-segment tool-timeline-shell-segment-stdout"
-              }
-              data-stream={segment.stream}
-            >
-              {segment.text}
-            </span>
-          ))}
+          {segments.map((segment) => {
+            const key = `${segment.stream}-${segmentOffset}`
+            segmentOffset += segment.text.length
+
+            return (
+              <span
+                key={key}
+                className={
+                  segment.stream === "stderr"
+                    ? "tool-timeline-shell-segment tool-timeline-shell-segment-stderr"
+                    : "tool-timeline-shell-segment tool-timeline-shell-segment-stdout"
+                }
+                data-stream={segment.stream}
+              >
+                {segment.text}
+              </span>
+            )
+          })}
         </>
       ) : output ? (
         `\n\n${output}`
@@ -159,7 +179,12 @@ export function createShellRenderer(): ToolRenderer {
           data-tool-detail-tone="output"
         >
           <div className="tool-timeline-detail-body tool-timeline-shell-body">
-            <ShellOutputBody command={command} output={output} segments={segments} />
+            <ShellOutputBody
+              command={command}
+              output={output}
+              segments={segments}
+              isRunning={data.isRunning ?? false}
+            />
           </div>
         </section>
       )
