@@ -117,16 +117,6 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
             )
           }
 
-          if (group.type === "tools") {
-            return (
-              <MemoizedStreamingToolGroup
-                key={i}
-                toolOutputs={group.tools}
-                keepContextGroupsOpen
-              />
-            )
-          }
-
           return (
             <AssistantTextBlock key={i} content={group.content} streaming />
           )
