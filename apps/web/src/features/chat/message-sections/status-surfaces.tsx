@@ -48,9 +48,9 @@ export function SessionHydratingIndicator({
   reducedMotion?: boolean
 }) {
   return (
-    <div className="pointer-events-none sticky top-0 z-10 mb-3">
+    <div className="pointer-events-none sticky top-0 z-10 mb-4">
       <div
-        className="text-caption mx-auto flex w-fit max-w-full items-center gap-2 rounded-full border border-border/35 bg-background/88 px-3 py-1.5 text-muted-foreground/80 shadow-none"
+        className="mx-auto inline-flex items-center gap-2 rounded-full border border-border/40 bg-muted/50 px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-sm backdrop-blur-md"
         role="status"
         aria-live="polite"
         aria-atomic="true"
@@ -58,11 +58,11 @@ export function SessionHydratingIndicator({
         <span
           className={
             reducedMotion
-              ? "size-1.5 rounded-full bg-foreground/35"
-              : "size-1.5 animate-pulse rounded-full bg-foreground/35"
+              ? "size-2 rounded-full bg-primary/50"
+              : "size-2 animate-pulse rounded-full bg-primary/50"
           }
         />
-        <span>Loading session…</span>
+        <span>Loading session...</span>
       </div>
     </div>
   )

@@ -370,7 +370,7 @@ describe("chat message status surfaces", () => {
     expect(html).toContain('role="status"')
     expect(html).toContain("Loading session")
     expect(html).not.toContain("animate-pulse")
-    expect(html).toContain("text-caption")
+    expect(html).toContain("text-xs font-medium")
   })
 
   test("uses shared auxiliary scale for thinking toggle and expanded content", () => {
@@ -455,7 +455,7 @@ describe("chat message status surfaces", () => {
     const source = loadChatMessagesHistoryHintSource()
 
     expect(source).toContain("Scroll up for older messages")
-    expect(source).toContain("text-center text-xs text-muted-foreground/80")
+    expect(source).toContain("text-xs font-medium text-muted-foreground")
   })
 
   test("drops session scroll restoration refs while keeping bottom-follow entrypoint", () => {
