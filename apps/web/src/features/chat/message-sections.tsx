@@ -23,50 +23,33 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
   const grouped = groupBlocks(turn.blocks)
 
   return (
-    <div
-      data-turn-id={turn.turn_id}
-      className="mb-8 animate-[message-in_250ms_ease-out_both] last:mb-0"
-    >
-      <div className="mb-5">
-        <UserMessageBlock content={turn.user_message} />
-      </div>
-
       <div
-        data-component="assistant-message"
-        className="group/turn flex w-full flex-col gap-4"
+          data-turn-id={turn.turn_id}
+          className="mb-8 animate-[message-in_250ms_ease-out_both] last:mb-0"
       >
-        {grouped.map((group, i) => {
-          if (group.type === "tools") {
-            return (
-              <MemoizedToolGroup
-                key={i}
-                items={group.invocations.map(fromInvocation)}
-              />
-            )
-          }
+        <div className="mb-5">
+          <UserMessageBlock content={turn.user_message} />
+        </div>
 
-          if (group.type === "tool-run") {
-            return (
-              <div
-                key={i}
-                data-component="tool-run"
-                className="flex flex-col gap-1"
-              >
-                {group.groups.map((g, j) => (
+        <div
+            data-component="assistant-message"
+            className="group/turn flex w-full flex-col gap-4"
+        >
+          {grouped.map((group, i) => {
+            if (group.type === "tools") {
+              return (
                   <MemoizedToolGroup
-                    key={j}
-                    items={g.invocations.map(fromInvocation)}
+                      key={i}
+                      items={group.invocations.map(fromInvocation)}
                   />
-                ))}
-              </div>
-            )
-          }
+              )
+            }
 
-          return <BlockRenderer key={i} block={group.block} />
-        })}
-        <TurnMeta turn={turn} />
+            return <BlockRenderer key={i} block={group.block} />
+          })}
+          <TurnMeta turn={turn} />
+        </div>
       </div>
-    </div>
   )
 }
 
@@ -74,66 +57,58 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
   const groups = groupStreamingBlocks(streaming.blocks)
 
   return (
-    <div className="mb-8 animate-[message-in_250ms_ease-out_both]">
-      {streaming.userMessage ? (
-        <div className="mb-5">
-          <UserMessageBlock content={streaming.userMessage} />
-        </div>
-      ) : null}
+      <div className="mb-8 animate-[message-in_250ms_ease-out_both]">
+        {streaming.userMessage ? (
+            <div className="mb-5">
+              <UserMessageBlock content={streaming.userMessage} />
+            </div>
+        ) : null}
 
-      <div
-        data-component="assistant-message"
-        className="flex w-full flex-col gap-4"
-      >
-        {groups.map((group, i) => {
-          if (group.type === "thinking") {
-            const isLast =
-              i === groups.length - 1 && streaming.status === "thinking"
+        <div
+            data-component="assistant-message"
+            className="flex w-full flex-col gap-4"
+        >
+          {groups.map((group, i) => {
+            if (group.type === "thinking") {
+              const isLast =
+                  i === groups.length - 1 && streaming.status === "thinking"
 
-            return (
-              <ThinkingBlock
-                key={i}
-                content={group.content}
-                isStreaming={isLast}
-              />
-            )
-          }
-
-          if (group.type === "tool-run") {
-            return (
-              <div
-                key={i}
-                data-component="tool-run"
-                className="flex flex-col gap-1"
-              >
-                {group.groups.map((g, j) => (
-                  <MemoizedStreamingToolGroup
-                    key={j}
-                    toolOutputs={g.tools}
-                    keepContextGroupsOpen
+              return (
+                  <ThinkingBlock
+                      key={i}
+                      content={group.content}
+                      isStreaming={isLast}
                   />
-                ))}
-              </div>
-            )
-          }
+              )
+            }
 
-          return (
-            <AssistantTextBlock key={i} content={group.content} streaming />
-          )
-        })}
+            if (group.type === "tools") {
+              return (
+                  <MemoizedStreamingToolGroup
+                      key={i}
+                      toolOutputs={group.tools}
+                      keepContextGroupsOpen
+                  />
+              )
+            }
+
+            return (
+                <AssistantTextBlock key={i} content={group.content} streaming />
+            )
+          })}
+        </div>
       </div>
-    </div>
   )
 }
 
 export const MemoizedTurnView = memo(
-  TurnView,
-  (prevProps, nextProps) => prevProps.turn === nextProps.turn
+    TurnView,
+    (prevProps, nextProps) => prevProps.turn === nextProps.turn
 )
 
 export const MemoizedStreamingView = memo(
-  StreamingView,
-  (prevProps, nextProps) => prevProps.streaming === nextProps.streaming
+    StreamingView,
+    (prevProps, nextProps) => prevProps.streaming === nextProps.streaming
 )
 
 export {

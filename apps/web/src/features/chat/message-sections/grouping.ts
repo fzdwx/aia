@@ -2,123 +2,76 @@ import type {
   StreamingToolOutput,
   StreamingTurn,
   TurnBlock,
-  ToolInvocationLifecycle,
+  TurnLifecycle,
 } from "@/lib/types"
 
 import { isContextExplorationTool } from "@/features/chat/tool-timeline-helpers"
 
 export type BlockGroup =
-  | { type: "single"; block: TurnBlock }
-  | { type: "tools"; invocations: ToolInvocationLifecycle[] }
-  | { type: "tool-run"; groups: { invocations: ToolInvocationLifecycle[] }[] }
+    | { type: "single"; block: TurnBlock }
+    | { type: "tools"; invocations: TurnLifecycle["tool_invocations"] }
 
 export type StreamingBlockGroup =
-  | { type: "thinking"; content: string }
-  | { type: "text"; content: string }
-  | { type: "tool-run"; groups: { tools: StreamingToolOutput[] }[] }
+    | { type: "thinking"; content: string }
+    | { type: "text"; content: string }
+    | { type: "tools"; tools: StreamingToolOutput[] }
 
 export function groupBlocks(blocks: TurnBlock[]): BlockGroup[] {
-  // First pass: group consecutive tools by type (context vs non-context)
-  const intermediate: (ToolInvocationLifecycle[] | TurnBlock)[] = []
+  const result: BlockGroup[] = []
 
   for (const block of blocks) {
     if (block.kind === "tool_invocation") {
-      const last = intermediate[intermediate.length - 1]
-      const isContextTool = isContextExplorationTool(block.invocation.call.tool_name)
+      const last = result[result.length - 1]
+      const isContextTool = isContextExplorationTool(
+          block.invocation.call.tool_name
+      )
+      const lastInvocation =
+          last && last.type === "tools"
+              ? last.invocations[last.invocations.length - 1]
+              : null
+      const canAppendToContextGroup =
+          lastInvocation != null &&
+          isContextTool &&
+          isContextExplorationTool(lastInvocation.call.tool_name)
 
-      // Check if we can append to previous tool group (same type)
-      const canAppend =
-        Array.isArray(last) &&
-        last.length > 0 &&
-        isContextExplorationTool(last[0].call.tool_name) === isContextTool
-
-      if (canAppend && Array.isArray(last)) {
-        last.push(block.invocation)
+      if (canAppendToContextGroup && last && last.type === "tools") {
+        last.invocations.push(block.invocation)
       } else {
-        intermediate.push([block.invocation])
+        result.push({ type: "tools", invocations: [block.invocation] })
       }
     } else {
-      intermediate.push(block)
+      result.push({ type: "single", block })
     }
   }
 
-  // Second pass: wrap ALL consecutive tool arrays into a single tool-run
-  const result: BlockGroup[] = []
-  let currentRun: { invocations: ToolInvocationLifecycle[] }[] = []
-
-  const flushRun = () => {
-    if (currentRun.length === 1) {
-      result.push({ type: "tools", invocations: currentRun[0].invocations })
-    } else if (currentRun.length > 1) {
-      result.push({ type: "tool-run", groups: currentRun })
-    }
-    currentRun = []
-  }
-
-  for (const item of intermediate) {
-    if (Array.isArray(item)) {
-      // This is a tool group - add to current run
-      currentRun.push({ invocations: item })
-    } else {
-      // This is a non-tool block - flush the run first
-      flushRun()
-      result.push({ type: "single", block: item })
-    }
-  }
-
-  flushRun()
   return result
 }
 
 export function groupStreamingBlocks(
-  blocks: StreamingTurn["blocks"]
+    blocks: StreamingTurn["blocks"]
 ): StreamingBlockGroup[] {
-  // First pass: group consecutive tools by type (context vs non-context)
-  const intermediate: (StreamingToolOutput[] | { type: "thinking"; content: string } | { type: "text"; content: string })[] = []
+  const groups: StreamingBlockGroup[] = []
 
   for (const block of blocks) {
     if (block.type === "tool") {
-      const last = intermediate[intermediate.length - 1]
+      const last = groups[groups.length - 1]
       const isContextTool = isContextExplorationTool(block.tool.toolName)
+      const lastTool =
+          last && last.type === "tools" ? last.tools[last.tools.length - 1] : null
+      const canAppendToContextGroup =
+          lastTool != null &&
+          isContextTool &&
+          isContextExplorationTool(lastTool.toolName)
 
-      // Check if we can append to previous tool group (same type)
-      const canAppend =
-        Array.isArray(last) &&
-        last.length > 0 &&
-        isContextExplorationTool(last[0].toolName) === isContextTool
-
-      if (canAppend && Array.isArray(last)) {
-        last.push(block.tool)
+      if (canAppendToContextGroup && last && last.type === "tools") {
+        last.tools.push(block.tool)
       } else {
-        intermediate.push([block.tool])
+        groups.push({ type: "tools", tools: [block.tool] })
       }
     } else {
-      intermediate.push(block)
+      groups.push(block)
     }
   }
 
-  // Second pass: wrap ALL consecutive tool arrays into a single tool-run
-  const result: StreamingBlockGroup[] = []
-  let currentRun: { tools: StreamingToolOutput[] }[] = []
-
-  const flushRun = () => {
-    if (currentRun.length >= 1) {
-      result.push({ type: "tool-run", groups: currentRun })
-    }
-    currentRun = []
-  }
-
-  for (const item of intermediate) {
-    if (Array.isArray(item)) {
-      // This is a tool group - add to current run
-      currentRun.push({ tools: item })
-    } else {
-      // This is a non-tool block - flush the run first
-      flushRun()
-      result.push(item)
-    }
-  }
-
-  flushRun()
-  return result
+  return groups
 }
