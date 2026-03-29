@@ -1,4 +1,4 @@
-export const HISTORY_LOAD_TRIGGER_PX = 400
+export const HISTORY_LOAD_TRIGGER_RATIO = 1.5 // 视口高度的倍数
 export const HISTORY_HINT_VISIBILITY_PX = 160
 export const STICK_TO_BOTTOM_THRESHOLD_PX = 24
 
@@ -25,8 +25,11 @@ export function shouldShowHistoryHint(
   return historyLoadingMore || scrollTop < HISTORY_HINT_VISIBILITY_PX
 }
 
-export function shouldTriggerOlderTurnsLoad(scrollTop: number) {
-  return scrollTop <= HISTORY_LOAD_TRIGGER_PX
+export function shouldTriggerOlderTurnsLoad(
+  scrollTop: number,
+  clientHeight: number
+) {
+  return scrollTop <= clientHeight * HISTORY_LOAD_TRIGGER_RATIO
 }
 
 export function shouldLoadOlderTurnsOnScroll({
@@ -42,5 +45,5 @@ export function shouldLoadOlderTurnsOnScroll({
 }) {
   if (!userScrolledUp) return false
   if (scrollHeight <= clientHeight) return false
-  return shouldTriggerOlderTurnsLoad(scrollTop)
+  return shouldTriggerOlderTurnsLoad(scrollTop, clientHeight)
 }

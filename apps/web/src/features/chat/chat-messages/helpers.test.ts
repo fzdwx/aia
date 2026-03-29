@@ -31,26 +31,30 @@ describe("chat message scroll helpers", () => {
     expect(shouldShowHistoryHint(false, 260)).toBe(false)
   })
 
-  test("triggers older history loading once scrolled into the top threshold", () => {
-    expect(shouldTriggerOlderTurnsLoad(400)).toBe(true)
-    expect(shouldTriggerOlderTurnsLoad(100)).toBe(true)
-    expect(shouldTriggerOlderTurnsLoad(401)).toBe(false)
+  test("triggers older history loading based on viewport height ratio", () => {
+    const clientHeight = 400
+    // 1.5 * 400 = 600
+    expect(shouldTriggerOlderTurnsLoad(600, clientHeight)).toBe(true)
+    expect(shouldTriggerOlderTurnsLoad(400, clientHeight)).toBe(true)
+    expect(shouldTriggerOlderTurnsLoad(601, clientHeight)).toBe(false)
   })
 
   test("only pages older turns after an explicit upward scroll in an overflowing list", () => {
+    const clientHeight = 400
+    // Trigger threshold is 1.5 * 400 = 600
     expect(
       shouldLoadOlderTurnsOnScroll({
-        scrollTop: 350,
+        scrollTop: 500,
         scrollHeight: 1200,
-        clientHeight: 400,
+        clientHeight,
         userScrolledUp: true,
       })
     ).toBe(true)
     expect(
       shouldLoadOlderTurnsOnScroll({
-        scrollTop: 350,
+        scrollTop: 500,
         scrollHeight: 1200,
-        clientHeight: 400,
+        clientHeight,
         userScrolledUp: false,
       })
     ).toBe(false)
@@ -58,7 +62,7 @@ describe("chat message scroll helpers", () => {
       shouldLoadOlderTurnsOnScroll({
         scrollTop: 0,
         scrollHeight: 320,
-        clientHeight: 400,
+        clientHeight,
         userScrolledUp: true,
       })
     ).toBe(false)

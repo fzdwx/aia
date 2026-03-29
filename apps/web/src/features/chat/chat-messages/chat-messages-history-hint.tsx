@@ -1,3 +1,5 @@
+import { Loader2 } from "lucide-react"
+
 export function ChatMessagesHistoryHint({
   historyLoadingMore,
   showHistoryHint,
@@ -15,14 +17,19 @@ export function ChatMessagesHistoryHint({
       aria-hidden={!showHistoryHint}
     >
       <div
-        className="max-w-full rounded-full border border-border/35 bg-background/88 px-3 py-1 text-center text-xs text-muted-foreground/80 shadow-none"
+        className="max-w-full rounded-full border border-border/35 bg-background/88 px-3 py-1.5 text-center text-xs text-muted-foreground/80 shadow-sm backdrop-blur-sm"
         role={historyLoadingMore ? "status" : undefined}
         aria-live={historyLoadingMore ? "polite" : undefined}
         aria-atomic={historyLoadingMore ? "true" : undefined}
       >
-        {historyLoadingMore
-          ? "Loading older messages…"
-          : "Scroll up for older messages"}
+        {historyLoadingMore ? (
+          <span className="inline-flex items-center gap-1.5">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Loading history...
+          </span>
+        ) : (
+          "Scroll up for older messages"
+        )}
       </div>
     </div>
   )

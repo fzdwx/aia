@@ -2,7 +2,7 @@
 rfc: 0003
 name: scroll-position-anchor-on-history-load
 title: Scroll Position Anchor on History Load
-description: Fixes the scroll position jumping issue when loading older messages by anchoring to the first visible message instead of using scrollHeight delta.
+description: Fixes the scroll position jumping issue when loading older messages and improves loading UX with dynamic trigger threshold and visual feedback.
 status: Implemented
 date: 2026-03-29
 authors:
@@ -15,7 +15,10 @@ superseded_by: null
 
 ## Summary
 
-修复向上滚动加载历史消息时滚动位置跳动问题：将锚点从 `scrollHeight` 差值计算改为基于第一条可见消息元素的定位，确保加载完成后用户视图停留在正确的位置。
+修复向上滚动加载历史消息时滚动位置跳动问题，同时优化加载体验：
+1. 记录加载前的 scrollHeight 和 scrollTop，加载后恢复位置
+2. 使用视口高度比例（1.5x）触发预加载，适配不同屏幕尺寸
+3. 改进加载指示器，添加旋转动画提供视觉反馈
 
 ## Motivation
 
