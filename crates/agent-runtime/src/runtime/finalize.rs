@@ -35,7 +35,7 @@ where
             started_at_ms: context.started_at_ms,
             finished_at_ms: now_timestamp_ms(),
             source_entry_ids,
-            user_message: context.user_message,
+            user_messages: context.user_messages,
             blocks: context.blocks,
             assistant_message: context.summary.assistant_message,
             thinking: context.summary.thinking,
@@ -72,7 +72,7 @@ where
             started_at_ms: context.started_at_ms,
             finished_at_ms: now_timestamp_ms(),
             source_entry_ids: context.source_entry_ids.clone(),
-            user_message: context.user_message.to_string(),
+            user_messages: context.user_messages.to_vec(),
             blocks: lifecycle_blocks,
             assistant_message: context.assistant_message,
             thinking: if context.aggregated_thinking.is_empty() {

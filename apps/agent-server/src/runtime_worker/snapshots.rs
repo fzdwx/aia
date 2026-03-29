@@ -117,7 +117,7 @@ struct TurnHistoryBuilder {
     started_at_ms: Option<u64>,
     finished_at_ms: Option<u64>,
     source_entry_ids: Vec<u64>,
-    user_message: Option<String>,
+    user_messages: Vec<String>,
     blocks: Vec<agent_runtime::TurnBlock>,
     assistant_message: Option<String>,
     thinking: Option<String>,
@@ -143,9 +143,7 @@ impl TurnHistoryBuilder {
         if let Some(message) = entry.as_message() {
             match message.role {
                 Role::User => {
-                    if self.user_message.is_none() {
-                        self.user_message = Some(message.content);
-                    }
+                    self.user_messages.push(message.content);
                 }
                 Role::Assistant => {
                     self.assistant_message = Some(message.content.clone());
@@ -228,13 +226,15 @@ impl TurnHistoryBuilder {
     }
 
     fn into_turn_lifecycle(self) -> Option<TurnLifecycle> {
-        let user_message = self.user_message?;
+        if self.user_messages.is_empty() {
+            return None;
+        }
         Some(TurnLifecycle {
             turn_id: self.turn_id,
             started_at_ms: self.started_at_ms.unwrap_or(0),
             finished_at_ms: self.finished_at_ms.unwrap_or(0),
             source_entry_ids: self.source_entry_ids,
-            user_message,
+            user_messages: self.user_messages,
             blocks: self.blocks,
             assistant_message: self.assistant_message,
             thinking: self.thinking,
@@ -268,7 +268,7 @@ impl TurnHistoryBuilder {
         Some(CurrentTurnSnapshot {
             turn_id: lifecycle.turn_id,
             started_at_ms: lifecycle.started_at_ms,
-            user_message: lifecycle.user_message,
+            user_message: lifecycle.user_messages.join("\n"),
             status,
             blocks: lifecycle.blocks.into_iter().filter_map(turn_block_to_current).collect(),
         })

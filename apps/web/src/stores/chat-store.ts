@@ -4,10 +4,14 @@ import {
   fetchHistory,
   fetchSessionInfo,
   fetchSessions as apiFetchSessions,
+  fetchQueue as apiFetchQueue,
   createSession as apiCreateSession,
   deleteSession as apiDeleteSession,
   submitTurn as apiSubmitTurn,
+  sendMessage as apiSendMessage,
   cancelTurn as apiCancelTurn,
+  interruptTurn as apiInterruptTurn,
+  deleteQueuedMessage as apiDeleteQueuedMessage,
 } from "@/lib/api"
 import {
   createIdleScheduler,
@@ -18,6 +22,7 @@ import { setActiveWorkspaceRoot } from "@/lib/tool-display"
 import type {
   ChatState,
   ContextCompressionNotice,
+  QueuedMessage,
   SessionListItem,
   SseEvent,
   StreamingTurn,
@@ -54,6 +59,7 @@ type SessionSnapshot = {
   chatState: ChatState
   contextPressure: number | null
   lastCompression: ContextCompressionNotice | null
+  messageQueue: QueuedMessage[]
 }
 
 type SessionTitleAnimation = {
@@ -68,6 +74,7 @@ const EMPTY_SESSION_SNAPSHOT: SessionSnapshot = {
   chatState: "idle",
   contextPressure: null,
   lastCompression: null,
+  messageQueue: [],
 }
 
 function latestTurn(turns: TurnLifecycle[]): TurnLifecycle | null {
@@ -190,12 +197,16 @@ type ChatStore = {
   error: string | null
   contextPressure: number | null
   lastCompression: ContextCompressionNotice | null
+  messageQueue: QueuedMessage[]
   _pendingPrompt: string | null
   _sessionSnapshots: Record<string, SessionSnapshot>
   initialize: () => void
   handleSseEvent: (event: SseEvent) => void
   submitTurn: (prompt: string) => void
+  sendMessage: (prompt: string) => Promise<void>
   cancelTurn: () => Promise<void>
+  interruptTurn: () => Promise<void>
+  deleteQueuedMessage: (messageId: string) => Promise<void>
   fetchSessions: () => Promise<void>
   createSession: () => Promise<void>
   switchSession: (id: string) => Promise<void>
@@ -325,6 +336,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     })
     const currentTurnPromise = fetchCurrentTurn(id)
     const sessionInfoPromise = fetchSessionInfo(id)
+    const queuePromise = apiFetchQueue(id)
     setActiveWorkspaceRoot(null)
 
     set((state) => ({
@@ -360,6 +372,27 @@ export const useChatStore = create<ChatStore>((set, get) => {
       })
       .catch(() => {})
 
+    queuePromise
+      .then((queueData) => {
+        if (loadId !== latestSessionLoadId) return
+        set((state) => {
+          const snapshot = {
+            ...(state._sessionSnapshots[id] ?? cachedSnapshot),
+            messageQueue: queueData.messages,
+          }
+          return {
+            messageQueue: queueData.messages,
+            _sessionSnapshots: upsertSessionSnapshot(
+              state._sessionSnapshots,
+              id,
+              snapshot,
+              state.sessions
+            ),
+          }
+        })
+      })
+      .catch(() => {})
+
     try {
       const [historyPage, currentTurn] = await Promise.all([
         historyPagePromise,
@@ -378,6 +411,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         chatState: currentTurn ? "active" : "idle",
         contextPressure: get().contextPressure,
         lastCompression: null,
+        messageQueue: get().messageQueue,
       }
 
       set((state) => ({
@@ -529,6 +563,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     error: null,
     contextPressure: null,
     lastCompression: null,
+    messageQueue: [],
     _pendingPrompt: null,
     _sessionSnapshots: {},
 
@@ -952,6 +987,110 @@ export const useChatStore = create<ChatStore>((set, get) => {
           }
           break
         }
+        case "message_queued": {
+          if (event.data.session_id !== activeId) break
+          const newMessage: QueuedMessage = {
+            id: event.data.message_id,
+            content: event.data.content_preview,
+            queued_at_ms: Date.now(),
+          }
+          set((state) => {
+            const snapshot = state._sessionSnapshots[activeId ?? ""]
+            const currentQueue = snapshot?.messageQueue ?? []
+            return {
+              messageQueue: [...currentQueue, newMessage],
+              _sessionSnapshots:
+                activeId && snapshot
+                  ? upsertSessionSnapshot(
+                      state._sessionSnapshots,
+                      activeId,
+                      {
+                        ...snapshot,
+                        messageQueue: [...currentQueue, newMessage],
+                      },
+                      state.sessions
+                    )
+                  : state._sessionSnapshots,
+            }
+          })
+          break
+        }
+        case "message_deleted": {
+          if (event.data.session_id !== activeId) break
+          const deletedId = event.data.message_id
+          set((state) => {
+            const snapshot = state._sessionSnapshots[activeId ?? ""]
+            const currentQueue = snapshot?.messageQueue ?? []
+            const filteredQueue = currentQueue.filter((m) => m.id !== deletedId)
+            return {
+              messageQueue: filteredQueue,
+              _sessionSnapshots:
+                activeId && snapshot
+                  ? upsertSessionSnapshot(
+                      state._sessionSnapshots,
+                      activeId,
+                      {
+                        ...snapshot,
+                        messageQueue: filteredQueue,
+                      },
+                      state.sessions
+                    )
+                  : state._sessionSnapshots,
+            }
+          })
+          break
+        }
+        case "turn_interrupted": {
+          if (event.data.session_id !== activeId) break
+          const prev = get().streamingTurn
+          if (!prev) break
+          set((state) => {
+            const nextStreamingTurn = { ...prev, status: "cancelled" as const }
+            const snapshot = state._sessionSnapshots[activeId ?? ""]
+            return {
+              streamingTurn: nextStreamingTurn,
+              chatState: "idle",
+              error: null,
+              _sessionSnapshots:
+                activeId && snapshot
+                  ? upsertSessionSnapshot(
+                      state._sessionSnapshots,
+                      activeId,
+                      {
+                        ...snapshot,
+                        streamingTurn: nextStreamingTurn,
+                        chatState: "idle",
+                      },
+                      state.sessions
+                    )
+                  : state._sessionSnapshots,
+            }
+          })
+          break
+        }
+        case "queue_processing": {
+          if (event.data.session_id !== activeId) break
+          // 队列开始处理时清空显示
+          set((state) => {
+            const snapshot = state._sessionSnapshots[activeId ?? ""]
+            return {
+              messageQueue: [],
+              _sessionSnapshots:
+                activeId && snapshot
+                  ? upsertSessionSnapshot(
+                      state._sessionSnapshots,
+                      activeId,
+                      {
+                        ...snapshot,
+                        messageQueue: [],
+                      },
+                      state.sessions
+                    )
+                  : state._sessionSnapshots,
+            }
+          })
+          break
+        }
       }
     },
 
@@ -1053,6 +1192,60 @@ export const useChatStore = create<ChatStore>((set, get) => {
       } catch (err) {
         set({
           error: err instanceof Error ? err.message : "Cancel failed",
+        })
+      }
+    },
+
+    sendMessage: async (prompt: string) => {
+      const sessionId = get().activeSessionId
+      if (!sessionId) return
+
+      const chatState = get().chatState
+      if (chatState === "idle") {
+        // 空闲时立即开始 turn
+        get().submitTurn(prompt)
+        return
+      }
+
+      // 运行时入队
+      try {
+        const result = await apiSendMessage(prompt, sessionId)
+        if (result.status === "started") {
+          // 立即开始了，不需要额外处理
+        }
+        // 如果是 queued，SSE 事件会更新队列
+      } catch (err) {
+        set({
+          error: err instanceof Error ? err.message : "Send message failed",
+        })
+      }
+    },
+
+    interruptTurn: async () => {
+      const sessionId = get().activeSessionId
+      const streamingTurn = get().streamingTurn
+      if (!sessionId || !streamingTurn) return
+
+      try {
+        await apiInterruptTurn(sessionId)
+        // SSE 事件会处理状态更新
+      } catch (err) {
+        set({
+          error: err instanceof Error ? err.message : "Interrupt failed",
+        })
+      }
+    },
+
+    deleteQueuedMessage: async (messageId: string) => {
+      const sessionId = get().activeSessionId
+      if (!sessionId) return
+
+      try {
+        await apiDeleteQueuedMessage(messageId, sessionId)
+        // SSE 事件会更新队列
+      } catch (err) {
+        set({
+          error: err instanceof Error ? err.message : "Delete message failed",
         })
       }
     },

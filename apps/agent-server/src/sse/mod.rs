@@ -73,6 +73,29 @@ pub enum SsePayload {
         session_id: String,
         turn_id: String,
     },
+    /// 消息入队
+    MessageQueued {
+        session_id: String,
+        message_id: String,
+        position: u32,
+        content_preview: String,
+    },
+    /// 消息从队列删除
+    MessageDeleted {
+        session_id: String,
+        message_id: String,
+        remaining_count: u32,
+    },
+    /// Turn 被打断
+    TurnInterrupted {
+        session_id: String,
+        turn_id: Option<String>,
+    },
+    /// 队列开始处理
+    QueueProcessing {
+        session_id: String,
+        count: u32,
+    },
 }
 
 #[derive(Serialize)]
@@ -153,6 +176,34 @@ struct TurnCancelledData {
     turn_id: String,
 }
 
+#[derive(Serialize)]
+struct MessageQueuedData {
+    session_id: String,
+    message_id: String,
+    position: u32,
+    content_preview: String,
+}
+
+#[derive(Serialize)]
+struct MessageDeletedData {
+    session_id: String,
+    message_id: String,
+    remaining_count: u32,
+}
+
+#[derive(Serialize)]
+struct TurnInterruptedData {
+    session_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    turn_id: Option<String>,
+}
+
+#[derive(Serialize)]
+struct QueueProcessingData {
+    session_id: String,
+    count: u32,
+}
+
 fn serialize_sse_data<T: Serialize>(event_name: &str, payload: &T) -> String {
     serde_json::to_string(payload).unwrap_or_else(|error| {
         json!({
@@ -231,6 +282,30 @@ impl SsePayload {
                 Ok(Event::default().event("turn_cancelled").data(serialize_sse_data(
                     "turn_cancelled",
                     &TurnCancelledData { session_id, turn_id },
+                )))
+            }
+            Self::MessageQueued { session_id, message_id, position, content_preview } => {
+                Ok(Event::default().event("message_queued").data(serialize_sse_data(
+                    "message_queued",
+                    &MessageQueuedData { session_id, message_id, position, content_preview },
+                )))
+            }
+            Self::MessageDeleted { session_id, message_id, remaining_count } => {
+                Ok(Event::default().event("message_deleted").data(serialize_sse_data(
+                    "message_deleted",
+                    &MessageDeletedData { session_id, message_id, remaining_count },
+                )))
+            }
+            Self::TurnInterrupted { session_id, turn_id } => {
+                Ok(Event::default().event("turn_interrupted").data(serialize_sse_data(
+                    "turn_interrupted",
+                    &TurnInterruptedData { session_id, turn_id },
+                )))
+            }
+            Self::QueueProcessing { session_id, count } => {
+                Ok(Event::default().event("queue_processing").data(serialize_sse_data(
+                    "queue_processing",
+                    &QueueProcessingData { session_id, count },
                 )))
             }
         }

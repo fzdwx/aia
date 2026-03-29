@@ -34,6 +34,12 @@ pub(crate) struct SessionQuery {
     pub limit: Option<usize>,
 }
 
+#[derive(Deserialize)]
+pub(crate) struct SendMessageRequest {
+    pub session_id: Option<String>,
+    pub message: String,
+}
+
 #[derive(Serialize)]
 pub(crate) struct SessionSettingsResponse {
     pub provider: String,
@@ -116,4 +122,9 @@ pub(crate) fn router() -> Router<SharedState> {
         )
         .route("/api/session/handoff", post(handlers::create_handoff))
         .route("/api/session/auto-compress", post(handlers::auto_compress_session))
+        // 消息队列相关路由
+        .route("/api/session/message", post(handlers::send_message))
+        .route("/api/session/queue", get(handlers::get_queue))
+        .route("/api/session/queue/{message_id}", delete(handlers::delete_queued_message))
+        .route("/api/session/interrupt", post(handlers::interrupt_turn))
 }

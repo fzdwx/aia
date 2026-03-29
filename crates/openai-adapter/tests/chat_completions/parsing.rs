@@ -17,8 +17,15 @@ impl OpenAiChatCompletionsModel {
             if finish_reason.is_none() {
                 finish_reason = choice.finish_reason.clone();
             }
-            if let Some(reasoning) = choice.message.reasoning.filter(|value| !value.is_empty()) {
-                segments.push(CompletionSegment::Thinking(reasoning));
+            // Some providers use "reasoning_content", others use "reasoning"
+            let reasoning = choice
+                .message
+                .reasoning_content
+                .as_ref()
+                .filter(|value| !value.is_empty())
+                .or(choice.message.reasoning.as_ref().filter(|value| !value.is_empty()));
+            if let Some(reasoning) = reasoning {
+                segments.push(CompletionSegment::Thinking(reasoning.clone()));
             }
             if let Some(content) = choice.message.content.filter(|value| !value.is_empty()) {
                 segments.push(CompletionSegment::Text(content));

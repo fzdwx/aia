@@ -52,7 +52,7 @@ pub(crate) async fn submit_turn(
         return runtime_worker_error_response(error);
     }
 
-    match state.session_manager.submit_turn(session_id, body.prompt).await {
+    match state.session_manager.submit_turn(session_id, vec![body.prompt]).await {
         Ok(turn_id) => {
             (StatusCode::ACCEPTED, Json(serde_json::json!({ "ok": true, "turn_id": turn_id })))
         }

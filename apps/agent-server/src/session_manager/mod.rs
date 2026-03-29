@@ -1,6 +1,7 @@
 mod auto_rename;
 mod current_turn;
 mod handle;
+mod message_queue;
 mod prompt;
 mod provider_sync;
 mod query_ops;
@@ -38,6 +39,8 @@ use current_turn::{
     update_current_turn_from_stream, update_current_turn_status,
 };
 pub use handle::SessionManagerHandle;
+use message_queue::{MAX_QUEUE_SIZE, QueuedMessage, generate_message_id};
+pub use message_queue::{QueueMessageResponse, QueueMessageStatus};
 use prompt::build_session_system_prompt;
 use provider_sync::{ProviderSyncService, ReturnedRuntimeSync};
 pub(crate) use query_ops::SessionQueryService;
@@ -191,10 +194,10 @@ impl SessionManagerLoop {
             SessionCommand::DeleteSession { session_id, reply } => {
                 let _ = reply.send(self.delete_session(&session_id).await);
             }
-            SessionCommand::SubmitTurn { session_id, prompt, reply } => {
+            SessionCommand::SubmitTurn { session_id, prompts, reply } => {
                 let mut turn_execution =
                     TurnExecutionService::new(&mut self.slots, &self.config, &self.return_tx);
-                let _ = reply.send(turn_execution.submit_turn(&session_id, prompt).await);
+                let _ = reply.send(turn_execution.submit_turn(&session_id, prompts).await);
             }
             SessionCommand::CancelTurn { session_id, reply } => {
                 let mut query = SessionQueryService::new(&mut self.slots, &self.hydration_errors);
@@ -280,63 +283,127 @@ impl SessionManagerLoop {
                 let mut provider_sync = ProviderSyncService::new(&mut self.slots, &mut self.config);
                 let _ = reply.send(provider_sync.switch_provider(input));
             }
+            SessionCommand::QueueMessage { session_id, content, reply } => {
+                let _ = reply.send(self.handle_queue_message(&session_id, content).await);
+            }
+            SessionCommand::GetQueue { session_id, reply } => {
+                let _ = reply.send(self.handle_get_queue(&session_id));
+            }
+            SessionCommand::DeleteQueuedMessage { session_id, message_id, reply } => {
+                let _ = reply.send(self.handle_delete_queued_message(&session_id, &message_id));
+            }
+            SessionCommand::InterruptTurn { session_id, reply } => {
+                let _ = reply.send(self.handle_interrupt_turn(&session_id));
+            }
+            SessionCommand::SubmitQueuedMessages { session_id, messages, reply } => {
+                let mut turn_execution =
+                    TurnExecutionService::new(&mut self.slots, &self.config, &self.return_tx);
+                let _ = reply.send(turn_execution.submit_turn(&session_id, messages).await);
+            }
         }
     }
 
     fn handle_runtime_return(&mut self, mut ret: RuntimeReturn) {
-        if let Some(slot) = self.slots.get_mut(&ret.session_id) {
-            let session_path = slot.session_path.clone();
-            if let Err(error) = refresh_runtime_tape_from_disk(&session_path, &mut ret.runtime) {
-                let _ = self.config.broadcast_tx.send(SsePayload::Error {
-                    session_id: ret.session_id.clone(),
-                    turn_id: None,
-                    message: error.message,
-                });
-            }
-            let pending_provider_binding = slot.take_pending_provider_binding();
-            let sync = ReturnedRuntimeSync::new(
-                &ret.session_id,
-                &session_path,
-                &self.config.registry,
-                self.config.store.clone(),
-                pending_provider_binding,
-            );
-            if let Err(error) = sync.apply(&mut ret.runtime) {
-                let _ = self.config.broadcast_tx.send(SsePayload::Error {
-                    session_id: ret.session_id.clone(),
-                    turn_id: None,
-                    message: error.message,
-                });
-            }
+        // 先提取队列数据（如果有的话），避免多次借用
+        let queued_messages = {
+            if let Some(slot) = self.slots.get_mut(&ret.session_id) {
+                let session_path = slot.session_path.clone();
+                if let Err(error) = refresh_runtime_tape_from_disk(&session_path, &mut ret.runtime) {
+                    let _ = self.config.broadcast_tx.send(SsePayload::Error {
+                        session_id: ret.session_id.clone(),
+                        turn_id: None,
+                        message: error.message,
+                    });
+                }
+                let pending_provider_binding = slot.take_pending_provider_binding();
+                let sync = ReturnedRuntimeSync::new(
+                    &ret.session_id,
+                    &session_path,
+                    &self.config.registry,
+                    self.config.store.clone(),
+                    pending_provider_binding,
+                );
+                if let Err(error) = sync.apply(&mut ret.runtime) {
+                    let _ = self.config.broadcast_tx.send(SsePayload::Error {
+                        session_id: ret.session_id.clone(),
+                        turn_id: None,
+                        message: error.message,
+                    });
+                }
 
-            *write_lock(&slot.context_stats) = ret.runtime.context_stats();
-            slot.provider_binding = ret
-                .runtime
-                .tape()
-                .latest_provider_binding()
-                .unwrap_or(SessionProviderBinding::Bootstrap);
-            let should_auto_compress = slot
-                .context_stats
-                .read()
-                .ok()
-                .and_then(|stats| stats.pressure_ratio)
-                .is_some_and(|ratio| ratio >= agent_prompts::AUTO_COMPRESSION_THRESHOLD);
-            if let Err(error) = slot.finish_turn(ret.runtime, ret.subscriber) {
-                let _ = self.config.broadcast_tx.send(SsePayload::Error {
-                    session_id: ret.session_id.clone(),
-                    turn_id: None,
-                    message: error.message,
-                });
-                return;
-            }
+                *write_lock(&slot.context_stats) = ret.runtime.context_stats();
+                slot.provider_binding = ret
+                    .runtime
+                    .tape()
+                    .latest_provider_binding()
+                    .unwrap_or(SessionProviderBinding::Bootstrap);
+                let should_auto_compress = slot
+                    .context_stats
+                    .read()
+                    .ok()
+                    .and_then(|stats| stats.pressure_ratio)
+                    .is_some_and(|ratio| ratio >= agent_prompts::AUTO_COMPRESSION_THRESHOLD);
 
-            if should_auto_compress {
-                let (reply, _reply_rx) = tokio::sync::oneshot::channel();
-                let _ = self.command_tx.try_send(SessionCommand::AutoCompressSession {
-                    session_id: ret.session_id,
-                    reply,
-                });
+                // 保存中断标志并重置（在 finish_turn 之前）
+                slot.interrupt_requested = false;
+
+                if let Err(error) = slot.finish_turn(ret.runtime, ret.subscriber) {
+                    let _ = self.config.broadcast_tx.send(SsePayload::Error {
+                        session_id: ret.session_id.clone(),
+                        turn_id: None,
+                        message: error.message,
+                    });
+                    return;
+                }
+
+                // 收集队列消息（打断后仍然处理队列）
+                let queue_messages = if !slot.message_queue.is_empty() {
+                    // 设置队列处理标志，防止新消息直接开始 turn
+                    slot.queue_processing = true;
+
+                    let messages: Vec<QueuedMessage> = slot.message_queue.drain(..).collect();
+
+                    // 追加 dequeued 事件到 tape
+                    for msg in &messages {
+                        let entry = TapeEntry::event("message_dequeued", Some(serde_json::json!({
+                            "id": msg.id
+                        })));
+                        let _ = SessionTape::append_jsonl_entry(&slot.session_path, &entry);
+                    }
+
+                    Some(messages.iter().map(|m| m.content.clone()).collect::<Vec<String>>())
+                } else {
+                    None
+                };
+
+                if should_auto_compress {
+                    let (reply, _reply_rx) = tokio::sync::oneshot::channel();
+                    let _ = self.command_tx.try_send(SessionCommand::AutoCompressSession {
+                        session_id: ret.session_id.clone(),
+                        reply,
+                    });
+                }
+
+                queue_messages
+            } else {
+                None
             }
+        };
+
+        // 处理队列消息
+        if let Some(contents) = queued_messages {
+            // 广播队列处理事件
+            let _ = self.config.broadcast_tx.send(SsePayload::QueueProcessing {
+                session_id: ret.session_id.clone(),
+                count: contents.len() as u32,
+            });
+
+            // 通过 command_tx 发送新命令来开始 turn
+            let _ = self.command_tx.try_send(SessionCommand::SubmitQueuedMessages {
+                session_id: ret.session_id,
+                messages: contents,
+                reply: drop_reply_channel(),
+            });
         }
     }
 
@@ -644,6 +711,168 @@ impl SessionManagerLoop {
             },
         )
     }
+
+    async fn handle_queue_message(
+        &mut self,
+        session_id: &str,
+        content: String,
+    ) -> Result<QueueMessageResponse, RuntimeWorkerError> {
+        let slot = self.slots.get_mut(session_id).ok_or_else(|| {
+            RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
+        })?;
+
+        // 检查是否正在处理队列（此时虽然是 Idle 但不应该开始新 turn）
+        let is_processing_queue = slot.queue_processing;
+
+        match slot.status() {
+            SlotStatus::Idle if !is_processing_queue => {
+                // 空闲时立即开始 turn
+                let mut turn_execution =
+                    TurnExecutionService::new(&mut self.slots, &self.config, &self.return_tx);
+                let turn_id = turn_execution.submit_turn(session_id, vec![content]).await?;
+                Ok(QueueMessageResponse {
+                    status: QueueMessageStatus::Started,
+                    turn_id: Some(turn_id),
+                    position: None,
+                    message_id: None,
+                })
+            }
+            SlotStatus::Running | SlotStatus::Idle => {
+                // 运行时或队列处理中，入队
+                // 检查队列是否已满
+                if slot.message_queue.len() >= MAX_QUEUE_SIZE {
+                    return Err(RuntimeWorkerError::queue_full(MAX_QUEUE_SIZE));
+                }
+
+                // 运行时入队
+                let message_id = generate_message_id();
+                let queued_at_ms = now_timestamp_ms();
+
+                // 追加 tape 事件
+                let entry = TapeEntry::event("message_queued", Some(serde_json::json!({
+                    "id": message_id,
+                    "content": content,
+                    "queued_at_ms": queued_at_ms,
+                })));
+                if let Err(error) = SessionTape::append_jsonl_entry(&slot.session_path, &entry) {
+                    return Err(RuntimeWorkerError::internal(format!("session append failed: {error}")));
+                }
+
+                // 更新内存状态
+                let position = slot.message_queue.len() as u32 + 1;
+                slot.message_queue.push(QueuedMessage {
+                    id: message_id.clone(),
+                    content,
+                    queued_at_ms,
+                });
+
+                // 广播 SSE 事件
+                let _ = self.config.broadcast_tx.send(SsePayload::MessageQueued {
+                    session_id: session_id.to_string(),
+                    message_id: message_id.clone(),
+                    position,
+                    content_preview: slot.message_queue.last().unwrap().content.chars().take(50).collect(),
+                });
+
+                Ok(QueueMessageResponse {
+                    status: QueueMessageStatus::Queued,
+                    turn_id: None,
+                    position: Some(position),
+                    message_id: Some(message_id),
+                })
+            }
+        }
+    }
+
+    fn handle_get_queue(
+        &mut self,
+        session_id: &str,
+    ) -> Result<Vec<QueuedMessage>, RuntimeWorkerError> {
+        let slot = self.slots.get(session_id).ok_or_else(|| {
+            self.hydration_errors.get(session_id).cloned().unwrap_or_else(|| {
+                RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
+            })
+        })?;
+
+        Ok(slot.message_queue.clone())
+    }
+
+    fn handle_delete_queued_message(
+        &mut self,
+        session_id: &str,
+        message_id: &str,
+    ) -> Result<(), RuntimeWorkerError> {
+        let slot = self.slots.get_mut(session_id).ok_or_else(|| {
+            RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
+        })?;
+
+        // 只能在 session 空闲时删除
+        if slot.status() == SlotStatus::Running {
+            return Err(RuntimeWorkerError::cannot_modify_queue_while_running());
+        }
+
+        // 查找并删除消息
+        let index = slot
+            .message_queue
+            .iter()
+            .position(|msg| msg.id == message_id)
+            .ok_or_else(|| RuntimeWorkerError::message_not_found(message_id))?;
+
+        slot.message_queue.remove(index);
+
+        // 追加删除事件到 tape
+        let entry = TapeEntry::event("message_deleted", Some(serde_json::json!({
+            "id": message_id
+        })));
+        if let Err(error) = SessionTape::append_jsonl_entry(&slot.session_path, &entry) {
+            return Err(RuntimeWorkerError::internal(format!("session append failed: {error}")));
+        }
+
+        // 广播 SSE 事件
+        let _ = self.config.broadcast_tx.send(SsePayload::MessageDeleted {
+            session_id: session_id.to_string(),
+            message_id: message_id.to_string(),
+            remaining_count: slot.message_queue.len() as u32,
+        });
+
+        Ok(())
+    }
+
+    fn handle_interrupt_turn(&mut self, session_id: &str) -> Result<bool, RuntimeWorkerError> {
+        let slot = self.slots.get_mut(session_id).ok_or_else(|| {
+            RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
+        })?;
+
+        if slot.status() != SlotStatus::Running {
+            return Ok(false);
+        }
+
+        // 设置中断标志
+        slot.interrupt_requested = true;
+
+        // 获取当前 turn_id
+        let turn_id = slot
+            .current_turn
+            .read()
+            .ok()
+            .and_then(|current| current.as_ref().map(|turn| turn.turn_id.clone()));
+
+        // 取消 turn
+        if let Some(running_turn) = slot.running_turn() {
+            running_turn.control.cancel();
+        }
+
+        // 取消 pending question（如果有）
+        let _ = self.cancel_pending_question(session_id);
+
+        // 广播 SSE 事件
+        let _ = self.config.broadcast_tx.send(SsePayload::TurnInterrupted {
+            session_id: session_id.to_string(),
+            turn_id,
+        });
+
+        Ok(true)
+    }
 }
 
 struct SessionSlotFactory<'a> {
@@ -701,6 +930,9 @@ impl<'a> SessionSlotFactory<'a> {
         let snapshots = rebuild_session_snapshots_from_tape(runtime.tape());
         let context_stats = runtime.context_stats();
 
+        // 恢复队列
+        let message_queue = restore_queue_from_tape(runtime.tape());
+
         Ok(SessionSlot::idle(
             session_path,
             provider_binding,
@@ -709,6 +941,7 @@ impl<'a> SessionSlotFactory<'a> {
             Arc::new(RwLock::new(context_stats)),
             runtime,
             subscriber,
+            message_queue,
         ))
     }
 }
@@ -870,6 +1103,58 @@ fn prompt_cache_for_selection(
         key: Some(aia_config::build_prompt_cache_key(&profile.name, &model.id, session_id)),
         retention: Some(RuntimePromptCacheRetention::OneDay),
     })
+}
+
+fn restore_queue_from_tape(tape: &SessionTape) -> Vec<QueuedMessage> {
+    use std::collections::HashSet;
+    
+    let mut queue: Vec<QueuedMessage> = Vec::new();
+    let mut deleted: HashSet<String> = HashSet::new();
+
+    for entry in tape.entries() {
+        if entry.kind != "event" {
+            continue;
+        }
+
+        let event_name = entry.event_name();
+        let event_data = entry.event_data();
+
+        match event_name {
+            Some("message_queued") => {
+                if let Some(data) = event_data {
+                    if let Ok(msg) = parse_queued_message(data) {
+                        // 只有未被删除的才加入
+                        if !deleted.contains(&msg.id) {
+                            queue.push(msg);
+                        }
+                    }
+                }
+            }
+            Some("message_deleted") | Some("message_dequeued") => {
+                if let Some(id) = event_data.and_then(|d| d.get("id")).and_then(|v| v.as_str()) {
+                    deleted.insert(id.to_string());
+                    queue.retain(|m| m.id != id);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    queue
+}
+
+fn parse_queued_message(data: &serde_json::Value) -> Result<QueuedMessage, ()> {
+    Ok(QueuedMessage {
+        id: data.get("id").and_then(|v| v.as_str()).ok_or(())?.to_string(),
+        content: data.get("content").and_then(|v| v.as_str()).ok_or(())?.to_string(),
+        queued_at_ms: data.get("queued_at_ms").and_then(|v| v.as_u64()).ok_or(())?,
+    })
+}
+
+/// 创建一个用于丢弃回复的 oneshot channel
+fn drop_reply_channel<T>() -> tokio::sync::oneshot::Sender<T> {
+    let (tx, _rx) = tokio::sync::oneshot::channel();
+    tx
 }
 
 pub(crate) use types::{read_lock, write_lock};

@@ -99,9 +99,14 @@ impl StreamingState for ChatCompletionsStreamingState {
                 .map(ToString::to_string);
         }
 
-        if let Some(reasoning) = delta.get("reasoning").and_then(|value| value.as_str())
-            && !reasoning.is_empty()
-        {
+        // Some providers use "reasoning", others use "reasoning_content"
+        let reasoning_text = delta
+            .get("reasoning_content")
+            .and_then(|value| value.as_str())
+            .filter(|text| !text.is_empty())
+            .or_else(|| delta.get("reasoning").and_then(|value| value.as_str()).filter(|text| !text.is_empty()));
+
+        if let Some(reasoning) = reasoning_text {
             self.thinking_buf.push_str(reasoning);
             sink(StreamEvent::ThinkingDelta { text: reasoning.to_string() });
         }

@@ -21,19 +21,22 @@ import { TurnMeta } from "./message-sections/turn-meta"
 
 function TurnView({ turn }: { turn: TurnLifecycle }) {
   const grouped = groupBlocks(turn.blocks)
+  const userMessages = turn.user_messages ?? (turn.user_message ? [turn.user_message] : [])
 
   return (
       <div
           data-turn-id={turn.turn_id}
           className="mb-8 animate-[message-in_250ms_ease-out_both] last:mb-0"
       >
-        <div className="mb-5">
-          <UserMessageBlock content={turn.user_message} />
-        </div>
+        {userMessages.map((content, i) => (
+          <div key={i} className="mb-5">
+            <UserMessageBlock content={content} />
+          </div>
+        ))}
 
         <div
             data-component="assistant-message"
-            className="group/turn flex w-full flex-col [&>*+*]:mt-4 [&>*[data-type='tools']+*[data-type='tools']]:mt-0"
+            className="group/turn flex w-full flex-col [&>*+*]:mt-4 [&>*[data-type='tools']+*[data-type='tools']]:mt-1.5"
         >
           {grouped.map((group, i) => {
             if (group.type === "tools") {
@@ -71,7 +74,7 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
 
         <div
             data-component="assistant-message"
-            className="flex w-full flex-col [&>*+*]:mt-4 [&>*[data-type='tools']+*[data-type='tools']]:mt-0"
+            className="flex w-full flex-col [&>*+*]:mt-4 [&>*[data-type='tools']+*[data-type='tools']]:mt-1.5"
         >
           {groups.map((group, i) => {
             if (group.type === "thinking") {

@@ -39,8 +39,11 @@ pub(crate) struct ChatCompletionChoice {
 pub(crate) struct ChatCompletionMessage {
     #[serde(default)]
     pub content: Option<String>,
+    // Some providers use "reasoning", others use "reasoning_content"
     #[serde(default)]
     pub reasoning: Option<String>,
+    #[serde(default)]
+    pub reasoning_content: Option<String>,
     #[serde(default)]
     pub tool_calls: Vec<ChatCompletionToolCall>,
 }

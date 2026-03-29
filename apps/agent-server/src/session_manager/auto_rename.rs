@@ -177,7 +177,7 @@ fn serialize_title_source(title_source: SessionTitleSource) -> String {
 
 pub(super) fn should_count_turn_for_auto_rename(turn: &TurnLifecycle) -> bool {
     matches!(turn.outcome, agent_runtime::TurnOutcome::Succeeded)
-        && !turn.user_message.trim().is_empty()
+        && turn.user_messages.iter().any(|m| !m.trim().is_empty())
 }
 
 pub(super) fn should_schedule_session_rename(record: &SessionRecord) -> bool {
@@ -192,7 +192,7 @@ fn latest_user_turns_from_tape(tape: &session_tape::SessionTape, limit: usize) -
         .into_iter()
         .rev()
         .filter(|turn| should_count_turn_for_auto_rename(turn))
-        .map(|turn| turn.user_message)
+        .map(|turn| turn.user_messages.join("\n"))
         .take(limit)
         .collect::<Vec<_>>()
         .into_iter()

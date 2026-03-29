@@ -8,6 +8,7 @@ import type {
   ProviderInfo,
   QuestionResult,
   ProviderListItem,
+  QueuedMessage,
   SessionSettings,
   SessionListItem,
   SseEvent,
@@ -175,6 +176,61 @@ export async function cancelTurn(sessionId?: string): Promise<boolean> {
   if (!res.ok) throw new Error(`POST /api/turn/cancel failed: ${res.status}`)
   const payload = (await res.json()) as { cancelled?: boolean }
   return payload.cancelled === true
+}
+
+// ── Message Queue endpoints ───────────────────────────────────
+
+export type QueueMessageResponse =
+  | { status: "started"; turn_id: string }
+  | { status: "queued"; position: number; message_id: string }
+
+export async function sendMessage(
+  message: string,
+  sessionId?: string
+): Promise<QueueMessageResponse> {
+  const res = await fetch("/api/session/message", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message, session_id: sessionId }),
+  })
+  if (!res.ok) throw new Error(`POST /api/session/message failed: ${res.status}`)
+  return (await res.json()) as QueueMessageResponse
+}
+
+export async function fetchQueue(
+  sessionId?: string
+): Promise<{ messages: QueuedMessage[] }> {
+  const params = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ""
+  const res = await fetch(`/api/session/queue${params}`)
+  if (!res.ok) throw new Error(`GET /api/session/queue failed: ${res.status}`)
+  return (await res.json()) as { messages: QueuedMessage[] }
+}
+
+export async function deleteQueuedMessage(
+  messageId: string,
+  sessionId?: string
+): Promise<void> {
+  const params = sessionId
+    ? `?session_id=${encodeURIComponent(sessionId)}`
+    : ""
+  const res = await fetch(
+    `/api/session/queue/${encodeURIComponent(messageId)}${params}`,
+    { method: "DELETE" }
+  )
+  if (!res.ok)
+    throw new Error(`DELETE /api/session/queue/${messageId} failed: ${res.status}`)
+}
+
+export async function interruptTurn(sessionId?: string): Promise<boolean> {
+  const params = sessionId
+    ? `?session_id=${encodeURIComponent(sessionId)}`
+    : ""
+  const res = await fetch(`/api/session/interrupt${params}`, {
+    method: "POST",
+  })
+  if (!res.ok) throw new Error(`POST /api/session/interrupt failed: ${res.status}`)
+  const payload = (await res.json()) as { interrupted?: boolean }
+  return payload.interrupted === true
 }
 
 // ── Provider endpoints (unchanged) ─────────────────────────────
@@ -387,6 +443,10 @@ export function connectEvents(onEvent: (event: SseEvent) => void): () => void {
   es.addEventListener("session_updated", handle("session_updated"))
   es.addEventListener("session_deleted", handle("session_deleted"))
   es.addEventListener("turn_cancelled", handle("turn_cancelled"))
+  es.addEventListener("message_queued", handle("message_queued"))
+  es.addEventListener("message_deleted", handle("message_deleted"))
+  es.addEventListener("turn_interrupted", handle("turn_interrupted"))
+  es.addEventListener("queue_processing", handle("queue_processing"))
 
   return () => es.close()
 }

@@ -56,7 +56,7 @@ fn bootstrap_state_with_options_applies_embedded_runtime_customization() {
             .expect("session should be created");
         let _ = state
             .session_manager
-            .submit_turn(session.id.clone(), "hello".into())
+            .submit_turn(session.id.clone(), vec!["hello".into()])
             .await
             .expect("turn should be accepted");
 
@@ -116,7 +116,7 @@ fn bootstrap_state_with_options_applies_custom_request_timeout() {
             .expect("session should be created");
         let _ = state
             .session_manager
-            .submit_turn(session.id.clone(), "hello".into())
+            .submit_turn(session.id.clone(), vec!["hello".into()])
             .await
             .expect("turn should be accepted");
 

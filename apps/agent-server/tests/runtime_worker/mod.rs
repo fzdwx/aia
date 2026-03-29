@@ -25,7 +25,7 @@ fn rebuild_turn_history_from_tape_restores_completed_turns() {
     assert_eq!(turns.len(), 1);
     let turn = &turns[0];
     assert_eq!(turn.turn_id, turn_id);
-    assert_eq!(turn.user_message, "你好");
+    assert_eq!(turn.user_messages, vec!["你好"]);
     assert_eq!(turn.assistant_message.as_deref(), Some("已完成"));
     assert_eq!(turn.thinking.as_deref(), Some("思考中"));
     assert_eq!(turn.tool_invocations.len(), 1);
@@ -227,7 +227,7 @@ fn rebuild_turn_history_from_tape_restores_legacy_turn_record() {
         started_at_ms: 1000,
         finished_at_ms: 2000,
         source_entry_ids: vec![1, 2],
-        user_message: "旧问题".to_string(),
+        user_messages: vec!["旧问题".to_string()],
         blocks: vec![agent_runtime::TurnBlock::Assistant { content: "旧回答".to_string() }],
         assistant_message: Some("旧回答".to_string()),
         thinking: None,

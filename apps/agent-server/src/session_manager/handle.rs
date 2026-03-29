@@ -12,6 +12,7 @@ use crate::runtime_worker::{
 use agent_core::{QuestionRequest, QuestionResult};
 use session_tape::SessionProviderBinding;
 
+use super::message_queue::{QueuedMessage, QueueMessageResponse};
 use super::types::SessionCommand;
 
 #[cfg(test)]
@@ -81,9 +82,9 @@ impl SessionManagerHandle {
     pub async fn submit_turn(
         &self,
         session_id: String,
-        prompt: String,
+        prompts: Vec<String>,
     ) -> Result<String, RuntimeWorkerError> {
-        self.request(|reply| SessionCommand::SubmitTurn { session_id, prompt, reply }).await
+        self.request(|reply| SessionCommand::SubmitTurn { session_id, prompts, reply }).await
     }
 
     pub async fn cancel_turn(&self, session_id: String) -> Result<bool, RuntimeWorkerError> {
@@ -203,6 +204,34 @@ impl SessionManagerHandle {
         input: SwitchProviderInput,
     ) -> Result<ProviderInfoSnapshot, RuntimeWorkerError> {
         self.request(|reply| SessionCommand::SwitchProvider { input, reply }).await
+    }
+
+    pub async fn queue_message(
+        &self,
+        session_id: String,
+        content: String,
+    ) -> Result<QueueMessageResponse, RuntimeWorkerError> {
+        self.request(|reply| SessionCommand::QueueMessage { session_id, content, reply }).await
+    }
+
+    pub async fn get_queue(
+        &self,
+        session_id: String,
+    ) -> Result<Vec<QueuedMessage>, RuntimeWorkerError> {
+        self.request(|reply| SessionCommand::GetQueue { session_id, reply }).await
+    }
+
+    pub async fn delete_queued_message(
+        &self,
+        session_id: String,
+        message_id: String,
+    ) -> Result<(), RuntimeWorkerError> {
+        self.request(|reply| SessionCommand::DeleteQueuedMessage { session_id, message_id, reply })
+            .await
+    }
+
+    pub async fn interrupt_turn(&self, session_id: String) -> Result<bool, RuntimeWorkerError> {
+        self.request(|reply| SessionCommand::InterruptTurn { session_id, reply }).await
     }
 }
 

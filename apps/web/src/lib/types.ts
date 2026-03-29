@@ -98,7 +98,9 @@ export type TurnLifecycle = {
   started_at_ms: number
   finished_at_ms: number
   source_entry_ids: number[]
-  user_message: string
+  /** @deprecated Use user_messages instead */
+  user_message?: string
+  user_messages?: string[]
   blocks: TurnBlock[]
   assistant_message: string | null
   thinking: string | null
@@ -185,6 +187,37 @@ export type SseEvent =
     }
   | { type: "session_deleted"; data: { session_id: string } }
   | { type: "turn_cancelled"; data: { session_id: string; turn_id: string } }
+  | {
+      type: "message_queued"
+      data: {
+        session_id: string
+        message_id: string
+        position: number
+        content_preview: string
+      }
+    }
+  | {
+      type: "message_deleted"
+      data: {
+        session_id: string
+        message_id: string
+        remaining_count: number
+      }
+    }
+  | {
+      type: "turn_interrupted"
+      data: {
+        session_id: string
+        turn_id: string | null
+      }
+    }
+  | {
+      type: "queue_processing"
+      data: {
+        session_id: string
+        count: number
+      }
+    }
 
 // Mirrors Rust TurnStatus
 export type TurnStatus =
@@ -566,3 +599,10 @@ export type TraceDashboard = {
 export type TraceDetailResponse = TraceRecord | TraceLoopDetail
 
 export type AppView = "chat" | "settings" | "trace" | "channels"
+
+// 消息队列
+export type QueuedMessage = {
+  id: string
+  content: string
+  queued_at_ms: number
+}

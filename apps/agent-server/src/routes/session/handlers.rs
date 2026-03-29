@@ -13,7 +13,7 @@ use agent_core::ReasoningEffort;
 use super::{
     AutoCompressRequest, CreateSessionRequest, HandoffRequest, PendingQuestionResponse,
     ResolvePendingQuestionRequest, SessionInfoResponse, SessionQuery, SessionSettingsResponse,
-    UpdateSessionSettingsRequest,
+    SendMessageRequest, UpdateSessionSettingsRequest,
 };
 use crate::routes::common::{
     JsonResponse, json_response, require_session_id, resolve_session_id,
@@ -294,6 +294,80 @@ pub(crate) async fn get_current_turn(
 
     match state.session_manager.get_current_turn(session_id).await {
         Ok(current) => json_response(StatusCode::OK, current),
+        Err(error) => runtime_worker_error_response(error),
+    }
+}
+
+pub(crate) async fn send_message(
+    State(state): State<SharedState>,
+    Json(body): Json<SendMessageRequest>,
+) -> impl IntoResponse {
+    let session_id = match require_session_id(state.as_ref(), body.session_id).await {
+        Ok(session_id) => session_id,
+        Err(response) => return response,
+    };
+
+    match state.session_manager.queue_message(session_id, body.message).await {
+        Ok(response) => {
+            let status = match response.status {
+                crate::session_manager::QueueMessageStatus::Started => StatusCode::ACCEPTED,
+                crate::session_manager::QueueMessageStatus::Queued => StatusCode::OK,
+            };
+            (status, Json(serde_json::to_value(response).unwrap()))
+        }
+        Err(error) => runtime_worker_error_response(error),
+    }
+}
+
+pub(crate) async fn get_queue(
+    State(state): State<SharedState>,
+    Query(query): Query<SessionQuery>,
+) -> impl IntoResponse {
+    let session_id = match require_session_id(state.as_ref(), query.session_id).await {
+        Ok(session_id) => session_id,
+        Err(response) => return response,
+    };
+
+    match state.session_manager.get_queue(session_id).await {
+        Ok(messages) => json_response(
+            StatusCode::OK,
+            serde_json::json!({
+                "messages": messages,
+            }),
+        ),
+        Err(error) => runtime_worker_error_response(error),
+    }
+}
+
+pub(crate) async fn delete_queued_message(
+    State(state): State<SharedState>,
+    Path(message_id): Path<String>,
+    Query(query): Query<SessionQuery>,
+) -> impl IntoResponse {
+    let session_id = match require_session_id(state.as_ref(), query.session_id).await {
+        Ok(session_id) => session_id,
+        Err(response) => return response,
+    };
+
+    match state.session_manager.delete_queued_message(session_id, message_id.clone()).await {
+        Ok(()) => json_response(StatusCode::OK, serde_json::json!({ "deleted": true, "message_id": message_id })),
+        Err(error) => runtime_worker_error_response(error),
+    }
+}
+
+pub(crate) async fn interrupt_turn(
+    State(state): State<SharedState>,
+    Query(query): Query<SessionQuery>,
+) -> impl IntoResponse {
+    let session_id = match require_session_id(state.as_ref(), query.session_id).await {
+        Ok(session_id) => session_id,
+        Err(response) => return response,
+    };
+
+    match state.session_manager.interrupt_turn(session_id).await {
+        Ok(interrupted) => {
+            json_response(StatusCode::OK, serde_json::json!({ "interrupted": interrupted }))
+        }
         Err(error) => runtime_worker_error_response(error),
     }
 }

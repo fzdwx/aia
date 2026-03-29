@@ -84,7 +84,7 @@ pub(crate) async fn submit_prompt_and_wait(
 
     let turn_id = state
         .session_manager
-        .submit_turn(session_id.to_string(), prompt)
+        .submit_turn(session_id.to_string(), vec![prompt])
         .await
         .map_err(|error| ServerInitError::new("turn 提交", error.message))?;
 

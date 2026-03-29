@@ -19,6 +19,8 @@ use crate::{
     sse::SsePayload,
 };
 
+use super::message_queue::{QueuedMessage, QueueMessageResponse};
+
 pub(crate) type SessionId = String;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,6 +50,12 @@ pub(crate) struct SessionSlot {
     pub(crate) context_stats: Arc<RwLock<ContextStats>>,
     pub(crate) execution: SlotExecutionState,
     pub(crate) pending_question_waiters: HashMap<String, tokio_oneshot::Sender<QuestionResult>>,
+    /// 排队的消息
+    pub(crate) message_queue: Vec<QueuedMessage>,
+    /// 中断标志（用户按了 ESC）
+    pub(crate) interrupt_requested: bool,
+    /// 正在处理队列标志（防止处理期间新消息直接开始 turn）
+    pub(crate) queue_processing: bool,
 }
 
 impl SessionSlot {
@@ -59,6 +67,7 @@ impl SessionSlot {
         context_stats: Arc<RwLock<ContextStats>>,
         runtime: AgentRuntime<ServerModel, ToolRegistry>,
         subscriber: RuntimeSubscriberId,
+        message_queue: Vec<QueuedMessage>,
     ) -> Self {
         Self {
             session_path,
@@ -68,6 +77,9 @@ impl SessionSlot {
             context_stats,
             execution: SlotExecutionState::Idle { runtime, subscriber },
             pending_question_waiters: HashMap::new(),
+            message_queue,
+            interrupt_requested: false,
+            queue_processing: false,
         }
     }
 
@@ -232,7 +244,7 @@ pub(crate) enum SessionCommand {
     },
     SubmitTurn {
         session_id: SessionId,
-        prompt: String,
+        prompts: Vec<String>,
         reply: oneshot::Sender<Result<String, RuntimeWorkerError>>,
     },
     CancelTurn {
@@ -304,6 +316,34 @@ pub(crate) enum SessionCommand {
     SwitchProvider {
         input: SwitchProviderInput,
         reply: oneshot::Sender<Result<ProviderInfoSnapshot, RuntimeWorkerError>>,
+    },
+    /// 发送消息（空闲时立即执行，运行时入队）
+    QueueMessage {
+        session_id: SessionId,
+        content: String,
+        reply: oneshot::Sender<Result<QueueMessageResponse, RuntimeWorkerError>>,
+    },
+    /// 获取当前消息队列
+    GetQueue {
+        session_id: SessionId,
+        reply: oneshot::Sender<Result<Vec<QueuedMessage>, RuntimeWorkerError>>,
+    },
+    /// 删除队列中的消息
+    DeleteQueuedMessage {
+        session_id: SessionId,
+        message_id: String,
+        reply: oneshot::Sender<Result<(), RuntimeWorkerError>>,
+    },
+    /// 打断当前 turn
+    InterruptTurn {
+        session_id: SessionId,
+        reply: oneshot::Sender<Result<bool, RuntimeWorkerError>>,
+    },
+    /// 处理队列中的消息（内部命令，由 handle_runtime_return 触发）
+    SubmitQueuedMessages {
+        session_id: SessionId,
+        messages: Vec<String>,
+        reply: oneshot::Sender<Result<String, RuntimeWorkerError>>,
     },
 }
 

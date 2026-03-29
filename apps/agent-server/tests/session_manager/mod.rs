@@ -237,6 +237,9 @@ fn get_session_info_uses_cached_stats_when_turn_is_running() {
                 pending_provider_binding: None,
             },
             pending_question_waiters: std::collections::HashMap::new(),
+            message_queue: Vec::new(),
+            interrupt_requested: false,
+            queue_processing: false,
         },
     );
 
@@ -286,6 +289,9 @@ fn running_session_slot_keeps_in_memory_provider_binding() {
                 pending_provider_binding: None,
             },
             pending_question_waiters: std::collections::HashMap::new(),
+            message_queue: Vec::new(),
+            interrupt_requested: false,
+            queue_processing: false,
         },
     );
 
@@ -604,6 +610,9 @@ fn handle_cancel_turn_marks_running_snapshot_as_cancelled() {
                 pending_provider_binding: None,
             },
             pending_question_waiters: std::collections::HashMap::new(),
+            message_queue: Vec::new(),
+            interrupt_requested: false,
+            queue_processing: false,
         },
     );
     let (broadcast_tx, _broadcast_rx) = tokio::sync::broadcast::channel(8);
@@ -685,7 +694,7 @@ fn spawned_turn_worker_completes_bootstrap_turn() {
             .await
             .expect("session should be created");
         let accepted_turn_id = handle
-            .submit_turn(session.id.clone(), "hello from async worker".into())
+            .submit_turn(session.id.clone(), vec!["hello from async worker".into()])
             .await
             .expect("turn should be accepted");
 
@@ -702,7 +711,7 @@ fn spawned_turn_worker_completes_bootstrap_turn() {
         let turn = completed_turn.expect("turn should complete");
 
         assert!(accepted_turn_id.starts_with("srv-turn-"));
-        assert_eq!(turn.user_message, "hello from async worker");
+        assert_eq!(turn.user_messages, vec!["hello from async worker"]);
         assert_eq!(turn.outcome, agent_runtime::TurnOutcome::Succeeded);
         assert!(
             turn.assistant_message
@@ -773,7 +782,7 @@ fn spawned_turn_worker_applies_custom_system_prompt_and_runtime_hooks() {
             .await
             .expect("session should be created");
         let _ = handle
-            .submit_turn(session.id.clone(), "hello".into())
+            .submit_turn(session.id.clone(), vec!["hello".into()])
             .await
             .expect("turn should be accepted");
 

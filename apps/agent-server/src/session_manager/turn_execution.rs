@@ -33,14 +33,24 @@ impl<'a> TurnExecutionService<'a> {
         Self { slots, config, return_tx }
     }
 
+    /// 提交 turn，支持单条或多条用户消息
+    ///
+    /// 每条消息作为独立的 user message 追加到 tape
     pub(super) async fn submit_turn(
         &mut self,
         session_id: &str,
-        prompt: String,
+        prompts: Vec<String>,
     ) -> Result<String, RuntimeWorkerError> {
+        if prompts.is_empty() {
+            return Err(RuntimeWorkerError::bad_request("no prompts provided"));
+        }
+
         let slot = self.slots.get_mut(session_id).ok_or_else(|| {
             RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
         })?;
+
+        // 清除队列处理标志（以防万一）
+        slot.queue_processing = false;
 
         let (runtime, subscriber, running_turn) = slot.begin_turn()?;
         *write_lock(&slot.context_stats) = runtime.context_stats();
@@ -59,10 +69,12 @@ impl<'a> TurnExecutionService<'a> {
             })?;
 
         let turn_id = next_server_turn_id();
+        // 使用换行分隔多条消息作为预览
+        let user_message_preview = prompts.join("\n");
         let current_turn = CurrentTurnSnapshot {
             turn_id: turn_id.clone(),
             started_at_ms: now_timestamp_ms(),
-            user_message: prompt.clone(),
+            user_message: user_message_preview,
             status: TurnStatus::Waiting,
             blocks: Vec::new(),
         };
@@ -72,7 +84,7 @@ impl<'a> TurnExecutionService<'a> {
         let worker = TurnWorker::new(
             runtime,
             subscriber,
-            prompt,
+            prompts,
             turn_control,
             TurnWorkerContext {
                 broadcast_tx: self.config.broadcast_tx.clone(),
@@ -175,24 +187,20 @@ pub(super) struct TurnWorkerContext {
 pub(super) struct TurnWorker {
     runtime: AgentRuntime<ServerModel, ToolRegistry>,
     subscriber: RuntimeSubscriberId,
-    mode: TurnWorkerMode,
+    prompts: Vec<String>,
     turn_control: agent_runtime::TurnControl,
     context: TurnWorkerContext,
-}
-
-enum TurnWorkerMode {
-    Submit { prompt: String },
 }
 
 impl TurnWorker {
     pub(super) fn new(
         runtime: AgentRuntime<ServerModel, ToolRegistry>,
         subscriber: RuntimeSubscriberId,
-        prompt: String,
+        prompts: Vec<String>,
         turn_control: agent_runtime::TurnControl,
         context: TurnWorkerContext,
     ) -> Self {
-        Self { runtime, subscriber, mode: TurnWorkerMode::Submit { prompt }, turn_control, context }
+        Self { runtime, subscriber, prompts, turn_control, context }
     }
 
     pub(super) async fn run(mut self) -> RuntimeReturn {
@@ -202,38 +210,22 @@ impl TurnWorker {
         let stream_turn_id = self.context.turn_id.clone();
         let stream_snapshot = self.context.current_turn_snapshot.clone();
 
-        let TurnWorkerMode::Submit { prompt } = &self.mode;
-        let result = self
-            .runtime
-            .handle_turn_streaming(prompt.clone(), self.turn_control.clone(), |event| {
-                let new_status = match &event {
-                    StreamEvent::ThinkingDelta { .. } => CurrentStatusInner::Thinking,
-                    StreamEvent::TextDelta { .. } => CurrentStatusInner::Generating,
-                    StreamEvent::ToolCallDetected { .. } => current_status.clone(),
-                    StreamEvent::ToolCallStarted { .. } => CurrentStatusInner::Working,
-                    StreamEvent::ToolOutputDelta { .. } => CurrentStatusInner::Working,
-                    StreamEvent::Done => CurrentStatusInner::Finishing,
-                    _ => current_status.clone(),
-                };
-
-                if new_status != current_status {
-                    current_status = new_status.clone();
-                    update_current_turn_status(&stream_snapshot, new_status.to_turn_status());
-                    let _ = status_broadcast.send(SsePayload::Status {
-                        session_id: stream_session_id.clone(),
-                        turn_id: stream_turn_id.clone(),
-                        status: new_status.to_turn_status(),
-                    });
-                }
-
-                update_current_turn_from_stream(&stream_snapshot, &event);
-                let _ = status_broadcast.send(SsePayload::Stream {
-                    session_id: stream_session_id.clone(),
-                    turn_id: stream_turn_id.clone(),
-                    event,
-                });
-            })
-            .await;
+        let prompts = std::mem::take(&mut self.prompts);
+        let turn_control = self.turn_control.clone();
+        let result = self.runtime.handle_turn_streaming(
+            prompts,
+            turn_control,
+            |event| {
+                Self::handle_stream_event(
+                    &event,
+                    &mut current_status,
+                    &status_broadcast,
+                    &stream_session_id,
+                    &stream_turn_id,
+                    &stream_snapshot,
+                );
+            },
+        ).await;
         *write_lock(&self.context.context_stats_snapshot) = self.runtime.context_stats();
 
         match result {
@@ -327,5 +319,41 @@ impl TurnWorker {
         }
 
         *write_lock(&self.context.current_turn_snapshot) = None;
+    }
+
+    fn handle_stream_event(
+        event: &StreamEvent,
+        current_status: &mut CurrentStatusInner,
+        status_broadcast: &broadcast::Sender<SsePayload>,
+        stream_session_id: &str,
+        stream_turn_id: &str,
+        stream_snapshot: &Arc<RwLock<Option<CurrentTurnSnapshot>>>,
+    ) {
+        let new_status = match event {
+            StreamEvent::ThinkingDelta { .. } => CurrentStatusInner::Thinking,
+            StreamEvent::TextDelta { .. } => CurrentStatusInner::Generating,
+            StreamEvent::ToolCallDetected { .. } => current_status.clone(),
+            StreamEvent::ToolCallStarted { .. } => CurrentStatusInner::Working,
+            StreamEvent::ToolOutputDelta { .. } => CurrentStatusInner::Working,
+            StreamEvent::Done => CurrentStatusInner::Finishing,
+            _ => current_status.clone(),
+        };
+
+        if new_status != *current_status {
+            *current_status = new_status.clone();
+            update_current_turn_status(stream_snapshot, new_status.to_turn_status());
+            let _ = status_broadcast.send(SsePayload::Status {
+                session_id: stream_session_id.to_string(),
+                turn_id: stream_turn_id.to_string(),
+                status: new_status.to_turn_status(),
+            });
+        }
+
+        update_current_turn_from_stream(stream_snapshot, event);
+        let _ = status_broadcast.send(SsePayload::Stream {
+            session_id: stream_session_id.to_string(),
+            turn_id: stream_turn_id.to_string(),
+            event: event.clone(),
+        });
     }
 }

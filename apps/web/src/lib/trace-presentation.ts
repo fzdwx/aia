@@ -259,6 +259,7 @@ export function buildTraceLoopGroups(
               : totalDurationMs,
           status: finalStatus,
           userMessage:
+            turn?.user_messages?.join("\n") ??
             turn?.user_message ??
             latestLlmTrace?.user_message ??
             latestTrace.user_message ??
@@ -304,7 +305,7 @@ export function buildTraceLoopGroups(
         requestKind: loop.request_kind,
         turnId: loop.turn_id,
         runId: loop.run_id,
-        userMessage: turn?.user_message ?? loop.user_message,
+        userMessage: turn?.user_messages?.join("\n") ?? turn?.user_message ?? loop.user_message,
         assistantMessage: turn?.assistant_message ?? null,
         model: loop.model,
         protocol: loop.protocol,

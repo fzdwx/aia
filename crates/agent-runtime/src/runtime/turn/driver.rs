@@ -20,12 +20,12 @@ where
         &mut self,
         turn_id: &str,
         started_at_ms: u64,
-        user_message: &str,
+        user_messages: &[String],
         buffers: &mut TurnBuffers,
         runtime_error: RuntimeError,
     ) -> Result<TurnOutput, RuntimeError> {
         self.record_turn_failure(
-            buffers.failure_context(turn_id, started_at_ms, user_message),
+            buffers.failure_context(turn_id, started_at_ms, user_messages),
             runtime_error.clone(),
         )?;
         Err(runtime_error)
@@ -35,7 +35,7 @@ where
         &mut self,
         turn_id: String,
         started_at_ms: u64,
-        user_message: Message,
+        user_messages: Vec<String>,
         control: TurnControl,
         mut buffers: TurnBuffers,
         mut llm_step_index: u32,
@@ -49,7 +49,7 @@ where
                 return self.fail_turn(
                     &turn_id,
                     started_at_ms,
-                    &user_message.content,
+                    &user_messages,
                     &mut buffers,
                     RuntimeError::cancelled(),
                 );
@@ -82,7 +82,7 @@ where
                         return self.fail_turn(
                             &turn_id,
                             started_at_ms,
-                            &user_message.content,
+                            &user_messages,
                             &mut buffers,
                             RuntimeError::cancelled(),
                         );
@@ -97,7 +97,7 @@ where
                     return self.fail_turn(
                         &turn_id,
                         started_at_ms,
-                        &user_message.content,
+                        &user_messages,
                         &mut buffers,
                         RuntimeError::model(error),
                     );
@@ -108,7 +108,7 @@ where
                 return self.fail_turn(
                     &turn_id,
                     started_at_ms,
-                    &user_message.content,
+                    &user_messages,
                     &mut buffers,
                     RuntimeError::cancelled(),
                 );
@@ -118,7 +118,7 @@ where
                 return self.fail_turn(
                     &turn_id,
                     started_at_ms,
-                    &user_message.content,
+                    &user_messages,
                     &mut buffers,
                     runtime_error,
                 );
@@ -147,7 +147,7 @@ where
                     return self.fail_turn(
                         &turn_id,
                         started_at_ms,
-                        &user_message.content,
+                        &user_messages,
                         &mut buffers,
                         runtime_error,
                     );
@@ -162,7 +162,7 @@ where
                         return self.fail_turn(
                             &turn_id,
                             started_at_ms,
-                            &user_message.content,
+                            &user_messages,
                             &mut buffers,
                             RuntimeError::stop_reason_mismatch(&completion.stop_reason),
                         );
@@ -173,7 +173,7 @@ where
                         return self.fail_turn(
                             &turn_id,
                             started_at_ms,
-                            &user_message.content,
+                            &user_messages,
                             &mut buffers,
                             RuntimeError::stop_reason_mismatch(&completion.stop_reason),
                         );
@@ -182,7 +182,7 @@ where
                     self.finish_success_turn(buffers.into_success_context(
                         turn_id.clone(),
                         started_at_ms,
-                        user_message.content.clone(),
+                        user_messages,
                         completion.usage.clone(),
                     ))?;
 
@@ -196,15 +196,22 @@ where
         }
     }
 
+    /// 处理 turn，支持单条或多条用户消息
+    ///
+    /// 每条消息作为独立的 user message 追加到 tape，
+    /// agent 能清晰看到这是多条独立的用户输入。
     pub async fn handle_turn_streaming(
         &mut self,
-        user_input: impl Into<String>,
+        user_inputs: Vec<String>,
         control: TurnControl,
         on_delta: impl FnMut(StreamEvent) + Send,
     ) -> Result<TurnOutput, RuntimeError> {
+        if user_inputs.is_empty() {
+            return Err(RuntimeError::session("no user messages provided"));
+        }
+
         let turn_id = next_turn_id();
         let started_at_ms = now_timestamp_ms();
-        let user_input = self.rewrite_input(user_input.into())?;
         let abort_signal = control.abort_signal();
 
         self.ensure_agent_started()?;
@@ -221,17 +228,29 @@ where
             return Err(RuntimeError::cancelled());
         }
 
-        let user_message = Message::new(Role::User, user_input);
-        let user_entry_id =
-            self.append_tape_entry(TapeEntry::message(&user_message).with_run_id(&turn_id))?;
-        let buffers = TurnBuffers::new(user_entry_id);
-        self.publish_event(RuntimeEvent::UserMessage { content: user_message.content.clone() });
-        self.notify_turn_start(&turn_id, &user_message.content);
+        // 追加所有 user message 到 tape，收集 entry IDs
+        let mut user_entry_ids = Vec::with_capacity(user_inputs.len());
+        for user_input in &user_inputs {
+            let user_input = self.rewrite_input(user_input.clone())?;
+            let user_message = Message::new(Role::User, user_input);
+            let entry_id =
+                self.append_tape_entry(TapeEntry::message(&user_message).with_run_id(&turn_id))?;
+            user_entry_ids.push(entry_id);
+            self.publish_event(RuntimeEvent::UserMessage {
+                content: user_message.content.clone(),
+            });
+        }
+
+        let buffers = TurnBuffers::with_user_entries(user_entry_ids);
+        
+        // 使用所有消息作为预览
+        let preview: String = user_inputs.join("\n");
+        self.notify_turn_start(&turn_id, &preview);
 
         self.drive_turn_loop(
             turn_id,
             started_at_ms,
-            user_message,
+            user_inputs,
             control,
             buffers,
             llm_step_index,

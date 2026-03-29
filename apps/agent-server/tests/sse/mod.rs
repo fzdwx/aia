@@ -43,7 +43,7 @@ fn turn_completed_payload_can_convert_to_event() {
         started_at_ms: 1,
         finished_at_ms: 2,
         source_entry_ids: vec![1],
-        user_message: "# 用户".into(),
+        user_messages: vec!["# 用户".into()],
         blocks: vec![agent_runtime::TurnBlock::Assistant { content: "# 回答".into() }],
         assistant_message: Some("# 回答".into()),
         thinking: None,

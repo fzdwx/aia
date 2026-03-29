@@ -8,6 +8,7 @@ use crate::state::SharedState;
 
 #[derive(Deserialize)]
 pub(crate) struct TurnRequest {
+    /// 用户消息
     pub prompt: String,
     pub session_id: Option<String>,
 }

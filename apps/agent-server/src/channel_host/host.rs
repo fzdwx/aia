@@ -92,7 +92,7 @@ impl ChannelSessionService for AgentServerChannelHost {
 #[async_trait]
 impl ChannelRuntimeHost for AgentServerChannelHost {
     async fn submit_turn(&self, session_id: String, prompt: String) -> Result<String, String> {
-        self.session_manager.submit_turn(session_id, prompt).await.map_err(runtime_error_to_string)
+        self.session_manager.submit_turn(session_id, vec![prompt]).await.map_err(runtime_error_to_string)
     }
 
     fn subscribe_runtime_events(

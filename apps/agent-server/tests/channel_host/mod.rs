@@ -91,7 +91,7 @@ fn map_turn_completed_payload_to_channel_runtime_event() {
             started_at_ms: 1,
             finished_at_ms: 2,
             source_entry_ids: vec![1],
-            user_message: "用户问题".into(),
+            user_messages: vec!["用户问题".into()],
             blocks: vec![agent_runtime::TurnBlock::Assistant { content: "回答".into() }],
             assistant_message: Some("回答".into()),
             thinking: None,

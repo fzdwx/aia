@@ -1,5 +1,5 @@
 import { useRef, useState } from "react"
-import { ArrowUp, Square } from "lucide-react"
+import { ArrowUp, Square, X, ListOrdered } from "lucide-react"
 
 import { ModelSelector } from "./model-selector"
 import { PendingQuestionComposer } from "./pending-question-composer"
@@ -27,25 +27,61 @@ function ContextPressure() {
   return <span className={cn("tabular-nums", color)}>{pct}%</span>
 }
 
+function MessageQueue() {
+  const messageQueue = useChatStore((s) => s.messageQueue)
+  const deleteQueuedMessage = useChatStore((s) => s.deleteQueuedMessage)
+  const chatState = useChatStore((s) => s.chatState)
+
+  if (messageQueue.length === 0) return null
+
+  return (
+    <div className="mb-2 rounded-lg border border-border/50 bg-muted/30 px-3 py-2">
+      <div className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+        <ListOrdered className="size-3" />
+        <span>Queued messages ({messageQueue.length})</span>
+      </div>
+      <div className="space-y-1">
+        {messageQueue.map((msg, index) => (
+          <div
+            key={msg.id}
+            className="flex items-center gap-2 rounded bg-background/50 px-2 py-1 text-xs"
+          >
+            <span className="text-muted-foreground">{index + 1}.</span>
+            <span className="flex-1 truncate">{msg.content}</span>
+            {chatState === "idle" && (
+              <button
+                onClick={() => void deleteQueuedMessage(msg.id)}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="size-3" />
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function ChatInput() {
-  const submitTurn = useChatStore((s) => s.submitTurn)
-  const cancelTurn = useChatStore((s) => s.cancelTurn)
+  const sendMessage = useChatStore((s) => s.sendMessage)
+  const interruptTurn = useChatStore((s) => s.interruptTurn)
   const chatState = useChatStore((s) => s.chatState)
   const pendingQuestion = usePendingQuestionStore((s) => s.pendingQuestion)
   const sessionSettingsError = useSessionSettingsStore((s) => s.error)
   const [value, setValue] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const disabled = chatState === "active"
+  const isActive = chatState === "active"
 
   if (pendingQuestion) {
     return <PendingQuestionComposer />
   }
 
-  const canSend = value.trim().length > 0 && !disabled
+  const canSend = value.trim().length > 0
 
   function handleSend() {
     if (!canSend) return
-    submitTurn(value.trim())
+    sendMessage(value.trim())
     setValue("")
     textareaRef.current?.focus()
   }
@@ -71,6 +107,7 @@ export function ChatInput() {
             {sessionSettingsError}
           </div>
         )}
+        <MessageQueue />
         <div className="flex items-end gap-3 rounded-xl border border-border/50 bg-card px-4 py-3">
           <textarea
             ref={textareaRef}
@@ -83,19 +120,19 @@ export function ChatInput() {
             style={{ fieldSizing: "content" } as React.CSSProperties}
           />
           <button
-            onClick={disabled ? () => void cancelTurn() : handleSend}
-            disabled={!disabled && !canSend}
+            onClick={isActive ? () => void interruptTurn() : handleSend}
+            disabled={!isActive && !canSend}
             className={cn(
               "flex size-7 shrink-0 items-center justify-center rounded-lg transition-all duration-150",
-              disabled
+              isActive
                 ? "bg-amber-500/90 text-black hover:bg-amber-500"
                 : canSend
                   ? "bg-foreground text-background hover:opacity-80"
                   : "bg-muted text-muted-foreground/30"
             )}
-            title={disabled ? "Cancel current turn" : "Send message"}
+            title={isActive ? "Interrupt (ESC)" : "Send message"}
           >
-            {disabled ? (
+            {isActive ? (
               <Square className="size-3.5 fill-current" strokeWidth={2.5} />
             ) : (
               <ArrowUp className="size-4" strokeWidth={2.5} />
@@ -107,7 +144,9 @@ export function ChatInput() {
         >
           <ContextPressure />
           <p className={CHAT_INPUT_HELP}>
-            aia may produce inaccurate responses.
+            {isActive
+              ? "Press button or ESC to interrupt"
+              : "aia may produce inaccurate responses."}
           </p>
         </div>
       </div>

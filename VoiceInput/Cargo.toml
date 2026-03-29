@@ -1,0 +1,54 @@
+[package]
+name = "voice-input"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gtk4 = "0.9"
+glib = "0.20"
+gio = "0.20"
+pango = "0.20"
+cairo-rs = "0.20"
+
+# Audio
+cpal = "0.15"
+rubato = "0.15"  # Audio resampling
+ringbuf = "0.4"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+async-channel = "2"
+
+# HTTP client for Whisper API
+reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls", "multipart"], default-features = false }
+reqwest-eventsource = "0.6"
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Key listening
+evdev = "0.12"
+nix = { version = "0.29", features = ["poll"] }
+
+# Clipboard
+arboard = "3"
+
+# Config
+confy = "0.6"
+directories = "5"
+
+# Input method
+subprocess = "0.2"
+
+# Utilities
+anyhow = "1"
+log = "0.4"
+env_logger = "0.11"
+parking_lot = "0.12"
+rand = "0.8"
+
+[profile.release]
+lto = true
+strip = true
+
+[workspace]

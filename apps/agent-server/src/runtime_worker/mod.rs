@@ -84,6 +84,18 @@ impl RuntimeWorkerError {
     pub fn unavailable() -> Self {
         Self::internal("runtime worker unavailable")
     }
+
+    pub fn queue_full(max_size: usize) -> Self {
+        Self::bad_request(format!("message queue is full (max {} messages)", max_size))
+    }
+
+    pub fn message_not_found(id: &str) -> Self {
+        Self::not_found(format!("message not found: {}", id))
+    }
+
+    pub fn cannot_modify_queue_while_running() -> Self {
+        Self::bad_request("cannot modify message queue while session is running")
+    }
 }
 
 #[derive(Clone)]
