@@ -64,13 +64,18 @@ function ToolTrigger({
     ? getToolDisplayPath(item.toolName, item.details, item.arguments)
     : ""
   const fileParts = filePath ? getFileDisplayParts(filePath) : null
+  const isStreamingPath = isFileTool && isRunning && !filePath
 
   return (
     <div data-component="tool-trigger">
       <span data-slot="tool-title">
         {isRunning ? <TextShimmer text={displayName} active /> : displayName}
       </span>
-      {fileParts ? (
+      {isStreamingPath ? (
+        <span data-slot="tool-subtitle" data-kind="file-path" data-state="streaming">
+          <TextShimmer text="..." active />
+        </span>
+      ) : fileParts ? (
         <span
           data-slot="tool-subtitle"
           data-kind="file-path"

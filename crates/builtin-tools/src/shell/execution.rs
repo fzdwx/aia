@@ -56,14 +56,18 @@ pub(super) async fn run_embedded_brush(
     let mut stderr_closed = false;
     let mut finished = None;
     let mut control: Option<tokio::sync::oneshot::Sender<ShellControlMessage>> = None;
-    let mut abort_sent = false;
+    let mut abort_requested = false;
 
     while !(stdout_closed && stderr_closed && finished.is_some()) {
-        if abort.is_aborted() && !abort_sent {
+        if abort.is_aborted() && !abort_requested {
+            abort_requested = true;
+        }
+
+        // Send abort if we have control and abort was requested
+        if abort_requested {
             if let Some(control_tx) = control.take() {
                 let _ = control_tx.send(ShellControlMessage::Abort);
             }
-            abort_sent = true;
         }
 
         match tokio::time::timeout(SHELL_EVENT_POLL_INTERVAL, event_rx.recv()).await {
@@ -82,7 +86,12 @@ pub(super) async fn run_embedded_brush(
                 finished = Some(result);
             }
             Ok(Some(ShellEvent::ShellReady(control_tx))) => {
-                control = Some(control_tx);
+                // If abort was already requested, send it immediately
+                if abort_requested {
+                    let _ = control_tx.send(ShellControlMessage::Abort);
+                } else {
+                    control = Some(control_tx);
+                }
             }
             Ok(None) => break,
             Err(_) => continue,

@@ -117,12 +117,16 @@ export function applyStreamEventToBlocks(
         StreamingBlock,
         { type: "tool" }
       >
+      const mergedArguments = {
+        ...block.tool.arguments,
+        ...normalizeToolArguments(data.arguments),
+      }
       nextBlocks[existingIndex] = {
         ...block,
         tool: {
           ...block.tool,
           toolName: data.tool_name || block.tool.toolName,
-          arguments: normalizeToolArguments(data.arguments),
+          arguments: mergedArguments,
         },
       }
     } else {
@@ -148,12 +152,16 @@ export function applyStreamEventToBlocks(
         StreamingBlock,
         { type: "tool" }
       >
+      const mergedArguments = {
+        ...block.tool.arguments,
+        ...normalizeToolArguments(data.arguments),
+      }
       nextBlocks[existingIndex] = {
         ...block,
         tool: {
           ...block.tool,
           toolName: data.tool_name || block.tool.toolName,
-          arguments: normalizeToolArguments(data.arguments),
+          arguments: mergedArguments,
           startedAtMs: block.tool.startedAtMs ?? data.started_at_ms,
         },
       }
