@@ -11,7 +11,7 @@ import {
   coalesceStreamingToolOutputs,
   formatDurationMs,
   fromStreamingTool,
-  isContextExplorationTool,
+  isContextExplorationTool, normalizeToolName,
   type ToolRowItem,
 } from "./tool-timeline-helpers"
 import { ContextToolGroup } from "./tool-timeline/context-group"
@@ -91,11 +91,14 @@ function ToolRow({
   const showDetails = expanded ?? localShowDetails
   useDurationTicker(item.finishedAtMs == null)
   const isRunning = item.finishedAtMs == null
-  const normalizedToolName = normalizeToolName(item.toolName)
+
+  // Duration calculation: some tools (like Shell) should only show duration
+  // after they've actually started, not when just detected
+  const showDurationBeforeStart = toolRendererRegistry.shouldShowDurationBeforeStart(item.toolName)
   const durationStartMs = isRunning
-    ? normalizedToolName === "Shell"
-      ? item.startedAtMs
-      : (item.startedAtMs ?? item.detectedAtMs)
+    ? showDurationBeforeStart
+      ? (item.startedAtMs ?? item.detectedAtMs)
+      : item.startedAtMs
     : (item.startedAtMs ?? item.detectedAtMs)
   const duration = formatDurationMs(durationStartMs, item.finishedAtMs, {
     live: isRunning,
@@ -108,6 +111,9 @@ function ToolRow({
     outputSegments: item.outputSegments,
     succeeded: item.succeeded,
     isRunning,
+    detectedAtMs: item.detectedAtMs,
+    startedAtMs: item.startedAtMs,
+    finishedAtMs: item.finishedAtMs,
   }
   const inlineDetails = shouldInlineToolDetails(item)
     ? toolRendererRegistry.renderDetails(renderData)

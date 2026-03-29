@@ -42,5 +42,8 @@ export function createToolRendererRegistry(
     renderDetails(data: ToolRenderData) {
       return this.resolve(data.toolName).renderDetails(data)
     },
+    shouldShowDurationBeforeStart(toolName: string) {
+      return this.resolve(toolName).showDurationBeforeStart ?? true
+    },
   }
 }

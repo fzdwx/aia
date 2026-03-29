@@ -49,6 +49,9 @@ export function createShellRenderer(): ToolRenderer {
   return {
     matches: (toolName) => toolName === "Shell",
     detailsPanelMode: "renderer-only-flat",
+    // Shell should only show duration after it has actually started,
+    // not during the detected-but-not-started phase
+    showDurationBeforeStart: false,
     renderTitle(data) {
       const args = normalizeToolArguments(data.arguments)
       const descriptionValue = getStringValue(args, "description")
