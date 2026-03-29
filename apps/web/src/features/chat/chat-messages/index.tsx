@@ -44,7 +44,10 @@ export function ChatMessages() {
   const prevSessionIdRef = useRef<string | null>(null)
   const prevScrollTopRef = useRef(0)
   const rafPendingRef = useRef(false)
-  const scrollAnchorRef = useRef<number | null>(null)
+  const scrollAnchorRef = useRef<{
+    scrollHeight: number
+    scrollTop: number
+  } | null>(null)
 
   const [scrollTop, setScrollTop] = useState(0)
   const [isAtBottom, setIsAtBottom] = useState(true)
@@ -64,8 +67,12 @@ export function ChatMessages() {
     if (historyLoadingMore || sessionHydrating || !historyHasMore) return
     const container = containerRef.current
     if (!container) return
+
+    scrollAnchorRef.current = {
+      scrollHeight: container.scrollHeight,
+      scrollTop: container.scrollTop,
+    }
     autoFollowRef.current = false
-    scrollAnchorRef.current = container.scrollHeight
     await loadOlderTurns()
   }, [loadOlderTurns, historyLoadingMore, sessionHydrating, historyHasMore])
 
@@ -126,14 +133,6 @@ export function ChatMessages() {
       const container = containerRef.current
       if (!container) return
 
-      const anchor = scrollAnchorRef.current
-      if (anchor !== null) {
-        scrollAnchorRef.current = null
-        const added = container.scrollHeight - anchor
-        if (added > 0) container.scrollTop += added
-        return
-      }
-
       if (autoFollowRef.current) {
         scrollToBottom()
       }
@@ -144,6 +143,25 @@ export function ChatMessages() {
       resizeObserver.disconnect()
     }
   }, [activeSessionId, scrollToBottom])
+
+  useLayoutEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const anchor = scrollAnchorRef.current
+    if (anchor !== null) {
+      scrollAnchorRef.current = null
+      // 使用 requestAnimationFrame 确保 DOM 完全更新
+      requestAnimationFrame(() => {
+        const currentContainer = containerRef.current
+        if (!currentContainer) return
+        const added = currentContainer.scrollHeight - anchor.scrollHeight
+        if (added > 0) {
+          currentContainer.scrollTop = anchor.scrollTop + added
+        }
+      })
+    }
+  }, [turns.length])
 
   useLayoutEffect(() => {
     if (prevSessionIdRef.current === activeSessionId) return

@@ -32,15 +32,15 @@ describe("chat message scroll helpers", () => {
   })
 
   test("triggers older history loading once scrolled into the top threshold", () => {
-    expect(shouldTriggerOlderTurnsLoad(80)).toBe(true)
-    expect(shouldTriggerOlderTurnsLoad(12)).toBe(true)
-    expect(shouldTriggerOlderTurnsLoad(81)).toBe(false)
+    expect(shouldTriggerOlderTurnsLoad(400)).toBe(true)
+    expect(shouldTriggerOlderTurnsLoad(100)).toBe(true)
+    expect(shouldTriggerOlderTurnsLoad(401)).toBe(false)
   })
 
   test("only pages older turns after an explicit upward scroll in an overflowing list", () => {
     expect(
       shouldLoadOlderTurnsOnScroll({
-        scrollTop: 64,
+        scrollTop: 350,
         scrollHeight: 1200,
         clientHeight: 400,
         userScrolledUp: true,
@@ -48,7 +48,7 @@ describe("chat message scroll helpers", () => {
     ).toBe(true)
     expect(
       shouldLoadOlderTurnsOnScroll({
-        scrollTop: 64,
+        scrollTop: 350,
         scrollHeight: 1200,
         clientHeight: 400,
         userScrolledUp: false,
