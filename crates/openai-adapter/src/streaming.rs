@@ -140,19 +140,32 @@ pub(crate) async fn complete_streaming_request<S>(
 where
     S: StreamingState,
 {
+    // Check abort before making the request
+    if abort.is_aborted() {
+        return Err(OpenAiAdapterError::cancelled("OpenAI 流式请求已取消"));
+    }
+
     let client = http_client(request)?;
     let request_builder = apply_user_agent(
         client.post(endpoint_url).bearer_auth(api_key).json(&request_body),
         request.user_agent.as_deref(),
     );
-    let response =
-        request_builder.send().await.map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
+
+    let response = request_builder
+        .send()
+        .await
+        .map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
 
     let status = response.status();
     if !status.is_success() {
         let body =
             response.text().await.map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
         return Err(request_failure(endpoint_url, status, &body));
+    }
+
+    // Check abort after receiving response headers
+    if abort.is_aborted() {
+        return Err(OpenAiAdapterError::cancelled("OpenAI 流式请求已取消"));
     }
 
     let mut state = S::default();
