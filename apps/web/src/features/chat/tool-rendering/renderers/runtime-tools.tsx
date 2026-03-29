@@ -75,7 +75,10 @@ export function createTapeHandoffRenderer(): ToolRenderer {
       return getStringValue(args, "name") ?? "handoff"
     },
     renderSubtitle(data) {
-      return  truncateInline(getStringValue(data.arguments, "name")??data.outputContent, 72)
+      return truncateInline(
+        getStringValue(data.arguments, "name") ?? data.outputContent,
+        72
+      )
     },
     renderDetails(data) {
       const args = normalizeToolArguments(data.arguments)

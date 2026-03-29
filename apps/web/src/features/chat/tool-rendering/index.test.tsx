@@ -1113,7 +1113,7 @@ describe("tool renderer registry", () => {
     expect(html).toContain("leading-6 font-medium text-foreground")
   })
 
-  test("renders TapeHandoff title and subtitle with summary-first hierarchy", () => {
+  test("renders TapeHandoff title and subtitle from name field", () => {
     const title = toolRendererRegistry.renderTitle({
       toolName: "TapeHandoff",
       arguments: {
@@ -1134,10 +1134,10 @@ describe("tool renderer registry", () => {
     })
 
     expect(title).toBe("session-cut")
-    expect(subtitle).toBe("Condensed handoff summary for the next wake.")
+    expect(subtitle).toBe("session-cut")
   })
 
-  test("renders TapeHandoff details with shell-styled summary and markdown body", () => {
+  test("renders TapeHandoff details with summary only", () => {
     const details = toolRendererRegistry.renderDetails({
       toolName: "TapeHandoff",
       arguments: {
@@ -1159,9 +1159,8 @@ describe("tool renderer registry", () => {
     expect(html).toContain("tool-timeline-shell-detail")
     expect(html).toContain("tool-timeline-shell-body")
     expect(html).toContain("markdown-content")
-    expect(html).toContain("Resume plan")
-    expect(html).toContain("Carry over unresolved TODO items.")
-    expect(html).toContain("Resume from anchor")
+    expect(html).not.toContain("Resume plan")
+    expect(html).not.toContain("Carry over unresolved TODO items.")
     expect(html).not.toContain("Input")
     expect(html).not.toContain("Result")
     expect(html).not.toContain("Content")

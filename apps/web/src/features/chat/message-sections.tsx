@@ -23,7 +23,10 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
   const grouped = groupBlocks(turn.blocks)
 
   return (
-    <div className="mb-8 animate-[message-in_250ms_ease-out_both] last:mb-0">
+    <div 
+      data-turn-id={turn.turn_id}
+      className="mb-8 animate-[message-in_250ms_ease-out_both] last:mb-0"
+    >
       <div className="mb-5">
         <UserMessageBlock content={turn.user_message} />
       </div>
