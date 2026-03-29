@@ -33,19 +33,24 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
 
         <div
             data-component="assistant-message"
-            className="group/turn flex w-full flex-col gap-4"
+            className="group/turn flex w-full flex-col [&>*+*]:mt-4 [&>*[data-type='tools']+*[data-type='tools']]:mt-0"
         >
           {grouped.map((group, i) => {
             if (group.type === "tools") {
               return (
-                  <MemoizedToolGroup
-                      key={i}
-                      items={group.invocations.map(fromInvocation)}
-                  />
+                  <div key={i} data-type="tools">
+                    <MemoizedToolGroup
+                        items={group.invocations.map(fromInvocation)}
+                    />
+                  </div>
               )
             }
 
-            return <BlockRenderer key={i} block={group.block} />
+            return (
+                <div key={i} data-type="text">
+                  <BlockRenderer block={group.block} />
+                </div>
+            )
           })}
           <TurnMeta turn={turn} />
         </div>
@@ -66,7 +71,7 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
 
         <div
             data-component="assistant-message"
-            className="flex w-full flex-col gap-4"
+            className="flex w-full flex-col [&>*+*]:mt-4 [&>*[data-type='tools']+*[data-type='tools']]:mt-0"
         >
           {groups.map((group, i) => {
             if (group.type === "thinking") {
@@ -74,26 +79,30 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
                   i === groups.length - 1 && streaming.status === "thinking"
 
               return (
-                  <ThinkingBlock
-                      key={i}
-                      content={group.content}
-                      isStreaming={isLast}
-                  />
+                  <div key={i} data-type="text">
+                    <ThinkingBlock
+                        content={group.content}
+                        isStreaming={isLast}
+                    />
+                  </div>
               )
             }
 
             if (group.type === "tools") {
               return (
-                  <MemoizedStreamingToolGroup
-                      key={i}
-                      toolOutputs={group.tools}
-                      keepContextGroupsOpen
-                  />
+                  <div key={i} data-type="tools">
+                    <MemoizedStreamingToolGroup
+                        toolOutputs={group.tools}
+                        keepContextGroupsOpen
+                    />
+                  </div>
               )
             }
 
             return (
-                <AssistantTextBlock key={i} content={group.content} streaming />
+                <div key={i} data-type="text">
+                  <AssistantTextBlock content={group.content} streaming />
+                </div>
             )
           })}
         </div>
