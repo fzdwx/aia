@@ -11,7 +11,7 @@ import {
   coalesceStreamingToolOutputs,
   formatDurationMs,
   fromStreamingTool,
-  isContextExplorationTool, normalizeToolName,
+  isContextExplorationTool,
   type ToolRowItem,
 } from "./tool-timeline-helpers"
 import { ContextToolGroup } from "./tool-timeline/context-group"
