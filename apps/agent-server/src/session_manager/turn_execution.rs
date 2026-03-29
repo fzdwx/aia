@@ -54,7 +54,9 @@ impl<'a> TurnExecutionService<'a> {
             .map_err(|error| {
                 RuntimeWorkerError::internal(format!("session activity update failed: {error}"))
             })?
-            .ok_or_else(|| RuntimeWorkerError::not_found(format!("session not found: {session_id}")))?;
+            .ok_or_else(|| {
+                RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
+            })?;
 
         let turn_id = next_server_turn_id();
         let current_turn = CurrentTurnSnapshot {

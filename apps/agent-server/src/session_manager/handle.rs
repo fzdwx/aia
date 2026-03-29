@@ -219,9 +219,9 @@ impl ChannelSessionService for SessionManagerHandle {
             SessionTitleSource::Channel,
             SessionAutoRenamePolicy::Disabled,
         )
-            .await
-            .map(|session| session.id)
-            .map_err(|error| ChannelBridgeError::new(error.message))
+        .await
+        .map(|session| session.id)
+        .map_err(|error| ChannelBridgeError::new(error.message))
     }
 
     async fn session_info(

@@ -21,14 +21,42 @@ pub enum TurnStatus {
 
 #[derive(Clone)]
 pub enum SsePayload {
-    Stream { session_id: String, turn_id: String, event: StreamEvent },
-    Status { session_id: String, turn_id: String, status: TurnStatus },
-    CurrentTurnStarted { session_id: String, current_turn: CurrentTurnSnapshot },
-    TurnCompleted { session_id: String, turn_id: String, turn: TurnLifecycle },
-    ContextCompressed { session_id: String, summary: String },
-    SyncRequired { reason: String, skipped_messages: u64 },
-    Error { session_id: String, turn_id: Option<String>, message: String },
-    SessionCreated { session_id: String, title: String },
+    Stream {
+        session_id: String,
+        turn_id: String,
+        event: StreamEvent,
+    },
+    Status {
+        session_id: String,
+        turn_id: String,
+        status: TurnStatus,
+    },
+    CurrentTurnStarted {
+        session_id: String,
+        current_turn: CurrentTurnSnapshot,
+    },
+    TurnCompleted {
+        session_id: String,
+        turn_id: String,
+        turn: TurnLifecycle,
+    },
+    ContextCompressed {
+        session_id: String,
+        summary: String,
+    },
+    SyncRequired {
+        reason: String,
+        skipped_messages: u64,
+    },
+    Error {
+        session_id: String,
+        turn_id: Option<String>,
+        message: String,
+    },
+    SessionCreated {
+        session_id: String,
+        title: String,
+    },
     SessionUpdated {
         session_id: String,
         title: String,
@@ -38,8 +66,13 @@ pub enum SsePayload {
         last_active_at: String,
         model: String,
     },
-    SessionDeleted { session_id: String },
-    TurnCancelled { session_id: String, turn_id: String },
+    SessionDeleted {
+        session_id: String,
+    },
+    TurnCancelled {
+        session_id: String,
+        turn_id: String,
+    },
 }
 
 #[derive(Serialize)]

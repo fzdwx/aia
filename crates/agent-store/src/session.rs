@@ -1,6 +1,6 @@
+use rusqlite::Connection;
 use rusqlite::Row;
 use serde::{Deserialize, Serialize};
-use rusqlite::Connection;
 
 use std::sync::Arc;
 
@@ -33,9 +33,7 @@ impl SessionTitleSource {
             "auto" => Ok(Self::Auto),
             "manual" => Ok(Self::Manual),
             "channel" => Ok(Self::Channel),
-            other => Err(AiaStoreError::new(format!(
-                "unknown session title source: {other}"
-            ))),
+            other => Err(AiaStoreError::new(format!("unknown session title source: {other}"))),
         }
     }
 }
@@ -62,9 +60,9 @@ impl SessionAutoRenamePolicy {
             "enabled" => Ok(Self::Enabled),
             "disabled" => Ok(Self::Disabled),
             "inherit" => Ok(Self::Inherit),
-            other => Err(AiaStoreError::new(format!(
-                "unknown session auto rename policy: {other}"
-            ))),
+            other => {
+                Err(AiaStoreError::new(format!("unknown session auto rename policy: {other}")))
+            }
         }
     }
 }
@@ -85,13 +83,7 @@ impl SessionRecord {
     pub fn new(id: impl Into<String>, title: impl Into<String>, model: impl Into<String>) -> Self {
         let title = title.into();
         let title_source = default_title_source_for_title(&title);
-        Self::new_with_metadata(
-            id,
-            title,
-            model,
-            title_source,
-            SessionAutoRenamePolicy::Enabled,
-        )
+        Self::new_with_metadata(id, title, model, title_source, SessionAutoRenamePolicy::Enabled)
     }
 
     pub fn new_with_metadata(
@@ -415,7 +407,9 @@ impl AiaStore {
 
             row.user_turn_count_since_last_rename =
                 row.user_turn_count_since_last_rename.saturating_add(1);
-            if allow_schedule && row.user_turn_count_since_last_rename >= row.rename_after_user_turns {
+            if allow_schedule
+                && row.user_turn_count_since_last_rename >= row.rename_after_user_turns
+            {
                 row.user_turn_count_since_last_rename = 0;
                 row.rename_after_user_turns = next_session_rename_threshold();
                 persist_session_auto_rename_state(conn, &row)?;
@@ -466,16 +460,11 @@ impl AiaStore {
         })
         .await
     }
-
 }
 
 fn read_session_record(row: &Row<'_>) -> rusqlite::Result<SessionRecord> {
     let title_source = SessionTitleSource::parse(&row.get::<_, String>(2)?).map_err(|error| {
-        rusqlite::Error::FromSqlConversionFailure(
-            2,
-            rusqlite::types::Type::Text,
-            Box::new(error),
-        )
+        rusqlite::Error::FromSqlConversionFailure(2, rusqlite::types::Type::Text, Box::new(error))
     })?;
     let auto_rename_policy =
         SessionAutoRenamePolicy::parse(&row.get::<_, String>(3)?).map_err(|error| {

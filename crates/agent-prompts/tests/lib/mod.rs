@@ -52,6 +52,10 @@ fn title_generator_prompt_template_matches_embedded_template() {
     let prompt = crate::title_generator_prompt_template();
 
     assert_eq!(prompt, include_str!("../../prompts/title-generator.md").trim());
-    assert!(prompt.contains("Generate a brief title that would help the user find this conversation later."));
+    assert!(
+        prompt.contains(
+            "Generate a brief title that would help the user find this conversation later."
+        )
+    );
     assert!(prompt.contains("{{conversation_excerpt}}"));
 }

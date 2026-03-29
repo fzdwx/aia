@@ -22,8 +22,7 @@ pub fn render_title_generator_prompt(context: TitleGeneratorPromptContext) -> St
 fn build_title_generator_conversation_excerpt(context: &TitleGeneratorPromptContext) -> String {
     let mut excerpt = format!(
         "Current title: {}\nTitle source: {}\nRecent user messages:\n",
-        context.current_title,
-        context.title_source,
+        context.current_title, context.title_source,
     );
 
     for (index, turn) in context.recent_user_turns.iter().enumerate() {

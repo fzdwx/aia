@@ -1,12 +1,8 @@
 use std::sync::Arc;
 
-use agent_core::{
-    AbortSignal, CompletionRequest, LanguageModel, LlmTraceRequestContext,
-};
+use agent_core::{AbortSignal, CompletionRequest, LanguageModel, LlmTraceRequestContext};
 use agent_runtime::TurnLifecycle;
-use agent_store::{
-    AiaStore, SessionAutoRenamePolicy, SessionRecord, SessionTitleSource,
-};
+use agent_store::{AiaStore, SessionAutoRenamePolicy, SessionRecord, SessionTitleSource};
 use provider_registry::ProviderRegistry;
 
 use crate::{
@@ -48,12 +44,7 @@ impl SessionAutoRenameService {
         let sessions_dir = self.sessions_dir.clone();
         let session_id = session_id.to_string();
         tokio::spawn(async move {
-            let service = SessionAutoRenameService {
-                store,
-                registry,
-                broadcast_tx,
-                sessions_dir,
-            };
+            let service = SessionAutoRenameService { store, registry, broadcast_tx, sessions_dir };
             let _ = service.run_once(&session_id, &record).await;
         });
     }
@@ -107,10 +98,8 @@ impl SessionAutoRenameService {
         recent_user_turns: &[String],
     ) -> Result<String, String> {
         let selection = resolve_selection_for_session(&self.registry, record);
-        let (identity, model) =
-            build_model_from_selection(selection, Some(self.store.clone())).map_err(|error| {
-                error.to_string()
-            })?;
+        let (identity, model) = build_model_from_selection(selection, Some(self.store.clone()))
+            .map_err(|error| error.to_string())?;
 
         let prompt = agent_prompts::render_title_generator_prompt(
             agent_prompts::TitleGeneratorPromptContext {
@@ -220,4 +209,3 @@ fn projected_session_model_for_record(
     let selection = resolve_selection_for_session(registry, record);
     Some(model_identity_from_selection(&selection).name)
 }
-

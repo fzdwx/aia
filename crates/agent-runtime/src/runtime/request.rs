@@ -21,7 +21,7 @@ where
         request_kind: &str,
         step_index: u32,
     ) -> CompletionRequest {
-        let (instructions, conversation, available_tools) = self.default_request_parts();
+        let (instructions, conversation, available_tools) = self.default_request_parts(turn_id);
         let max_output_tokens = self.effective_max_output_tokens(
             instructions.as_deref(),
             &conversation,
@@ -50,6 +50,7 @@ where
 
     fn default_request_parts(
         &self,
+        turn_id: &str,
     ) -> (Option<String>, Vec<ConversationItem>, Vec<ToolDefinition>) {
         let view = self.tape.default_view();
         let mut conversation = Vec::new();
@@ -57,8 +58,11 @@ where
             && let Some(msg) = anchor_state_message(anchor)
         {
             conversation.push(ConversationItem::Message(msg));
+            conversation
+                .extend(self.pending_turn_conversation_before_anchor(turn_id, anchor.entry_id));
         }
-        conversation.extend(drop_orphaned_tool_results(view.conversation));
+        conversation.extend(view.conversation);
+        conversation = drop_orphaned_tool_results(conversation);
 
         let available_tools = self.visible_tools();
         let instructions = self.instructions.as_ref().filter(|text| !text.is_empty()).cloned();
@@ -88,6 +92,28 @@ where
         self.tape.entries().iter().enumerate().rev().find_map(|(index, entry)| {
             (entry.event_name() == Some("turn_completed")).then_some(index)
         })
+    }
+
+    fn pending_turn_conversation_before_anchor(
+        &self,
+        turn_id: &str,
+        anchor_entry_id: u64,
+    ) -> Vec<ConversationItem> {
+        self.tape
+            .entries()
+            .iter()
+            .filter(|entry| entry.id < anchor_entry_id)
+            .filter(|entry| {
+                entry.meta.get("run_id").and_then(|value| value.as_str()) == Some(turn_id)
+            })
+            .filter_map(|entry| {
+                entry
+                    .as_message()
+                    .map(ConversationItem::Message)
+                    .or_else(|| entry.as_tool_call().map(ConversationItem::ToolCall))
+                    .or_else(|| entry.as_tool_result().map(ConversationItem::ToolResult))
+            })
+            .collect()
     }
 
     fn effective_max_output_tokens(

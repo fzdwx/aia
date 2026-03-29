@@ -12,7 +12,7 @@ use agent_core::{
 };
 use agent_core_macros::ToolArgsSchema as DeriveToolArgsSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::{
     OpenAiChatCompletionsConfig, OpenAiChatCompletionsModel, OpenAiResponsesConfig,
@@ -121,9 +121,9 @@ fn responses_请求体会透传自研_schema_工具参数且不包含_schema_元
     .expect("模型创建成功");
 
     let mut request = sample_request();
-    request.available_tools =
-        vec![ToolDefinition::new("search_code", "搜索代码")
-            .with_parameters_schema::<SearchToolArgs>()];
+    request.available_tools = vec![
+        ToolDefinition::new("search_code", "搜索代码").with_parameters_schema::<SearchToolArgs>(),
+    ];
 
     let body = model.build_request_body(&request);
 

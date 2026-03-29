@@ -1,10 +1,10 @@
+mod auto_rename;
 mod current_turn;
 mod handle;
 mod prompt;
 mod provider_sync;
 mod query_ops;
 mod server_runtime_tool_host;
-mod auto_rename;
 #[cfg(test)]
 #[path = "../../tests/session_manager/mod.rs"]
 mod tests;
@@ -32,12 +32,12 @@ use crate::{
     model::{ProviderLaunchChoice, ServerModel, build_model_from_selection},
     sse::SsePayload,
 };
+use auto_rename::SessionAutoRenameService;
 use current_turn::{
     CurrentStatusInner, next_server_turn_id, now_timestamp_ms, refresh_context_stats_snapshot,
     update_current_turn_from_stream, update_current_turn_status,
 };
 pub use handle::SessionManagerHandle;
-use auto_rename::SessionAutoRenameService;
 use prompt::build_session_system_prompt;
 use provider_sync::{ProviderSyncService, ReturnedRuntimeSync};
 pub(crate) use query_ops::SessionQueryService;
@@ -184,13 +184,9 @@ impl SessionManagerLoop {
             SessionCommand::ListSessions { reply } => {
                 let _ = reply.send(self.list_sessions().await);
             }
-            SessionCommand::CreateSession {
-                title,
-                title_source,
-                auto_rename_policy,
-                reply,
-            } => {
-                let _ = reply.send(self.create_session(title, title_source, auto_rename_policy).await);
+            SessionCommand::CreateSession { title, title_source, auto_rename_policy, reply } => {
+                let _ =
+                    reply.send(self.create_session(title, title_source, auto_rename_policy).await);
             }
             SessionCommand::DeleteSession { session_id, reply } => {
                 let _ = reply.send(self.delete_session(&session_id).await);
@@ -353,15 +349,16 @@ impl SessionManagerLoop {
         let session_id = generate_session_id();
         let title = title.unwrap_or_else(|| aia_config::DEFAULT_SESSION_TITLE.to_string());
         let model_name = read_lock(&self.config.provider_info_snapshot).model.clone();
-        let (title_source, auto_rename_policy) = if let (Some(title_source), Some(auto_rename_policy)) =
-            (title_source, auto_rename_policy)
-        {
-            (title_source, auto_rename_policy)
-        } else if title == aia_config::DEFAULT_SESSION_TITLE {
-            (SessionTitleSource::Default, SessionAutoRenamePolicy::Enabled)
-        } else {
-            (SessionTitleSource::Manual, SessionAutoRenamePolicy::Enabled)
-        };
+        let (title_source, auto_rename_policy) =
+            if let (Some(title_source), Some(auto_rename_policy)) =
+                (title_source, auto_rename_policy)
+            {
+                (title_source, auto_rename_policy)
+            } else if title == aia_config::DEFAULT_SESSION_TITLE {
+                (SessionTitleSource::Default, SessionAutoRenamePolicy::Enabled)
+            } else {
+                (SessionTitleSource::Manual, SessionAutoRenamePolicy::Enabled)
+            };
         let record = SessionRecord::new_with_metadata(
             session_id.clone(),
             title.clone(),
