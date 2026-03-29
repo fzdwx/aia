@@ -49,7 +49,8 @@ function ToolTrigger({
   const title = toolRendererRegistry.renderTitle(renderData)
   const meta = toolRendererRegistry.renderMeta(renderData)
   const renderedSubtitle = toolRendererRegistry.renderSubtitle(renderData)
-  const renderedTriggerSubtitle = toolRendererRegistry.renderTriggerSubtitle(renderData)
+  const renderedTriggerSubtitle =
+    toolRendererRegistry.renderTriggerSubtitle(renderData)
 
   const subtitle =
     renderedSubtitle ??
@@ -94,7 +95,8 @@ function ToolRow({
 
   // Duration calculation: some tools (like Shell) should only show duration
   // after they've actually started, not when just detected
-  const showDurationBeforeStart = toolRendererRegistry.shouldShowDurationBeforeStart(item.toolName)
+  const showDurationBeforeStart =
+    toolRendererRegistry.shouldShowDurationBeforeStart(item.toolName)
   const durationStartMs = isRunning
     ? showDurationBeforeStart
       ? (item.startedAtMs ?? item.detectedAtMs)

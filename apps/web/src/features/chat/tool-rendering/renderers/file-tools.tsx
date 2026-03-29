@@ -64,7 +64,11 @@ function renderFilePathTriggerSubtitle(
   // Show shimmer while path is empty during streaming
   if (!path && isRunning) {
     return (
-      <span data-slot="tool-subtitle" data-kind="file-path" data-state="streaming">
+      <span
+        data-slot="tool-subtitle"
+        data-kind="file-path"
+        data-state="streaming"
+      >
         <span className="shimmer-text">...</span>
       </span>
     )

@@ -23,7 +23,7 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
   const grouped = groupBlocks(turn.blocks)
 
   return (
-    <div 
+    <div
       data-turn-id={turn.turn_id}
       className="mb-8 animate-[message-in_250ms_ease-out_both] last:mb-0"
     >
@@ -42,6 +42,23 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
                 key={i}
                 items={group.invocations.map(fromInvocation)}
               />
+            )
+          }
+
+          if (group.type === "tool-run") {
+            return (
+              <div
+                key={i}
+                data-component="tool-run"
+                className="flex flex-col gap-1"
+              >
+                {group.groups.map((g, j) => (
+                  <MemoizedToolGroup
+                    key={j}
+                    items={g.invocations.map(fromInvocation)}
+                  />
+                ))}
+              </div>
             )
           }
 
@@ -79,6 +96,24 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
                 content={group.content}
                 isStreaming={isLast}
               />
+            )
+          }
+
+          if (group.type === "tool-run") {
+            return (
+              <div
+                key={i}
+                data-component="tool-run"
+                className="flex flex-col gap-1"
+              >
+                {group.groups.map((g, j) => (
+                  <MemoizedStreamingToolGroup
+                    key={j}
+                    toolOutputs={g.tools}
+                    keepContextGroupsOpen
+                  />
+                ))}
+              </div>
             )
           }
 
