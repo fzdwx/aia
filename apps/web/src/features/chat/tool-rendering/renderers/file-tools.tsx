@@ -50,9 +50,48 @@ function buildWriteContentsFromArguments(
   }
 }
 
+/**
+ * Render the trigger subtitle for file tools.
+ * Shows shimmer placeholder while file path is streaming, then actual path.
+ */
+function renderFilePathTriggerSubtitle(
+  data: Parameters<ToolRenderer["renderTitle"]>[0]
+): React.ReactNode {
+  const args = normalizeToolArguments(data.arguments)
+  const path = getToolDisplayPath(data.toolName, data.details, args)
+  const isRunning = data.isRunning ?? false
+
+  // Show shimmer while path is empty during streaming
+  if (!path && isRunning) {
+    return (
+      <span data-slot="tool-subtitle" data-kind="file-path" data-state="streaming">
+        <span className="shimmer-text">...</span>
+      </span>
+    )
+  }
+
+  if (!path) return null
+
+  const { fileName, directory } = getFileDisplayParts(path)
+  const title = buildFileToolTitle(path)
+
+  return (
+    <span
+      data-slot="tool-subtitle"
+      data-kind="file-path"
+      data-state={data.succeeded ? "default" : "failure"}
+      title={title ?? undefined}
+    >
+      <span data-slot="tool-file-name">{fileName}</span>
+      {directory ? <span data-slot="tool-file-dir">{directory}</span> : null}
+    </span>
+  )
+}
+
 export function createReadRenderer(): ToolRenderer {
   return {
     matches: (toolName) => toolName === "Read",
+    renderTriggerSubtitle: renderFilePathTriggerSubtitle,
     renderTitle(data) {
       const args = normalizeToolArguments(data.arguments)
       const path = getToolDisplayPath(data.toolName, data.details, args)
@@ -92,6 +131,7 @@ export function createWriteRenderer(): ToolRenderer {
   return {
     matches: (toolName) => toolName === "Write",
     detailsPanelMode: "renderer-only-flat",
+    renderTriggerSubtitle: renderFilePathTriggerSubtitle,
     renderTitle(data) {
       const args = normalizeToolArguments(data.arguments)
       const path = getToolDisplayPath(data.toolName, data.details, args)
@@ -125,6 +165,7 @@ export function createEditRenderer(): ToolRenderer {
   return {
     matches: (toolName) => toolName === "Edit",
     detailsPanelMode: "renderer-only-flat",
+    renderTriggerSubtitle: renderFilePathTriggerSubtitle,
     renderTitle(data) {
       const args = normalizeToolArguments(data.arguments)
       const path = getToolDisplayPath(data.toolName, data.details, args)

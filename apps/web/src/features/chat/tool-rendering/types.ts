@@ -16,6 +16,8 @@ export type ToolRenderer = {
   detailsPanelMode?: "default" | "renderer-only" | "renderer-only-flat" | "none"
   renderTitle: (data: ToolRenderData) => string
   renderSubtitle?: (data: ToolRenderData) => string | null
+  /** Render the trigger subtitle with full control (e.g., file path with streaming shimmer) */
+  renderTriggerSubtitle?: (data: ToolRenderData) => ReactNode | null
   renderMeta?: (data: ToolRenderData) => ReactNode | null
   renderDetails: (data: ToolRenderData) => ReactNode | null
 }
@@ -25,6 +27,7 @@ export type ToolRendererRegistry = {
   resolve: (toolName: string) => ToolRenderer
   renderTitle: (data: ToolRenderData) => string
   renderSubtitle: (data: ToolRenderData) => string | null
+  renderTriggerSubtitle: (data: ToolRenderData) => ReactNode | null
   renderMeta: (data: ToolRenderData) => ReactNode | null
   renderDetails: (data: ToolRenderData) => ReactNode | null
 }

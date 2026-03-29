@@ -33,6 +33,9 @@ export function createToolRendererRegistry(
     renderSubtitle(data: ToolRenderData) {
       return this.resolve(data.toolName).renderSubtitle?.(data) ?? null
     },
+    renderTriggerSubtitle(data: ToolRenderData) {
+      return this.resolve(data.toolName).renderTriggerSubtitle?.(data) ?? null
+    },
     renderMeta(data: ToolRenderData) {
       return this.resolve(data.toolName).renderMeta?.(data) ?? null
     },

@@ -7,13 +7,11 @@ import { cn } from "@/lib/utils"
 import type { StreamingToolOutput } from "@/lib/types"
 
 import { toolRendererRegistry } from "./tool-rendering"
-import { getFileDisplayParts, getToolDisplayPath } from "@/lib/tool-display"
 import {
   coalesceStreamingToolOutputs,
   formatDurationMs,
   fromStreamingTool,
   isContextExplorationTool,
-  normalizeToolName,
   type ToolRowItem,
 } from "./tool-timeline-helpers"
 import { ContextToolGroup } from "./tool-timeline/context-group"
@@ -51,42 +49,20 @@ function ToolTrigger({
   const title = toolRendererRegistry.renderTitle(renderData)
   const meta = toolRendererRegistry.renderMeta(renderData)
   const renderedSubtitle = toolRendererRegistry.renderSubtitle(renderData)
-  const normalizedToolName = normalizeToolName(item.toolName)
+  const renderedTriggerSubtitle = toolRendererRegistry.renderTriggerSubtitle(renderData)
+
   const subtitle =
     renderedSubtitle ??
     getFallbackSubtitle(item) ??
     (title && title !== displayName ? title : null)
-  const isFileTool =
-    normalizedToolName === "Read" ||
-    normalizedToolName === "Write" ||
-    normalizedToolName === "Edit"
-  const filePath = isFileTool
-    ? getToolDisplayPath(item.toolName, item.details, item.arguments)
-    : ""
-  const fileParts = filePath ? getFileDisplayParts(filePath) : null
-  const isStreamingPath = isFileTool && isRunning && !filePath
 
   return (
     <div data-component="tool-trigger">
       <span data-slot="tool-title">
         {isRunning ? <TextShimmer text={displayName} active /> : displayName}
       </span>
-      {isStreamingPath ? (
-        <span data-slot="tool-subtitle" data-kind="file-path" data-state="streaming">
-          <TextShimmer text="..." active />
-        </span>
-      ) : fileParts ? (
-        <span
-          data-slot="tool-subtitle"
-          data-kind="file-path"
-          data-state={item.succeeded ? "default" : "failure"}
-          title={title ?? undefined}
-        >
-          <span data-slot="tool-file-name">{fileParts.fileName}</span>
-          {fileParts.directory ? (
-            <span data-slot="tool-file-dir">{fileParts.directory}</span>
-          ) : null}
-        </span>
+      {renderedTriggerSubtitle ? (
+        renderedTriggerSubtitle
       ) : subtitle ? (
         <span
           data-slot="tool-subtitle"
