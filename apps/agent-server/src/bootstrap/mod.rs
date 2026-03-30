@@ -173,7 +173,7 @@ impl ServerBootstrap {
         let session_id = generate_session_id();
         let model_name = resources
             .registry
-            .active_provider()
+            .first_provider()
             .and_then(|provider| provider.default_model_id().map(str::to_string))
             .unwrap_or_default();
         let record = SessionRecord::new_with_metadata(
@@ -193,7 +193,7 @@ impl ServerBootstrap {
     fn build_snapshots(&self, resources: &BootstrapResources) -> BootstrapSnapshots {
         let selection = resources
             .registry
-            .active_provider()
+            .first_provider()
             .cloned()
             .map(|profile| ProviderLaunchChoice::OpenAi {
                 model: profile.default_model_id().unwrap_or("").to_string(),

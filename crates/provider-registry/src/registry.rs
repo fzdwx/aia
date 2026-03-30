@@ -9,7 +9,6 @@ pub fn default_registry_path() -> std::path::PathBuf {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ProviderRegistry {
     providers: Vec<ProviderProfile>,
-    active_provider: Option<String>,
 }
 
 impl ProviderRegistry {
@@ -19,10 +18,6 @@ impl ProviderRegistry {
         {
             *existing = provider;
             return;
-        }
-
-        if self.active_provider.is_none() {
-            self.active_provider = Some(provider.name.clone());
         }
 
         self.providers.push(provider);
@@ -35,24 +30,14 @@ impl ProviderRegistry {
         };
 
         self.providers.remove(index);
-        if self.active_provider.as_deref() == Some(provider_name) {
-            self.active_provider = self.providers.first().map(|provider| provider.name.clone());
-        }
         Ok(())
     }
 
-    pub fn set_active(&mut self, provider_name: &str) -> Result<(), ProviderRegistryError> {
-        if !self.providers.iter().any(|provider| provider.name == provider_name) {
-            return Err(ProviderRegistryError::new(format!("provider 不存在：{provider_name}")));
-        }
-
-        self.active_provider = Some(provider_name.to_string());
-        Ok(())
-    }
-
-    pub fn active_provider(&self) -> Option<&ProviderProfile> {
-        let active_name = self.active_provider.as_ref()?;
-        self.providers.iter().find(|provider| provider.name == *active_name)
+    /// Returns the first provider, if any exists.
+    /// New sessions will use the latest session's provider binding if available,
+    /// otherwise fall back to this.
+    pub fn first_provider(&self) -> Option<&ProviderProfile> {
+        self.providers.first()
     }
 
     pub fn providers(&self) -> &[ProviderProfile] {

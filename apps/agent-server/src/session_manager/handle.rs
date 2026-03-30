@@ -7,7 +7,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::runtime_worker::{
     CreateProviderInput, CurrentTurnSnapshot, ProviderInfoSnapshot, RuntimeWorkerError,
-    SwitchProviderInput, UpdateProviderInput,
+    UpdateProviderInput,
 };
 use agent_core::{QuestionRequest, QuestionResult};
 use session_tape::SessionProviderBinding;
@@ -197,13 +197,6 @@ impl SessionManagerHandle {
 
     pub async fn delete_provider(&self, name: String) -> Result<(), RuntimeWorkerError> {
         self.request(|reply| SessionCommand::DeleteProvider { name, reply }).await
-    }
-
-    pub async fn switch_provider(
-        &self,
-        input: SwitchProviderInput,
-    ) -> Result<ProviderInfoSnapshot, RuntimeWorkerError> {
-        self.request(|reply| SessionCommand::SwitchProvider { input, reply }).await
     }
 
     pub async fn queue_message(

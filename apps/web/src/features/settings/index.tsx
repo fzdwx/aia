@@ -398,16 +398,6 @@ export function SettingsPanel() {
                                   {providerHost(providerItem.base_url)}
                                 </span>
                               </span>
-                              <span
-                                className={cn(
-                                  SETTINGS_BADGE,
-                                  providerItem.active
-                                    ? "border-border/40 bg-muted/55 text-foreground/80"
-                                    : "text-muted-foreground"
-                                )}
-                              >
-                                {providerItem.active ? "in use" : "standby"}
-                              </span>
                             </span>
                             <span className="text-ui-xs flex flex-wrap items-center gap-1.5 text-muted-foreground/85">
                               <span className="rounded-sm border border-border/30 px-1.5 py-0.5">
@@ -508,13 +498,6 @@ export function SettingsPanel() {
                               ? selectedProvider.name
                               : "新建 Provider"}
                           </h2>
-                          <Badge variant="outline" className="text-ui-xs">
-                            {selectedProvider
-                              ? selectedProvider.active
-                                ? "in use"
-                                : "standby"
-                              : "draft"}
-                          </Badge>
                           <Badge variant="outline" className="text-ui-xs">
                             {selectedProvider
                               ? providerProtocolLabel(selectedProvider.kind)

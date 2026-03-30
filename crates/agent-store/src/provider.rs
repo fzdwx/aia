@@ -144,9 +144,6 @@ fn load_provider_registry_from_conn(
         rows.collect::<Result<Vec<_>, _>>()?
     };
 
-    let active_provider_name =
-        profiles.iter().find(|profile| profile.is_active).map(|profile| profile.name.clone());
-
     let providers = profiles
         .into_iter()
         .map(|profile| {
@@ -179,11 +176,6 @@ fn load_provider_registry_from_conn(
     for provider in providers {
         registry.upsert(provider);
     }
-    if let Some(active_provider_name) = active_provider_name {
-        registry
-            .set_active(&active_provider_name)
-            .map_err(|error| AiaStoreError::new(error.to_string()))?;
-    }
     Ok(registry)
 }
 
@@ -199,7 +191,6 @@ fn save_provider_registry_to_conn(
         .into_iter()
         .map(|model| ((model.provider_name.clone(), model.model_id.clone()), model))
         .collect::<HashMap<_, _>>();
-    let active_provider_name = registry.active_provider().map(|provider| provider.name.as_str());
 
     conn.execute("DELETE FROM provider_models", [])?;
     conn.execute("DELETE FROM providers", [])?;
@@ -207,7 +198,7 @@ fn save_provider_registry_to_conn(
     for profile in registry.providers() {
         let stored_profile = StoredProviderProfile::new(
             profile,
-            active_provider_name == Some(profile.name.as_str()),
+            false, // No active provider concept anymore
             existing_profiles.get(&profile.name).map(|stored| stored.created_at.as_str()),
         );
         conn.execute(

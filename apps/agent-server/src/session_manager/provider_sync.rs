@@ -6,12 +6,12 @@ use agent_core::ToolRegistry;
 use agent_runtime::AgentRuntime;
 use agent_store::AiaStore;
 use provider_registry::ProviderRegistry;
-use session_tape::{SessionProviderBinding, SessionTape};
+use session_tape::SessionProviderBinding;
 
 use crate::{
-    model::{ProviderLaunchChoice, ServerModel, build_model_from_selection},
+    model::{ServerModel, build_model_from_selection},
     runtime_worker::{
-        CreateProviderInput, ProviderInfoSnapshot, RuntimeWorkerError, SwitchProviderInput,
+        CreateProviderInput, ProviderInfoSnapshot, RuntimeWorkerError,
         UpdateProviderInput,
     },
 };
@@ -25,14 +25,6 @@ use super::{
 enum RuntimeSyncMode {
     PreserveSessionBinding,
     RebindTo(SessionProviderBinding),
-}
-
-enum RegistrySyncPolicy {
-    PreserveSessionBindings,
-    SwitchActiveProvider {
-        previous_registry: ProviderRegistry,
-        next_active_binding: SessionProviderBinding,
-    },
 }
 
 struct RuntimeSyncContext<'a> {
@@ -142,8 +134,7 @@ impl<'a> ProviderSyncService<'a> {
             api_key: input.api_key,
             models: input.models,
         });
-        self.sync_registry(candidate_registry, RegistrySyncPolicy::PreserveSessionBindings)
-            .map(|_| ())
+        self.sync_registry(candidate_registry).map(|_| ())
     }
 
     pub(super) fn update_provider(
@@ -170,8 +161,7 @@ impl<'a> ProviderSyncService<'a> {
 
         let mut candidate_registry = self.config.registry.clone();
         candidate_registry.upsert(updated);
-        self.sync_registry(candidate_registry, RegistrySyncPolicy::PreserveSessionBindings)
-            .map(|_| ())
+        self.sync_registry(candidate_registry).map(|_| ())
     }
 
     pub(super) fn delete_provider(&mut self, name: String) -> Result<(), RuntimeWorkerError> {
@@ -179,30 +169,7 @@ impl<'a> ProviderSyncService<'a> {
         candidate_registry
             .remove(&name)
             .map_err(|error| RuntimeWorkerError::not_found(error.to_string()))?;
-        self.sync_registry(candidate_registry, RegistrySyncPolicy::PreserveSessionBindings)
-            .map(|_| ())
-    }
-
-    pub(super) fn switch_provider(
-        &mut self,
-        input: SwitchProviderInput,
-    ) -> Result<ProviderInfoSnapshot, RuntimeWorkerError> {
-        if !self.config.registry.providers().iter().any(|provider| provider.name == input.name) {
-            return Err(RuntimeWorkerError::not_found(format!("provider 不存在：{}", input.name)));
-        }
-
-        let previous_registry = self.config.registry.clone();
-        let mut candidate_registry = previous_registry.clone();
-        candidate_registry
-            .set_active(&input.name)
-            .map_err(|error| RuntimeWorkerError::bad_request(error.to_string()))?;
-
-        let next_active_binding =
-            prepare_runtime_sync(&candidate_registry, Some(self.config.store.clone()))?.3;
-        self.sync_registry(
-            candidate_registry,
-            RegistrySyncPolicy::SwitchActiveProvider { previous_registry, next_active_binding },
-        )
+        self.sync_registry(candidate_registry).map(|_| ())
     }
 
     pub(super) fn update_session_provider_binding(
@@ -283,7 +250,6 @@ impl<'a> ProviderSyncService<'a> {
     fn sync_registry(
         &mut self,
         candidate_registry: ProviderRegistry,
-        policy: RegistrySyncPolicy,
     ) -> Result<ProviderInfoSnapshot, RuntimeWorkerError> {
         let (info, _, _, _) =
             prepare_runtime_sync(&candidate_registry, Some(self.config.store.clone()))?;
@@ -295,57 +261,16 @@ impl<'a> ProviderSyncService<'a> {
         for (session_id, slot) in self.slots.iter_mut() {
             let session_path = slot.session_path.clone();
             let context_stats = slot.context_stats.clone();
-            match (slot.runtime_mut(), &policy) {
-                (Some(runtime), RegistrySyncPolicy::PreserveSessionBindings) => {
-                    RuntimeSyncContext::new(
-                        session_id,
-                        &session_path,
-                        &candidate_registry,
-                        self.config.store.clone(),
-                        RuntimeSyncMode::PreserveSessionBinding,
-                    )
-                    .apply(runtime)?;
-                    refresh_context_stats_snapshot(&context_stats, runtime);
-                }
-                (
-                    Some(runtime),
-                    RegistrySyncPolicy::SwitchActiveProvider {
-                        previous_registry,
-                        next_active_binding,
-                    },
-                ) => {
-                    let mode = if tape_follows_active_provider(runtime.tape(), previous_registry) {
-                        RuntimeSyncMode::RebindTo(next_active_binding.clone())
-                    } else {
-                        RuntimeSyncMode::PreserveSessionBinding
-                    };
-                    RuntimeSyncContext::new(
-                        session_id,
-                        &session_path,
-                        &candidate_registry,
-                        self.config.store.clone(),
-                        mode,
-                    )
-                    .apply(runtime)?;
-                    refresh_context_stats_snapshot(&context_stats, runtime);
-                }
-                (
-                    None,
-                    RegistrySyncPolicy::SwitchActiveProvider {
-                        previous_registry,
-                        next_active_binding,
-                    },
-                ) => {
-                    let tape = load_session_tape_with_repair(&slot.session_path)?;
-                    slot.replace_pending_provider_binding(
-                        if tape_follows_active_provider(&tape, previous_registry) {
-                            Some(next_active_binding.clone())
-                        } else {
-                            None
-                        },
-                    )?;
-                }
-                (None, RegistrySyncPolicy::PreserveSessionBindings) => {}
+            if let Some(runtime) = slot.runtime_mut() {
+                RuntimeSyncContext::new(
+                    session_id,
+                    &session_path,
+                    &candidate_registry,
+                    self.config.store.clone(),
+                    RuntimeSyncMode::PreserveSessionBinding,
+                )
+                .apply(runtime)?;
+                refresh_context_stats_snapshot(&context_stats, runtime);
             }
         }
 
@@ -354,14 +279,6 @@ impl<'a> ProviderSyncService<'a> {
         *super::write_lock(&self.config.provider_info_snapshot) = info.clone();
 
         Ok(info)
-    }
-}
-
-fn tape_follows_active_provider(tape: &SessionTape, registry: &ProviderRegistry) -> bool {
-    match (choose_provider_for_tape(registry, tape), registry.active_provider()) {
-        (ProviderLaunchChoice::Bootstrap, None) => true,
-        (ProviderLaunchChoice::OpenAi { profile, .. }, Some(active)) => profile.name == active.name,
-        _ => false,
     }
 }
 

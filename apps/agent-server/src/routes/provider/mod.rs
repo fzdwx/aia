@@ -20,7 +20,6 @@ pub(crate) struct ProviderListItem {
     pub kind: String,
     pub models: Vec<ModelConfigDto>,
     pub base_url: String,
-    pub active: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -92,11 +91,6 @@ pub(crate) struct UpdateProviderRequest {
     pub base_url: Option<String>,
 }
 
-#[derive(Deserialize)]
-pub(crate) struct SwitchProviderRequest {
-    pub name: String,
-}
-
 mod handlers;
 #[cfg(test)]
 #[path = "../../../tests/routes/provider/mod.rs"]
@@ -110,5 +104,4 @@ pub(crate) fn router() -> Router<SharedState> {
             "/api/providers/{name}",
             put(handlers::update_provider).delete(handlers::delete_provider),
         )
-        .route("/api/providers/switch", post(handlers::switch_provider))
 }

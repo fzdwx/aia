@@ -318,7 +318,6 @@ export type ProviderListItem = {
   kind: string
   models: ModelConfig[]
   base_url: string
-  active: boolean
 }
 
 export type SessionSettings = {

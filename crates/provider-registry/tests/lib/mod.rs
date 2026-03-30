@@ -32,15 +32,6 @@ fn 同名_provider_会被更新而不是重复追加() {
 }
 
 #[test]
-fn 设置不存在的活动_provider_会报错() {
-    let mut registry = ProviderRegistry::default();
-
-    let error = registry.set_active("missing").expect_err("应当失败");
-
-    assert!(error.to_string().contains("不存在"));
-}
-
-#[test]
 fn 可构造_openai_兼容聊天补全_provider() {
     let provider = ProviderProfile::openai_chat_completions(
         "compat",
@@ -77,7 +68,7 @@ fn 可兼容旧版单_model_格式() {
 }
 
 #[test]
-fn 删除活动_provider_后会回退到下一个() {
+fn 删除_provider_后会从列表移除() {
     let mut registry = ProviderRegistry::default();
     registry.upsert(ProviderProfile::openai_responses(
         "main",
@@ -91,11 +82,11 @@ fn 删除活动_provider_后会回退到下一个() {
         "secret",
         "minum-security-llm",
     ));
-    registry.set_active("main").expect("设置活动 provider 成功");
 
     registry.remove("main").expect("删除成功");
 
-    assert_eq!(registry.active_provider().map(|provider| provider.name.as_str()), Some("backup"));
+    assert_eq!(registry.providers().len(), 1);
+    assert_eq!(registry.first_provider().map(|p| p.name.as_str()), Some("backup"));
 }
 
 #[test]

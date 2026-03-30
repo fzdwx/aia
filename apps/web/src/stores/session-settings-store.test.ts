@@ -23,7 +23,6 @@ const providerList: ProviderListItem[] = [
     name: "openai",
     kind: "openai-responses",
     base_url: "https://api.openai.com",
-    active: true,
     models: [
       {
         id: "gpt-5",

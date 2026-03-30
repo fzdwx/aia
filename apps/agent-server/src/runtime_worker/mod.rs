@@ -117,11 +117,6 @@ pub struct UpdateProviderInput {
 }
 
 #[derive(Clone)]
-pub struct SwitchProviderInput {
-    pub name: String,
-}
-
-#[derive(Clone)]
 pub struct RunningTurnHandle {
     pub control: TurnControl,
 }

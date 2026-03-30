@@ -14,7 +14,7 @@ use crate::{
     model::ServerModel,
     runtime_worker::{
         CreateProviderInput, CurrentTurnSnapshot, ProviderInfoSnapshot, RunningTurnHandle,
-        RuntimeWorkerError, SwitchProviderInput, UpdateProviderInput,
+        RuntimeWorkerError, UpdateProviderInput,
     },
     sse::SsePayload,
 };
@@ -312,10 +312,6 @@ pub(crate) enum SessionCommand {
     DeleteProvider {
         name: String,
         reply: oneshot::Sender<Result<(), RuntimeWorkerError>>,
-    },
-    SwitchProvider {
-        input: SwitchProviderInput,
-        reply: oneshot::Sender<Result<ProviderInfoSnapshot, RuntimeWorkerError>>,
     },
     /// 发送消息（空闲时立即执行，运行时入队）
     QueueMessage {

@@ -55,8 +55,7 @@ pub use types::{RuntimeToolHost, SessionManagerConfig};
 pub(crate) use crate::runtime_worker::CurrentTurnSnapshot;
 use crate::runtime_worker::rebuild_session_snapshots_from_tape;
 pub use crate::runtime_worker::{
-    CreateProviderInput, ProviderInfoSnapshot, RuntimeWorkerError, SwitchProviderInput,
-    UpdateProviderInput,
+    CreateProviderInput, ProviderInfoSnapshot, RuntimeWorkerError, UpdateProviderInput,
 };
 pub(crate) use tool_trace::ToolTraceRecorder;
 
@@ -278,10 +277,6 @@ impl SessionManagerLoop {
             SessionCommand::DeleteProvider { name, reply } => {
                 let mut provider_sync = ProviderSyncService::new(&mut self.slots, &mut self.config);
                 let _ = reply.send(provider_sync.delete_provider(name));
-            }
-            SessionCommand::SwitchProvider { input, reply } => {
-                let mut provider_sync = ProviderSyncService::new(&mut self.slots, &mut self.config);
-                let _ = reply.send(provider_sync.switch_provider(input));
             }
             SessionCommand::QueueMessage { session_id, content, reply } => {
                 let _ = reply.send(self.handle_queue_message(&session_id, content).await);
@@ -1029,8 +1024,9 @@ fn choose_provider_for_tape(
         }
     }
 
+    // Fall back to first provider if no binding in tape
     registry
-        .active_provider()
+        .first_provider()
         .cloned()
         .map(|profile| ProviderLaunchChoice::OpenAi {
             model: profile.default_model_id().unwrap_or("").to_string(),
@@ -1068,7 +1064,7 @@ fn prepare_runtime_sync(
     RuntimeWorkerError,
 > {
     let selection = registry
-        .active_provider()
+        .first_provider()
         .cloned()
         .map(|profile| ProviderLaunchChoice::OpenAi {
             model: profile.default_model_id().unwrap_or("").to_string(),
@@ -1081,7 +1077,7 @@ fn prepare_runtime_sync(
         |error: crate::model::ServerSetupError| RuntimeWorkerError::internal(error.to_string()),
     )?;
 
-    let binding = match registry.active_provider() {
+    let binding = match registry.first_provider() {
         Some(profile) => SessionProviderBinding::Provider {
             name: profile.name.clone(),
             model: profile.default_model_id().unwrap_or("").to_string(),

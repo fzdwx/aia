@@ -17,11 +17,8 @@ function resolveSelectedProviderName(
     return current
   }
 
-  return (
-    providerList.find((provider) => provider.active)?.name ??
-    providerList[0]?.name ??
-    null
-  )
+  // Default to first provider
+  return providerList[0]?.name ?? null
 }
 
 type WorkbenchStore = {

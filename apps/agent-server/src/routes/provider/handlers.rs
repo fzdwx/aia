@@ -7,28 +7,27 @@ use axum::{
 use provider_registry::{ModelConfig, ProviderKind};
 
 use crate::{
-    session_manager::{CreateProviderInput, SwitchProviderInput, UpdateProviderInput, read_lock},
+    session_manager::{CreateProviderInput, UpdateProviderInput, read_lock},
     state::SharedState,
 };
 
 use super::{
-    CreateProviderRequest, ModelConfigDto, ProviderInfo, ProviderListItem, SwitchProviderRequest,
+    CreateProviderRequest, ModelConfigDto, ProviderInfo, ProviderListItem,
     UpdateProviderRequest,
 };
 use crate::routes::common::{
-    JsonResponse, error_response, json_response, ok_response, runtime_worker_error_response,
+    JsonResponse, error_response, ok_response, runtime_worker_error_response,
 };
 
 pub(crate) async fn list_providers(
     State(state): State<SharedState>,
 ) -> Json<Vec<ProviderListItem>> {
     let registry = read_lock(&state.provider_registry_snapshot);
-    let active_name = registry.active_provider().map(|provider| provider.name.as_str());
     Json(
         registry
             .providers()
             .iter()
-            .map(|provider| provider_list_item(provider, active_name))
+            .map(|provider| provider_list_item(provider))
             .collect(),
     )
 }
@@ -93,16 +92,6 @@ pub(crate) async fn delete_provider(
     }
 }
 
-pub(crate) async fn switch_provider(
-    State(state): State<SharedState>,
-    Json(body): Json<SwitchProviderRequest>,
-) -> impl IntoResponse {
-    match state.session_manager.switch_provider(SwitchProviderInput { name: body.name }).await {
-        Ok(info) => json_response(StatusCode::OK, provider_info_from_snapshot(&info)),
-        Err(error) => runtime_worker_error_response(error),
-    }
-}
-
 pub(super) fn parse_provider_kind(protocol_name: &str) -> Result<ProviderKind, JsonResponse> {
     match protocol_name {
         "openai-responses" => Ok(ProviderKind::OpenAiResponses),
@@ -127,13 +116,11 @@ pub(super) fn provider_info_from_snapshot(
 
 pub(super) fn provider_list_item(
     provider: &provider_registry::ProviderProfile,
-    active_name: Option<&str>,
 ) -> ProviderListItem {
     ProviderListItem {
         name: provider.name.clone(),
         kind: provider.kind.protocol_name().to_string(),
         models: provider.models.iter().map(ModelConfigDto::from).collect(),
         base_url: provider.base_url.clone(),
-        active: active_name == Some(provider.name.as_str()),
     }
 }
