@@ -363,12 +363,14 @@ impl SessionManagerLoop {
 
                     let messages: Vec<QueuedMessage> = slot.message_queue.drain(..).collect();
 
-                    // 追加 dequeued 事件到 tape
-                    for msg in &messages {
-                        let entry = TapeEntry::event("message_dequeued", Some(serde_json::json!({
-                            "id": msg.id
-                        })));
-                        let _ = SessionTape::append_jsonl_entry(&slot.session_path, &entry);
+                    // 通过 runtime 追加 dequeued 事件到 tape（会有正确的 ID 分配）
+                    if let Some(runtime) = slot.runtime_mut() {
+                        for msg in &messages {
+                            let entry = TapeEntry::event("message_dequeued", Some(serde_json::json!({
+                                "id": msg.id
+                            })));
+                            let _ = runtime.append_tape_entry(entry);
+                        }
                     }
 
                     Some(messages.iter().map(|m| m.content.clone()).collect::<Vec<String>>())
@@ -613,6 +615,9 @@ impl SessionManagerLoop {
             })
         })?;
 
+        // 注意：这里加载了新的 tape，可能与 TurnWorker 的写入冲突
+        // TODO: 应该通过 runtime 的 tape 来写入，但 runtime 在 Running 状态下被 TurnWorker 持有
+        // 需要 refactor 让 pending question 的写入也通过 runtime 进行
         let mut tape = load_session_tape_with_repair(&slot.session_path)?;
         if tape
             .try_pending_question_request()
@@ -670,6 +675,8 @@ impl SessionManagerLoop {
             })
         })?;
 
+        // 注意：这里加载了新的 tape，可能与 TurnWorker 的写入冲突
+        // TODO: 应该通过 runtime 的 tape 来写入，但 runtime 在 Running 状态下被 TurnWorker 持有
         let mut tape = load_session_tape_with_repair(&slot.session_path)?;
         let pending_request = tape
             .try_pending_question_request()
@@ -744,20 +751,16 @@ impl SessionManagerLoop {
                     return Err(RuntimeWorkerError::queue_full(MAX_QUEUE_SIZE));
                 }
 
-                // 运行时入队
+                // 生成消息 ID
                 let message_id = generate_message_id();
                 let queued_at_ms = now_timestamp_ms();
 
-                // 追加 tape 事件
-                let entry = TapeEntry::event("message_queued", Some(serde_json::json!({
-                    "id": message_id,
-                    "content": content,
-                    "queued_at_ms": queued_at_ms,
-                })));
-                if let Err(error) = SessionTape::append_jsonl_entry(&slot.session_path, &entry) {
-                    return Err(RuntimeWorkerError::internal(format!("session append failed: {error}")));
-                }
-
+                // 注意：不在 Running 状态下直接写入文件，避免与 TurnWorker 的写入冲突
+                // 消息队列会在 turn 结束后处理，那时候会正确写入 tape
+                // 
+                // 如果服务器在 turn 运行期间重启，内存中的队列会丢失，
+                // 但这是可接受的，因为用户可以重新发送消息
+                
                 // 更新内存状态
                 let position = slot.message_queue.len() as u32 + 1;
                 slot.message_queue.push(QueuedMessage {
@@ -820,12 +823,14 @@ impl SessionManagerLoop {
 
         slot.message_queue.remove(index);
 
-        // 追加删除事件到 tape
-        let entry = TapeEntry::event("message_deleted", Some(serde_json::json!({
-            "id": message_id
-        })));
-        if let Err(error) = SessionTape::append_jsonl_entry(&slot.session_path, &entry) {
-            return Err(RuntimeWorkerError::internal(format!("session append failed: {error}")));
+        // 通过 runtime 追加删除事件到 tape（会有正确的 ID 分配）
+        if let Some(runtime) = slot.runtime_mut() {
+            let entry = TapeEntry::event("message_deleted", Some(serde_json::json!({
+                "id": message_id
+            })));
+            runtime.append_tape_entry(entry).map_err(|error| {
+                RuntimeWorkerError::internal(format!("session append failed: {error}"))
+            })?;
         }
 
         // 广播 SSE 事件

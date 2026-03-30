@@ -240,7 +240,7 @@ where
         TurnControl::new(AbortSignal::new())
     }
 
-    pub(super) fn append_tape_entry(&mut self, entry: TapeEntry) -> Result<u64, RuntimeError> {
+    pub fn append_tape_entry(&mut self, entry: TapeEntry) -> Result<u64, RuntimeError> {
         let entry_id = self.tape.append_entry(entry);
         self.persist_last_tape_entry()?;
         Ok(entry_id)
