@@ -7,13 +7,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::state::SharedState;
 
-#[derive(Debug, Serialize)]
-pub(crate) struct ProviderInfo {
-    pub name: String,
-    pub model: String,
-    pub connected: bool,
-}
-
 #[derive(Serialize)]
 pub(crate) struct ProviderListItem {
     pub name: String,

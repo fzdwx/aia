@@ -12,7 +12,7 @@ use crate::{
 };
 
 use super::{
-    CreateProviderRequest, ModelConfigDto, ProviderInfo, ProviderListItem,
+    CreateProviderRequest, ModelConfigDto, ProviderListItem,
     UpdateProviderRequest,
 };
 use crate::routes::common::{
@@ -102,16 +102,6 @@ pub(super) fn parse_provider_kind(protocol_name: &str) -> Result<ProviderKind, J
 
 fn models_from_dtos(dtos: Vec<ModelConfigDto>) -> Vec<ModelConfig> {
     dtos.into_iter().map(ModelConfig::from).collect()
-}
-
-pub(super) fn provider_info_from_snapshot(
-    snapshot: &crate::session_manager::ProviderInfoSnapshot,
-) -> ProviderInfo {
-    ProviderInfo {
-        name: snapshot.name.clone(),
-        model: snapshot.model.clone(),
-        connected: snapshot.connected,
-    }
 }
 
 pub(super) fn provider_list_item(
