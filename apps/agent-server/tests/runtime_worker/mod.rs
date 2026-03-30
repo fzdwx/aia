@@ -117,7 +117,7 @@ fn rebuild_session_snapshots_from_tape_keeps_incomplete_turn_out_of_history() {
 
     assert!(snapshots.history.is_empty());
     let current = snapshots.current_turn.expect("应保留当前未完成轮次");
-    assert_eq!(current.user_message, "处理中");
+    assert_eq!(current.user_messages, vec!["处理中"]);
     assert_eq!(current.status, crate::sse::TurnStatus::Thinking);
     assert!(current.started_at_ms > 0);
     assert_eq!(current.blocks, vec![CurrentTurnBlock::Thinking { content: "先分析".to_string() }]);

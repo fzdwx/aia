@@ -327,7 +327,7 @@ fn tool_call_detected_projects_live_tool_block_before_start_event() {
     let snapshot = Arc::new(RwLock::new(Some(CurrentTurnSnapshot {
         turn_id: "turn-1".into(),
         started_at_ms: 100,
-        user_message: "查点资料".into(),
+        user_messages: vec!["查点资料".into()],
         status: TurnStatus::Working,
         blocks: Vec::new(),
     })));
@@ -373,7 +373,7 @@ fn tool_call_started_upgrades_existing_detected_tool_block() {
     let snapshot = Arc::new(RwLock::new(Some(CurrentTurnSnapshot {
         turn_id: "turn-1".into(),
         started_at_ms: 100,
-        user_message: "查点资料".into(),
+        user_messages: vec!["查点资料".into()],
         status: TurnStatus::Working,
         blocks: Vec::new(),
     })));
@@ -416,7 +416,7 @@ fn tool_call_started_overrides_placeholder_timestamp_created_by_output_delta() {
     let snapshot = Arc::new(RwLock::new(Some(CurrentTurnSnapshot {
         turn_id: "turn-1".into(),
         started_at_ms: 100,
-        user_message: "跑测试".into(),
+        user_messages: vec!["跑测试".into()],
         status: TurnStatus::Working,
         blocks: Vec::new(),
     })));
@@ -563,7 +563,7 @@ fn update_current_turn_status_recovers_from_poisoned_snapshot_lock() {
     let snapshot = Arc::new(RwLock::new(Some(CurrentTurnSnapshot {
         turn_id: "turn-1".into(),
         started_at_ms: 1,
-        user_message: "hello".into(),
+        user_messages: vec!["hello".into()],
         status: TurnStatus::Waiting,
         blocks: Vec::new(),
     })));
@@ -581,7 +581,7 @@ fn handle_cancel_turn_marks_running_snapshot_as_cancelled() {
     let current_turn = Arc::new(RwLock::new(Some(CurrentTurnSnapshot {
         turn_id: "turn-1".into(),
         started_at_ms: 1,
-        user_message: "hello".into(),
+        user_messages: vec!["hello".into()],
         status: TurnStatus::Working,
         blocks: Vec::new(),
     })));

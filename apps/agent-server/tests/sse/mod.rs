@@ -71,7 +71,7 @@ fn current_turn_started_payload_can_convert_to_event() {
         current_turn: CurrentTurnSnapshot {
             turn_id: "turn-1".into(),
             started_at_ms: 1,
-            user_message: "外部消息".into(),
+            user_messages: vec!["外部消息".into()],
             status: TurnStatus::Waiting,
             blocks: vec![],
         },
