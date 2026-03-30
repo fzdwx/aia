@@ -89,6 +89,7 @@ function snapshotFromState(
     | "chatState"
     | "contextPressure"
     | "lastCompression"
+    | "messageQueue"
   >
 ): SessionSnapshot {
   return {
@@ -97,6 +98,7 @@ function snapshotFromState(
     chatState: state.chatState,
     contextPressure: state.contextPressure,
     lastCompression: state.lastCompression,
+    messageQueue: state.messageQueue,
   }
 }
 
@@ -129,6 +131,7 @@ function applySessionSnapshot(
   | "chatState"
   | "contextPressure"
   | "lastCompression"
+  | "messageQueue"
   | "error"
 > {
   return {
@@ -140,6 +143,7 @@ function applySessionSnapshot(
     chatState: snapshot.chatState,
     contextPressure: snapshot.contextPressure,
     lastCompression: snapshot.lastCompression,
+    messageQueue: snapshot.messageQueue,
     error: null,
   }
 }
@@ -217,7 +221,7 @@ type ChatStore = {
 let latestSessionLoadId = 0
 let pendingHistoryHydrationAbort: AbortController | null = null
 let pendingHistoryHydrationIdleHandle: IdleHandle | null = null
-const sessionTitleAnimationTimers = new Map<string, number>()
+const sessionTitleAnimationTimers = new Map<string, ReturnType<typeof globalThis.setTimeout>>()
 let scheduleIdleWork: IdleScheduler = defaultIdleScheduler.schedule
 let cancelIdleWork: IdleCanceller = defaultIdleScheduler.cancel
 
@@ -458,6 +462,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
                 chatState: get().chatState,
                 contextPressure: get().contextPressure,
                 lastCompression: get().lastCompression,
+                messageQueue: get().messageQueue,
               }
               set((state) => ({
                 turns,
@@ -757,6 +762,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
               chatState: isWaitingForQuestion ? "active" : "idle",
               contextPressure: state.contextPressure,
               lastCompression: null,
+              messageQueue: state.messageQueue,
             }
             return {
               turns,

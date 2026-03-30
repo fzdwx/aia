@@ -12,6 +12,7 @@ import {
 import { Switch } from "@/components/ui/switch"
 
 export type ModelFormRow = {
+  _key: string
   id: string
   display_name: string
   limit_context: string
@@ -43,8 +44,8 @@ export function ProviderConnectionSection({
       <div className="mb-2.5">
         <p className="workspace-section-label text-foreground">Connection</p>
         <p className="workspace-panel-copy mt-1 text-muted-foreground">
-          Name is the registry key and must be unique. Protocol controls request
-          mapping.
+          The provider name is the registry key and must be unique. The protocol
+          controls how requests are mapped.
         </p>
       </div>
 
@@ -80,9 +81,9 @@ export function ProviderConnectionSection({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="openai-responses">OpenAI Responses</SelectItem>
+              <SelectItem value="openai-responses">Responses API</SelectItem>
               <SelectItem value="openai-chat-completions">
-                OpenAI Chat Completions
+                Chat Completions API
               </SelectItem>
             </SelectContent>
           </Select>
@@ -118,7 +119,7 @@ export function ProviderAuthenticationSection({
           Authentication
         </p>
         <p className="workspace-panel-copy mt-1 text-muted-foreground">
-          Required when creating a provider. Leave it blank while editing to
+          Required when creating a provider. Leave this blank while editing to
           keep the current key.
         </p>
       </div>
@@ -195,8 +196,8 @@ export function ProviderModelCatalogSection({
             Model Catalog
           </p>
           <p className="workspace-panel-copy mt-1 text-muted-foreground">
-            At least one valid Model ID is required. Context and output limits
-            fall back to backend defaults when left blank.
+            Add at least one valid model ID. Context and output limits fall back
+            to backend defaults when left blank.
           </p>
         </div>
 
@@ -231,7 +232,7 @@ export function ProviderModelCatalogSection({
           <div className="divide-y divide-border/20">
             {models.map((row, index) => (
               <div
-                key={`${row.id}:${index}`}
+                key={row._key}
                 className="grid grid-cols-[minmax(220px,2fr)_minmax(170px,1.4fr)_110px_110px_120px_44px] gap-2 px-2.5 py-2"
               >
                 <Input
@@ -318,8 +319,7 @@ export function ProviderModelCatalogSection({
       </div>
 
       <p className="workspace-meta mt-2 text-muted-foreground">
-        The Reasoning switch indicates whether this model supports session-level
-        thinking controls.
+        Turn on Reasoning if this model supports session-level thinking controls.
       </p>
     </section>
   )

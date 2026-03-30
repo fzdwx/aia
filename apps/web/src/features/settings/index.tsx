@@ -29,8 +29,13 @@ const SETTINGS_BADGE =
 const SETTINGS_INFO_TEXT = "workspace-meta"
 const SETTINGS_MONO_COUNT = "workspace-code text-muted-foreground"
 
+function nextModelRowKey(): string {
+  return `model-row-${Math.random().toString(36).slice(2, 10)}`
+}
+
 function emptyModelRow(): ModelFormRow {
   return {
+    _key: nextModelRowKey(),
     id: "",
     display_name: "",
     limit_context: "",
@@ -52,8 +57,8 @@ function providerHost(baseUrl: string): string {
 }
 
 function providerProtocolLabel(kind: string): string {
-  if (kind === "openai-responses") return "Responses"
-  if (kind === "openai-chat-completions") return "Chat Completions"
+  if (kind === "openai-responses") return "Responses API"
+  if (kind === "openai-chat-completions") return "Chat Completions API"
   return kind
 }
 
@@ -130,6 +135,7 @@ export function SettingsPanel() {
     setBaseUrl(selectedProvider.base_url)
     setModels(
       selectedProvider.models.map((model) => ({
+        _key: nextModelRowKey(),
         id: model.id,
         display_name: model.display_name ?? "",
         limit_context: model.limit?.context?.toString() ?? "",
@@ -267,8 +273,8 @@ export function SettingsPanel() {
   )
 
   const workspaceDescription = isProvidersSection
-    ? "Provider connections and model catalogs"
-    : "Channel transport profiles"
+    ? "Manage provider connections and model catalogs"
+    : "Manage channel transport profiles"
 
   const providerSubmitDisabled =
     submitting ||
@@ -292,7 +298,7 @@ export function SettingsPanel() {
           </button>
           <div className="min-w-0">
             <h1 className="text-ui-xs mt-0.5 font-semibold tracking-tight text-foreground">
-              Settings Workbench
+              Settings
             </h1>
             <p className="workspace-panel-copy mt-1 text-muted-foreground">
               {workspaceDescription}
@@ -327,7 +333,7 @@ export function SettingsPanel() {
               className="text-ui-xs h-8 bg-foreground px-3 tracking-[0.04em] text-background normal-case hover:bg-foreground/92"
             >
               <Plus className="size-3.5" />
-              New Provider
+              New provider
             </Button>
           ) : null}
         </div>
@@ -341,12 +347,12 @@ export function SettingsPanel() {
                 <div className="flex items-center justify-between gap-2">
                   <div>
                     <p className={SETTINGS_META_LABEL_FOREGROUND}>
-                      {isProvidersSection ? "Registry" : "Channel Catalog"}
+                      {isProvidersSection ? "Providers" : "Channel catalog"}
                     </p>
                     <p className={`mt-0.5 ${SETTINGS_PANEL_HELP_TEXT}`}>
                       {isProvidersSection
-                        ? "按可用性与连接信息快速判断目标 Provider"
-                        : "按接入状态与字段规模判断下一步配置成本"}
+                        ? "Review hosts, protocols, and models at a glance."
+                        : "Compare transport status and setup scope at a glance."}
                     </p>
                   </div>
                   <span className={SETTINGS_MONO_COUNT}>
@@ -363,7 +369,7 @@ export function SettingsPanel() {
                     filteredProviders.length === 0 ? (
                       <p className="workspace-panel-copy px-3 py-4 text-muted-foreground">
                         {providerList.length === 0 && !normalizedItemQuery
-                          ? "No providers yet. Start with New Provider in the top-right corner."
+                          ? "No providers yet. Create one to get started."
                           : "No matches found. Try filtering by name or protocol."}
                       </p>
                     ) : (
@@ -419,7 +425,7 @@ export function SettingsPanel() {
                   ) : filteredChannels.length === 0 ? (
                     <p className="workspace-panel-copy px-3 py-4 text-muted-foreground">
                       {supportedChannels.length === 0 && !normalizedItemQuery
-                        ? "The server has not returned any configurable channels yet."
+                        ? "No configurable channels are available yet."
                         : "No matches found. Try filtering by transport or label."}
                     </p>
                   ) : (
@@ -496,7 +502,7 @@ export function SettingsPanel() {
                           <h2 className="text-ui-xs truncate font-semibold text-foreground">
                             {selectedProvider
                               ? selectedProvider.name
-                              : "新建 Provider"}
+                              : "New provider"}
                           </h2>
                           <Badge variant="outline" className="text-ui-xs">
                             {selectedProvider
@@ -507,7 +513,7 @@ export function SettingsPanel() {
                         <p className="workspace-panel-copy mt-1 text-muted-foreground">
                           {selectedProvider
                             ? `Host ${providerHost(selectedProvider.base_url)} · ${selectedProvider.models.length} models registered.`
-                            : "Submit the connection settings to register this provider and make it available to sessions immediately."}
+                            : "Save these settings to add a provider and make it available to new sessions."}
                         </p>
                       </div>
 
@@ -520,7 +526,7 @@ export function SettingsPanel() {
                           className="h-9 shrink-0 px-3 text-destructive hover:bg-destructive/10 hover:text-destructive"
                         >
                           <Trash2 className="size-3.5" />
-                          Delete
+                          Delete provider
                         </Button>
                       ) : null}
                     </div>
@@ -569,10 +575,10 @@ export function SettingsPanel() {
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <p className="workspace-meta text-muted-foreground">
                           {!hasValidModel
-                            ? "Enter at least one Model ID before saving."
+                            ? "Add at least one model ID before saving."
                             : selectedProvider
-                              ? "Submitting will update the current provider."
-                              : "Submitting will create a new provider and select it automatically."}
+                              ? "Saving updates this provider."
+                              : "Saving creates this provider and selects it automatically."}
                         </p>
                         <Button
                           type="submit"
