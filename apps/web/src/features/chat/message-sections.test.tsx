@@ -198,7 +198,7 @@ describe("chat message status surfaces", () => {
     const streamingHtml = renderWithTheme(
       <MemoizedStreamingView
         streaming={{
-          userMessages: "Question",
+          userMessages: ["Question"],
           status: "working",
           blocks: [
             {
@@ -377,7 +377,7 @@ describe("chat message status surfaces", () => {
     const html = renderWithTheme(
       <MemoizedStreamingView
         streaming={{
-          userMessages: "Question",
+          userMessages: ["Question"],
           status: "thinking",
           blocks: [{ type: "thinking", content: "first\nsecond" }],
         }}
@@ -609,7 +609,7 @@ describe("chat message status surfaces", () => {
     const html = renderWithTheme(
       <MemoizedStreamingView
         streaming={{
-          userMessages: "Question",
+          userMessages: ["Question"],
           status: "generating",
           blocks: [{ type: "text", content: "Streaming answer" }],
         }}

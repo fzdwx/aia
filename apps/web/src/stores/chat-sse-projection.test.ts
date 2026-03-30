@@ -24,6 +24,8 @@ describe("chat sse projection", () => {
         invocation_id: "shell-1",
         stream: "stderr",
         text: "warning: noisy\n",
+        session_id: "session-1",
+        turn_id: "turn-1",
       }
     )
 

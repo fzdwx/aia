@@ -832,6 +832,7 @@ describe("chat store submitTurn", () => {
           chatState: "active",
           contextPressure: 0.1,
           lastCompression: null,
+          messageQueue: [],
         },
       },
     })
@@ -886,6 +887,7 @@ describe("chat store submitTurn", () => {
           chatState: "idle",
           contextPressure: null,
           lastCompression: null,
+          messageQueue: [],
         },
       },
     })
@@ -1239,6 +1241,7 @@ describe("chat store submitTurn", () => {
           chatState: "idle",
           contextPressure: null,
           lastCompression: null,
+          messageQueue: [],
         },
         "session-2": {
           latestTurn: {
@@ -1259,6 +1262,7 @@ describe("chat store submitTurn", () => {
           chatState: "idle",
           contextPressure: 0.1,
           lastCompression: null,
+          messageQueue: [],
         },
       },
     })
@@ -1521,6 +1525,7 @@ describe("chat store submitTurn", () => {
           chatState: "idle",
           contextPressure: 0.2,
           lastCompression: null,
+          messageQueue: [],
         },
       },
     })
@@ -1716,6 +1721,7 @@ describe("chat store submitTurn", () => {
           chatState: "idle",
           contextPressure: null,
           lastCompression: null,
+          messageQueue: [],
         },
       },
     })
