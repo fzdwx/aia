@@ -54,9 +54,9 @@
   --surface-float-strong: oklch(0.202 0.0018 255 / 0.98);
   --surface-interactive-weak: oklch(0.244 0.002 255 / 0.74);
   --surface-interactive-base: oklch(0.286 0.0022 255 / 0.82);
-  --input-base: oklch(0.19 0.0018 255 / 0.98);
-  --input-hover: oklch(0.208 0.002 255 / 0.98);
-  --input-focus: oklch(0.216 0.0024 255 / 0.98);
+  --input-base: oklch(0.28 0.003 255 / 0.92);
+  --input-hover: oklch(0.32 0.003 255 / 0.94);
+  --input-focus: oklch(0.36 0.004 255 / 0.96);
   --text-strong: oklch(0.94 0.0015 255);
   --text-base: oklch(0.77 0.0018 255);
   --text-weak: oklch(0.61 0.0018 255);
