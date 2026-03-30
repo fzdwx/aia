@@ -26,7 +26,7 @@ export function currentTurnToStreamingTurn(
   current: CurrentTurnSnapshot
 ): StreamingTurn {
   return {
-    userMessage: current.user_message,
+    userMessages: current.user_messages ?? [],
     status: current.status,
     blocks: current.blocks.map((block) => {
       switch (block.kind) {
@@ -60,9 +60,9 @@ export function currentTurnToStreamingTurn(
   }
 }
 
-export function createPendingStreamingTurn(prompt: string): StreamingTurn {
+export function createPendingStreamingTurn(prompts: string[]): StreamingTurn {
   return {
-    userMessage: prompt,
+    userMessages: prompts,
     status: "waiting",
     blocks: [],
   }

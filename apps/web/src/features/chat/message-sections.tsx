@@ -63,14 +63,15 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
 
 function StreamingView({ streaming }: { streaming: StreamingTurn }) {
   const groups = groupStreamingBlocks(streaming.blocks)
+  const userMessages = streaming.userMessages ?? []
 
   return (
       <div className="mb-8 animate-[message-in_250ms_ease-out_both]">
-        {streaming.userMessage ? (
-            <div className="mb-5">
-              <UserMessageBlock content={streaming.userMessage} />
+        {userMessages.map((content, i) => (
+            <div key={i} className="mb-5">
+              <UserMessageBlock content={content} />
             </div>
-        ) : null}
+        ))}
 
         <div
             data-component="assistant-message"

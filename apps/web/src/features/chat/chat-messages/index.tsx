@@ -172,8 +172,10 @@ export function ChatMessages() {
   }, [activeSessionId, scrollToBottom])
 
   useLayoutEffect(() => {
-    if (!activeSessionId || !autoFollowRef.current) return
+    if (!activeSessionId) return
     if (turns.length === 0 && !streamingTurn) return
+    // 发送新消息时强制滚动到底部
+    autoFollowRef.current = true
     scrollToBottom()
   }, [activeSessionId, turns.length, streamingTurn, scrollToBottom])
 

@@ -7,7 +7,6 @@ import {
   fetchQueue as apiFetchQueue,
   createSession as apiCreateSession,
   deleteSession as apiDeleteSession,
-  submitTurn as apiSubmitTurn,
   sendMessage as apiSendMessage,
   cancelTurn as apiCancelTurn,
   interruptTurn as apiInterruptTurn,
@@ -677,7 +676,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
               const prompt = get()._pendingPrompt
               if (prompt) {
                 set((state) => {
-                  const nextStreamingTurn = createPendingStreamingTurn(prompt)
+                  const nextStreamingTurn = createPendingStreamingTurn([prompt])
                   return {
                     _pendingPrompt: null,
                     chatState: "active",
@@ -1095,13 +1094,13 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     submitTurn: (prompt: string) => {
-      if (get().chatState === "active") return
       const sessionId = get().activeSessionId
       if (!sessionId) return
 
+      // 始终使用 sendMessage API，它会自动处理空闲/运行状态
       set((state) => {
         const nextStreamingTurn: StreamingTurn = {
-          userMessage: prompt,
+          userMessages: [prompt],
           status: "waiting",
           blocks: [],
         }
@@ -1132,7 +1131,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           ),
         }
       })
-      apiSubmitTurn(prompt, sessionId).catch((err: unknown) => {
+      apiSendMessage(prompt, sessionId).catch((err: unknown) => {
         void usePendingQuestionStore.getState().hydrateForSession(sessionId)
         set((state) => {
           const nextState = {
@@ -1200,20 +1199,45 @@ export const useChatStore = create<ChatStore>((set, get) => {
       const sessionId = get().activeSessionId
       if (!sessionId) return
 
-      const chatState = get().chatState
-      if (chatState === "idle") {
-        // 空闲时立即开始 turn
-        get().submitTurn(prompt)
-        return
-      }
-
-      // 运行时入队
-      try {
-        const result = await apiSendMessage(prompt, sessionId)
-        if (result.status === "started") {
-          // 立即开始了，不需要额外处理
+      // 统一使用 sendMessage API，后端会自动处理空闲/运行状态
+      // 先乐观更新 UI
+      set((state) => {
+        const nextStreamingTurn: StreamingTurn = {
+          userMessages: [prompt],
+          status: "waiting",
+          blocks: [],
         }
-        // 如果是 queued，SSE 事件会更新队列
+        const snapshot =
+          state._sessionSnapshots[sessionId] ?? EMPTY_SESSION_SNAPSHOT
+        const nextState = {
+          ...state,
+          error: null,
+          _pendingPrompt: prompt,
+          chatState: "active" as const,
+          lastCompression: null,
+          streamingTurn: nextStreamingTurn,
+        }
+        return {
+          error: null,
+          _pendingPrompt: prompt,
+          chatState: "active",
+          lastCompression: null,
+          streamingTurn: nextStreamingTurn,
+          _sessionSnapshots: upsertSessionSnapshot(
+            state._sessionSnapshots,
+            sessionId,
+            {
+              ...snapshotFromState(nextState),
+              latestTurn: snapshot.latestTurn,
+            },
+            state.sessions
+          ),
+        }
+      })
+
+      try {
+        await apiSendMessage(prompt, sessionId)
+        // SSE 事件会处理后续状态更新
       } catch (err) {
         set({
           error: err instanceof Error ? err.message : "Send message failed",

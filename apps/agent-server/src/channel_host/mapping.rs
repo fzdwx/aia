@@ -35,7 +35,7 @@ fn map_current_turn_snapshot(snapshot: CurrentTurnSnapshot) -> ChannelCurrentTur
     ChannelCurrentTurnSnapshot {
         turn_id: snapshot.turn_id,
         started_at_ms: snapshot.started_at_ms,
-        user_message: snapshot.user_message,
+        user_message: snapshot.user_messages.join("\n"),
         status: map_turn_status(snapshot.status),
     }
 }

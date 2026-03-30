@@ -261,7 +261,7 @@ export type HistoryPage = {
 
 export type CurrentTurnSnapshot = {
   started_at_ms: number
-  user_message: string
+  user_messages: string[]
   status: TurnStatus
   blocks: CurrentTurnBlock[]
 }
@@ -290,7 +290,7 @@ export type StreamingBlock =
 
 // Streaming turn accumulator state
 export type StreamingTurn = {
-  userMessage: string
+  userMessages?: string[]
   status: TurnStatus
   thinkingText?: string
   assistantText?: string

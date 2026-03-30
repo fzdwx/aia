@@ -40,7 +40,8 @@ pub enum CurrentTurnBlock {
 pub struct CurrentTurnSnapshot {
     pub turn_id: String,
     pub started_at_ms: u64,
-    pub user_message: String,
+    /// 用户消息列表，多条消息时有多个元素
+    pub user_messages: Vec<String>,
     pub status: TurnStatus,
     pub blocks: Vec<CurrentTurnBlock>,
 }

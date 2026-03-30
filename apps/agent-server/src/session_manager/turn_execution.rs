@@ -69,12 +69,10 @@ impl<'a> TurnExecutionService<'a> {
             })?;
 
         let turn_id = next_server_turn_id();
-        // 使用换行分隔多条消息作为预览
-        let user_message_preview = prompts.join("\n");
         let current_turn = CurrentTurnSnapshot {
             turn_id: turn_id.clone(),
             started_at_ms: now_timestamp_ms(),
-            user_message: user_message_preview,
+            user_messages: prompts.clone(),
             status: TurnStatus::Waiting,
             blocks: Vec::new(),
         };

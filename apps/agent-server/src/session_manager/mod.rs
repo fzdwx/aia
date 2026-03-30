@@ -636,11 +636,11 @@ impl SessionManagerLoop {
         *write_lock(&slot.current_turn) = Some(crate::runtime_worker::CurrentTurnSnapshot {
             turn_id: request.turn_id.clone(),
             started_at_ms: now_timestamp_ms(),
-            user_message: slot
+            user_messages: slot
                 .current_turn
                 .read()
                 .ok()
-                .and_then(|current| current.as_ref().map(|turn| turn.user_message.clone()))
+                .and_then(|current| current.as_ref().map(|turn| turn.user_messages.clone()))
                 .unwrap_or_default(),
             status: crate::sse::TurnStatus::WaitingForQuestion,
             blocks: slot

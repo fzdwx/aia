@@ -78,7 +78,7 @@ describe("chat store submitTurn", () => {
     const state = useChatStore.getState()
     expect(state.chatState).toBe("active")
     assert.deepEqual(state.streamingTurn, {
-      userMessage: "hello world",
+      userMessages: ["hello world"],
       status: "waiting",
       blocks: [],
     })
@@ -118,7 +118,7 @@ describe("chat store submitTurn", () => {
         started_at_ms: 1,
         finished_at_ms: 2,
         source_entry_ids: [1, 2],
-        user_message: "hello",
+        user_messages: ["hello"],
         blocks: [],
         assistant_message: null,
         thinking: null,
@@ -153,7 +153,7 @@ describe("chat store submitTurn", () => {
       chatState: "active",
       _pendingPrompt: "hello world",
       streamingTurn: {
-        userMessage: "hello world",
+        userMessages: ["hello world"],
         status: "thinking",
         blocks: [{ type: "text", content: "partial answer" }],
       },
@@ -168,7 +168,7 @@ describe("chat store submitTurn", () => {
 
     const state = useChatStore.getState()
     assert.deepEqual(state.streamingTurn, {
-      userMessage: "hello world",
+      userMessages: ["hello world"],
       status: "waiting",
       blocks: [{ type: "text", content: "partial answer" }],
     })
@@ -186,7 +186,7 @@ describe("chat store submitTurn", () => {
       activeSessionId: "session-1",
       chatState: "active",
       streamingTurn: {
-        userMessage: "hello world",
+        userMessages: ["hello world"],
         status: "working",
         blocks: [],
       },
@@ -203,7 +203,7 @@ describe("chat store submitTurn", () => {
 
     expect(hydratedSessionId).toBe("session-1")
     assert.deepEqual(useChatStore.getState().streamingTurn, {
-      userMessage: "hello world",
+      userMessages: ["hello world"],
       status: "waiting_for_question",
       blocks: [],
     })
@@ -214,7 +214,7 @@ describe("chat store submitTurn", () => {
       activeSessionId: "session-1",
       chatState: "active",
       streamingTurn: {
-        userMessage: "hello world",
+        userMessages: ["hello world"],
         status: "generating",
         blocks: [{ type: "text", content: "partial answer" }],
       },
@@ -232,7 +232,7 @@ describe("chat store submitTurn", () => {
     const state = useChatStore.getState()
     expect(state.chatState).toBe("active")
     assert.deepEqual(state.streamingTurn, {
-      userMessage: "hello world",
+      userMessages: ["hello world"],
       status: "finishing",
       blocks: [{ type: "text", content: "partial answer" }],
     })
@@ -250,7 +250,7 @@ describe("chat store submitTurn", () => {
       data: {
         session_id: "session-1",
         started_at_ms: 30,
-        user_message: "飞书里来的问题",
+        user_messages: ["飞书里来的问题"],
         status: "waiting",
         blocks: [],
       },
@@ -258,7 +258,7 @@ describe("chat store submitTurn", () => {
 
     const state = useChatStore.getState()
     assert.deepEqual(state.streamingTurn, {
-      userMessage: "飞书里来的问题",
+      userMessages: ["飞书里来的问题"],
       status: "waiting",
       blocks: [],
     })
@@ -273,7 +273,7 @@ describe("chat store submitTurn", () => {
         return new Response(
           JSON.stringify({
             started_at_ms: 30,
-            user_message: "飞书外部消息",
+            user_messages: ["飞书外部消息"],
             status: "working",
             blocks: [{ kind: "text", content: "已恢复中的输出" }],
           }),
@@ -301,7 +301,7 @@ describe("chat store submitTurn", () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     assert.deepEqual(useChatStore.getState().streamingTurn, {
-      userMessage: "飞书外部消息",
+      userMessages: ["飞书外部消息"],
       status: "working",
       blocks: [{ type: "text", content: "已恢复中的输出" }],
     })
@@ -323,7 +323,7 @@ describe("chat store submitTurn", () => {
         return new Response(
           JSON.stringify({
             started_at_ms: 30,
-            user_message: "工具在等回答",
+            user_messages: ["工具在等回答"],
             status: "waiting_for_question",
             blocks: [],
           }),
@@ -352,7 +352,7 @@ describe("chat store submitTurn", () => {
 
     expect(hydratedSessionId).toBe("session-1")
     assert.deepEqual(useChatStore.getState().streamingTurn, {
-      userMessage: "工具在等回答",
+      userMessages: ["工具在等回答"],
       status: "waiting_for_question",
       blocks: [],
     })
@@ -368,7 +368,7 @@ describe("chat store submitTurn", () => {
         return new Response(
           JSON.stringify({
             started_at_ms: 42,
-            user_message: "恢复中的问题",
+            user_messages: ["恢复中的问题"],
             status: "generating",
             blocks: [{ kind: "thinking", content: "先恢复上下文" }],
           }),
@@ -400,7 +400,7 @@ describe("chat store submitTurn", () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     assert.deepEqual(useChatStore.getState().streamingTurn, {
-      userMessage: "恢复中的问题",
+      userMessages: ["恢复中的问题"],
       status: "generating",
       blocks: [{ type: "thinking", content: "先恢复上下文" }],
     })
@@ -416,7 +416,7 @@ describe("chat store submitTurn", () => {
           started_at_ms: 1,
           finished_at_ms: 2,
           source_entry_ids: [1, 2],
-          user_message: "what time is it",
+          user_messages: ["what time is it"],
           blocks: [
             {
               kind: "failure",
@@ -453,7 +453,7 @@ describe("chat store submitTurn", () => {
     useChatStore.setState({
       chatState: "active",
       streamingTurn: {
-        userMessage: "read AGENTS",
+        userMessages: ["read AGENTS"],
         status: "thinking",
         blocks: [],
       },
@@ -495,7 +495,7 @@ describe("chat store submitTurn", () => {
       activeSessionId: "session-1",
       chatState: "active",
       streamingTurn: {
-        userMessage: "search docs",
+        userMessages: ["search docs"],
         status: "working",
         blocks: [],
       },
@@ -558,7 +558,7 @@ describe("chat store submitTurn", () => {
       activeSessionId: "session-1",
       chatState: "active",
       streamingTurn: {
-        userMessage: "run checks",
+        userMessages: ["run checks"],
         status: "working",
         blocks: [],
       },
@@ -594,7 +594,7 @@ describe("chat store submitTurn", () => {
     useChatStore.setState({
       chatState: "active",
       streamingTurn: {
-        userMessage: "hello world",
+        userMessages: ["hello world"],
         status: "generating",
         blocks: [
           { type: "thinking", content: "先分析" },
@@ -618,7 +618,7 @@ describe("chat store submitTurn", () => {
     expect(state.chatState).toBe("idle")
     expect(state.error).toBe(null)
     assert.deepEqual(state.streamingTurn, {
-      userMessage: "hello world",
+      userMessages: ["hello world"],
       status: "cancelled",
       blocks: [
         { type: "thinking", content: "先分析" },
@@ -632,7 +632,7 @@ describe("chat store submitTurn", () => {
       activeSessionId: "session-1",
       chatState: "active",
       streamingTurn: {
-        userMessage: "hello world",
+        userMessages: ["hello world"],
         status: "working",
         blocks: [{ type: "text", content: "partial answer" }],
       },
@@ -732,7 +732,7 @@ describe("chat store submitTurn", () => {
         return new Response(
           JSON.stringify({
             started_at_ms: 30,
-            user_message: "继续执行",
+            user_messages: ["继续执行"],
             status: "working",
             blocks: [{ kind: "text", content: "已恢复中的输出" }],
           }),
@@ -751,7 +751,7 @@ describe("chat store submitTurn", () => {
                 started_at_ms: 10,
                 finished_at_ms: 20,
                 source_entry_ids: [1, 2],
-                user_message: "上一轮问题",
+                user_messages: ["上一轮问题"],
                 blocks: [{ kind: "assistant", content: "上一轮答案" }],
                 assistant_message: "上一轮答案",
                 thinking: null,
@@ -793,7 +793,7 @@ describe("chat store submitTurn", () => {
           started_at_ms: 1,
           finished_at_ms: 2,
           source_entry_ids: [9],
-          user_message: "过期问题",
+          user_messages: ["过期问题"],
           blocks: [{ kind: "assistant", content: "过期答案" }],
           assistant_message: "过期答案",
           thinking: null,
@@ -804,7 +804,7 @@ describe("chat store submitTurn", () => {
         },
       ],
       streamingTurn: {
-        userMessage: "旧中的执行",
+        userMessages: ["旧中的执行"],
         status: "thinking",
         blocks: [{ type: "text", content: "旧中的输出" }],
       },
@@ -815,7 +815,7 @@ describe("chat store submitTurn", () => {
             started_at_ms: 1,
             finished_at_ms: 2,
             source_entry_ids: [9],
-            user_message: "过期问题",
+            user_messages: ["过期问题"],
             blocks: [{ kind: "assistant", content: "过期答案" }],
             assistant_message: "过期答案",
             thinking: null,
@@ -825,7 +825,7 @@ describe("chat store submitTurn", () => {
             outcome: "succeeded",
           },
           streamingTurn: {
-            userMessage: "旧中的执行",
+            userMessages: ["旧中的执行"],
             status: "thinking",
             blocks: [{ type: "text", content: "旧中的输出" }],
           },
@@ -846,7 +846,7 @@ describe("chat store submitTurn", () => {
     const state = useChatStore.getState()
     expect(state.turns[0]?.turn_id).toBe("turn-resynced")
     assert.deepEqual(state.streamingTurn, {
-      userMessage: "继续执行",
+      userMessages: ["继续执行"],
       status: "working",
       blocks: [{ type: "text", content: "已恢复中的输出" }],
     })
@@ -863,7 +863,7 @@ describe("chat store submitTurn", () => {
     useChatStore.setState({
       chatState: "active",
       streamingTurn: {
-        userMessage: "hello world",
+        userMessages: ["hello world"],
         status: "cancelled",
         blocks: [
           { type: "thinking", content: "先分析" },
@@ -876,7 +876,7 @@ describe("chat store submitTurn", () => {
         "session-1": {
           latestTurn: null,
           streamingTurn: {
-            userMessage: "hello world",
+            userMessages: ["hello world"],
             status: "cancelled",
             blocks: [
               { type: "thinking", content: "先分析" },
@@ -898,7 +898,7 @@ describe("chat store submitTurn", () => {
         started_at_ms: 1,
         finished_at_ms: 2,
         source_entry_ids: [1, 2, 3],
-        user_message: "hello world",
+        user_messages: ["hello world"],
         blocks: [
           { kind: "thinking", content: "先分析" },
           { kind: "assistant", content: "部分回答" },
@@ -983,7 +983,7 @@ describe("chat store submitTurn", () => {
                   started_at_ms: 11,
                   finished_at_ms: 12,
                   source_entry_ids: [3],
-                  user_message: "target latest question",
+                  user_messages: ["target latest question"],
                   blocks: [
                     { kind: "assistant", content: "target latest answer" },
                   ],
@@ -1016,7 +1016,7 @@ describe("chat store submitTurn", () => {
                   started_at_ms: 9,
                   finished_at_ms: 10,
                   source_entry_ids: [4],
-                  user_message: "target second question",
+                  user_messages: ["target second question"],
                   blocks: [
                     { kind: "assistant", content: "target second answer" },
                   ],
@@ -1049,7 +1049,7 @@ describe("chat store submitTurn", () => {
                 started_at_ms: 5,
                 finished_at_ms: 6,
                 source_entry_ids: [5],
-                user_message: "target oldest question",
+                user_messages: ["target oldest question"],
                 blocks: [
                   { kind: "assistant", content: "target oldest answer" },
                 ],
@@ -1065,7 +1065,7 @@ describe("chat store submitTurn", () => {
                 started_at_ms: 7,
                 finished_at_ms: 8,
                 source_entry_ids: [6],
-                user_message: "target older question",
+                user_messages: ["target older question"],
                 blocks: [{ kind: "assistant", content: "target older answer" }],
                 assistant_message: "target older answer",
                 thinking: null,
@@ -1096,7 +1096,7 @@ describe("chat store submitTurn", () => {
           started_at_ms: 1,
           finished_at_ms: 2,
           source_entry_ids: [1],
-          user_message: "older question",
+          user_messages: ["older question"],
           blocks: [{ kind: "assistant", content: "older answer" }],
           assistant_message: "older answer",
           thinking: null,
@@ -1110,7 +1110,7 @@ describe("chat store submitTurn", () => {
           started_at_ms: 3,
           finished_at_ms: 4,
           source_entry_ids: [2],
-          user_message: "latest question",
+          user_messages: ["latest question"],
           blocks: [{ kind: "assistant", content: "latest answer" }],
           assistant_message: "latest answer",
           thinking: null,
@@ -1209,7 +1209,7 @@ describe("chat store submitTurn", () => {
           started_at_ms: 1,
           finished_at_ms: 2,
           source_entry_ids: [1],
-          user_message: "old session question",
+          user_messages: ["old session question"],
           blocks: [{ kind: "assistant", content: "old session answer" }],
           assistant_message: "old session answer",
           thinking: null,
@@ -1226,7 +1226,7 @@ describe("chat store submitTurn", () => {
             started_at_ms: 1,
             finished_at_ms: 2,
             source_entry_ids: [1],
-            user_message: "old session question",
+            user_messages: ["old session question"],
             blocks: [{ kind: "assistant", content: "old session answer" }],
             assistant_message: "old session answer",
             thinking: null,
@@ -1246,7 +1246,7 @@ describe("chat store submitTurn", () => {
             started_at_ms: 10,
             finished_at_ms: 20,
             source_entry_ids: [2],
-            user_message: "cached question",
+            user_messages: ["cached question"],
             blocks: [{ kind: "assistant", content: "cached answer" }],
             assistant_message: "cached answer",
             thinking: null,
@@ -1283,7 +1283,7 @@ describe("chat store submitTurn", () => {
               started_at_ms: 11,
               finished_at_ms: 21,
               source_entry_ids: [3],
-              user_message: "live question",
+              user_messages: ["live question"],
               blocks: [{ kind: "assistant", content: "live answer" }],
               assistant_message: "live answer",
               thinking: null,
@@ -1389,7 +1389,7 @@ describe("chat store submitTurn", () => {
                   started_at_ms: 11,
                   finished_at_ms: 12,
                   source_entry_ids: [3],
-                  user_message: "target latest question",
+                  user_messages: ["target latest question"],
                   blocks: [
                     { kind: "assistant", content: "target latest answer" },
                   ],
@@ -1418,7 +1418,7 @@ describe("chat store submitTurn", () => {
                 started_at_ms: 9,
                 finished_at_ms: 10,
                 source_entry_ids: [4],
-                user_message: "target second question",
+                user_messages: ["target second question"],
                 blocks: [
                   { kind: "assistant", content: "target second answer" },
                 ],
@@ -1490,7 +1490,7 @@ describe("chat store submitTurn", () => {
           started_at_ms: 1,
           finished_at_ms: 2,
           source_entry_ids: [1],
-          user_message: "当前会话问题",
+          user_messages: ["当前会话问题"],
           blocks: [{ kind: "assistant", content: "当前会话答案" }],
           assistant_message: "当前会话答案",
           thinking: null,
@@ -1508,7 +1508,7 @@ describe("chat store submitTurn", () => {
             started_at_ms: 10,
             finished_at_ms: 20,
             source_entry_ids: [2],
-            user_message: "下一个会话问题",
+            user_messages: ["下一个会话问题"],
             blocks: [{ kind: "assistant", content: "下一个会话答案" }],
             assistant_message: "下一个会话答案",
             thinking: null,
@@ -1640,7 +1640,7 @@ describe("chat store submitTurn", () => {
                 started_at_ms: 1,
                 finished_at_ms: 2,
                 source_entry_ids: [1],
-                user_message: "older question",
+                user_messages: ["older question"],
                 blocks: [{ kind: "assistant", content: "older answer" }],
                 assistant_message: "older answer",
                 thinking: null,
@@ -1654,7 +1654,7 @@ describe("chat store submitTurn", () => {
                 started_at_ms: 11,
                 finished_at_ms: 12,
                 source_entry_ids: [2],
-                user_message: "current question",
+                user_messages: ["current question"],
                 blocks: [{ kind: "assistant", content: "current answer" }],
                 assistant_message: "current answer",
                 thinking: null,
@@ -1686,7 +1686,7 @@ describe("chat store submitTurn", () => {
           started_at_ms: 11,
           finished_at_ms: 12,
           source_entry_ids: [2],
-          user_message: "current question",
+          user_messages: ["current question"],
           blocks: [{ kind: "assistant", content: "current answer" }],
           assistant_message: "current answer",
           thinking: null,
@@ -1703,7 +1703,7 @@ describe("chat store submitTurn", () => {
             started_at_ms: 11,
             finished_at_ms: 12,
             source_entry_ids: [2],
-            user_message: "current question",
+            user_messages: ["current question"],
             blocks: [{ kind: "assistant", content: "current answer" }],
             assistant_message: "current answer",
             thinking: null,

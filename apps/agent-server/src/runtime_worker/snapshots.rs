@@ -268,7 +268,7 @@ impl TurnHistoryBuilder {
         Some(CurrentTurnSnapshot {
             turn_id: lifecycle.turn_id,
             started_at_ms: lifecycle.started_at_ms,
-            user_message: lifecycle.user_messages.join("\n"),
+            user_messages: lifecycle.user_messages,
             status,
             blocks: lifecycle.blocks.into_iter().filter_map(turn_block_to_current).collect(),
         })
