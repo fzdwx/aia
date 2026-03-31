@@ -24,7 +24,12 @@ export function StatusIndicator({
       aria-live="polite"
       aria-atomic="true"
     >
-      <Shimmer className="" as="span" duration={1} spread={3}>
+      <Shimmer
+        as="span"
+        className="[--color-muted-foreground:var(--color-foreground)]"
+        duration={1}
+        spread={3}
+      >
         {STATUS_LABELS[status]}
       </Shimmer>
     </div>
