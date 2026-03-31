@@ -2055,7 +2055,8 @@ fn 手动压缩请求会携带压缩_trace_上下文() {
     tape.append(Message::new(Role::User, "历史消息二"));
     tape.append(Message::new(Role::Assistant, "历史回答二"));
 
-    let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape);
+    let mut runtime =
+        AgentRuntime::with_tape(model, StubTools, identity, tape).with_user_agent("aia-test/1.0");
 
     run_async(runtime.auto_compress_now()).expect("手动压缩应成功");
 
@@ -2064,6 +2065,8 @@ fn 手动压缩请求会携带压缩_trace_上下文() {
     let trace_context = requests[0].trace_context.as_ref().expect("压缩请求应携带 trace 上下文");
     assert_eq!(trace_context.request_kind, "compression");
     assert_eq!(trace_context.operation_name, "summarize");
+    assert_eq!(requests[0].user_agent.as_deref(), Some("aia-test/1.0"));
+    assert_eq!(requests[0].prompt_cache, None);
 }
 
 struct CompressionInspectionModel {

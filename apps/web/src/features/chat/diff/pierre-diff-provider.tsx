@@ -1,21 +1,14 @@
-import { WorkerPoolContextProvider } from "@pierre/diffs/react"
-import type { ReactNode } from "react"
+import { WorkerPoolContext } from "@pierre/diffs/react"
+import { useState, type ReactNode } from "react"
 
-import { pierreWorkerPoolOptions } from "./pierre-worker"
-
-const PIERRE_WORKER_HIGHLIGHT_OPTIONS = {
-  preferredHighlighter: "shiki-js",
-  tokenizeMaxLineLength: 1000,
-  lineDiffType: "none",
-} as const
+import { getPierreWorkerPool } from "./pierre-worker"
 
 export function PierreDiffProvider({ children }: { children: ReactNode }) {
+  const [workerPool] = useState(() => getPierreWorkerPool())
+
   return (
-    <WorkerPoolContextProvider
-      poolOptions={pierreWorkerPoolOptions}
-      highlighterOptions={PIERRE_WORKER_HIGHLIGHT_OPTIONS}
-    >
+    <WorkerPoolContext.Provider value={workerPool}>
       {children}
-    </WorkerPoolContextProvider>
+    </WorkerPoolContext.Provider>
   )
 }

@@ -17,6 +17,7 @@ pub(super) struct SessionAutoRenameService {
     pub(super) registry: ProviderRegistry,
     pub(super) broadcast_tx: tokio::sync::broadcast::Sender<SsePayload>,
     pub(super) sessions_dir: std::path::PathBuf,
+    pub(super) user_agent: String,
 }
 
 impl SessionAutoRenameService {
@@ -42,9 +43,16 @@ impl SessionAutoRenameService {
         let registry = self.registry.clone();
         let broadcast_tx = self.broadcast_tx.clone();
         let sessions_dir = self.sessions_dir.clone();
+        let user_agent = self.user_agent.clone();
         let session_id = session_id.to_string();
         tokio::spawn(async move {
-            let service = SessionAutoRenameService { store, registry, broadcast_tx, sessions_dir };
+            let service = SessionAutoRenameService {
+                store,
+                registry,
+                broadcast_tx,
+                sessions_dir,
+                user_agent,
+            };
             let _ = service.run_once(&session_id, &record).await;
         });
     }
@@ -116,7 +124,7 @@ impl SessionAutoRenameService {
             available_tools: vec![],
             parallel_tool_calls: Some(false),
             prompt_cache: None,
-            user_agent: None,
+            user_agent: Some(self.user_agent.clone()),
             timeout: None,
             trace_context: Some(build_rename_trace_context(record)),
         };

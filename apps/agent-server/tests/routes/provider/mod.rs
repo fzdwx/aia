@@ -45,7 +45,7 @@ fn provider_list_item_projects_fields() {
         label: "Rayin".into(),
         adapter: AdapterKind::OpenAiResponses,
         endpoint: ProviderEndpoint { base_url: "https://example.com".into() },
-        credential: provider_registry::CredentialRef { api_key: "secret".into() },
+        credential: provider_registry::CredentialRef::api_key("secret"),
         models: vec![ModelConfig {
             id: "gpt-5.4".into(),
             display_name: Some("GPT-5.4".into()),

@@ -79,7 +79,7 @@ fn 模型_limit_仍保留在领域模型里() {
         label: "main".into(),
         adapter: AdapterKind::OpenAiResponses,
         endpoint: ProviderEndpoint { base_url: "https://api.openai.com/v1".into() },
-        credential: CredentialRef { api_key: "secret".into() },
+        credential: CredentialRef::api_key("secret"),
         models: vec![ModelConfig {
             id: "gpt-4.1".into(),
             display_name: Some("GPT-4.1".into()),

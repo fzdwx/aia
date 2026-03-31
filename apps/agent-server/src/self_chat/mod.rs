@@ -42,10 +42,7 @@ pub async fn run_self_chat(
         .clone();
 
     println!("[self] session: {}", session.id);
-    println!(
-        "[self] provider: {}/{}",
-        provider_info.provider_id, provider_info.model_id
-    );
+    println!("[self] provider: {}/{}", provider_info.provider_id, provider_info.model_id);
     if let Some(task) = startup_task.as_deref() {
         println!("[self] startup task: {task}");
     }

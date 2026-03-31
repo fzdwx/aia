@@ -11,7 +11,7 @@ use agent_core::{
     ModelIdentity, ModelRef, ReasoningEffort, Role,
 };
 use agent_store::{AiaStore, LlmTraceStatus};
-use provider_registry::{AdapterKind, ModelConfig, ModelLimit, ResolvedModelSpec};
+use provider_registry::{AdapterKind, CredentialRef, ModelConfig, ModelLimit, ResolvedModelSpec};
 use serde_json::json;
 
 use super::{ProviderLaunchChoice, ServerModel, build_model_from_selection};
@@ -57,7 +57,7 @@ fn resolved_spec(
         model_ref: ModelRef::new(provider_id, model.id.clone()),
         adapter: AdapterKind::OpenAiResponses,
         base_url,
-        api_key: api_key.to_string(),
+        credential: CredentialRef::api_key(api_key),
         model,
     }
 }

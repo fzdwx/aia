@@ -173,16 +173,17 @@ fn build_openai_model(
 ) -> Result<(ModelIdentity, ServerModel), ServerSetupError> {
     let identity = build_model_identity(&spec, reasoning_effort);
     let model_id = identity.name.clone();
+    let api_key = spec.credential.api_key_value().to_string();
 
     match spec.adapter {
         AdapterKind::OpenAiResponses => {
-            let config = OpenAiResponsesConfig::new(spec.base_url, spec.api_key, &model_id);
+            let config = OpenAiResponsesConfig::new(spec.base_url, api_key, &model_id);
             let model =
                 OpenAiResponsesModel::new(config).map_err(ServerSetupError::OpenAiAdapter)?;
             Ok((identity, ServerModel::new(ServerModelInner::OpenAiResponses(model), trace_store)))
         }
         AdapterKind::OpenAiChatCompletions => {
-            let config = OpenAiChatCompletionsConfig::new(spec.base_url, spec.api_key, &model_id);
+            let config = OpenAiChatCompletionsConfig::new(spec.base_url, api_key, &model_id);
             let model =
                 OpenAiChatCompletionsModel::new(config).map_err(ServerSetupError::OpenAiAdapter)?;
             Ok((

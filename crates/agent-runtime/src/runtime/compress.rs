@@ -45,7 +45,7 @@ where
                 available_tools: Vec::new(),
                 parallel_tool_calls: Some(false),
                 prompt_cache: None,
-                user_agent: None,
+                user_agent: self.user_agent.clone(),
                 timeout: self.request_timeout.clone(),
                 trace_context: turn_id.map(|turn_id| {
                     build_llm_trace_context(

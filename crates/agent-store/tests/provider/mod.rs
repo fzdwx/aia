@@ -22,7 +22,7 @@ fn provider_registry_round_trips_through_normalized_tables() {
         label: "main".into(),
         adapter: AdapterKind::OpenAiResponses,
         endpoint: ProviderEndpoint { base_url: "https://api.openai.com/v1".into() },
-        credential: CredentialRef { api_key: "secret".into() },
+        credential: CredentialRef::api_key("secret"),
         models: vec![
             ModelConfig {
                 id: "gpt-4.1".into(),
@@ -61,7 +61,7 @@ fn provider_registry_persists_providers_and_newest_model_order() {
         label: "main".into(),
         adapter: AdapterKind::OpenAiResponses,
         endpoint: ProviderEndpoint { base_url: "https://api.openai.com/v1".into() },
-        credential: CredentialRef { api_key: "secret".into() },
+        credential: CredentialRef::api_key("secret"),
         models: vec![ModelConfig::new("gpt-4.1"), ModelConfig::new("gpt-4.1-mini")],
     });
     registry.upsert(ProviderAccount::openai_chat_completions(
@@ -85,7 +85,7 @@ fn provider_registry_persists_providers_and_newest_model_order() {
         label: "main".into(),
         adapter: AdapterKind::OpenAiResponses,
         endpoint: ProviderEndpoint { base_url: "https://api.openai.com/v1".into() },
-        credential: CredentialRef { api_key: "secret".into() },
+        credential: CredentialRef::api_key("secret"),
         models: vec![
             ModelConfig::new("gpt-5"),
             ModelConfig::new("gpt-4.1"),

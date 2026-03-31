@@ -273,6 +273,7 @@ impl TurnWorker {
                         registry: self.context.registry.clone(),
                         broadcast_tx: self.context.broadcast_tx.clone(),
                         sessions_dir: self.context.sessions_dir.clone(),
+                        user_agent: self.context.user_agent.clone(),
                     };
                     let session_id = self.context.session_id.clone();
                     tokio::spawn(async move {

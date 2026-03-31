@@ -1340,13 +1340,19 @@ describe("tool renderer registry", () => {
 
   test("keeps shared pierre worker pool configuration in a dedicated provider module", () => {
     const source = loadPierreDiffProviderSource()
+    const workerSource = readFileSync(
+      new URL("../diff/pierre-worker.ts", import.meta.url),
+      "utf8"
+    )
 
-    expect(source).toContain("WorkerPoolContextProvider")
-    expect(source).toContain("pierreWorkerPoolOptions")
-    expect(source).toContain('preferredHighlighter: "shiki-js"')
-    expect(source).toContain('lineDiffType: "none"')
-    expect(source).toContain("highlighterOptions")
-    expect(source).not.toContain("sharedRenderOptions")
+    expect(source).toContain("WorkerPoolContext.Provider")
+    expect(source).toContain("getPierreWorkerPool")
+    expect(workerSource).toContain("pierreWorkerPoolOptions")
+    expect(workerSource).toContain("pierreWorkerHighlighterOptions")
+    expect(workerSource).toContain("poolSize: 2")
+    expect(workerSource).toContain("totalASTLRUCacheSize: 24")
+    expect(workerSource).toContain('preferredHighlighter: "shiki-js"')
+    expect(workerSource).toContain('lineDiffType: "none"')
   })
 
   test("injects pierre diff scrollbar hiding hooks via unsafe css", () => {
