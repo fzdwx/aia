@@ -1,5 +1,5 @@
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
-use provider_registry::{ProviderProfile, ProviderRegistry};
+use provider_registry::{ProviderAccount, ProviderRegistry};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
@@ -10,7 +10,7 @@ use crate::routes::test_support::{
 
 fn sample_registry() -> ProviderRegistry {
     let mut registry = ProviderRegistry::default();
-    registry.upsert(ProviderProfile::openai_responses(
+    registry.upsert(ProviderAccount::openai_responses(
         "primary",
         "https://primary.example.com",
         "primary-key",

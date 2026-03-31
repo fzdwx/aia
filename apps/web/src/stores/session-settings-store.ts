@@ -5,8 +5,8 @@ import {
   updateSessionSettings as apiUpdateSessionSettings,
 } from "@/lib/api"
 import type {
-  ProviderInfo,
   ProviderListItem,
+  SessionSelectionInfo,
   SessionSettings,
   ThinkingLevel,
 } from "@/lib/types"
@@ -16,9 +16,13 @@ function findProviderModel(
   settings: SessionSettings | null
 ) {
   if (!settings) return null
-  const provider = providerList.find((item) => item.name === settings.provider)
+  const provider = providerList.find(
+    (item) => item.id === settings.model_ref?.provider_id
+  )
   if (!provider) return null
-  const model = provider.models.find((item) => item.id === settings.model)
+  const model = provider.models.find(
+    (item) => item.id === settings.model_ref?.model_id
+  )
   if (!model) return null
   return { provider, model }
 }
@@ -34,15 +38,15 @@ type SessionSettingsStore = {
   switchModel: (
     sessionId: string,
     providerList: ProviderListItem[],
-    providerName: string,
+    providerId: string,
     modelId: string,
     reasoningEffort?: ThinkingLevel | null
-  ) => Promise<ProviderInfo>
+  ) => Promise<SessionSelectionInfo>
   setReasoningEffort: (
     sessionId: string,
     providerList: ProviderListItem[],
     reasoningEffort: ThinkingLevel | null
-  ) => Promise<ProviderInfo | null>
+  ) => Promise<SessionSelectionInfo | null>
 }
 
 let latestHydrationRequestId = 0
@@ -95,13 +99,13 @@ export const useSessionSettingsStore = create<SessionSettingsStore>(
     switchModel: async (
       sessionId,
       providerList,
-      providerName,
+      providerId,
       modelId,
       reasoningEffort
     ) => {
-      const provider = providerList.find((item) => item.name === providerName)
+      const provider = providerList.find((item) => item.id === providerId)
       if (!provider) {
-        throw new Error(`provider not found: ${providerName}`)
+        throw new Error(`provider not found: ${providerId}`)
       }
       const model = provider.models.find((item) => item.id === modelId)
       if (!model) {
@@ -117,8 +121,10 @@ export const useSessionSettingsStore = create<SessionSettingsStore>(
       try {
         const info = await apiUpdateSessionSettings({
           session_id: sessionId,
-          provider: providerName,
-          model: modelId,
+          model_ref: {
+            provider_id: providerId,
+            model_id: modelId,
+          },
           reasoning_effort: nextReasoningEffort,
         })
 
@@ -129,9 +135,11 @@ export const useSessionSettingsStore = create<SessionSettingsStore>(
         set({
           updating: false,
           sessionSettings: {
-            provider: providerName,
-            model: modelId,
-            protocol: provider.kind,
+            model_ref: {
+              provider_id: providerId,
+              model_id: modelId,
+            },
+            adapter: provider.adapter,
             reasoning_effort: nextReasoningEffort,
           },
         })
@@ -154,12 +162,12 @@ export const useSessionSettingsStore = create<SessionSettingsStore>(
 
     setReasoningEffort: async (sessionId, providerList, reasoningEffort) => {
       const sessionSettings = get().sessionSettings
-      if (!sessionSettings) return null
+      if (!sessionSettings?.model_ref) return null
       return get().switchModel(
         sessionId,
         providerList,
-        sessionSettings.provider,
-        sessionSettings.model,
+        sessionSettings.model_ref.provider_id,
+        sessionSettings.model_ref.model_id,
         reasoningEffort
       )
     },

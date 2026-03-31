@@ -1814,8 +1814,9 @@ describe("chat store submitTurn", () => {
     useProviderRegistryStore.setState({
       providerList: [
         {
-          name: "openai",
-          kind: "openai-responses",
+          id: "openai",
+          label: "OpenAI",
+          adapter: "openai-responses",
           base_url: "https://api.openai.com",
           models: [
             {
@@ -1838,9 +1839,11 @@ describe("chat store submitTurn", () => {
     })
     useSessionSettingsStore.setState({
       sessionSettings: {
-        provider: "openai",
-        model: "gpt-5",
-        protocol: "openai-responses",
+        model_ref: {
+          provider_id: "openai",
+          model_id: "gpt-5",
+        },
+        adapter: "openai-responses",
         reasoning_effort: "high",
       },
       hydrating: false,

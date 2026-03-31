@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::runtime_worker::RunningTurnHandle;
 use crate::sse::TurnStatus;
-use agent_core::{RequestTimeoutConfig, StreamEvent};
+use agent_core::{ModelRef, RequestTimeoutConfig, StreamEvent};
 use agent_store::SessionRecord;
 use session_tape::SessionTape;
 
@@ -57,8 +57,8 @@ fn sample_manager_config(root: &std::path::Path) -> SessionManagerConfig {
         broadcast_tx,
         provider_registry_snapshot: Arc::new(RwLock::new(registry)),
         provider_info_snapshot: Arc::new(RwLock::new(super::ProviderInfoSnapshot {
-            name: "bootstrap".into(),
-            model: "bootstrap".into(),
+            provider_id: "bootstrap".into(),
+            model_id: "bootstrap".into(),
             connected: true,
         })),
         workspace_root: root.to_path_buf(),
@@ -264,10 +264,7 @@ fn running_session_slot_keeps_in_memory_provider_binding() {
         SessionSlot {
             session_path: temp_session_path("running-session-settings"),
             provider_binding: session_tape::SessionProviderBinding::Provider {
-                name: "primary".into(),
-                model: "model-primary".into(),
-                base_url: "https://primary.example.com".into(),
-                protocol: "openai-responses".into(),
+                model_ref: ModelRef::new("primary", "model-primary"),
                 reasoning_effort: Some("high".into()),
             },
             history: Arc::new(RwLock::new(Vec::new())),
@@ -301,11 +298,9 @@ fn running_session_slot_keeps_in_memory_provider_binding() {
     assert!(matches!(
         &slot.provider_binding,
         session_tape::SessionProviderBinding::Provider {
-            name,
-            model,
+            model_ref,
             reasoning_effort: Some(effort),
-            ..
-        } if name == "primary" && model == "model-primary" && effort == "high"
+        } if model_ref.provider_id == "primary" && model_ref.model_id == "model-primary" && effort == "high"
     ));
 }
 
@@ -463,10 +458,7 @@ fn session_slot_finish_turn_restores_idle_state_and_clears_pending_binding() {
         slot.begin_turn().expect("idle slot should start turn");
 
     slot.replace_pending_provider_binding(Some(session_tape::SessionProviderBinding::Provider {
-        name: "primary".into(),
-        model: "model-primary".into(),
-        base_url: "https://primary.example.com".into(),
-        protocol: "openai-responses".into(),
+        model_ref: ModelRef::new("primary", "model-primary"),
         reasoning_effort: None,
     }))
     .expect("running slot should accept pending binding");
@@ -487,7 +479,7 @@ fn session_slot_factory_fails_on_malformed_latest_provider_binding() {
     std::fs::write(
         &session_path,
         concat!(
-            "{\"id\":1,\"kind\":\"event\",\"payload\":{\"name\":\"provider_binding\",\"data\":{\"name\":\"older\",\"model\":\"gpt-4.1-mini\",\"base_url\":\"https://api.openai.com/v1\",\"protocol\":\"openai-responses\"}},\"meta\":{},\"date\":\"2026-03-21T00:00:00Z\"}\n",
+            "{\"id\":1,\"kind\":\"event\",\"payload\":{\"name\":\"provider_binding\",\"data\":{\"model_ref\":{\"provider_id\":\"older\",\"model_id\":\"gpt-4.1-mini\"},\"reasoning_effort\":null}},\"meta\":{},\"date\":\"2026-03-21T00:00:00Z\"}\n",
             "{\"id\":2,\"kind\":\"event\",\"payload\":{\"name\":\"provider_binding\",\"data\":{\"broken\":true}},\"meta\":{},\"date\":\"2026-03-21T00:00:01Z\"}\n"
         ),
     )
@@ -519,7 +511,7 @@ fn get_session_settings_reports_recovery_error_for_malformed_latest_provider_bin
     std::fs::write(
         config.sessions_dir.join("session-1.jsonl"),
         concat!(
-            "{\"id\":1,\"kind\":\"event\",\"payload\":{\"name\":\"provider_binding\",\"data\":{\"name\":\"older\",\"model\":\"gpt-4.1-mini\",\"base_url\":\"https://api.openai.com/v1\",\"protocol\":\"openai-responses\"}},\"meta\":{},\"date\":\"2026-03-21T00:00:00Z\"}\n",
+            "{\"id\":1,\"kind\":\"event\",\"payload\":{\"name\":\"provider_binding\",\"data\":{\"model_ref\":{\"provider_id\":\"older\",\"model_id\":\"gpt-4.1-mini\"},\"reasoning_effort\":null}},\"meta\":{},\"date\":\"2026-03-21T00:00:00Z\"}\n",
             "{\"id\":2,\"kind\":\"event\",\"payload\":{\"name\":\"provider_binding\",\"data\":{\"broken\":true}},\"meta\":{},\"date\":\"2026-03-21T00:00:01Z\"}\n"
         ),
     )
@@ -625,8 +617,8 @@ fn handle_cancel_turn_marks_running_snapshot_as_cancelled() {
             provider_registry::ProviderRegistry::default(),
         )),
         provider_info_snapshot: Arc::new(RwLock::new(super::ProviderInfoSnapshot {
-            name: "bootstrap".into(),
-            model: "bootstrap".into(),
+            provider_id: "bootstrap".into(),
+            model_id: "bootstrap".into(),
             connected: true,
         })),
         workspace_root: std::path::PathBuf::new(),
@@ -673,8 +665,8 @@ fn spawned_turn_worker_completes_bootstrap_turn() {
             broadcast_tx,
             provider_registry_snapshot: Arc::new(RwLock::new(registry)),
             provider_info_snapshot: Arc::new(RwLock::new(super::ProviderInfoSnapshot {
-                name: "bootstrap".into(),
-                model: "bootstrap".into(),
+                provider_id: "bootstrap".into(),
+                model_id: "bootstrap".into(),
                 connected: true,
             })),
             workspace_root: temp_root.clone(),
@@ -761,8 +753,8 @@ fn spawned_turn_worker_applies_custom_system_prompt_and_runtime_hooks() {
             broadcast_tx,
             provider_registry_snapshot: Arc::new(RwLock::new(registry)),
             provider_info_snapshot: Arc::new(RwLock::new(super::ProviderInfoSnapshot {
-                name: "bootstrap".into(),
-                model: "bootstrap".into(),
+                provider_id: "bootstrap".into(),
+                model_id: "bootstrap".into(),
                 connected: true,
             })),
             workspace_root: temp_root.clone(),

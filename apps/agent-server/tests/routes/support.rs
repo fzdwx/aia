@@ -20,8 +20,8 @@ pub(crate) fn test_state() -> Arc<AppState> {
     let store = Arc::new(agent_store::AiaStore::in_memory().expect("memory store"));
     let provider_registry_snapshot = Arc::new(RwLock::new(ProviderRegistry::default()));
     let provider_info_snapshot = Arc::new(RwLock::new(ProviderInfoSnapshot {
-        name: "bootstrap".into(),
-        model: "bootstrap".into(),
+        provider_id: "bootstrap".into(),
+        model_id: "bootstrap".into(),
         connected: true,
     }));
     let channel_adapter_catalog = Arc::new(build_channel_adapter_catalog(
@@ -69,17 +69,17 @@ pub(crate) fn test_state_with_session_manager_setup(
             .expect("sqlite store should initialize"),
     );
     setup(root.as_path(), &store);
-    let active_provider = registry.active_provider().cloned();
+    let active_provider = registry.first_provider().cloned();
     let provider_registry_snapshot = Arc::new(RwLock::new(registry.clone()));
     let provider_info_snapshot = Arc::new(RwLock::new(match active_provider.as_ref() {
         Some(profile) => ProviderInfoSnapshot {
-            name: profile.name.clone(),
-            model: profile.default_model_id().unwrap_or("").to_string(),
+            provider_id: profile.id.clone(),
+            model_id: profile.default_model_id().unwrap_or("").to_string(),
             connected: true,
         },
         None => ProviderInfoSnapshot {
-            name: "bootstrap".into(),
-            model: "bootstrap".into(),
+            provider_id: "bootstrap".into(),
+            model_id: "bootstrap".into(),
             connected: true,
         },
     }));

@@ -26,13 +26,13 @@ export function ModelSelector() {
   const hydrating = useSessionSettingsStore((s) => s.hydrating)
   const updating = useSessionSettingsStore((s) => s.updating)
 
-  const activeProviderName = sessionSettings?.provider
-  const activeModelId = sessionSettings?.model
+  const activeProviderId = sessionSettings?.model_ref?.provider_id
+  const activeModelId = sessionSettings?.model_ref?.model_id
   const selectedValue =
-    activeProviderName && activeModelId
-      ? `${activeProviderName}::${activeModelId}`
+    activeProviderId && activeModelId
+      ? `${activeProviderId}::${activeModelId}`
       : ""
-  const activeProvider = providerList.find((p) => p.name === activeProviderName)
+  const activeProvider = providerList.find((p) => p.id === activeProviderId)
   const activeModel = activeProvider?.models.find((m) => m.id === activeModelId)
   const displayLabel = hydrating
     ? "loading model..."
@@ -47,9 +47,9 @@ export function ModelSelector() {
         value={selectedValue}
         onValueChange={(value) => {
           if (!value) return
-          const [providerName, modelId] = value.split("::")
-          if (!providerName || !modelId) return
-          void switchActiveSessionModel(providerName, modelId).catch(() => {})
+          const [providerId, modelId] = value.split("::")
+          if (!providerId || !modelId) return
+          void switchActiveSessionModel(providerId, modelId).catch(() => {})
         }}
       >
         <SelectTrigger
@@ -64,18 +64,17 @@ export function ModelSelector() {
           className="min-w-[220px]"
         >
           {providerList.map((provider) => (
-            <SelectGroup key={provider.name}>
+            <SelectGroup key={provider.id}>
               <SelectLabel className={MODEL_SELECTOR_LABEL}>
-                {provider.name}
+                {provider.label}
               </SelectLabel>
               {provider.models.map((model) => {
                 const isActive =
-                  provider.name === activeProviderName &&
-                  model.id === activeModelId
+                  provider.id === activeProviderId && model.id === activeModelId
                 return (
                   <SelectItem
-                    key={`${provider.name}-${model.id}`}
-                    value={`${provider.name}::${model.id}`}
+                    key={`${provider.id}-${model.id}`}
+                    value={`${provider.id}::${model.id}`}
                     className={cn(
                       MODEL_SELECTOR_ITEM,
                       !isActive && "text-muted-foreground"

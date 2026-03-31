@@ -20,8 +20,9 @@ const originalFetch = globalThis.fetch
 
 const providerList: ProviderListItem[] = [
   {
-    name: "openai",
-    kind: "openai-responses",
+    id: "openai",
+    label: "OpenAI",
+    adapter: "openai-responses",
     base_url: "https://api.openai.com",
     models: [
       {
@@ -80,9 +81,11 @@ describe("session settings store", () => {
   test("supportsReasoning reflects active session model capability", () => {
     useSessionSettingsStore.setState({
       sessionSettings: {
-        provider: "openai",
-        model: "gpt-5",
-        protocol: "openai-responses",
+        model_ref: {
+          provider_id: "openai",
+          model_id: "gpt-5",
+        },
+        adapter: "openai-responses",
         reasoning_effort: "high",
       },
       hydrating: false,
@@ -94,9 +97,11 @@ describe("session settings store", () => {
 
     useSessionSettingsStore.setState({
       sessionSettings: {
-        provider: "openai",
-        model: "gpt-4.1-mini",
-        protocol: "openai-responses",
+        model_ref: {
+          provider_id: "openai",
+          model_id: "gpt-4.1-mini",
+        },
+        adapter: "openai-responses",
         reasoning_effort: null,
       },
     })
@@ -116,8 +121,8 @@ describe("session settings store", () => {
       calls.push({ url, body: init?.body as string | undefined })
       return new Response(
         JSON.stringify({
-          name: "openai",
-          model: "gpt-4.1-mini",
+          provider_id: "openai",
+          model_id: "gpt-4.1-mini",
           connected: true,
         }),
         { status: 200, headers: { "Content-Type": "application/json" } }
@@ -126,9 +131,11 @@ describe("session settings store", () => {
 
     useSessionSettingsStore.setState({
       sessionSettings: {
-        provider: "openai",
-        model: "gpt-5",
-        protocol: "openai-responses",
+        model_ref: {
+          provider_id: "openai",
+          model_id: "gpt-5",
+        },
+        adapter: "openai-responses",
         reasoning_effort: "high",
       },
       hydrating: false,
@@ -141,14 +148,18 @@ describe("session settings store", () => {
     expect(calls[0]?.url).toBe("/api/session/settings")
     expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({
       session_id: "session-1",
-      provider: "openai",
-      model: "gpt-4.1-mini",
+      model_ref: {
+        provider_id: "openai",
+        model_id: "gpt-4.1-mini",
+      },
       reasoning_effort: null,
     })
     expect(useSessionSettingsStore.getState().sessionSettings).toEqual({
-      provider: "openai",
-      model: "gpt-4.1-mini",
-      protocol: "openai-responses",
+      model_ref: {
+        provider_id: "openai",
+        model_id: "gpt-4.1-mini",
+      },
+      adapter: "openai-responses",
       reasoning_effort: null,
     })
     expect(useChatStore.getState().sessions[0]?.model).toBe("gpt-5")
@@ -164,8 +175,8 @@ describe("session settings store", () => {
       calls.push({ url, body: init?.body as string | undefined })
       return new Response(
         JSON.stringify({
-          name: "openai",
-          model: "gpt-5-mini",
+          provider_id: "openai",
+          model_id: "gpt-5-mini",
           connected: true,
         }),
         { status: 200, headers: { "Content-Type": "application/json" } }
@@ -174,9 +185,11 @@ describe("session settings store", () => {
 
     useSessionSettingsStore.setState({
       sessionSettings: {
-        provider: "openai",
-        model: "gpt-5",
-        protocol: "openai-responses",
+        model_ref: {
+          provider_id: "openai",
+          model_id: "gpt-5",
+        },
+        adapter: "openai-responses",
         reasoning_effort: "high",
       },
       hydrating: false,
@@ -189,14 +202,18 @@ describe("session settings store", () => {
     expect(calls[0]?.url).toBe("/api/session/settings")
     expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({
       session_id: "session-1",
-      provider: "openai",
-      model: "gpt-5-mini",
+      model_ref: {
+        provider_id: "openai",
+        model_id: "gpt-5-mini",
+      },
       reasoning_effort: "high",
     })
     expect(useSessionSettingsStore.getState().sessionSettings).toEqual({
-      provider: "openai",
-      model: "gpt-5-mini",
-      protocol: "openai-responses",
+      model_ref: {
+        provider_id: "openai",
+        model_id: "gpt-5-mini",
+      },
+      adapter: "openai-responses",
       reasoning_effort: "high",
     })
   })
@@ -219,9 +236,11 @@ describe("session settings store", () => {
 
     useSessionSettingsStore.setState({
       sessionSettings: {
-        provider: "openai",
-        model: "gpt-5",
-        protocol: "openai-responses",
+        model_ref: {
+          provider_id: "openai",
+          model_id: "gpt-5",
+        },
+        adapter: "openai-responses",
         reasoning_effort: "high",
       },
       hydrating: false,
@@ -273,9 +292,11 @@ describe("session settings store", () => {
     )(
       new Response(
         JSON.stringify({
-          provider: "openai",
-          model: "gpt-5-mini",
-          protocol: "openai-responses",
+          model_ref: {
+            provider_id: "openai",
+            model_id: "gpt-5-mini",
+          },
+          adapter: "openai-responses",
           reasoning_effort: "high",
         }),
         { status: 200, headers: { "Content-Type": "application/json" } }
@@ -289,9 +310,11 @@ describe("session settings store", () => {
     )(
       new Response(
         JSON.stringify({
-          provider: "openai",
-          model: "gpt-4.1-mini",
-          protocol: "openai-responses",
+          model_ref: {
+            provider_id: "openai",
+            model_id: "gpt-4.1-mini",
+          },
+          adapter: "openai-responses",
           reasoning_effort: null,
         }),
         { status: 200, headers: { "Content-Type": "application/json" } }
@@ -300,9 +323,11 @@ describe("session settings store", () => {
     await sessionOneHydration
 
     expect(useSessionSettingsStore.getState().sessionSettings).toEqual({
-      provider: "openai",
-      model: "gpt-5-mini",
-      protocol: "openai-responses",
+      model_ref: {
+        provider_id: "openai",
+        model_id: "gpt-5-mini",
+      },
+      adapter: "openai-responses",
       reasoning_effort: "high",
     })
   })
@@ -331,9 +356,11 @@ describe("session settings store", () => {
 
     useSessionSettingsStore.setState({
       sessionSettings: {
-        provider: "openai",
-        model: "gpt-5",
-        protocol: "openai-responses",
+        model_ref: {
+          provider_id: "openai",
+          model_id: "gpt-5",
+        },
+        adapter: "openai-responses",
         reasoning_effort: "high",
       },
       hydrating: false,
@@ -354,9 +381,11 @@ describe("session settings store", () => {
     )(
       new Response(
         JSON.stringify({
-          provider: "openai",
-          model: "gpt-4.1-mini",
-          protocol: "openai-responses",
+          model_ref: {
+            provider_id: "openai",
+            model_id: "gpt-4.1-mini",
+          },
+          adapter: "openai-responses",
           reasoning_effort: null,
         }),
         { status: 200, headers: { "Content-Type": "application/json" } }
@@ -370,8 +399,8 @@ describe("session settings store", () => {
     )(
       new Response(
         JSON.stringify({
-          name: "openai",
-          model: "gpt-5-mini",
+          provider_id: "openai",
+          model_id: "gpt-5-mini",
           connected: true,
         }),
         { status: 200, headers: { "Content-Type": "application/json" } }
@@ -380,9 +409,11 @@ describe("session settings store", () => {
     await mutation
 
     expect(useSessionSettingsStore.getState().sessionSettings).toEqual({
-      provider: "openai",
-      model: "gpt-4.1-mini",
-      protocol: "openai-responses",
+      model_ref: {
+        provider_id: "openai",
+        model_id: "gpt-4.1-mini",
+      },
+      adapter: "openai-responses",
       reasoning_effort: null,
     })
     expect(useSessionSettingsStore.getState().updating).toBe(false)

@@ -5,14 +5,13 @@ use std::sync::Arc;
 use agent_core::ToolRegistry;
 use agent_runtime::AgentRuntime;
 use agent_store::AiaStore;
-use provider_registry::ProviderRegistry;
+use provider_registry::{CredentialRef, ProviderAccount, ProviderEndpoint, ProviderRegistry};
 use session_tape::SessionProviderBinding;
 
 use crate::{
     model::{ServerModel, build_model_from_selection},
     runtime_worker::{
-        CreateProviderInput, ProviderInfoSnapshot, RuntimeWorkerError,
-        UpdateProviderInput,
+        CreateProviderInput, ProviderInfoSnapshot, RuntimeWorkerError, UpdateProviderInput,
     },
 };
 
@@ -127,11 +126,12 @@ impl<'a> ProviderSyncService<'a> {
         input: CreateProviderInput,
     ) -> Result<(), RuntimeWorkerError> {
         let mut candidate_registry = self.config.registry.clone();
-        candidate_registry.upsert(provider_registry::ProviderProfile {
-            name: input.name,
-            kind: input.kind,
-            base_url: input.base_url,
-            api_key: input.api_key,
+        candidate_registry.upsert(ProviderAccount {
+            id: input.id,
+            label: input.label,
+            adapter: input.adapter,
+            endpoint: ProviderEndpoint { base_url: input.base_url },
+            credential: CredentialRef { api_key: input.api_key },
             models: input.models,
         });
         self.sync_registry(candidate_registry).map(|_| ())
@@ -147,15 +147,20 @@ impl<'a> ProviderSyncService<'a> {
             .registry
             .providers()
             .iter()
-            .find(|provider| provider.name == name)
+            .find(|provider| provider.id == name)
             .cloned()
             .ok_or_else(|| RuntimeWorkerError::not_found(format!("provider 不存在：{name}")))?;
 
-        let updated = provider_registry::ProviderProfile {
-            name: name.clone(),
-            kind: input.kind.unwrap_or(profile.kind),
-            base_url: input.base_url.unwrap_or(profile.base_url),
-            api_key: input.api_key.unwrap_or(profile.api_key),
+        let updated = ProviderAccount {
+            id: name.clone(),
+            label: input.label.unwrap_or(profile.label),
+            adapter: input.adapter.unwrap_or(profile.adapter),
+            endpoint: ProviderEndpoint {
+                base_url: input.base_url.unwrap_or(profile.endpoint.base_url),
+            },
+            credential: CredentialRef {
+                api_key: input.api_key.unwrap_or(profile.credential.api_key),
+            },
             models: input.models.unwrap_or(profile.models),
         };
 
@@ -215,14 +220,14 @@ impl<'a> ProviderSyncService<'a> {
                     slot.replace_pending_provider_binding(Some(binding))?;
                     return Ok(match &slot.provider_binding {
                         SessionProviderBinding::Bootstrap => ProviderInfoSnapshot {
-                            name: "bootstrap".into(),
-                            model: "bootstrap".into(),
+                            provider_id: "bootstrap".into(),
+                            model_id: "bootstrap".into(),
                             connected: true,
                         },
-                        SessionProviderBinding::Provider { name, model, .. } => {
+                        SessionProviderBinding::Provider { model_ref, .. } => {
                             ProviderInfoSnapshot {
-                                name: name.clone(),
-                                model: model.clone(),
+                                provider_id: model_ref.provider_id.clone(),
+                                model_id: model_ref.model_id.clone(),
                                 connected: true,
                             }
                         }

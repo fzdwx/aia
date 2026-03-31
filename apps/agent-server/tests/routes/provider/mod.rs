@@ -1,8 +1,8 @@
-use provider_registry::{ModelConfig, ModelLimit, ProviderKind, ProviderProfile};
+use provider_registry::{AdapterKind, ModelConfig, ModelLimit, ProviderAccount, ProviderEndpoint};
 
 use super::{
     ModelConfigDto, ModelLimitDto,
-    handlers::{parse_provider_kind, provider_info_from_snapshot, provider_list_item},
+    handlers::{parse_adapter_kind, provider_list_item},
 };
 
 #[test]
@@ -23,41 +23,29 @@ fn model_config_dto_round_trip_preserves_limit() {
 }
 
 #[test]
-fn parse_provider_kind_accepts_known_protocols() {
-    assert!(matches!(parse_provider_kind("openai-responses"), Ok(ProviderKind::OpenAiResponses)));
+fn parse_adapter_kind_accepts_known_protocols() {
+    assert!(matches!(parse_adapter_kind("openai-responses"), Ok(AdapterKind::OpenAiResponses)));
     assert!(matches!(
-        parse_provider_kind("openai-chat-completions"),
-        Ok(ProviderKind::OpenAiChatCompletions)
+        parse_adapter_kind("openai-chat-completions"),
+        Ok(AdapterKind::OpenAiChatCompletions)
     ));
 }
 
 #[test]
-fn parse_provider_kind_rejects_unknown_protocol() {
+fn parse_adapter_kind_rejects_unknown_protocol() {
     let response =
-        parse_provider_kind("unknown-protocol").expect_err("unknown protocol should fail");
+        parse_adapter_kind("unknown-protocol").expect_err("unknown protocol should fail");
     assert_eq!(response.0, axum::http::StatusCode::BAD_REQUEST);
 }
 
 #[test]
-fn provider_info_from_snapshot_projects_fields() {
-    let info = provider_info_from_snapshot(&crate::session_manager::ProviderInfoSnapshot {
-        name: "rayin".into(),
-        model: "gpt-5.4".into(),
-        connected: true,
-    });
-
-    assert_eq!(info.name, "rayin");
-    assert_eq!(info.model, "gpt-5.4");
-    assert!(info.connected);
-}
-
-#[test]
-fn provider_list_item_marks_active_provider() {
-    let profile = ProviderProfile {
-        name: "rayin".into(),
-        kind: ProviderKind::OpenAiResponses,
-        base_url: "https://example.com".into(),
-        api_key: "secret".into(),
+fn provider_list_item_projects_fields() {
+    let provider = ProviderAccount {
+        id: "rayin".into(),
+        label: "Rayin".into(),
+        adapter: AdapterKind::OpenAiResponses,
+        endpoint: ProviderEndpoint { base_url: "https://example.com".into() },
+        credential: provider_registry::CredentialRef { api_key: "secret".into() },
         models: vec![ModelConfig {
             id: "gpt-5.4".into(),
             display_name: Some("GPT-5.4".into()),
@@ -67,8 +55,10 @@ fn provider_list_item_marks_active_provider() {
         }],
     };
 
-    let item = provider_list_item(&profile, Some("rayin"));
-    assert!(item.active);
-    assert_eq!(item.kind, "openai-responses");
+    let item = provider_list_item(&provider);
+    assert_eq!(item.id, "rayin");
+    assert_eq!(item.label, "Rayin");
+    assert_eq!(item.adapter, "openai-responses");
+    assert_eq!(item.base_url, "https://example.com");
     assert_eq!(item.models.len(), 1);
 }

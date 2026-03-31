@@ -1,7 +1,10 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use agent_core::ModelRef;
+
 use crate::{
-    ModelConfig, ModelLimit, ProviderKind, ProviderProfile, ProviderRegistry, default_registry_path,
+    AdapterKind, CredentialRef, ModelConfig, ModelLimit, ProviderAccount, ProviderEndpoint,
+    ProviderRegistry, default_registry_path,
 };
 
 #[test]
@@ -12,13 +15,13 @@ fn 默认存储路径位于项目隐藏目录() {
 #[test]
 fn 同名_provider_会被更新而不是重复追加() {
     let mut registry = ProviderRegistry::default();
-    registry.upsert(ProviderProfile::openai_responses(
+    registry.upsert(ProviderAccount::openai_responses(
         "main",
         "https://api.openai.com/v1",
         "secret",
         "gpt-4.1-mini",
     ));
-    registry.upsert(ProviderProfile::openai_responses(
+    registry.upsert(ProviderAccount::openai_responses(
         "main",
         "https://example.com/v1",
         "secret-2",
@@ -26,57 +29,36 @@ fn 同名_provider_会被更新而不是重复追加() {
     ));
 
     assert_eq!(registry.providers().len(), 1);
-    assert_eq!(registry.providers()[0].base_url, "https://example.com/v1");
+    assert_eq!(registry.providers()[0].endpoint.base_url, "https://example.com/v1");
     assert_eq!(registry.providers()[0].default_model_id(), Some("gpt-4.1"));
     assert!(registry.providers()[0].has_model("gpt-4.1"));
 }
 
 #[test]
 fn 可构造_openai_兼容聊天补全_provider() {
-    let provider = ProviderProfile::openai_chat_completions(
+    let provider = ProviderAccount::openai_chat_completions(
         "compat",
         "http://127.0.0.1:8000/v1",
         "secret",
         "minum-security-llm",
     );
 
-    assert_eq!(provider.kind, ProviderKind::OpenAiChatCompletions);
-    assert_eq!(provider.name, "compat");
-    assert_eq!(provider.base_url, "http://127.0.0.1:8000/v1");
+    assert_eq!(provider.adapter, AdapterKind::OpenAiChatCompletions);
+    assert_eq!(provider.id, "compat");
+    assert_eq!(provider.endpoint.base_url, "http://127.0.0.1:8000/v1");
     assert_eq!(provider.default_model_id(), Some("minum-security-llm"));
-}
-
-#[test]
-fn 可兼容旧版单_model_格式() {
-    let registry: ProviderRegistry = serde_json::from_value(serde_json::json!({
-        "providers": [
-            {
-                "name": "legacy",
-                "kind": "OpenAiResponses",
-                "base_url": "https://api.openai.com/v1",
-                "api_key": "secret",
-                "model": "gpt-4.1-mini"
-            }
-        ],
-        "active_provider": "legacy"
-    }))
-    .expect("旧格式应可恢复");
-
-    assert_eq!(registry.providers().len(), 1);
-    assert!(registry.providers()[0].has_model("gpt-4.1-mini"));
-    assert_eq!(registry.providers()[0].default_model_id(), Some("gpt-4.1-mini"));
 }
 
 #[test]
 fn 删除_provider_后会从列表移除() {
     let mut registry = ProviderRegistry::default();
-    registry.upsert(ProviderProfile::openai_responses(
+    registry.upsert(ProviderAccount::openai_responses(
         "main",
         "https://api.openai.com/v1",
         "secret",
         "gpt-4.1-mini",
     ));
-    registry.upsert(ProviderProfile::openai_chat_completions(
+    registry.upsert(ProviderAccount::openai_chat_completions(
         "backup",
         "http://127.0.0.1:8000/v1",
         "secret",
@@ -86,17 +68,18 @@ fn 删除_provider_后会从列表移除() {
     registry.remove("main").expect("删除成功");
 
     assert_eq!(registry.providers().len(), 1);
-    assert_eq!(registry.first_provider().map(|p| p.name.as_str()), Some("backup"));
+    assert_eq!(registry.first_provider().map(|p| p.id.as_str()), Some("backup"));
 }
 
 #[test]
 fn 模型_limit_仍保留在领域模型里() {
     let mut registry = ProviderRegistry::default();
-    registry.upsert(ProviderProfile {
-        name: "main".into(),
-        kind: ProviderKind::OpenAiResponses,
-        base_url: "https://api.openai.com/v1".into(),
-        api_key: "secret".into(),
+    registry.upsert(ProviderAccount {
+        id: "main".into(),
+        label: "main".into(),
+        adapter: AdapterKind::OpenAiResponses,
+        endpoint: ProviderEndpoint { base_url: "https://api.openai.com/v1".into() },
+        credential: CredentialRef { api_key: "secret".into() },
         models: vec![ModelConfig {
             id: "gpt-4.1".into(),
             display_name: Some("GPT-4.1".into()),
@@ -125,6 +108,38 @@ fn provider_model_config_limit_复用_agent_core_共享类型() {
     };
 
     assert_eq!(model.limit, Some(shared_limit));
+}
+
+#[test]
+fn registry_can_resolve_model_ref() {
+    let mut registry = ProviderRegistry::default();
+    registry.upsert(ProviderAccount::openai_responses(
+        "main",
+        "https://api.openai.com/v1",
+        "secret",
+        "gpt-5-mini",
+    ));
+
+    let resolved = registry
+        .resolve_model(&ModelRef::new("main", "gpt-5-mini"))
+        .expect("model ref should resolve");
+
+    assert_eq!(resolved.model_ref, ModelRef::new("main", "gpt-5-mini"));
+    assert_eq!(resolved.base_url, "https://api.openai.com/v1");
+    assert_eq!(resolved.model.id, "gpt-5-mini");
+}
+
+#[test]
+fn first_model_ref_uses_first_provider_default_model() {
+    let mut registry = ProviderRegistry::default();
+    registry.upsert(ProviderAccount::openai_responses(
+        "main",
+        "https://api.openai.com/v1",
+        "secret",
+        "gpt-5-mini",
+    ));
+
+    assert_eq!(registry.first_model_ref(), Some(ModelRef::new("main", "gpt-5-mini")));
 }
 
 #[test]

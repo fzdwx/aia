@@ -99,11 +99,11 @@ export function SettingsPanel() {
   const selectTransport = useChannelsStore((s) => s.selectTransport)
 
   const selectedProvider =
-    providerList.find((provider) => provider.name === selectedProviderName) ??
+    providerList.find((provider) => provider.id === selectedProviderName) ??
     null
 
-  const [name, setName] = useState("")
-  const [kind, setKind] = useState("openai-responses")
+  const [label, setLabel] = useState("")
+  const [adapter, setAdapter] = useState("openai-responses")
   const [apiKey, setApiKey] = useState("")
   const [baseUrl, setBaseUrl] = useState("https://api.openai.com/v1")
   const [models, setModels] = useState<ModelFormRow[]>([emptyModelRow()])
@@ -121,16 +121,16 @@ export function SettingsPanel() {
 
   useEffect(() => {
     if (!selectedProvider) {
-      setName("")
-      setKind("openai-responses")
+      setLabel("")
+      setAdapter("openai-responses")
       setApiKey("")
       setBaseUrl("https://api.openai.com/v1")
       setModels([emptyModelRow()])
       return
     }
 
-    setName(selectedProvider.name)
-    setKind(selectedProvider.kind)
+    setLabel(selectedProvider.label)
+    setAdapter(selectedProvider.adapter)
     setApiKey("")
     setBaseUrl(selectedProvider.base_url)
     setModels(
@@ -189,8 +189,8 @@ export function SettingsPanel() {
 
   const hasValidModel = models.some((model) => model.id.trim())
 
-  function handleKindChange(value: string | null) {
-    if (value) setKind(value)
+  function handleAdapterChange(value: string | null) {
+    if (value) setAdapter(value)
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -204,7 +204,8 @@ export function SettingsPanel() {
 
       if (selectedProvider) {
         const body: Record<string, unknown> = {
-          kind,
+          label: label.trim(),
+          adapter,
           models: builtModels,
           base_url: baseUrl.trim(),
         }
@@ -212,21 +213,22 @@ export function SettingsPanel() {
         if (apiKey.trim()) body.api_key = apiKey.trim()
 
         await storeUpdateProvider(
-          selectedProvider.name,
+          selectedProvider.id,
           body as Parameters<typeof storeUpdateProvider>[1]
         )
         return
       }
 
-      const providerName = name.trim()
+      const providerId = label.trim()
       await storeCreateProvider({
-        name: providerName,
-        kind,
+        id: providerId,
+        label: label.trim(),
+        adapter,
         models: builtModels,
         api_key: apiKey.trim(),
         base_url: baseUrl.trim(),
       })
-      selectProviderName(providerName)
+      selectProviderName(providerId)
     } finally {
       setSubmitting(false)
     }
@@ -236,7 +238,7 @@ export function SettingsPanel() {
     if (!selectedProvider) return
 
     const deletingLastProvider = providerList.length <= 1
-    await storeDeleteProvider(selectedProvider.name)
+    await storeDeleteProvider(selectedProvider.id)
 
     if (deletingLastProvider) {
       selectProviderName(NEW_PROVIDER_SETTINGS_KEY)
@@ -251,8 +253,9 @@ export function SettingsPanel() {
       normalizedItemQuery
         ? providerList.filter((providerItem) => {
             return (
-              providerItem.name.toLowerCase().includes(normalizedItemQuery) ||
-              providerItem.kind.toLowerCase().includes(normalizedItemQuery)
+              providerItem.id.toLowerCase().includes(normalizedItemQuery) ||
+              providerItem.label.toLowerCase().includes(normalizedItemQuery) ||
+              providerItem.adapter.toLowerCase().includes(normalizedItemQuery)
             )
           })
         : providerList,
@@ -278,7 +281,7 @@ export function SettingsPanel() {
 
   const providerSubmitDisabled =
     submitting ||
-    (!selectedProvider && !name.trim()) ||
+    (!selectedProvider && !label.trim()) ||
     !hasValidModel ||
     (!selectedProvider && !apiKey.trim())
 
@@ -375,16 +378,14 @@ export function SettingsPanel() {
                     ) : (
                       filteredProviders.map((providerItem) => {
                         const isActive =
-                          providerItem.name === selectedProviderName &&
+                          providerItem.id === selectedProviderName &&
                           selectedProviderName !== NEW_PROVIDER_SETTINGS_KEY
 
                         return (
                           <button
-                            key={providerItem.name}
+                            key={providerItem.id}
                             type="button"
-                            onClick={() =>
-                              selectProviderName(providerItem.name)
-                            }
+                            onClick={() => selectProviderName(providerItem.id)}
                             className={cn(
                               "flex w-full flex-col gap-1.5 rounded-lg border px-3 py-3 text-left transition-colors",
                               isActive
@@ -396,7 +397,7 @@ export function SettingsPanel() {
                             <span className="flex items-start justify-between gap-2">
                               <span className="min-w-0">
                                 <span className="text-ui-sm block truncate font-medium tracking-[0.01em] text-foreground">
-                                  {providerItem.name}
+                                  {providerItem.label}
                                 </span>
                                 <span
                                   className={`mt-0.5 block ${SETTINGS_INFO_TEXT}`}
@@ -407,7 +408,7 @@ export function SettingsPanel() {
                             </span>
                             <span className="text-ui-xs flex flex-wrap items-center gap-1.5 text-muted-foreground/85">
                               <span className="rounded-sm border border-border/30 px-1.5 py-0.5">
-                                {providerProtocolLabel(providerItem.kind)}
+                                {providerProtocolLabel(providerItem.adapter)}
                               </span>
                               <span className="rounded-sm border border-border/30 px-1.5 py-0.5 tabular-nums">
                                 {providerItem.models.length} model
@@ -501,13 +502,13 @@ export function SettingsPanel() {
                         <div className="flex flex-wrap items-center gap-2">
                           <h2 className="text-ui-xs truncate font-semibold text-foreground">
                             {selectedProvider
-                              ? selectedProvider.name
+                              ? selectedProvider.label
                               : "New provider"}
                           </h2>
                           <Badge variant="outline" className="text-ui-xs">
                             {selectedProvider
-                              ? providerProtocolLabel(selectedProvider.kind)
-                              : providerProtocolLabel(kind)}
+                              ? providerProtocolLabel(selectedProvider.adapter)
+                              : providerProtocolLabel(adapter)}
                           </Badge>
                         </div>
                         <p className="workspace-panel-copy mt-1 text-muted-foreground">
@@ -538,14 +539,14 @@ export function SettingsPanel() {
                   >
                     <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
                       <ProviderConnectionSection
-                        name={name}
-                        kind={kind}
+                        name={label}
+                        kind={adapter}
                         providerNameInputId={providerNameInputId}
                         providerProtocolInputId={providerProtocolInputId}
                         providerProtocolLabelId={providerProtocolLabelId}
                         selectedProviderLocked={selectedProvider != null}
-                        onNameChange={setName}
-                        onKindChange={handleKindChange}
+                        onNameChange={setLabel}
+                        onKindChange={handleAdapterChange}
                       />
 
                       <ProviderAuthenticationSection

@@ -404,10 +404,10 @@ describe("chat message status surfaces", () => {
     const source = loadMessageSectionsSource()
 
     expect(source).toContain(
-      'className="group/turn flex w-full flex-col [&>*+*]:mt-4 [&>*[data-type=\'tools\']+*[data-type=\'tools\']]:mt-1.5"'
+      "className=\"group/turn flex w-full flex-col [&>*+*]:mt-4 [&>*[data-type='tools']+*[data-type='tools']]:mt-1.5\""
     )
     expect(source).toContain(
-      'className="flex w-full flex-col [&>*+*]:mt-4 [&>*[data-type=\'tools\']+*[data-type=\'tools\']]:mt-1.5"'
+      "className=\"flex w-full flex-col [&>*+*]:mt-4 [&>*[data-type='tools']+*[data-type='tools']]:mt-1.5\""
     )
   })
 
@@ -465,7 +465,9 @@ describe("chat message status surfaces", () => {
 
     expect(source).toContain("scrollToBottom()")
     expect(source).toContain("const startedNewStreamingTurn =")
-    expect(source).toContain("previousStreamingTurn == null && streamingTurn != null")
+    expect(source).toContain(
+      "previousStreamingTurn == null && streamingTurn != null"
+    )
     expect(source.match(/new ResizeObserver\(/g) ?? []).toHaveLength(2)
     expect(source).toContain("resizeObserver.observe(content)")
     expect(source).toContain("resizeObserver.observe(container)")
@@ -551,10 +553,12 @@ describe("chat message status surfaces", () => {
     expect(source).toContain("shouldResumeAutoFollow")
     expect(source).toContain("alignToBottom")
     expect(source).toContain("const showEmptyState =")
-    expect(source).toContain("!sessionHydrating && turns.length === 0 && !streamingTurn")
+    expect(source).toContain(
+      "!sessionHydrating && turns.length === 0 && !streamingTurn"
+    )
     expect(source).toContain("showEmptyState ? (")
     expect(source).toContain(
-      'pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center px-4 sm:bottom-6'
+      "pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center px-4 sm:bottom-6"
     )
   })
 

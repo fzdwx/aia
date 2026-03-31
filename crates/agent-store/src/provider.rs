@@ -1,26 +1,29 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use provider_registry::{ModelConfig, ModelLimit, ProviderKind, ProviderProfile, ProviderRegistry};
+use provider_registry::{
+    AdapterKind, CredentialRef, ModelConfig, ModelLimit, ProviderAccount, ProviderEndpoint,
+    ProviderRegistry,
+};
 use rusqlite::{Connection, Row};
 use serde::{Deserialize, Serialize};
 
 use crate::{AiaStore, AiaStoreError, iso8601_now};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct StoredProviderProfile {
-    pub name: String,
-    pub kind: String,
+pub struct StoredProviderAccount {
+    pub id: String,
+    pub label: String,
+    pub adapter: String,
     pub base_url: String,
     pub api_key: String,
-    pub is_active: bool,
     pub created_at: String,
     pub updated_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct StoredProviderModel {
-    pub provider_name: String,
+    pub provider_id: String,
     pub model_id: String,
     pub display_name: Option<String>,
     pub context_limit: Option<u32>,
@@ -31,15 +34,15 @@ pub struct StoredProviderModel {
     pub updated_at: String,
 }
 
-impl StoredProviderProfile {
-    fn new(profile: &ProviderProfile, is_active: bool, created_at: Option<&str>) -> Self {
+impl StoredProviderAccount {
+    fn new(account: &ProviderAccount, created_at: Option<&str>) -> Self {
         let now = iso8601_now();
         Self {
-            name: profile.name.clone(),
-            kind: profile.kind.protocol_name().to_string(),
-            base_url: profile.base_url.clone(),
-            api_key: profile.api_key.clone(),
-            is_active,
+            id: account.id.clone(),
+            label: account.label.clone(),
+            adapter: account.adapter.protocol_name().to_string(),
+            base_url: account.endpoint.base_url.clone(),
+            api_key: account.credential.api_key_value().to_string(),
             created_at: created_at.map(str::to_string).unwrap_or_else(|| now.clone()),
             updated_at: now,
         }
@@ -47,10 +50,10 @@ impl StoredProviderProfile {
 }
 
 impl StoredProviderModel {
-    fn new(provider_name: &str, model: &ModelConfig, created_at: Option<&str>) -> Self {
+    fn new(provider_id: &str, model: &ModelConfig, created_at: Option<&str>) -> Self {
         let now = iso8601_now();
         Self {
-            provider_name: provider_name.to_string(),
+            provider_id: provider_id.to_string(),
             model_id: model.id.clone(),
             display_name: model.display_name.clone(),
             context_limit: model.limit.as_ref().and_then(|limit| limit.context),
@@ -68,16 +71,16 @@ impl AiaStore {
         self.with_conn(|conn| {
             conn.execute_batch(
                 "CREATE TABLE IF NOT EXISTS providers (
-                    name         TEXT PRIMARY KEY,
-                    kind         TEXT NOT NULL,
+                    id           TEXT PRIMARY KEY,
+                    label        TEXT NOT NULL,
+                    adapter      TEXT NOT NULL,
                     base_url     TEXT NOT NULL,
                     api_key      TEXT NOT NULL,
-                    is_active    INTEGER NOT NULL DEFAULT 0,
                     created_at   TEXT NOT NULL,
                     updated_at   TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS provider_models (
-                    provider_name       TEXT NOT NULL,
+                    provider_id         TEXT NOT NULL,
                     model_id            TEXT NOT NULL,
                     display_name        TEXT,
                     context_limit       INTEGER,
@@ -86,13 +89,12 @@ impl AiaStore {
                     supports_reasoning  INTEGER NOT NULL,
                     created_at          TEXT NOT NULL,
                     updated_at          TEXT NOT NULL,
-                    PRIMARY KEY (provider_name, model_id),
-                    FOREIGN KEY (provider_name) REFERENCES providers(name) ON DELETE CASCADE
+                    PRIMARY KEY (provider_id, model_id),
+                    FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
                 );
-                CREATE INDEX IF NOT EXISTS idx_provider_models_provider_name
-                    ON provider_models(provider_name);",
+                CREATE INDEX IF NOT EXISTS idx_provider_models_provider_id
+                    ON provider_models(provider_id);",
             )?;
-            ensure_column(conn, "providers", "is_active", "INTEGER NOT NULL DEFAULT 0")?;
             Ok(())
         })
     }
@@ -125,20 +127,20 @@ fn load_provider_registry_from_conn(
 ) -> Result<ProviderRegistry, AiaStoreError> {
     let profiles = {
         let mut stmt = conn.prepare(
-            "SELECT name, kind, base_url, api_key, is_active, created_at, updated_at
+            "SELECT id, label, adapter, base_url, api_key, created_at, updated_at
              FROM providers
-             ORDER BY name ASC",
+             ORDER BY id ASC",
         )?;
-        let rows = stmt.query_map([], read_provider_profile_row)?;
+        let rows = stmt.query_map([], read_provider_account_row)?;
         rows.collect::<Result<Vec<_>, _>>()?
     };
 
     let models = {
         let mut stmt = conn.prepare(
-            "SELECT provider_name, model_id, display_name, context_limit, output_limit,
+            "SELECT provider_id, model_id, display_name, context_limit, output_limit,
                     default_temperature, supports_reasoning, created_at, updated_at
              FROM provider_models
-             ORDER BY provider_name ASC, created_at DESC, rowid DESC, model_id ASC",
+             ORDER BY provider_id ASC, created_at DESC, rowid DESC, model_id ASC",
         )?;
         let rows = stmt.query_map([], read_provider_model_row)?;
         rows.collect::<Result<Vec<_>, _>>()?
@@ -146,10 +148,10 @@ fn load_provider_registry_from_conn(
 
     let providers = profiles
         .into_iter()
-        .map(|profile| {
+        .map(|account| {
             let provider_models = models
                 .iter()
-                .filter(|model| model.provider_name == profile.name)
+                .filter(|model| model.provider_id == account.id)
                 .map(|model| ModelConfig {
                     id: model.model_id.clone(),
                     display_name: model.display_name.clone(),
@@ -162,11 +164,12 @@ fn load_provider_registry_from_conn(
                 })
                 .collect::<Vec<_>>();
 
-            Ok(ProviderProfile {
-                name: profile.name,
-                kind: parse_provider_kind(&profile.kind)?,
-                base_url: profile.base_url,
-                api_key: profile.api_key,
+            Ok(ProviderAccount {
+                id: account.id,
+                label: account.label,
+                adapter: parse_adapter_kind(&account.adapter)?,
+                endpoint: ProviderEndpoint { base_url: account.base_url },
+                credential: CredentialRef::api_key(account.api_key),
                 models: provider_models,
             })
         })
@@ -185,51 +188,50 @@ fn save_provider_registry_to_conn(
 ) -> Result<(), AiaStoreError> {
     let existing_profiles = load_existing_provider_profiles(conn)?
         .into_iter()
-        .map(|profile| (profile.name.clone(), profile))
+        .map(|profile| (profile.id.clone(), profile))
         .collect::<HashMap<_, _>>();
     let existing_models = load_existing_provider_models(conn)?
         .into_iter()
-        .map(|model| ((model.provider_name.clone(), model.model_id.clone()), model))
+        .map(|model| ((model.provider_id.clone(), model.model_id.clone()), model))
         .collect::<HashMap<_, _>>();
 
     conn.execute("DELETE FROM provider_models", [])?;
     conn.execute("DELETE FROM providers", [])?;
 
-    for profile in registry.providers() {
-        let stored_profile = StoredProviderProfile::new(
-            profile,
-            false, // No active provider concept anymore
-            existing_profiles.get(&profile.name).map(|stored| stored.created_at.as_str()),
+    for account in registry.providers() {
+        let stored_profile = StoredProviderAccount::new(
+            account,
+            existing_profiles.get(&account.id).map(|stored| stored.created_at.as_str()),
         );
         conn.execute(
-            "INSERT INTO providers (name, kind, base_url, api_key, is_active, created_at, updated_at)
+            "INSERT INTO providers (id, label, adapter, base_url, api_key, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             (
-                stored_profile.name.as_str(),
-                stored_profile.kind.as_str(),
+                stored_profile.id.as_str(),
+                stored_profile.label.as_str(),
+                stored_profile.adapter.as_str(),
                 stored_profile.base_url.as_str(),
                 stored_profile.api_key.as_str(),
-                stored_profile.is_active,
                 stored_profile.created_at.as_str(),
                 stored_profile.updated_at.as_str(),
             ),
         )?;
 
-        for model in profile.models.iter().rev() {
+        for model in account.models.iter().rev() {
             let stored_model = StoredProviderModel::new(
-                &profile.name,
+                &account.id,
                 model,
                 existing_models
-                    .get(&(profile.name.clone(), model.id.clone()))
+                    .get(&(account.id.clone(), model.id.clone()))
                     .map(|stored| stored.created_at.as_str()),
             );
             conn.execute(
                 "INSERT INTO provider_models (
-                    provider_name, model_id, display_name, context_limit, output_limit,
+                    provider_id, model_id, display_name, context_limit, output_limit,
                     default_temperature, supports_reasoning, created_at, updated_at
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 (
-                    stored_model.provider_name.as_str(),
+                    stored_model.provider_id.as_str(),
                     stored_model.model_id.as_str(),
                     stored_model.display_name.as_deref(),
                     stored_model.context_limit,
@@ -248,13 +250,13 @@ fn save_provider_registry_to_conn(
 
 fn load_existing_provider_profiles(
     conn: &Connection,
-) -> Result<Vec<StoredProviderProfile>, AiaStoreError> {
+) -> Result<Vec<StoredProviderAccount>, AiaStoreError> {
     let mut stmt = conn.prepare(
-        "SELECT name, kind, base_url, api_key, is_active, created_at, updated_at
+        "SELECT id, label, adapter, base_url, api_key, created_at, updated_at
          FROM providers
-         ORDER BY name ASC",
+         ORDER BY id ASC",
     )?;
-    let rows = stmt.query_map([], read_provider_profile_row)?;
+    let rows = stmt.query_map([], read_provider_account_row)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(AiaStoreError::from)
 }
 
@@ -262,22 +264,22 @@ fn load_existing_provider_models(
     conn: &Connection,
 ) -> Result<Vec<StoredProviderModel>, AiaStoreError> {
     let mut stmt = conn.prepare(
-        "SELECT provider_name, model_id, display_name, context_limit, output_limit,
+        "SELECT provider_id, model_id, display_name, context_limit, output_limit,
                 default_temperature, supports_reasoning, created_at, updated_at
          FROM provider_models
-         ORDER BY provider_name ASC, created_at DESC, rowid DESC, model_id ASC",
+         ORDER BY provider_id ASC, created_at DESC, rowid DESC, model_id ASC",
     )?;
     let rows = stmt.query_map([], read_provider_model_row)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(AiaStoreError::from)
 }
 
-fn read_provider_profile_row(row: &Row<'_>) -> rusqlite::Result<StoredProviderProfile> {
-    Ok(StoredProviderProfile {
-        name: row.get(0)?,
-        kind: row.get(1)?,
-        base_url: row.get(2)?,
-        api_key: row.get(3)?,
-        is_active: row.get::<_, i64>(4)? != 0,
+fn read_provider_account_row(row: &Row<'_>) -> rusqlite::Result<StoredProviderAccount> {
+    Ok(StoredProviderAccount {
+        id: row.get(0)?,
+        label: row.get(1)?,
+        adapter: row.get(2)?,
+        base_url: row.get(3)?,
+        api_key: row.get(4)?,
         created_at: row.get(5)?,
         updated_at: row.get(6)?,
     })
@@ -285,7 +287,7 @@ fn read_provider_profile_row(row: &Row<'_>) -> rusqlite::Result<StoredProviderPr
 
 fn read_provider_model_row(row: &Row<'_>) -> rusqlite::Result<StoredProviderModel> {
     Ok(StoredProviderModel {
-        provider_name: row.get(0)?,
+        provider_id: row.get(0)?,
         model_id: row.get(1)?,
         display_name: row.get(2)?,
         context_limit: row.get(3)?,
@@ -297,35 +299,12 @@ fn read_provider_model_row(row: &Row<'_>) -> rusqlite::Result<StoredProviderMode
     })
 }
 
-fn parse_provider_kind(kind: &str) -> Result<ProviderKind, AiaStoreError> {
+fn parse_adapter_kind(kind: &str) -> Result<AdapterKind, AiaStoreError> {
     match kind {
-        "openai-responses" => Ok(ProviderKind::OpenAiResponses),
-        "openai-chat-completions" => Ok(ProviderKind::OpenAiChatCompletions),
+        "openai-responses" => Ok(AdapterKind::OpenAiResponses),
+        "openai-chat-completions" => Ok(AdapterKind::OpenAiChatCompletions),
         other => Err(AiaStoreError::new(format!("unknown provider kind: {other}"))),
     }
-}
-
-fn ensure_column(
-    conn: &Connection,
-    table: &str,
-    column: &str,
-    definition: &str,
-) -> Result<(), AiaStoreError> {
-    if column_exists(conn, table, column)? {
-        return Ok(());
-    }
-
-    let alter = format!("ALTER TABLE {table} ADD COLUMN {column} {definition}");
-    conn.execute(&alter, [])?;
-    Ok(())
-}
-
-fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool, AiaStoreError> {
-    let pragma = format!("PRAGMA table_info({table})");
-    let mut stmt = conn.prepare(&pragma)?;
-    let existing =
-        stmt.query_map([], |row| row.get::<_, String>(1))?.collect::<Result<Vec<_>, _>>()?;
-    Ok(existing.iter().any(|name| name == column))
 }
 
 #[cfg(test)]

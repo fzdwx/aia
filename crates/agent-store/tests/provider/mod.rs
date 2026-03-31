@@ -1,4 +1,7 @@
-use provider_registry::{ModelConfig, ModelLimit, ProviderKind, ProviderProfile, ProviderRegistry};
+use provider_registry::{
+    AdapterKind, CredentialRef, ModelConfig, ModelLimit, ProviderAccount, ProviderEndpoint,
+    ProviderRegistry,
+};
 
 #[test]
 fn provider_registry_defaults_to_empty_when_missing() {
@@ -14,11 +17,12 @@ fn provider_registry_defaults_to_empty_when_missing() {
 fn provider_registry_round_trips_through_normalized_tables() {
     let store = crate::AiaStore::in_memory().expect("memory store should initialize");
     let mut registry = ProviderRegistry::default();
-    registry.upsert(ProviderProfile {
-        name: "main".into(),
-        kind: ProviderKind::OpenAiResponses,
-        base_url: "https://api.openai.com/v1".into(),
-        api_key: "secret".into(),
+    registry.upsert(ProviderAccount {
+        id: "main".into(),
+        label: "main".into(),
+        adapter: AdapterKind::OpenAiResponses,
+        endpoint: ProviderEndpoint { base_url: "https://api.openai.com/v1".into() },
+        credential: CredentialRef { api_key: "secret".into() },
         models: vec![
             ModelConfig {
                 id: "gpt-4.1".into(),
@@ -41,7 +45,7 @@ fn provider_registry_round_trips_through_normalized_tables() {
     let restored = store.load_provider_registry().expect("registry should load from sqlite");
 
     assert_eq!(restored.providers().len(), 1);
-    assert_eq!(restored.first_provider().map(|provider| provider.name.as_str()), Some("main"));
+    assert_eq!(restored.first_provider().map(|provider| provider.id.as_str()), Some("main"));
     assert_eq!(restored.providers()[0].models.len(), 2);
     assert_eq!(restored.providers()[0].default_model_id(), Some("gpt-4.1"));
     assert!(restored.providers()[0].has_model("gpt-4.1-mini"));
@@ -52,14 +56,15 @@ fn provider_registry_round_trips_through_normalized_tables() {
 fn provider_registry_persists_providers_and_newest_model_order() {
     let store = crate::AiaStore::in_memory().expect("memory store should initialize");
     let mut registry = ProviderRegistry::default();
-    registry.upsert(ProviderProfile {
-        name: "main".into(),
-        kind: ProviderKind::OpenAiResponses,
-        base_url: "https://api.openai.com/v1".into(),
-        api_key: "secret".into(),
+    registry.upsert(ProviderAccount {
+        id: "main".into(),
+        label: "main".into(),
+        adapter: AdapterKind::OpenAiResponses,
+        endpoint: ProviderEndpoint { base_url: "https://api.openai.com/v1".into() },
+        credential: CredentialRef { api_key: "secret".into() },
         models: vec![ModelConfig::new("gpt-4.1"), ModelConfig::new("gpt-4.1-mini")],
     });
-    registry.upsert(ProviderProfile::openai_chat_completions(
+    registry.upsert(ProviderAccount::openai_chat_completions(
         "backup",
         "https://example.com/v1",
         "secret-2",
@@ -71,15 +76,16 @@ fn provider_registry_persists_providers_and_newest_model_order() {
     let main = updated
         .providers()
         .iter()
-        .find(|provider| provider.name == "main")
+        .find(|provider| provider.id == "main")
         .expect("main provider should exist");
     assert_eq!(main.default_model_id(), Some("gpt-4.1"));
 
-    updated.upsert(ProviderProfile {
-        name: "main".into(),
-        kind: ProviderKind::OpenAiResponses,
-        base_url: "https://api.openai.com/v1".into(),
-        api_key: "secret".into(),
+    updated.upsert(ProviderAccount {
+        id: "main".into(),
+        label: "main".into(),
+        adapter: AdapterKind::OpenAiResponses,
+        endpoint: ProviderEndpoint { base_url: "https://api.openai.com/v1".into() },
+        credential: CredentialRef { api_key: "secret".into() },
         models: vec![
             ModelConfig::new("gpt-5"),
             ModelConfig::new("gpt-4.1"),
@@ -92,12 +98,12 @@ fn provider_registry_persists_providers_and_newest_model_order() {
     let main = restored
         .providers()
         .iter()
-        .find(|provider| provider.name == "main")
+        .find(|provider| provider.id == "main")
         .expect("main provider should exist");
-    assert_eq!(restored.first_provider().map(|provider| provider.name.as_str()), Some("backup"));
+    assert_eq!(restored.first_provider().map(|provider| provider.id.as_str()), Some("backup"));
     assert_eq!(
         main.models.iter().map(|model| model.id.as_str()).collect::<Vec<_>>(),
-        vec!["gpt-5", "gpt-4.1", "gpt-4.1-mini",]
+        vec!["gpt-5", "gpt-4.1", "gpt-4.1-mini"]
     );
     assert_eq!(main.default_model_id(), Some("gpt-5"));
 }

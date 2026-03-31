@@ -1,13 +1,13 @@
-use agent_core::ModelLimit;
-use serde::{Deserialize, Deserializer, Serialize};
+use agent_core::{ModelLimit, ModelRef};
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub enum ProviderKind {
+pub enum AdapterKind {
     OpenAiResponses,
     OpenAiChatCompletions,
 }
 
-impl ProviderKind {
+impl AdapterKind {
     pub fn protocol_name(&self) -> &'static str {
         match self {
             Self::OpenAiResponses => "openai-responses",
@@ -38,79 +38,85 @@ impl ModelConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct ProviderProfile {
-    pub name: String,
-    pub kind: ProviderKind,
-    pub base_url: String,
-    pub api_key: String,
-    pub models: Vec<ModelConfig>,
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CredentialRef {
+    ApiKey { value: String },
 }
 
-#[derive(Deserialize)]
-struct ProviderProfileWire {
-    name: String,
-    kind: ProviderKind,
-    base_url: String,
-    api_key: String,
-    #[serde(default)]
-    models: Vec<ModelConfig>,
-    #[serde(default)]
-    model: Option<String>,
-}
+impl CredentialRef {
+    pub fn api_key(value: impl Into<String>) -> Self {
+        Self::ApiKey { value: value.into() }
+    }
 
-impl<'de> Deserialize<'de> for ProviderProfile {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let wire = ProviderProfileWire::deserialize(deserializer)?;
-        let mut models = wire.models;
-        if models.is_empty()
-            && let Some(model) = wire.model
-        {
-            models.push(ModelConfig::new(model));
+    pub fn api_key_value(&self) -> &str {
+        match self {
+            Self::ApiKey { value } => value,
         }
+    }
 
-        Ok(Self {
-            name: wire.name,
-            kind: wire.kind,
-            base_url: wire.base_url,
-            api_key: wire.api_key,
-            models,
-        })
+    pub fn is_configured(&self) -> bool {
+        !self.api_key_value().trim().is_empty()
     }
 }
 
-impl ProviderProfile {
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ProviderEndpoint {
+    pub base_url: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ProviderAccount {
+    pub id: String,
+    pub label: String,
+    pub adapter: AdapterKind,
+    pub endpoint: ProviderEndpoint,
+    pub credential: CredentialRef,
+    pub models: Vec<ModelConfig>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResolvedModelSpec {
+    pub model_ref: ModelRef,
+    pub adapter: AdapterKind,
+    pub base_url: String,
+    pub credential: CredentialRef,
+    pub model: ModelConfig,
+}
+
+impl ProviderAccount {
     pub fn openai_responses(
-        name: impl Into<String>,
+        id: impl Into<String>,
         base_url: impl Into<String>,
         api_key: impl Into<String>,
         model: impl Into<String>,
     ) -> Self {
         let model = model.into();
+        let id = id.into();
         Self {
-            name: name.into(),
-            kind: ProviderKind::OpenAiResponses,
-            base_url: base_url.into(),
-            api_key: api_key.into(),
+            label: id.clone(),
+            id,
+            adapter: AdapterKind::OpenAiResponses,
+            endpoint: ProviderEndpoint { base_url: base_url.into() },
+            credential: CredentialRef::api_key(api_key),
             models: vec![ModelConfig::new(model.clone())],
         }
     }
 
     pub fn openai_chat_completions(
-        name: impl Into<String>,
+        id: impl Into<String>,
         base_url: impl Into<String>,
         api_key: impl Into<String>,
         model: impl Into<String>,
     ) -> Self {
         let model = model.into();
+        let id = id.into();
         Self {
-            name: name.into(),
-            kind: ProviderKind::OpenAiChatCompletions,
-            base_url: base_url.into(),
-            api_key: api_key.into(),
+            label: id.clone(),
+            id,
+            adapter: AdapterKind::OpenAiChatCompletions,
+            endpoint: ProviderEndpoint { base_url: base_url.into() },
+            credential: CredentialRef::api_key(api_key),
             models: vec![ModelConfig::new(model.clone())],
         }
     }
@@ -125,5 +131,9 @@ impl ProviderProfile {
 
     pub fn default_model_config(&self) -> Option<&ModelConfig> {
         self.models.first()
+    }
+
+    pub fn model_ref(&self, model_id: impl Into<String>) -> ModelRef {
+        ModelRef::new(self.id.clone(), model_id)
     }
 }

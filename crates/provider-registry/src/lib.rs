@@ -8,5 +8,7 @@ mod tests;
 
 pub use agent_core::ModelLimit;
 pub use error::ProviderRegistryError;
-pub use model::{ModelConfig, ProviderKind, ProviderProfile};
+pub use model::{
+    AdapterKind, CredentialRef, ModelConfig, ProviderAccount, ProviderEndpoint, ResolvedModelSpec,
+};
 pub use registry::{ProviderRegistry, default_registry_path};

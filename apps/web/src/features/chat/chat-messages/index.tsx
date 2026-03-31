@@ -290,7 +290,10 @@ export function ChatMessages() {
       </div>
       <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center px-4 sm:bottom-6">
         <div className="pointer-events-auto">
-          <ScrollToBottomButton isAtBottom={isAtBottom} onClick={scrollToBottom} />
+          <ScrollToBottomButton
+            isAtBottom={isAtBottom}
+            onClick={scrollToBottom}
+          />
         </div>
       </div>
     </div>

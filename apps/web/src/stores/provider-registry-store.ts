@@ -12,22 +12,24 @@ type ProviderRegistryStore = {
   providerList: ProviderListItem[]
   refreshProviders: () => Promise<void>
   createProvider: (body: {
-    name: string
-    kind: string
+    id: string
+    label: string
+    adapter: string
     models: ModelConfig[]
     api_key: string
     base_url: string
   }) => Promise<void>
   updateProvider: (
-    name: string,
+    id: string,
     body: {
-      kind?: string
+      label?: string
+      adapter?: string
       models?: ModelConfig[]
       api_key?: string
       base_url?: string
     }
   ) => Promise<void>
-  deleteProvider: (name: string) => Promise<void>
+  deleteProvider: (id: string) => Promise<void>
 }
 
 export const useProviderRegistryStore = create<ProviderRegistryStore>(
@@ -45,12 +47,12 @@ export const useProviderRegistryStore = create<ProviderRegistryStore>(
       await apiCreateProvider(body)
       await useProviderRegistryStore.getState().refreshProviders()
     },
-    updateProvider: async (name, body) => {
-      await apiUpdateProvider(name, body)
+    updateProvider: async (id, body) => {
+      await apiUpdateProvider(id, body)
       await useProviderRegistryStore.getState().refreshProviders()
     },
-    deleteProvider: async (name) => {
-      await apiDeleteProvider(name)
+    deleteProvider: async (id) => {
+      await apiDeleteProvider(id)
       await useProviderRegistryStore.getState().refreshProviders()
     },
   })

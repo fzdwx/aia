@@ -61,6 +61,8 @@
 - session 级模型 / 思考等级设置
 - Settings / Providers / Channels / Trace 工作台
 - 基于 `streamdown` 的统一 Markdown 渲染
+- provider / session settings 外层语义已开始按 `ProviderAccount + AdapterKind + ModelRef` 收口：provider 列表与设置面板使用 `id / label / adapter`，session 设置使用 `model_ref + reasoning_effort`
+- server 内部活动选择快照也已改成 `provider_id / model_id` 命名，避免继续在桥接层传播旧的 `name / model` 语义
 
 ### 5. Session 能力
 

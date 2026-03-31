@@ -13,12 +13,12 @@ function resolveSelectedProviderName(
     return current
   }
 
-  if (current && providerList.some((provider) => provider.name === current)) {
+  if (current && providerList.some((provider) => provider.id === current)) {
     return current
   }
 
   // Default to first provider
-  return providerList[0]?.name ?? null
+  return providerList[0]?.id ?? null
 }
 
 type WorkbenchStore = {

@@ -1,3 +1,4 @@
+use agent_core::{ModelRef, ReasoningEffort};
 use axum::{
     Router,
     routing::{delete, get, post},
@@ -6,7 +7,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::state::SharedState;
-use agent_core::{QuestionRequest, QuestionResult, ReasoningEffort};
+use agent_core::{QuestionRequest, QuestionResult};
 use agent_runtime::ContextStats;
 use session_tape::SessionProviderBinding;
 
@@ -42,9 +43,8 @@ pub(crate) struct SendMessageRequest {
 
 #[derive(Serialize)]
 pub(crate) struct SessionSettingsResponse {
-    pub provider: String,
-    pub model: String,
-    pub protocol: String,
+    pub model_ref: Option<ModelRef>,
+    pub adapter: Option<String>,
     pub reasoning_effort: Option<String>,
 }
 
@@ -65,8 +65,7 @@ pub(crate) struct PendingQuestionResponse {
 #[derive(Deserialize)]
 pub(crate) struct UpdateSessionSettingsRequest {
     pub session_id: Option<String>,
-    pub provider: Option<String>,
-    pub model: Option<String>,
+    pub model_ref: Option<ModelRef>,
     pub reasoning_effort: Option<String>,
 }
 
@@ -80,18 +79,12 @@ pub(crate) struct ResolvePendingQuestionRequest {
 impl SessionSettingsResponse {
     pub fn from_binding(binding: SessionProviderBinding) -> Self {
         match binding {
-            SessionProviderBinding::Bootstrap => Self {
-                provider: "bootstrap".into(),
-                model: "bootstrap".into(),
-                protocol: "bootstrap".into(),
-                reasoning_effort: None,
-            },
-            SessionProviderBinding::Provider {
-                name, model, protocol, reasoning_effort, ..
-            } => Self {
-                provider: name,
-                model,
-                protocol,
+            SessionProviderBinding::Bootstrap => {
+                Self { model_ref: None, adapter: None, reasoning_effort: None }
+            }
+            SessionProviderBinding::Provider { model_ref, reasoning_effort } => Self {
+                model_ref: Some(model_ref),
+                adapter: None,
                 reasoning_effort: ReasoningEffort::normalize(reasoning_effort),
             },
         }

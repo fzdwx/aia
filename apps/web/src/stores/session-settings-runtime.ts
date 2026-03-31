@@ -1,4 +1,4 @@
-import type { ProviderInfo, ThinkingLevel } from "@/lib/types"
+import type { SessionSelectionInfo, ThinkingLevel } from "@/lib/types"
 import { useChatStore } from "@/stores/chat-store"
 import { useProviderRegistryStore } from "@/stores/provider-registry-store"
 import {
@@ -18,16 +18,16 @@ function syncActiveSessionModelProjection(
 }
 
 export async function switchActiveSessionModel(
-  providerName: string,
+  providerId: string,
   modelId: string,
   reasoningEffort?: ThinkingLevel | null
-): Promise<ProviderInfo | null> {
+): Promise<SessionSelectionInfo | null> {
   const sessionId = useChatStore.getState().activeSessionId
   if (!sessionId) return null
 
   const info = await switchSessionModelThroughCoordinator(
     sessionId,
-    providerName,
+    providerId,
     modelId,
     reasoningEffort
   )
@@ -38,7 +38,7 @@ export async function switchActiveSessionModel(
 
 export async function setActiveSessionReasoningEffort(
   reasoningEffort: ThinkingLevel | null
-): Promise<ProviderInfo | null> {
+): Promise<SessionSelectionInfo | null> {
   const sessionId = useChatStore.getState().activeSessionId
   if (!sessionId) return null
 

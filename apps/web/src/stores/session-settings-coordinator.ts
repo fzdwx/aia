@@ -1,4 +1,4 @@
-import type { ProviderInfo, ThinkingLevel } from "@/lib/types"
+import type { SessionSelectionInfo, ThinkingLevel } from "@/lib/types"
 import { useProviderRegistryStore } from "@/stores/provider-registry-store"
 import { useSessionSettingsStore } from "@/stores/session-settings-store"
 
@@ -14,16 +14,16 @@ export function clearSessionSettingsState(): void {
 
 export async function switchSessionModelThroughCoordinator(
   sessionId: string,
-  providerName: string,
+  providerId: string,
   modelId: string,
   reasoningEffort?: ThinkingLevel | null
-): Promise<ProviderInfo> {
+): Promise<SessionSelectionInfo> {
   return useSessionSettingsStore
     .getState()
     .switchModel(
       sessionId,
       useProviderRegistryStore.getState().providerList,
-      providerName,
+      providerId,
       modelId,
       reasoningEffort
     )
@@ -32,7 +32,7 @@ export async function switchSessionModelThroughCoordinator(
 export async function setSessionReasoningThroughCoordinator(
   sessionId: string,
   reasoningEffort: ThinkingLevel | null
-): Promise<ProviderInfo | null> {
+): Promise<SessionSelectionInfo | null> {
   return useSessionSettingsStore
     .getState()
     .setReasoningEffort(

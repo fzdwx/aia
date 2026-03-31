@@ -15,7 +15,7 @@ use openai_adapter::{
     OpenAiAdapterError, OpenAiChatCompletionsConfig, OpenAiChatCompletionsModel,
     OpenAiResponsesConfig, OpenAiResponsesModel,
 };
-use provider_registry::{ProviderKind, ProviderProfile};
+use provider_registry::{AdapterKind, ResolvedModelSpec};
 
 use agent_core::ReasoningEffort;
 use trace::ModelTraceRecorder;
@@ -23,7 +23,7 @@ use trace::ModelTraceRecorder;
 #[derive(Clone, Debug, PartialEq)]
 pub enum ProviderLaunchChoice {
     Bootstrap,
-    OpenAi { profile: ProviderProfile, model: String, reasoning_effort: Option<ReasoningEffort> },
+    Resolved { spec: ResolvedModelSpec, reasoning_effort: Option<ReasoningEffort> },
 }
 
 pub struct ServerModel {
@@ -149,8 +149,8 @@ pub fn build_model_from_selection(
             ModelIdentity::new("local", "bootstrap", ModelDisposition::Balanced),
             ServerModel::new(ServerModelInner::Bootstrap(BootstrapModel), trace_store),
         )),
-        ProviderLaunchChoice::OpenAi { profile, model, reasoning_effort } => {
-            build_openai_model(profile, &model, reasoning_effort, trace_store)
+        ProviderLaunchChoice::Resolved { spec, reasoning_effort } => {
+            build_openai_model(spec, reasoning_effort, trace_store)
         }
     }
 }
@@ -160,31 +160,29 @@ pub fn model_identity_from_selection(selection: &ProviderLaunchChoice) -> ModelI
         ProviderLaunchChoice::Bootstrap => {
             ModelIdentity::new("local", "bootstrap", ModelDisposition::Balanced)
         }
-        ProviderLaunchChoice::OpenAi { profile, model, reasoning_effort } => {
-            build_model_identity(profile, model, reasoning_effort.clone())
+        ProviderLaunchChoice::Resolved { spec, reasoning_effort } => {
+            build_model_identity(spec, reasoning_effort.clone())
         }
     }
 }
 
 fn build_openai_model(
-    profile: ProviderProfile,
-    selected_model: &str,
+    spec: ResolvedModelSpec,
     reasoning_effort: Option<ReasoningEffort>,
     trace_store: Option<Arc<AiaStore>>,
 ) -> Result<(ModelIdentity, ServerModel), ServerSetupError> {
-    let identity = build_model_identity(&profile, selected_model, reasoning_effort);
+    let identity = build_model_identity(&spec, reasoning_effort);
     let model_id = identity.name.clone();
 
-    match profile.kind {
-        ProviderKind::OpenAiResponses => {
-            let config = OpenAiResponsesConfig::new(profile.base_url, profile.api_key, &model_id);
+    match spec.adapter {
+        AdapterKind::OpenAiResponses => {
+            let config = OpenAiResponsesConfig::new(spec.base_url, spec.api_key, &model_id);
             let model =
                 OpenAiResponsesModel::new(config).map_err(ServerSetupError::OpenAiAdapter)?;
             Ok((identity, ServerModel::new(ServerModelInner::OpenAiResponses(model), trace_store)))
         }
-        ProviderKind::OpenAiChatCompletions => {
-            let config =
-                OpenAiChatCompletionsConfig::new(profile.base_url, profile.api_key, &model_id);
+        AdapterKind::OpenAiChatCompletions => {
+            let config = OpenAiChatCompletionsConfig::new(spec.base_url, spec.api_key, &model_id);
             let model =
                 OpenAiChatCompletionsModel::new(config).map_err(ServerSetupError::OpenAiAdapter)?;
             Ok((
@@ -196,25 +194,17 @@ fn build_openai_model(
 }
 
 fn build_model_identity(
-    profile: &ProviderProfile,
-    selected_model: &str,
+    spec: &ResolvedModelSpec,
     reasoning_effort: Option<ReasoningEffort>,
 ) -> ModelIdentity {
-    let model_config = profile.models.iter().find(|model| model.id == selected_model);
-    let model_id = model_config
-        .map(|model| model.id.clone())
-        .or_else(|| profile.default_model_id().map(str::to_string))
-        .unwrap_or_default();
-    let limit = model_config.and_then(|model| model.limit.clone());
-
     let normalized_reasoning_effort = ReasoningEffort::normalize_for_model(
         ReasoningEffort::serialize_optional(reasoning_effort),
-        model_config.is_some_and(|model| model.supports_reasoning),
+        spec.model.supports_reasoning,
     );
 
-    ModelIdentity::new("openai", &model_id, ModelDisposition::Balanced)
+    ModelIdentity::new(&spec.model_ref.provider_id, &spec.model.id, ModelDisposition::Balanced)
         .with_reasoning_effort(normalized_reasoning_effort)
-        .with_limit(limit)
+        .with_limit(spec.model.limit.clone())
 }
 
 struct CompletionTraceRunner<'a> {

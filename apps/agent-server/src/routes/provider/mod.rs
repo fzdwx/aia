@@ -9,8 +9,9 @@ use crate::state::SharedState;
 
 #[derive(Serialize)]
 pub(crate) struct ProviderListItem {
-    pub name: String,
-    pub kind: String,
+    pub id: String,
+    pub label: String,
+    pub adapter: String,
     pub models: Vec<ModelConfigDto>,
     pub base_url: String,
 }
@@ -69,8 +70,9 @@ impl From<ModelConfigDto> for ModelConfig {
 
 #[derive(Deserialize)]
 pub(crate) struct CreateProviderRequest {
-    pub name: String,
-    pub kind: String,
+    pub id: String,
+    pub label: String,
+    pub adapter: String,
     pub models: Vec<ModelConfigDto>,
     pub api_key: String,
     pub base_url: String,
@@ -78,7 +80,8 @@ pub(crate) struct CreateProviderRequest {
 
 #[derive(Deserialize)]
 pub(crate) struct UpdateProviderRequest {
-    pub kind: Option<String>,
+    pub label: Option<String>,
+    pub adapter: Option<String>,
     pub models: Option<Vec<ModelConfigDto>>,
     pub api_key: Option<String>,
     pub base_url: Option<String>,
@@ -94,7 +97,7 @@ pub(crate) fn router() -> Router<SharedState> {
         .route("/api/providers", post(handlers::create_provider))
         .route("/api/providers/list", get(handlers::list_providers))
         .route(
-            "/api/providers/{name}",
+            "/api/providers/{id}",
             put(handlers::update_provider).delete(handlers::delete_provider),
         )
 }

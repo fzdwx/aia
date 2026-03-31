@@ -303,7 +303,8 @@ impl SessionManagerLoop {
         let queued_messages = {
             if let Some(slot) = self.slots.get_mut(&ret.session_id) {
                 let session_path = slot.session_path.clone();
-                if let Err(error) = refresh_runtime_tape_from_disk(&session_path, &mut ret.runtime) {
+                if let Err(error) = refresh_runtime_tape_from_disk(&session_path, &mut ret.runtime)
+                {
                     let _ = self.config.broadcast_tx.send(SsePayload::Error {
                         session_id: ret.session_id.clone(),
                         turn_id: None,
@@ -361,9 +362,12 @@ impl SessionManagerLoop {
                     // 通过 runtime 追加 dequeued 事件到 tape（会有正确的 ID 分配）
                     if let Some(runtime) = slot.runtime_mut() {
                         for msg in &messages {
-                            let entry = TapeEntry::event("message_dequeued", Some(serde_json::json!({
-                                "id": msg.id
-                            })));
+                            let entry = TapeEntry::event(
+                                "message_dequeued",
+                                Some(serde_json::json!({
+                                    "id": msg.id
+                                })),
+                            );
                             let _ = runtime.append_tape_entry(entry);
                         }
                     }
@@ -412,7 +416,7 @@ impl SessionManagerLoop {
     ) -> Result<SessionRecord, RuntimeWorkerError> {
         let session_id = generate_session_id();
         let title = title.unwrap_or_else(|| aia_config::DEFAULT_SESSION_TITLE.to_string());
-        let model_name = read_lock(&self.config.provider_info_snapshot).model.clone();
+        let model_name = read_lock(&self.config.provider_info_snapshot).model_id.clone();
         let (title_source, auto_rename_policy) =
             if let (Some(title_source), Some(auto_rename_policy)) =
                 (title_source, auto_rename_policy)
@@ -752,10 +756,10 @@ impl SessionManagerLoop {
 
                 // 注意：不在 Running 状态下直接写入文件，避免与 TurnWorker 的写入冲突
                 // 消息队列会在 turn 结束后处理，那时候会正确写入 tape
-                // 
+                //
                 // 如果服务器在 turn 运行期间重启，内存中的队列会丢失，
                 // 但这是可接受的，因为用户可以重新发送消息
-                
+
                 // 更新内存状态
                 let position = slot.message_queue.len() as u32 + 1;
                 slot.message_queue.push(QueuedMessage {
@@ -769,7 +773,14 @@ impl SessionManagerLoop {
                     session_id: session_id.to_string(),
                     message_id: message_id.clone(),
                     position,
-                    content_preview: slot.message_queue.last().unwrap().content.chars().take(50).collect(),
+                    content_preview: slot
+                        .message_queue
+                        .last()
+                        .unwrap()
+                        .content
+                        .chars()
+                        .take(50)
+                        .collect(),
                 });
 
                 Ok(QueueMessageResponse {
@@ -820,9 +831,12 @@ impl SessionManagerLoop {
 
         // 通过 runtime 追加删除事件到 tape（会有正确的 ID 分配）
         if let Some(runtime) = slot.runtime_mut() {
-            let entry = TapeEntry::event("message_deleted", Some(serde_json::json!({
-                "id": message_id
-            })));
+            let entry = TapeEntry::event(
+                "message_deleted",
+                Some(serde_json::json!({
+                    "id": message_id
+                })),
+            );
             runtime.append_tape_entry(entry).map_err(|error| {
                 RuntimeWorkerError::internal(format!("session append failed: {error}"))
             })?;
@@ -866,10 +880,10 @@ impl SessionManagerLoop {
         let _ = self.cancel_pending_question(session_id);
 
         // 广播 SSE 事件
-        let _ = self.config.broadcast_tx.send(SsePayload::TurnInterrupted {
-            session_id: session_id.to_string(),
-            turn_id,
-        });
+        let _ = self
+            .config
+            .broadcast_tx
+            .send(SsePayload::TurnInterrupted { session_id: session_id.to_string(), turn_id });
 
         Ok(true)
     }
@@ -1001,22 +1015,10 @@ fn choose_provider_for_tape(
     if let Some(binding) = tape.latest_provider_binding() {
         match binding {
             SessionProviderBinding::Bootstrap => return ProviderLaunchChoice::Bootstrap,
-            SessionProviderBinding::Provider {
-                name,
-                model,
-                base_url,
-                protocol,
-                reasoning_effort,
-            } => {
-                if let Some(profile) = registry.providers().iter().find(|provider| {
-                    provider.name == name
-                        && provider.has_model(&model)
-                        && provider.base_url == base_url
-                        && provider.kind.protocol_name() == protocol.as_str()
-                }) {
-                    return ProviderLaunchChoice::OpenAi {
-                        profile: profile.clone(),
-                        model,
+            SessionProviderBinding::Provider { model_ref, reasoning_effort } => {
+                if let Ok(spec) = registry.resolve_model(&model_ref) {
+                    return ProviderLaunchChoice::Resolved {
+                        spec,
                         reasoning_effort: ReasoningEffort::parse_persisted(reasoning_effort),
                     };
                 }
@@ -1026,13 +1028,9 @@ fn choose_provider_for_tape(
 
     // Fall back to first provider if no binding in tape
     registry
-        .first_provider()
-        .cloned()
-        .map(|profile| ProviderLaunchChoice::OpenAi {
-            model: profile.default_model_id().unwrap_or("").to_string(),
-            profile,
-            reasoning_effort: None,
-        })
+        .first_model_ref()
+        .and_then(|model_ref| registry.resolve_model(&model_ref).ok())
+        .map(|spec| ProviderLaunchChoice::Resolved { spec, reasoning_effort: None })
         .unwrap_or(ProviderLaunchChoice::Bootstrap)
 }
 
@@ -1047,7 +1045,7 @@ fn projected_session_model(
     if slot.status() == SlotStatus::Running {
         return Ok(match &slot.provider_binding {
             SessionProviderBinding::Bootstrap => "bootstrap".into(),
-            SessionProviderBinding::Provider { model, .. } => model.clone(),
+            SessionProviderBinding::Provider { model_ref, .. } => model_ref.model_id.clone(),
         });
     }
 
@@ -1064,13 +1062,9 @@ fn prepare_runtime_sync(
     RuntimeWorkerError,
 > {
     let selection = registry
-        .first_provider()
-        .cloned()
-        .map(|profile| ProviderLaunchChoice::OpenAi {
-            model: profile.default_model_id().unwrap_or("").to_string(),
-            profile,
-            reasoning_effort: None,
-        })
+        .first_model_ref()
+        .and_then(|model_ref| registry.resolve_model(&model_ref).ok())
+        .map(|spec| ProviderLaunchChoice::Resolved { spec, reasoning_effort: None })
         .unwrap_or(ProviderLaunchChoice::Bootstrap);
 
     let (identity, model) = build_model_from_selection(selection, trace_store).map_err(
@@ -1079,10 +1073,10 @@ fn prepare_runtime_sync(
 
     let binding = match registry.first_provider() {
         Some(profile) => SessionProviderBinding::Provider {
-            name: profile.name.clone(),
-            model: profile.default_model_id().unwrap_or("").to_string(),
-            base_url: profile.base_url.clone(),
-            protocol: profile.kind.protocol_name().to_string(),
+            model_ref: agent_core::ModelRef::new(
+                profile.id.clone(),
+                profile.default_model_id().unwrap_or("").to_string(),
+            ),
             reasoning_effort: None,
         },
         None => SessionProviderBinding::Bootstrap,
@@ -1096,19 +1090,22 @@ fn prompt_cache_for_selection(
     selection: &ProviderLaunchChoice,
     session_id: &str,
 ) -> Option<PromptCacheConfig> {
-    let ProviderLaunchChoice::OpenAi { profile, model, .. } = selection else {
-        return None;
-    };
-    let model = profile.models.iter().find(|candidate| candidate.id == *model)?;
     Some(PromptCacheConfig {
-        key: Some(aia_config::build_prompt_cache_key(&profile.name, &model.id, session_id)),
+        key: Some(match selection {
+            ProviderLaunchChoice::Bootstrap => return None,
+            ProviderLaunchChoice::Resolved { spec, .. } => aia_config::build_prompt_cache_key(
+                &spec.model_ref.provider_id,
+                &spec.model.id,
+                session_id,
+            ),
+        }),
         retention: Some(RuntimePromptCacheRetention::OneDay),
     })
 }
 
 fn restore_queue_from_tape(tape: &SessionTape) -> Vec<QueuedMessage> {
     use std::collections::HashSet;
-    
+
     let mut queue: Vec<QueuedMessage> = Vec::new();
     let mut deleted: HashSet<String> = HashSet::new();
 

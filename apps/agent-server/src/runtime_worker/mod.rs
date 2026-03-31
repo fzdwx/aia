@@ -5,7 +5,7 @@ mod tests;
 
 use agent_runtime::TurnControl;
 use axum::http::StatusCode;
-use provider_registry::{ModelConfig, ProviderKind};
+use provider_registry::{AdapterKind, ModelConfig};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -48,14 +48,18 @@ pub struct CurrentTurnSnapshot {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProviderInfoSnapshot {
-    pub name: String,
-    pub model: String,
+    pub provider_id: String,
+    pub model_id: String,
     pub connected: bool,
 }
 
 impl ProviderInfoSnapshot {
     pub fn from_identity(identity: &agent_core::ModelIdentity) -> Self {
-        Self { name: identity.provider.clone(), model: identity.name.clone(), connected: true }
+        Self {
+            provider_id: identity.provider.clone(),
+            model_id: identity.name.clone(),
+            connected: true,
+        }
     }
 }
 
@@ -101,8 +105,9 @@ impl RuntimeWorkerError {
 
 #[derive(Clone)]
 pub struct CreateProviderInput {
-    pub name: String,
-    pub kind: ProviderKind,
+    pub id: String,
+    pub label: String,
+    pub adapter: AdapterKind,
     pub models: Vec<ModelConfig>,
     pub api_key: String,
     pub base_url: String,
@@ -110,7 +115,8 @@ pub struct CreateProviderInput {
 
 #[derive(Clone)]
 pub struct UpdateProviderInput {
-    pub kind: Option<ProviderKind>,
+    pub label: Option<String>,
+    pub adapter: Option<AdapterKind>,
     pub models: Option<Vec<ModelConfig>>,
     pub api_key: Option<String>,
     pub base_url: Option<String>,

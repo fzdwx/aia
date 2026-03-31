@@ -193,13 +193,9 @@ impl ServerBootstrap {
     fn build_snapshots(&self, resources: &BootstrapResources) -> BootstrapSnapshots {
         let selection = resources
             .registry
-            .first_provider()
-            .cloned()
-            .map(|profile| ProviderLaunchChoice::OpenAi {
-                model: profile.default_model_id().unwrap_or("").to_string(),
-                profile,
-                reasoning_effort: None,
-            })
+            .first_model_ref()
+            .and_then(|model_ref| resources.registry.resolve_model(&model_ref).ok())
+            .map(|spec| ProviderLaunchChoice::Resolved { spec, reasoning_effort: None })
             .unwrap_or(ProviderLaunchChoice::Bootstrap);
         let identity = model_identity_from_selection(&selection);
 

@@ -136,13 +136,11 @@ fn resolve_selection_for_session(
     registry
         .providers()
         .iter()
-        .find(|profile| profile.has_model(&record.model))
-        .cloned()
-        .map(|profile| ProviderLaunchChoice::OpenAi {
-            model: record.model.clone(),
-            profile,
-            reasoning_effort: None,
+        .find(|provider| provider.has_model(&record.model))
+        .and_then(|provider| {
+            registry.resolve_model(&agent_core::ModelRef::new(&provider.id, &record.model)).ok()
         })
+        .map(|spec| ProviderLaunchChoice::Resolved { spec, reasoning_effort: None })
         .unwrap_or(ProviderLaunchChoice::Bootstrap)
 }
 

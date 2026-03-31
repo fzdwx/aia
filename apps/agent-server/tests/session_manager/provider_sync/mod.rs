@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use agent_core::RequestTimeoutConfig;
-use provider_registry::{ProviderProfile, ProviderRegistry};
+use agent_core::{ModelRef, RequestTimeoutConfig};
+use provider_registry::{ProviderAccount, ProviderRegistry};
 
 use super::{ProviderSyncService, ReturnedRuntimeSync};
-use crate::runtime_worker::{SwitchProviderInput, UpdateProviderInput};
+use crate::runtime_worker::UpdateProviderInput;
 use crate::session_manager::{SessionManagerConfig, SessionSlotFactory, prepare_runtime_sync};
 use session_tape::SessionProviderBinding;
 
@@ -17,13 +17,13 @@ fn temp_root(name: &str) -> std::path::PathBuf {
 
 fn sample_registry() -> ProviderRegistry {
     let mut registry = ProviderRegistry::default();
-    registry.upsert(ProviderProfile::openai_responses(
+    registry.upsert(ProviderAccount::openai_responses(
         "primary",
         "https://primary.example.com",
         "primary-key",
         "model-primary",
     ));
-    registry.upsert(ProviderProfile::openai_responses(
+    registry.upsert(ProviderAccount::openai_responses(
         "backup",
         "https://backup.example.com",
         "backup-key",
@@ -85,7 +85,8 @@ fn updating_non_active_provider_keeps_unbound_session_unmodified() {
         .update_provider(
             "backup".into(),
             UpdateProviderInput {
-                kind: None,
+                label: None,
+                adapter: None,
                 models: None,
                 api_key: Some("backup-key-updated".into()),
                 base_url: None,
@@ -107,46 +108,6 @@ fn updating_non_active_provider_keeps_unbound_session_unmodified() {
 }
 
 #[test]
-fn switching_provider_marks_running_session_for_return_sync() {
-    let root = temp_root("switch-running");
-    let mut config = sample_config(&root, sample_registry());
-    let mut slot =
-        SessionSlotFactory::new(&config).create("session-1").expect("session slot should build");
-    let (mut runtime, _subscriber, _running_turn) =
-        slot.begin_turn().expect("idle slot should start turn");
-
-    let mut slots = HashMap::new();
-    slots.insert("session-1".to_string(), slot);
-
-    let mut service = ProviderSyncService::new(&mut slots, &mut config);
-    service
-        .switch_provider(SwitchProviderInput { name: "backup".into() })
-        .expect("provider switch should succeed");
-
-    let pending_binding = slots["session-1"].pending_provider_binding().cloned();
-    let session_path = slots["session-1"].session_path.clone();
-    assert!(matches!(
-        pending_binding,
-        Some(SessionProviderBinding::Provider { ref name, .. }) if name == "backup"
-    ));
-
-    ReturnedRuntimeSync::new(
-        "session-1",
-        &session_path,
-        &config.registry,
-        config.store.clone(),
-        pending_binding.clone(),
-    )
-    .apply(&mut runtime)
-    .expect("returned runtime should resync");
-
-    assert_eq!(runtime.tape().latest_provider_binding(), pending_binding);
-    assert_eq!(runtime.model_identity().name, "model-backup");
-
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
 fn session_binding_preserves_reasoning_effort_override() {
     let root = temp_root("session-binding-reasoning");
     let mut config = sample_config(&root, sample_registry());
@@ -160,10 +121,7 @@ fn session_binding_preserves_reasoning_effort_override() {
         .update_session_provider_binding(
             "session-1",
             SessionProviderBinding::Provider {
-                name: "primary".into(),
-                model: "model-primary".into(),
-                base_url: "https://primary.example.com".into(),
-                protocol: "openai-responses".into(),
+                model_ref: ModelRef::new("primary", "model-primary"),
                 reasoning_effort: Some("high".into()),
             },
         )
@@ -202,10 +160,7 @@ fn running_session_settings_update_is_rejected() {
 
     let mut service = ProviderSyncService::new(&mut slots, &mut config);
     let binding = SessionProviderBinding::Provider {
-        name: "primary".into(),
-        model: "model-primary".into(),
-        base_url: "https://primary.example.com".into(),
-        protocol: "openai-responses".into(),
+        model_ref: ModelRef::new("primary", "model-primary"),
         reasoning_effort: Some("high".into()),
     };
 
@@ -216,6 +171,37 @@ fn running_session_settings_update_is_rejected() {
     assert_eq!(error.status, axum::http::StatusCode::BAD_REQUEST);
     assert!(error.message.contains("cannot update session settings while a turn is running"));
     assert_eq!(std::fs::read_to_string(&session_path).unwrap_or_default(), original_contents);
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn returned_runtime_sync_applies_pending_binding() {
+    let root = temp_root("returned-runtime-sync");
+    let config = sample_config(&root, sample_registry());
+    let mut slot =
+        SessionSlotFactory::new(&config).create("session-1").expect("session slot should build");
+    let (mut runtime, _subscriber, _running_turn) =
+        slot.begin_turn().expect("idle slot should start turn");
+    let session_path = slot.session_path.clone();
+    let pending_binding = Some(SessionProviderBinding::Provider {
+        model_ref: ModelRef::new("backup", "model-backup"),
+        reasoning_effort: None,
+    });
+
+    ReturnedRuntimeSync::new(
+        "session-1",
+        &session_path,
+        &config.registry,
+        config.store.clone(),
+        pending_binding.clone(),
+    )
+    .apply(&mut runtime)
+    .expect("returned runtime should resync");
+
+    assert_eq!(runtime.tape().latest_provider_binding(), pending_binding);
+    assert_eq!(runtime.model_identity().provider, "backup");
+    assert_eq!(runtime.model_identity().name, "model-backup");
 
     let _ = std::fs::remove_dir_all(root);
 }

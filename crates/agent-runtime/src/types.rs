@@ -108,7 +108,7 @@ impl<'de> serde::Deserialize<'de> for TurnLifecycle {
         }
 
         let legacy = LegacyTurnLifecycle::deserialize(deserializer)?;
-        
+
         // 向后兼容：如果 user_messages 为空但有 user_message，把 user_message 放进去
         let user_messages = if let Some(messages) = legacy.user_messages {
             messages

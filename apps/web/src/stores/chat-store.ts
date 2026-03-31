@@ -221,7 +221,10 @@ type ChatStore = {
 let latestSessionLoadId = 0
 let pendingHistoryHydrationAbort: AbortController | null = null
 let pendingHistoryHydrationIdleHandle: IdleHandle | null = null
-const sessionTitleAnimationTimers = new Map<string, ReturnType<typeof globalThis.setTimeout>>()
+const sessionTitleAnimationTimers = new Map<
+  string,
+  ReturnType<typeof globalThis.setTimeout>
+>()
 let scheduleIdleWork: IdleScheduler = defaultIdleScheduler.schedule
 let cancelIdleWork: IdleCanceller = defaultIdleScheduler.cancel
 

@@ -1,10 +1,10 @@
+use agent_core::ModelRef;
 use axum::{
     Json,
     extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
 };
-use provider_registry::ProviderKind;
 use session_tape::SessionProviderBinding;
 
 use crate::state::SharedState;
@@ -12,8 +12,8 @@ use agent_core::ReasoningEffort;
 
 use super::{
     AutoCompressRequest, CreateSessionRequest, HandoffRequest, PendingQuestionResponse,
-    ResolvePendingQuestionRequest, SessionInfoResponse, SessionQuery, SessionSettingsResponse,
-    SendMessageRequest, UpdateSessionSettingsRequest,
+    ResolvePendingQuestionRequest, SendMessageRequest, SessionInfoResponse, SessionQuery,
+    SessionSettingsResponse, UpdateSessionSettingsRequest,
 };
 use crate::routes::common::{
     JsonResponse, json_response, require_session_id, resolve_session_id,
@@ -79,7 +79,15 @@ pub(crate) async fn get_session_settings(
 
     match state.session_manager.get_session_settings(session_id).await {
         Ok(settings) => {
-            json_response(StatusCode::OK, SessionSettingsResponse::from_binding(settings))
+            let mut response = SessionSettingsResponse::from_binding(settings.clone());
+            if let SessionProviderBinding::Provider { ref model_ref, .. } = settings {
+                let registry = crate::session_manager::read_lock(&state.provider_registry_snapshot);
+                response.adapter = registry
+                    .resolve_model(model_ref)
+                    .ok()
+                    .map(|spec| spec.adapter.protocol_name().to_string());
+            }
+            json_response(StatusCode::OK, response)
         }
         Err(error) => runtime_worker_error_response(error),
     }
@@ -142,35 +150,28 @@ pub(crate) async fn update_session_settings(
         Err(response) => return response,
     };
 
-    let Some(provider) = body.provider else {
+    let Some(model_ref) = body.model_ref else {
         return json_response(
             StatusCode::BAD_REQUEST,
-            serde_json::json!({ "error": "provider is required" }),
-        );
-    };
-    let Some(model) = body.model else {
-        return json_response(
-            StatusCode::BAD_REQUEST,
-            serde_json::json!({ "error": "model is required" }),
+            serde_json::json!({ "error": "model_ref is required" }),
         );
     };
 
     let binding = {
         let registry = crate::session_manager::read_lock(&state.provider_registry_snapshot);
-        let Some(profile) =
-            registry.providers().iter().find(|candidate| candidate.name == provider)
-        else {
+        let Some(account) = registry.provider(&model_ref.provider_id) else {
             return json_response(
                 StatusCode::NOT_FOUND,
-                serde_json::json!({ "error": format!("provider 不存在：{provider}") }),
+                serde_json::json!({ "error": format!("provider 不存在：{}", model_ref.provider_id) }),
             );
         };
 
-        let Some(selected_model) = profile.models.iter().find(|candidate| candidate.id == model)
+        let Some(selected_model) =
+            account.models.iter().find(|candidate| candidate.id == model_ref.model_id)
         else {
             return json_response(
                 StatusCode::BAD_REQUEST,
-                serde_json::json!({ "error": format!("模型不存在：{model}") }),
+                serde_json::json!({ "error": format!("模型不存在：{}", model_ref.model_id) }),
             );
         };
 
@@ -185,17 +186,8 @@ pub(crate) async fn update_session_settings(
                 }
             };
 
-        let protocol = match profile.kind {
-            ProviderKind::OpenAiResponses => "openai-responses",
-            ProviderKind::OpenAiChatCompletions => "openai-chat-completions",
-        }
-        .to_string();
-
         SessionProviderBinding::Provider {
-            name: profile.name.clone(),
-            model: model.clone(),
-            base_url: profile.base_url.clone(),
-            protocol,
+            model_ref: ModelRef::new(account.id.clone(), model_ref.model_id.clone()),
             reasoning_effort: ReasoningEffort::serialize_optional(reasoning_effort)
                 .filter(|_| selected_model.supports_reasoning),
         }
@@ -205,8 +197,8 @@ pub(crate) async fn update_session_settings(
         Ok(info) => json_response(
             StatusCode::OK,
             serde_json::json!({
-                "name": info.name,
-                "model": info.model,
+                "provider_id": info.provider_id,
+                "model_id": info.model_id,
                 "connected": info.connected,
             }),
         ),
@@ -350,7 +342,10 @@ pub(crate) async fn delete_queued_message(
     };
 
     match state.session_manager.delete_queued_message(session_id, message_id.clone()).await {
-        Ok(()) => json_response(StatusCode::OK, serde_json::json!({ "deleted": true, "message_id": message_id })),
+        Ok(()) => json_response(
+            StatusCode::OK,
+            serde_json::json!({ "deleted": true, "message_id": message_id }),
+        ),
         Err(error) => runtime_worker_error_response(error),
     }
 }

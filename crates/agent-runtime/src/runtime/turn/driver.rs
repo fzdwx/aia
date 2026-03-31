@@ -236,13 +236,11 @@ where
             let entry_id =
                 self.append_tape_entry(TapeEntry::message(&user_message).with_run_id(&turn_id))?;
             user_entry_ids.push(entry_id);
-            self.publish_event(RuntimeEvent::UserMessage {
-                content: user_message.content.clone(),
-            });
+            self.publish_event(RuntimeEvent::UserMessage { content: user_message.content.clone() });
         }
 
         let buffers = TurnBuffers::with_user_entries(user_entry_ids);
-        
+
         // 使用所有消息作为预览
         let preview: String = user_inputs.join("\n");
         self.notify_turn_start(&turn_id, &preview);

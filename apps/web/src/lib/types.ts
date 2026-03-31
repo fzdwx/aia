@@ -110,9 +110,14 @@ export type TurnLifecycle = {
   outcome: TurnOutcome
 }
 
-export type ProviderInfo = {
-  name: string
-  model: string
+export type ModelRef = {
+  provider_id: string
+  model_id: string
+}
+
+export type SessionSelectionInfo = {
+  provider_id: string
+  model_id: string
   connected: boolean
 }
 
@@ -314,16 +319,16 @@ export type ModelConfig = {
 }
 
 export type ProviderListItem = {
-  name: string
-  kind: string
+  id: string
+  label: string
+  adapter: string
   models: ModelConfig[]
   base_url: string
 }
 
 export type SessionSettings = {
-  provider: string
-  model: string
-  protocol: string
+  model_ref: ModelRef | null
+  adapter: string | null
   reasoning_effort: ThinkingLevel | null
 }
 

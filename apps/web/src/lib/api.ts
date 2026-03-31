@@ -5,10 +5,11 @@ import type {
   HistoryPage,
   PendingQuestionResponse,
   ModelConfig,
-  ProviderInfo,
+  ModelRef,
   QuestionResult,
   ProviderListItem,
   QueuedMessage,
+  SessionSelectionInfo,
   SessionSettings,
   SessionListItem,
   SseEvent,
@@ -141,10 +142,9 @@ export async function cancelPendingQuestion(sessionId?: string): Promise<void> {
 
 export async function updateSessionSettings(body: {
   session_id?: string
-  provider: string
-  model: string
+  model_ref: ModelRef
   reasoning_effort?: ThinkingLevel | null
-}): Promise<ProviderInfo> {
+}): Promise<SessionSelectionInfo> {
   const res = await fetch("/api/session/settings", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -152,7 +152,7 @@ export async function updateSessionSettings(body: {
   })
   if (!res.ok)
     throw new Error(`PUT /api/session/settings failed: ${res.status}`)
-  return res.json() as Promise<ProviderInfo>
+  return res.json() as Promise<SessionSelectionInfo>
 }
 
 export async function submitTurn(
@@ -193,7 +193,8 @@ export async function sendMessage(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ message, session_id: sessionId }),
   })
-  if (!res.ok) throw new Error(`POST /api/session/message failed: ${res.status}`)
+  if (!res.ok)
+    throw new Error(`POST /api/session/message failed: ${res.status}`)
   return (await res.json()) as QueueMessageResponse
 }
 
@@ -210,25 +211,24 @@ export async function deleteQueuedMessage(
   messageId: string,
   sessionId?: string
 ): Promise<void> {
-  const params = sessionId
-    ? `?session_id=${encodeURIComponent(sessionId)}`
-    : ""
+  const params = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ""
   const res = await fetch(
     `/api/session/queue/${encodeURIComponent(messageId)}${params}`,
     { method: "DELETE" }
   )
   if (!res.ok)
-    throw new Error(`DELETE /api/session/queue/${messageId} failed: ${res.status}`)
+    throw new Error(
+      `DELETE /api/session/queue/${messageId} failed: ${res.status}`
+    )
 }
 
 export async function interruptTurn(sessionId?: string): Promise<boolean> {
-  const params = sessionId
-    ? `?session_id=${encodeURIComponent(sessionId)}`
-    : ""
+  const params = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ""
   const res = await fetch(`/api/session/interrupt${params}`, {
     method: "POST",
   })
-  if (!res.ok) throw new Error(`POST /api/session/interrupt failed: ${res.status}`)
+  if (!res.ok)
+    throw new Error(`POST /api/session/interrupt failed: ${res.status}`)
   const payload = (await res.json()) as { interrupted?: boolean }
   return payload.interrupted === true
 }
@@ -291,8 +291,9 @@ export async function fetchTraceDashboard(params?: {
 }
 
 export async function createProvider(body: {
-  name: string
-  kind: string
+  id: string
+  label: string
+  adapter: string
   models: ModelConfig[]
   api_key: string
   base_url: string
@@ -315,21 +316,21 @@ export async function createChannel(body: CreateChannelRequest): Promise<void> {
 }
 
 export async function updateProvider(
-  name: string,
+  id: string,
   body: {
-    kind?: string
+    label?: string
+    adapter?: string
     models?: ModelConfig[]
     api_key?: string
     base_url?: string
   }
 ): Promise<void> {
-  const res = await fetch(`/api/providers/${encodeURIComponent(name)}`, {
+  const res = await fetch(`/api/providers/${encodeURIComponent(id)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   })
-  if (!res.ok)
-    throw new Error(`PUT /api/providers/${name} failed: ${res.status}`)
+  if (!res.ok) throw new Error(`PUT /api/providers/${id} failed: ${res.status}`)
 }
 
 export async function updateChannel(
@@ -344,12 +345,12 @@ export async function updateChannel(
   if (!res.ok) throw new Error(`PUT /api/channels/${id} failed: ${res.status}`)
 }
 
-export async function deleteProvider(name: string): Promise<void> {
-  const res = await fetch(`/api/providers/${encodeURIComponent(name)}`, {
+export async function deleteProvider(id: string): Promise<void> {
+  const res = await fetch(`/api/providers/${encodeURIComponent(id)}`, {
     method: "DELETE",
   })
   if (!res.ok)
-    throw new Error(`DELETE /api/providers/${name} failed: ${res.status}`)
+    throw new Error(`DELETE /api/providers/${id} failed: ${res.status}`)
 }
 
 export async function deleteChannel(id: string): Promise<void> {
@@ -358,17 +359,6 @@ export async function deleteChannel(id: string): Promise<void> {
   })
   if (!res.ok)
     throw new Error(`DELETE /api/channels/${id} failed: ${res.status}`)
-}
-
-export async function switchProvider(name: string): Promise<ProviderInfo> {
-  const res = await fetch("/api/providers/switch", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
-  })
-  if (!res.ok)
-    throw new Error(`POST /api/providers/switch failed: ${res.status}`)
-  return res.json() as Promise<ProviderInfo>
 }
 
 /**

@@ -19,7 +19,7 @@ use crate::{
     sse::SsePayload,
 };
 
-use super::message_queue::{QueuedMessage, QueueMessageResponse};
+use super::message_queue::{QueueMessageResponse, QueuedMessage};
 
 pub(crate) type SessionId = String;
 
