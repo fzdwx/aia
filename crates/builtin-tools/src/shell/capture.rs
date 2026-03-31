@@ -14,12 +14,6 @@ pub(super) enum ShellEvent {
     Output(ToolOutputDelta),
     StreamClosed(ToolOutputStream),
     Finished(Result<i32, CoreError>),
-    ShellReady(tokio::sync::oneshot::Sender<ShellControlMessage>),
-}
-
-#[derive(Clone, Copy)]
-pub(super) enum ShellControlMessage {
-    Abort,
 }
 
 pub(super) fn spawn_capture_reader(

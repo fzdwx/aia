@@ -3,14 +3,14 @@ use std::path::{Path, PathBuf};
 use agent_core::{AbortSignal, CoreError, ToolOutputDelta, ToolOutputStream};
 use brush_builtins::{BuiltinSet, ShellBuilderExt};
 use brush_core::openfiles::OpenFiles;
-use brush_core::traps::TrapSignal;
 
 use super::capture::{
-    SHELL_EVENT_POLL_INTERVAL, ShellControlMessage, ShellEvent, create_output_capture,
-    spawn_capture_reader,
+    SHELL_EVENT_POLL_INTERVAL, ShellEvent, create_output_capture, spawn_capture_reader,
 };
 
 const EMBEDDED_SHELL_NAME: &str = "brush";
+
+const FORCED_TERMINATE_EXIT_CODE: i32 = 130;
 
 #[derive(Debug)]
 pub(super) struct EmbeddedShellExecution {
@@ -55,19 +55,12 @@ pub(super) async fn run_embedded_brush(
     let mut stdout_closed = false;
     let mut stderr_closed = false;
     let mut finished = None;
-    let mut control: Option<tokio::sync::oneshot::Sender<ShellControlMessage>> = None;
-    let mut abort_requested = false;
+    let mut killed = false;
 
     while !(stdout_closed && stderr_closed && finished.is_some()) {
-        if abort.is_aborted() && !abort_requested {
-            abort_requested = true;
-        }
-
-        // Send abort if we have control and abort was requested
-        if abort_requested {
-            if let Some(control_tx) = control.take() {
-                let _ = control_tx.send(ShellControlMessage::Abort);
-            }
+        if abort.is_aborted() && !killed {
+            killed = true;
+            shell_handle.abort();
         }
 
         match tokio::time::timeout(SHELL_EVENT_POLL_INTERVAL, event_rx.recv()).await {
@@ -85,14 +78,6 @@ pub(super) async fn run_embedded_brush(
             Ok(Some(ShellEvent::Finished(result))) => {
                 finished = Some(result);
             }
-            Ok(Some(ShellEvent::ShellReady(control_tx))) => {
-                // If abort was already requested, send it immediately
-                if abort_requested {
-                    let _ = control_tx.send(ShellControlMessage::Abort);
-                } else {
-                    control = Some(control_tx);
-                }
-            }
             Ok(None) => break,
             Err(_) => continue,
         }
@@ -100,12 +85,27 @@ pub(super) async fn run_embedded_brush(
 
     stdout_handle.await.map_err(|_| CoreError::new("stdout capture task panicked"))?;
     stderr_handle.await.map_err(|_| CoreError::new("stderr capture task panicked"))?;
-    shell_handle.await.map_err(|_| CoreError::new("embedded shell task panicked"))?;
 
-    let exit_code =
-        finished.unwrap_or_else(|| Err(CoreError::new("embedded shell exited without status")))?;
+    let exit_code = match shell_handle.await {
+        Ok(()) => finished
+            .transpose()
+            .map_err(|e| CoreError::new(format!("embedded shell exited without status: {e}")))?
+            .unwrap_or(FORCED_TERMINATE_EXIT_CODE),
+        Err(join_error) if join_error.is_cancelled() => {
+            forced_terminate_exit_code(finished)
+        }
+        Err(_) => FORCED_TERMINATE_EXIT_CODE,
+    };
 
     Ok(EmbeddedShellExecution { stdout, stderr, exit_code })
+}
+
+fn forced_terminate_exit_code(finished: Option<Result<i32, CoreError>>) -> i32 {
+    if let Some(Ok(code)) = finished {
+        code
+    } else {
+        FORCED_TERMINATE_EXIT_CODE
+    }
 }
 
 async fn run_embedded_brush_in_task(
@@ -113,7 +113,7 @@ async fn run_embedded_brush_in_task(
     cwd: PathBuf,
     stdout_writer: std::io::PipeWriter,
     stderr_writer: std::io::PipeWriter,
-    shell_tx: tokio::sync::mpsc::UnboundedSender<ShellEvent>,
+    _shell_tx: tokio::sync::mpsc::UnboundedSender<ShellEvent>,
 ) -> Result<i32, CoreError> {
     let mut shell = brush_core::Shell::builder()
         .no_profile(true)
@@ -134,24 +134,7 @@ async fn run_embedded_brush_in_task(
     params.set_fd(OpenFiles::STDOUT_FD, stdout_writer.into());
     params.set_fd(OpenFiles::STDERR_FD, stderr_writer.into());
 
-    let (control_tx, control_rx) = tokio::sync::oneshot::channel::<ShellControlMessage>();
-    let _ = shell_tx.send(ShellEvent::ShellReady(control_tx));
-
-    tokio::pin!(control_rx);
-    let run_result = tokio::select! {
-        result = shell.run_string(command, &params) => result,
-        message = &mut control_rx => {
-            if matches!(message, Ok(ShellControlMessage::Abort)) {
-                for job in &shell.jobs.jobs {
-                    let _ = job.kill(TrapSignal::try_from("TERM").map_err(|e| {
-                        CoreError::new(format!("failed to resolve TERM signal: {e}"))
-                    })?);
-                }
-                return Ok(130);
-            }
-            return Ok(130);
-        }
-    };
+    let run_result = shell.run_string(command, &params).await;
 
     run_result.map_err(|e| {
         CoreError::new(format!("embedded {EMBEDDED_SHELL_NAME} execution failed: {e}"))
