@@ -16,6 +16,7 @@ import {
 import {
   distanceFromBottom,
   shouldLoadOlderTurnsOnScroll,
+  shouldResumeAutoFollow,
   shouldShowHistoryHint,
   shouldStickToBottom,
 } from "./helpers"
@@ -42,6 +43,7 @@ export function ChatMessages() {
   const contentRef = useRef<HTMLDivElement>(null)
   const autoFollowRef = useRef(true)
   const prevSessionIdRef = useRef<string | null>(null)
+  const prevStreamingTurnRef = useRef(streamingTurn)
   const prevScrollTopRef = useRef(0)
   const rafPendingRef = useRef(false)
   const scrollAnchorRef = useRef<{
@@ -53,6 +55,8 @@ export function ChatMessages() {
   const [isAtBottom, setIsAtBottom] = useState(true)
 
   const showHistoryHint = shouldShowHistoryHint(historyLoadingMore, scrollTop)
+  const showEmptyState =
+    !sessionHydrating && turns.length === 0 && !streamingTurn
 
   const scrollToBottom = useCallback(() => {
     const container = containerRef.current
@@ -61,6 +65,19 @@ export function ChatMessages() {
     container.scrollTop = container.scrollHeight
     prevScrollTopRef.current = container.scrollTop
     setIsAtBottom(true)
+  }, [])
+
+  const alignToBottom = useCallback(() => {
+    const container = containerRef.current
+    if (!container) return
+    container.scrollTop = container.scrollHeight
+    prevScrollTopRef.current = container.scrollTop
+    const dist = distanceFromBottom({
+      scrollHeight: container.scrollHeight,
+      scrollTop: container.scrollTop,
+      clientHeight: container.clientHeight,
+    })
+    setIsAtBottom(shouldStickToBottom(dist))
   }, [])
 
   const handleLoadOlderTurns = useCallback(async () => {
@@ -91,7 +108,7 @@ export function ChatMessages() {
       const userScrolledUp = container.scrollTop < prevScrollTopRef.current
       if (userScrolledUp) {
         autoFollowRef.current = false
-      } else if (nextIsAtBottom) {
+      } else if (shouldResumeAutoFollow(dist)) {
         autoFollowRef.current = true
       }
 
@@ -134,7 +151,7 @@ export function ChatMessages() {
       if (!container) return
 
       if (autoFollowRef.current) {
-        scrollToBottom()
+        alignToBottom()
       }
     })
 
@@ -142,7 +159,23 @@ export function ChatMessages() {
     return () => {
       resizeObserver.disconnect()
     }
-  }, [activeSessionId, scrollToBottom])
+  }, [activeSessionId, alignToBottom])
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const resizeObserver = new ResizeObserver(() => {
+      if (autoFollowRef.current) {
+        alignToBottom()
+      }
+    })
+
+    resizeObserver.observe(container)
+    return () => {
+      resizeObserver.disconnect()
+    }
+  }, [activeSessionId, alignToBottom])
 
   useLayoutEffect(() => {
     const container = containerRef.current
@@ -169,19 +202,32 @@ export function ChatMessages() {
     autoFollowRef.current = true
     scrollAnchorRef.current = null
     scrollToBottom()
-  }, [activeSessionId, scrollToBottom])
+    requestAnimationFrame(() => {
+      if (autoFollowRef.current) {
+        alignToBottom()
+      }
+    })
+  }, [activeSessionId, alignToBottom, scrollToBottom])
 
   useLayoutEffect(() => {
     if (!activeSessionId) return
-    if (turns.length === 0 && !streamingTurn) return
-    // 发送新消息时强制滚动到底部
+
+    const previousStreamingTurn = prevStreamingTurnRef.current
+    prevStreamingTurnRef.current = streamingTurn
+
+    const startedNewStreamingTurn =
+      previousStreamingTurn == null && streamingTurn != null
+
+    if (!startedNewStreamingTurn) return
+
     autoFollowRef.current = true
     scrollToBottom()
-  }, [activeSessionId, turns.length, streamingTurn, scrollToBottom])
-
-  if (turns.length === 0 && !streamingTurn) {
-    return <ChatMessagesEmptyState error={error} />
-  }
+    requestAnimationFrame(() => {
+      if (autoFollowRef.current) {
+        alignToBottom()
+      }
+    })
+  }, [activeSessionId, streamingTurn, alignToBottom, scrollToBottom])
 
   return (
     <div className="relative min-h-0 flex-1">
@@ -211,20 +257,26 @@ export function ChatMessages() {
                 : "opacity-100 transition-opacity duration-150 ease-out"
             }
           >
-            {turns.map((turn) => (
-              <MemoizedTurnView key={turn.turn_id} turn={turn} />
-            ))}
-            {lastCompression && !streamingTurn ? (
-              <CompressionNotice summary={lastCompression.summary} />
-            ) : null}
-            {streamingTurn ? (
-              <MemoizedStreamingView streaming={streamingTurn} />
-            ) : null}
-            {error ? (
-              <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs leading-relaxed font-medium text-destructive">
-                {error}
-              </div>
-            ) : null}
+            {showEmptyState ? (
+              <ChatMessagesEmptyState error={error} />
+            ) : (
+              <>
+                {turns.map((turn) => (
+                  <MemoizedTurnView key={turn.turn_id} turn={turn} />
+                ))}
+                {lastCompression && !streamingTurn ? (
+                  <CompressionNotice summary={lastCompression.summary} />
+                ) : null}
+                {streamingTurn ? (
+                  <MemoizedStreamingView streaming={streamingTurn} />
+                ) : null}
+                {error ? (
+                  <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs leading-relaxed font-medium text-destructive">
+                    {error}
+                  </div>
+                ) : null}
+              </>
+            )}
             <div aria-hidden="true" className="h-px [overflow-anchor:auto]" />
           </div>
         </div>
@@ -236,7 +288,11 @@ export function ChatMessages() {
           </div>
         ) : null}
       </div>
-      <ScrollToBottomButton isAtBottom={isAtBottom} onClick={scrollToBottom} />
+      <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center px-4 sm:bottom-6">
+        <div className="pointer-events-auto">
+          <ScrollToBottomButton isAtBottom={isAtBottom} onClick={scrollToBottom} />
+        </div>
+      </div>
     </div>
   )
 }

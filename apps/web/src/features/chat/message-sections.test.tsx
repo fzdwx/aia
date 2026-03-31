@@ -404,9 +404,11 @@ describe("chat message status surfaces", () => {
     const source = loadMessageSectionsSource()
 
     expect(source).toContain(
-      'className="group/turn flex w-full flex-col gap-4"'
+      'className="group/turn flex w-full flex-col [&>*+*]:mt-4 [&>*[data-type=\'tools\']+*[data-type=\'tools\']]:mt-1.5"'
     )
-    expect(source).toContain('className="flex w-full flex-col gap-4"')
+    expect(source).toContain(
+      'className="flex w-full flex-col [&>*+*]:mt-4 [&>*[data-type=\'tools\']+*[data-type=\'tools\']]:mt-1.5"'
+    )
   })
 
   test("uses shared auxiliary scale for turn meta and compression notice", () => {
@@ -462,7 +464,11 @@ describe("chat message status surfaces", () => {
     const source = loadChatMessagesSource()
 
     expect(source).toContain("scrollToBottom()")
-    expect(source).toContain("if (turns.length === 0 && !streamingTurn) return")
+    expect(source).toContain("const startedNewStreamingTurn =")
+    expect(source).toContain("previousStreamingTurn == null && streamingTurn != null")
+    expect(source.match(/new ResizeObserver\(/g) ?? []).toHaveLength(2)
+    expect(source).toContain("resizeObserver.observe(content)")
+    expect(source).toContain("resizeObserver.observe(container)")
     expect(source).not.toContain("historyTriggerRef")
     expect(source).not.toContain("bottomAnchorRef")
     expect(source).not.toContain("previousScrollHeightRef")
@@ -536,6 +542,19 @@ describe("chat message status surfaces", () => {
 
     expect(source).toContain(
       "text-xs leading-relaxed font-medium text-destructive"
+    )
+  })
+
+  test("keeps scroll-to-bottom recovery and bottom-center placement in chat messages", () => {
+    const source = loadChatMessagesSource()
+
+    expect(source).toContain("shouldResumeAutoFollow")
+    expect(source).toContain("alignToBottom")
+    expect(source).toContain("const showEmptyState =")
+    expect(source).toContain("!sessionHydrating && turns.length === 0 && !streamingTurn")
+    expect(source).toContain("showEmptyState ? (")
+    expect(source).toContain(
+      'pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center px-4 sm:bottom-6'
     )
   })
 
