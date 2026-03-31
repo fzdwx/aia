@@ -85,6 +85,21 @@ describe("chat store submitTurn", () => {
     expect(state.error).toBe(null)
   })
 
+  test("sendMessage starts a turn immediately while idle", async () => {
+    globalThis.fetch = (async () =>
+      new Response(null, { status: 202 })) as FetchMock
+
+    await useChatStore.getState().sendMessage("hello from sendMessage")
+
+    const state = useChatStore.getState()
+    expect(state.chatState).toBe("active")
+    assert.deepEqual(state.streamingTurn, {
+      userMessages: ["hello from sendMessage"],
+      status: "waiting",
+      blocks: [],
+    })
+  })
+
   test("submit failure hydrates pending question for active session", async () => {
     let hydratedSessionId: string | null = null
     usePendingQuestionStore.setState({

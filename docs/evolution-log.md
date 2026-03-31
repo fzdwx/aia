@@ -22,6 +22,20 @@
 - `2026-03-18 Session 61` 到 `Session 72` 记录的是 channel 从过渡 webhook / 旧配置语义一路收口到 SQLite + 长连接运行态的过程；越早的条目越可能带有中间形态描述。
 - `2026-03-19 Session 79` 到 `Session 80` 记录的是一度切到 `markstream-react` 的尝试，但这条路线后来已在 `2026-03-23 Session 106` 回退；当前 Markdown 主路径请以后者与 `docs/status.md` 为准。
 
+## 2026-03-31 Session 112
+
+**Diagnosis**：Web 聊天消息区的“回到底部”体验存在三个直接影响使用的问题：发送消息后不一定立刻拉到底部；用户即使手动回到底部，流式输出过程中也可能因为底部判定窗口太窄而失去自动跟随；悬浮按钮原本固定在右下角，和当前消息列居中布局不够一致。
+**Decision**：本轮不改历史分页锚定主路径，只收口当前消息区的底部跟随体验：放宽“视为在底部”和“恢复自动跟随”的阈值；在新 streaming turn 开始时显式再次贴底，减少发送后与流式首帧之间的竞态；将“回到底部”按钮移到消息列表下方中间，并去掉文字，仅保留箭头图标。
+**Changes**：
+- `apps/web/src/features/chat/chat-messages/index.tsx`：滚动状态机改为使用更宽松的自动跟随恢复阈值；session 切换与新 streaming turn 开始时显式二次贴底；按钮定位改为消息列表下方中间。
+- `apps/web/src/features/chat/chat-messages/helpers.ts`、`apps/web/src/features/chat/chat-messages/helpers.test.ts`：新增 `shouldResumeAutoFollow(...)` 并调大底部判定阈值，补对应回归测试。
+- `apps/web/src/features/chat/chat-messages/scroll-to-bottom-button.tsx`：按钮改为无文案的居中胶囊，仅保留向下箭头。
+- `apps/web/src/stores/chat-store.test.ts`：补 `sendMessage(...)` 在 idle 时立即进入 optimistic streaming turn 的回归测试，覆盖发送后消息区能立刻出现内容的前提。
+- `apps/web/src/features/chat/message-sections.test.tsx`：补源码级回归，锁住“自动跟随恢复 + 下方中间按钮定位”这两个关键实现点，避免静默回滚。
+**Verification**：待本轮执行 `cd apps/web && pnpm run test -- --run src/features/chat/chat-messages/helpers.test.ts src/stores/chat-store.test.ts src/features/chat/message-sections.test.tsx`。
+**Commit**：未提交。
+**Next direction**：如果用户还反馈偶发不跟随，下一步优先补 `ChatMessages` 组件级 DOM/scroll 测试，直接覆盖“发送消息 → 新 turn 出现 → 流式块增长时保持贴底”的真实交互序列。
+
 ## 2026-03-25 Session 111
 
 **Diagnosis**：`Question` RFC 虽然已经把共享协议、runtime tool 和 capability gating 落进 `agent-core` / `agent-runtime`，但 `session-tape` 仍缺少对 `question_requested/question_resolved` 的一等恢复 helper。这样 server 进入 Phase 1 的 pending question 恢复时，仍得在 `apps/agent-server` 里手写一遍“倒序扫描 event、按 `request_id` 配对”的逻辑，不利于把 append-only tape 事实语义稳定地下沉到共享层。

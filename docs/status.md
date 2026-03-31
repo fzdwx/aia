@@ -2,7 +2,7 @@
 
 > 本文件只保留 **当前真实状态**。详细历史看 `docs/evolution-log.md`，未完成事项看 `docs/todo.md`。
 
-- Last verified: `2026-03-30`
+- Last verified: `2026-03-31`
 - Current source of truth: 以当前代码与 RFC 头部状态为准；本文件负责做压缩后的事实对齐
 
 ## 当前阶段
@@ -80,6 +80,7 @@
 - `RFC 0002 Session Auto Rename`：**Implemented**
 - `RFC 0003 Scroll Position Anchor on History Load`：**Implemented**
 - `RFC 0004 Message Queue and Interrupt Mechanism`：**Implemented**
+- `RFC 0005 Provider Domain Redesign`：**Draft**
 - `RFC 0001 Question Runtime Tool`：**Accepted**
   - 说明：pending question 的共享类型、server 控制面和 Web 承接已存在
   - 但“通用 suspend/resume 原语完全定稿并宣告收口”这件事还没有被提升到 `Implemented`

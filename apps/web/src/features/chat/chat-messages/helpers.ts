@@ -1,6 +1,7 @@
 export const HISTORY_LOAD_TRIGGER_RATIO = 1.5 // 视口高度的倍数
 export const HISTORY_HINT_VISIBILITY_PX = 160
-export const STICK_TO_BOTTOM_THRESHOLD_PX = 24
+export const STICK_TO_BOTTOM_THRESHOLD_PX = 48
+export const RESUME_AUTO_FOLLOW_THRESHOLD_PX = 96
 
 export function distanceFromBottom({
   scrollHeight,
@@ -16,6 +17,10 @@ export function distanceFromBottom({
 
 export function shouldStickToBottom(distance: number) {
   return distance < STICK_TO_BOTTOM_THRESHOLD_PX
+}
+
+export function shouldResumeAutoFollow(distance: number) {
+  return distance < RESUME_AUTO_FOLLOW_THRESHOLD_PX
 }
 
 export function shouldShowHistoryHint(
