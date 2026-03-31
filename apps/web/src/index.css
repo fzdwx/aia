@@ -1238,6 +1238,18 @@ body {
     background: transparent;
   }
 
+  .tool-timeline-lazy-diff {
+    display: block;
+    width: 100%;
+  }
+
+  .tool-timeline-lazy-diff[data-state="pending"] {
+    min-height: 3rem;
+    border-radius: 0.875rem;
+    border: 1px solid color-mix(in oklch, var(--border) 32%, transparent);
+    background: color-mix(in oklch, var(--surface-base) 38%, transparent);
+  }
+
   .tool-timeline-pierre-virtualizer {
     width: 100%;
     max-height: min(32rem, 70vh);

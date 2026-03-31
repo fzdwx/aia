@@ -15,7 +15,7 @@ use openai_adapter::{
     OpenAiAdapterError, OpenAiChatCompletionsConfig, OpenAiChatCompletionsModel,
     OpenAiResponsesConfig, OpenAiResponsesModel,
 };
-use provider_registry::{AdapterKind, ResolvedModelSpec};
+use provider_registry::{AdapterKind, CredentialRef, ResolvedModelSpec};
 
 use agent_core::ReasoningEffort;
 use trace::ModelTraceRecorder;
@@ -40,12 +40,16 @@ enum ServerModelInner {
 #[derive(Debug)]
 pub enum ServerSetupError {
     OpenAiAdapter(OpenAiAdapterError),
+    UnsupportedCredentialType { credential_type: String },
 }
 
 impl std::fmt::Display for ServerSetupError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::OpenAiAdapter(error) => write!(f, "{error}"),
+            Self::UnsupportedCredentialType { credential_type } => {
+                write!(f, "unsupported credential type: {credential_type}")
+            }
         }
     }
 }
@@ -173,7 +177,7 @@ fn build_openai_model(
 ) -> Result<(ModelIdentity, ServerModel), ServerSetupError> {
     let identity = build_model_identity(&spec, reasoning_effort);
     let model_id = identity.name.clone();
-    let api_key = spec.credential.api_key_value().to_string();
+    let api_key = resolve_api_key(&spec.credential)?;
 
     match spec.adapter {
         AdapterKind::OpenAiResponses => {
@@ -190,6 +194,21 @@ fn build_openai_model(
                 identity,
                 ServerModel::new(ServerModelInner::OpenAiChatCompletions(model), trace_store),
             ))
+        }
+    }
+}
+
+fn resolve_api_key(credential: &CredentialRef) -> Result<String, ServerSetupError> {
+    match credential {
+        CredentialRef::ApiKey { value } => Ok(value.clone()),
+        CredentialRef::Stored { credential_type, credential_value } => {
+            if credential_type == "api_key" {
+                Ok(credential_value.clone())
+            } else {
+                Err(ServerSetupError::UnsupportedCredentialType {
+                    credential_type: credential_type.clone(),
+                })
+            }
         }
     }
 }

@@ -22,6 +22,18 @@
 - `2026-03-18 Session 61` 到 `Session 72` 记录的是 channel 从过渡 webhook / 旧配置语义一路收口到 SQLite + 长连接运行态的过程；越早的条目越可能带有中间形态描述。
 - `2026-03-19 Session 79` 到 `Session 80` 记录的是一度切到 `markstream-react` 的尝试，但这条路线后来已在 `2026-03-23 Session 106` 回退；当前 Markdown 主路径请以后者与 `docs/status.md` 为准。
 
+## 2026-03-31 Session 113
+
+**Diagnosis**：session 预压缩当前走 `channel-bridge::prepare_session_for_turn(...)` 的同步前置链路；一旦上游兼容 `responses` 接口在自动压缩摘要请求上返回 `502 Bad Gateway`，这个“后台 best-effort 压缩”就会被错误提升为主流程失败，直接阻断 `POST /api/turn`，并把用户表层错误表现成 `auto compress failed: 模型执行失败：请求失败：POST .../responses -> 502 Bad Gateway`。
+**Decision**：把自动压缩明确收口为 best-effort 行为：session 预压缩只在压力过高时尝试压缩，但压缩失败不得拦截正式 turn 提交；主消息发送链只应被真正的 turn 请求失败阻断，而不是被辅助性的上下文整理失败阻断。
+**Changes**：
+- `crates/channel-bridge/src/session.rs`：`prepare_session_for_turn(...)` 现在在命中压力阈值时仍会尝试 `auto_compress_session(...)`，但忽略其错误返回，避免把自动压缩失败升级成 turn 前置硬失败。
+- `crates/channel-bridge/tests/session/mod.rs`：补“超过阈值仍会触发自动压缩”“自动压缩报错时 session prep 仍成功”两条回归测试。
+- `apps/agent-server/tests/routes/turn/mod.rs`：补本地假上游返回 `502` 的路由回归，锁住“预压缩失败时 `POST /api/turn` 仍返回 `202 Accepted`”这一用户可见行为。
+**Verification**：待本轮执行 `cargo test -p channel-bridge -p agent-server prepare_session_for_turn submit_turn_ignores_auto_compress_failure_before_turn_start`。
+**Commit**：未提交。
+**Next direction**：如果后续还想提升可观测性，下一步优先给“自动压缩失败但已降级跳过”的路径补内部日志或 trace 事件，而不是重新把它做回阻断式失败。
+
 ## 2026-03-31 Session 112
 
 **Diagnosis**：Web 聊天消息区的“回到底部”体验存在三个直接影响使用的问题：发送消息后不一定立刻拉到底部；用户即使手动回到底部，流式输出过程中也可能因为底部判定窗口太窄而失去自动跟随；悬浮按钮原本固定在右下角，和当前消息列居中布局不够一致。

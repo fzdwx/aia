@@ -84,7 +84,7 @@ where
 {
     let info = sessions.session_info(session_id).await?;
     if info.pressure_ratio.is_some_and(|ratio| ratio >= AUTO_COMPRESSION_THRESHOLD) {
-        sessions.auto_compress_session(session_id).await?;
+        let _ = sessions.auto_compress_session(session_id).await;
     }
     Ok(())
 }

@@ -43,6 +43,27 @@ function loadAppIndexCssSource() {
   ).replace(/\s+/g, " ")
 }
 
+function loadApplyPatchRendererSource() {
+  return readFileSync(
+    new URL("./renderers/apply-patch-list.tsx", import.meta.url),
+    "utf8"
+  ).replace(/\s+/g, " ")
+}
+
+function loadFileToolRendererSource() {
+  return readFileSync(
+    new URL("./renderers/file-tools.tsx", import.meta.url),
+    "utf8"
+  ).replace(/\s+/g, " ")
+}
+
+function loadLazyDiffMountSource() {
+  return readFileSync(
+    new URL("../diff/lazy-diff-mount.tsx", import.meta.url),
+    "utf8"
+  ).replace(/\s+/g, " ")
+}
+
 type ElementWithChildren = {
   children?: ReactNode
 }
@@ -526,8 +547,8 @@ describe("tool renderer registry", () => {
     })
 
     const html = renderWithTheme(details)
-    expect(html).toContain("<diffs-container")
-    expect(html).toContain("tool-timeline-pierre-root")
+    expect(html).toContain("tool-timeline-lazy-diff")
+    expect(html).not.toContain("<diffs-container")
     expect(html).not.toContain("Edited apps/web/src/index.css")
   })
 
@@ -549,8 +570,8 @@ describe("tool renderer registry", () => {
     })
 
     const html = renderWithTheme(details)
-    expect(html).toContain("<diffs-container")
-    expect(html).toContain("tool-timeline-pierre-root-multi")
+    expect(html).toContain("tool-timeline-lazy-diff")
+    expect(html).not.toContain("<diffs-container")
     expect(html).not.toContain("Edited apps/web/src/index.css")
   })
 
@@ -730,8 +751,8 @@ describe("tool renderer registry", () => {
     })
 
     const html = renderWithTheme(details)
-    expect(html).toContain("<diffs-container")
-    expect(html).toContain("tool-timeline-pierre-root")
+    expect(html).toContain("tool-timeline-lazy-diff")
+    expect(html).not.toContain("<diffs-container")
     expect(html).not.toContain("Wrote 28 bytes to apps/web/src/index.css")
     expect(html).not.toContain("Result")
   })
@@ -780,7 +801,7 @@ describe("tool renderer registry", () => {
     expect(html).toContain(">-1<")
     expect(html).toContain("text-emerald-400")
     expect(html).toContain("text-red-400")
-    expect(html).toContain("<diffs-container")
+    expect(html).not.toContain("<diffs-container")
     expect(html).not.toContain("tool-timeline-detail-title")
     expect(html).not.toContain('data-tool-detail-kind="patch"')
   })
@@ -802,7 +823,39 @@ describe("tool renderer registry", () => {
     expect(html).toContain(".aia/")
     expect(html).toContain(">+2<")
     expect(html).toContain(">-0<")
-    expect(html).toContain("tool-timeline-pierre-root-patch")
+    expect(html).not.toContain("tool-timeline-pierre-root-patch")
+  })
+
+  test("defers ApplyPatch diff mount until the file details are opened", () => {
+    const source = loadApplyPatchRendererSource()
+
+    expect(source).toContain("const [isOpen, setIsOpen] = useState(false)")
+    expect(source).toContain("onToggle={(event) => {")
+    expect(source).toContain("setIsOpen(event.currentTarget.open)")
+    expect(source).toContain("{isOpen ? (")
+    expect(source).toContain("<PierrePatchDiffOutput patch={entry.patch} />")
+  })
+
+  test("wraps write and edit diffs in the lazy mount container", () => {
+    const source = loadFileToolRendererSource()
+
+    expect(source).toContain("import { LazyDiffMount }")
+    expect(source).toContain("<LazyDiffMount>")
+    expect(source).toContain('diffStyle="unified"')
+    expect(source).toContain('diffStyle="split"')
+  })
+
+  test("mounts heavy Pierre diffs only after visibility and idle scheduling", () => {
+    const source = loadLazyDiffMountSource()
+
+    expect(source).toContain(
+      "const [shouldRender, setShouldRender] = useState(false)"
+    )
+    expect(source).toContain("createIdleScheduler()")
+    expect(source).toContain('typeof IntersectionObserver !== "function"')
+    expect(source).toContain("new IntersectionObserver(")
+    expect(source).toContain("rootMargin: DIFF_VISIBILITY_ROOT_MARGIN")
+    expect(source).toContain("startTransition(() => {")
   })
 
   test("renders shell details from streaming output segments", () => {

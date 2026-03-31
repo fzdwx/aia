@@ -8,6 +8,7 @@ struct FakeSessionService {
     created_titles: Mutex<Vec<String>>,
     pressure_ratio: Mutex<Option<f64>>,
     compress_calls: Mutex<Vec<String>>,
+    compress_error: Mutex<Option<String>>,
     next_session_id: Mutex<String>,
 }
 
@@ -49,6 +50,11 @@ impl ChannelSessionService for FakeSessionService {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .push(session_id.to_string());
+        if let Some(message) =
+            self.compress_error.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
+        {
+            return Err(ChannelBridgeError::new(message));
+        }
         Ok(true)
     }
 }
@@ -68,6 +74,23 @@ async fn prepare_session_for_turn_triggers_auto_compress_when_over_threshold() {
     *service.pressure_ratio.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(0.95);
 
     prepare_session_for_turn(&service, "session-1").await.expect("session prep should succeed");
+
+    assert_eq!(
+        service.compress_calls.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_slice(),
+        ["session-1"]
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prepare_session_for_turn_does_not_fail_when_auto_compress_errors() {
+    let service = FakeSessionService::default();
+    *service.pressure_ratio.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(0.95);
+    *service.compress_error.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) =
+        Some("upstream 502".into());
+
+    prepare_session_for_turn(&service, "session-1")
+        .await
+        .expect("session prep should ignore auto-compress failure");
 
     assert_eq!(
         service.compress_calls.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_slice(),

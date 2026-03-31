@@ -9,9 +9,9 @@ import {
   getStringValue,
   truncateInline,
 } from "../helpers"
-import { PierrePatchDiffOutput } from "../../diff/pierre-diff"
+import { ApplyPatchOperationList } from "./apply-patch-list"
 
-type ApplyPatchOperation = {
+export type ApplyPatchOperation = {
   added: number
   directory: string | null
   displayPath: string
@@ -222,53 +222,7 @@ function convertOperationToUnifiedDiff(
   }
 }
 
-function renderApplyPatchOperationList(operations: ApplyPatchOperation[]) {
-  return (
-    <div className="tool-timeline-patch-list">
-      {operations.map((entry) => (
-        <details
-          key={entry.key}
-          className="tool-timeline-patch-item"
-          data-kind={entry.kind}
-        >
-          <summary className="tool-timeline-patch-summary">
-            <span
-              className="tool-timeline-patch-path"
-              title={entry.displayPath}
-            >
-              <span className="tool-timeline-patch-filename">
-                {entry.fileName}
-                {entry.directory ? (
-                  <span className="tool-timeline-patch-directory">
-                    {` \u202A${entry.directory}\u202C`}
-                  </span>
-                ) : null}
-              </span>
-            </span>
-            <span className="tool-timeline-patch-summary-meta">
-              <span className="tool-timeline-patch-stats">
-                <span className="tool-timeline-patch-stat text-emerald-400">
-                  +{entry.added}
-                </span>
-                <span className="tool-timeline-patch-stat text-red-400">
-                  -{entry.removed}
-                </span>
-              </span>
-              <span className="tool-timeline-patch-chevron" aria-hidden="true">
-                ›
-              </span>
-            </span>
-          </summary>
-          <div className="tool-timeline-patch-body">
-            <PierrePatchDiffOutput patch={entry.patch} />
-          </div>
-        </details>
-      ))}
-    </div>
-  )
-}
-
-function toPatchOperations(value: string): ApplyPatchOperation[] {
+export function toPatchOperations(value: string): ApplyPatchOperation[] {
   const normalized = normalizeLineEndings(value)
 
   if (normalized.startsWith("diff --git ")) {
@@ -411,11 +365,7 @@ export function createApplyPatchRenderer(): ToolRenderer {
 
       if (!content) return null
 
-      const patches = toPatchOperations(content)
-
-      if (patches.length === 0) return null
-
-      return renderApplyPatchOperationList(patches)
+      return <ApplyPatchOperationList patch={content} />
     },
   }
 }

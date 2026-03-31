@@ -117,14 +117,14 @@ fn parse_credential(dto: ProviderCredentialDto) -> Result<CredentialRef, JsonRes
     match dto.credential_type.as_str() {
         "api_key" => {
             if dto.value.trim().is_empty() {
-                return Err(error_response(StatusCode::BAD_REQUEST, "credential value is required"));
+                return Err(error_response(
+                    StatusCode::BAD_REQUEST,
+                    "credential value is required",
+                ));
             }
             Ok(CredentialRef::api_key(dto.value))
         }
-        other => Err(error_response(
-            StatusCode::BAD_REQUEST,
-            format!("未知凭证类型：{other}"),
-        )),
+        other => Err(error_response(StatusCode::BAD_REQUEST, format!("未知凭证类型：{other}"))),
     }
 }
 

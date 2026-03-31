@@ -42,6 +42,7 @@ impl ModelConfig {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CredentialRef {
     ApiKey { value: String },
+    Stored { credential_type: String, credential_value: String },
 }
 
 impl CredentialRef {
@@ -49,14 +50,33 @@ impl CredentialRef {
         Self::ApiKey { value: value.into() }
     }
 
-    pub fn api_key_value(&self) -> &str {
-        match self {
-            Self::ApiKey { value } => value,
+    pub fn stored(credential_type: impl Into<String>, credential_value: impl Into<String>) -> Self {
+        Self::Stored {
+            credential_type: credential_type.into(),
+            credential_value: credential_value.into(),
         }
     }
 
+    pub fn credential_type(&self) -> &str {
+        match self {
+            Self::ApiKey { .. } => "api_key",
+            Self::Stored { credential_type, .. } => credential_type,
+        }
+    }
+
+    pub fn credential_value(&self) -> &str {
+        match self {
+            Self::ApiKey { value } => value,
+            Self::Stored { credential_value, .. } => credential_value,
+        }
+    }
+
+    pub fn api_key_value(&self) -> &str {
+        self.credential_value()
+    }
+
     pub fn is_configured(&self) -> bool {
-        !self.api_key_value().trim().is_empty()
+        !self.credential_value().trim().is_empty()
     }
 }
 

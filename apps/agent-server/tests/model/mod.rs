@@ -62,6 +62,21 @@ fn resolved_spec(
     }
 }
 
+fn resolved_spec_with_credential(
+    provider_id: &str,
+    base_url: String,
+    credential: CredentialRef,
+    model: ModelConfig,
+) -> ResolvedModelSpec {
+    ResolvedModelSpec {
+        model_ref: ModelRef::new(provider_id, model.id.clone()),
+        adapter: AdapterKind::OpenAiResponses,
+        base_url,
+        credential,
+        model,
+    }
+}
+
 #[test]
 fn server_model_marks_cancelled_openai_errors_as_cancelled() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
@@ -271,6 +286,32 @@ fn build_model_from_selection_keeps_reasoning_none_without_override() {
     .expect("model should build");
 
     assert_eq!(identity.reasoning_effort, None);
+}
+
+#[test]
+fn build_model_from_selection_accepts_stored_api_key_credential() {
+    let (identity, _) = build_model_from_selection(
+        ProviderLaunchChoice::Resolved {
+            spec: resolved_spec_with_credential(
+                "rayin",
+                "https://example.com".to_string(),
+                CredentialRef::stored("api_key", "test-key"),
+                ModelConfig {
+                    id: "gpt-5.4".to_string(),
+                    display_name: None,
+                    limit: Some(ModelLimit { context: Some(200_000), output: Some(8_192) }),
+                    default_temperature: None,
+                    supports_reasoning: false,
+                },
+            ),
+            reasoning_effort: None,
+        },
+        None,
+    )
+    .expect("model should build from stored api key credential");
+
+    assert_eq!(identity.provider, "rayin");
+    assert_eq!(identity.name, "gpt-5.4");
 }
 
 #[test]

@@ -16,7 +16,8 @@ pub struct StoredProviderAccount {
     pub label: String,
     pub adapter: String,
     pub base_url: String,
-    pub api_key: String,
+    pub credential_type: String,
+    pub credential_value: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -37,12 +38,14 @@ pub struct StoredProviderModel {
 impl StoredProviderAccount {
     fn new(account: &ProviderAccount, created_at: Option<&str>) -> Self {
         let now = iso8601_now();
+        let (credential_type, credential_value) = stored_credential_parts(&account.credential);
         Self {
             id: account.id.clone(),
             label: account.label.clone(),
             adapter: account.adapter.protocol_name().to_string(),
             base_url: account.endpoint.base_url.clone(),
-            api_key: account.credential.api_key_value().to_string(),
+            credential_type,
+            credential_value,
             created_at: created_at.map(str::to_string).unwrap_or_else(|| now.clone()),
             updated_at: now,
         }
@@ -75,7 +78,8 @@ impl AiaStore {
                     label        TEXT NOT NULL,
                     adapter      TEXT NOT NULL,
                     base_url     TEXT NOT NULL,
-                    api_key      TEXT NOT NULL,
+                    credential_type  TEXT,
+                    credential_value TEXT,
                     created_at   TEXT NOT NULL,
                     updated_at   TEXT NOT NULL
                 );
@@ -95,6 +99,7 @@ impl AiaStore {
                 CREATE INDEX IF NOT EXISTS idx_provider_models_provider_id
                     ON provider_models(provider_id);",
             )?;
+            migrate_provider_credentials(conn)?;
             Ok(())
         })
     }
@@ -125,12 +130,9 @@ impl AiaStore {
 fn load_provider_registry_from_conn(
     conn: &rusqlite::Connection,
 ) -> Result<ProviderRegistry, AiaStoreError> {
+    let provider_select = provider_account_select_sql(conn)?;
     let profiles = {
-        let mut stmt = conn.prepare(
-            "SELECT id, label, adapter, base_url, api_key, created_at, updated_at
-             FROM providers
-             ORDER BY id ASC",
-        )?;
+        let mut stmt = conn.prepare(&provider_select)?;
         let rows = stmt.query_map([], read_provider_account_row)?;
         rows.collect::<Result<Vec<_>, _>>()?
     };
@@ -169,7 +171,10 @@ fn load_provider_registry_from_conn(
                 label: account.label,
                 adapter: parse_adapter_kind(&account.adapter)?,
                 endpoint: ProviderEndpoint { base_url: account.base_url },
-                credential: CredentialRef::api_key(account.api_key),
+                credential: parse_stored_credential(
+                    &account.credential_type,
+                    account.credential_value,
+                )?,
                 models: provider_models,
             })
         })
@@ -204,14 +209,16 @@ fn save_provider_registry_to_conn(
             existing_profiles.get(&account.id).map(|stored| stored.created_at.as_str()),
         );
         conn.execute(
-            "INSERT INTO providers (id, label, adapter, base_url, api_key, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO providers (
+                id, label, adapter, base_url, credential_type, credential_value, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             (
                 stored_profile.id.as_str(),
                 stored_profile.label.as_str(),
                 stored_profile.adapter.as_str(),
                 stored_profile.base_url.as_str(),
-                stored_profile.api_key.as_str(),
+                stored_profile.credential_type.as_str(),
+                stored_profile.credential_value.as_str(),
                 stored_profile.created_at.as_str(),
                 stored_profile.updated_at.as_str(),
             ),
@@ -251,11 +258,8 @@ fn save_provider_registry_to_conn(
 fn load_existing_provider_profiles(
     conn: &Connection,
 ) -> Result<Vec<StoredProviderAccount>, AiaStoreError> {
-    let mut stmt = conn.prepare(
-        "SELECT id, label, adapter, base_url, api_key, created_at, updated_at
-         FROM providers
-         ORDER BY id ASC",
-    )?;
+    let select_sql = provider_account_select_sql(conn)?;
+    let mut stmt = conn.prepare(&select_sql)?;
     let rows = stmt.query_map([], read_provider_account_row)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(AiaStoreError::from)
 }
@@ -279,10 +283,82 @@ fn read_provider_account_row(row: &Row<'_>) -> rusqlite::Result<StoredProviderAc
         label: row.get(1)?,
         adapter: row.get(2)?,
         base_url: row.get(3)?,
-        api_key: row.get(4)?,
-        created_at: row.get(5)?,
-        updated_at: row.get(6)?,
+        credential_type: row.get(4)?,
+        credential_value: row.get(5)?,
+        created_at: row.get(6)?,
+        updated_at: row.get(7)?,
     })
+}
+
+fn migrate_provider_credentials(conn: &Connection) -> Result<(), AiaStoreError> {
+    let columns = provider_column_names(conn)?;
+    let has_credential_type = columns.iter().any(|column| column == "credential_type");
+    let has_credential_value = columns.iter().any(|column| column == "credential_value");
+    let has_api_key = columns.iter().any(|column| column == "api_key");
+
+    if !has_credential_type {
+        conn.execute("ALTER TABLE providers ADD COLUMN credential_type TEXT", [])?;
+    }
+    if !has_credential_value {
+        conn.execute("ALTER TABLE providers ADD COLUMN credential_value TEXT", [])?;
+    }
+
+    if has_api_key {
+        conn.execute(
+            "UPDATE providers
+             SET credential_type = COALESCE(credential_type, 'api_key'),
+                 credential_value = COALESCE(credential_value, api_key)
+             WHERE credential_type IS NULL OR credential_value IS NULL",
+            [],
+        )?;
+    }
+
+    Ok(())
+}
+
+fn provider_column_names(conn: &Connection) -> Result<Vec<String>, AiaStoreError> {
+    let mut stmt = conn.prepare("PRAGMA table_info(providers)")?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(AiaStoreError::from)
+}
+
+fn provider_account_select_sql(conn: &Connection) -> Result<String, AiaStoreError> {
+    let columns = provider_column_names(conn)?;
+    let has_credential_type = columns.iter().any(|column| column == "credential_type");
+    let has_credential_value = columns.iter().any(|column| column == "credential_value");
+    let has_api_key = columns.iter().any(|column| column == "api_key");
+
+    let credential_type_expr =
+        if has_credential_type { "COALESCE(credential_type, 'api_key')" } else { "'api_key'" };
+    let credential_value_expr = match (has_credential_value, has_api_key) {
+        (true, true) => "COALESCE(credential_value, api_key, '')",
+        (true, false) => "COALESCE(credential_value, '')",
+        (false, true) => "COALESCE(api_key, '')",
+        (false, false) => "''",
+    };
+
+    Ok(format!(
+        "SELECT id, label, adapter, base_url,\n                {credential_type_expr} AS credential_type,\n                {credential_value_expr} AS credential_value,\n                created_at, updated_at\n         FROM providers\n         ORDER BY id ASC"
+    ))
+}
+
+fn stored_credential_parts(credential: &CredentialRef) -> (String, String) {
+    match credential {
+        CredentialRef::ApiKey { value } => ("api_key".to_string(), value.clone()),
+        CredentialRef::Stored { credential_type, credential_value } => {
+            (credential_type.clone(), credential_value.clone())
+        }
+    }
+}
+
+fn parse_stored_credential(
+    credential_type: &str,
+    credential_value: String,
+) -> Result<CredentialRef, AiaStoreError> {
+    match credential_type {
+        "api_key" => Ok(CredentialRef::stored("api_key", credential_value)),
+        other => Ok(CredentialRef::stored(other, credential_value)),
+    }
 }
 
 fn read_provider_model_row(row: &Row<'_>) -> rusqlite::Result<StoredProviderModel> {
