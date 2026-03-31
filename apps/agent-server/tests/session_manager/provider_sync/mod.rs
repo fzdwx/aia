@@ -88,7 +88,7 @@ fn updating_non_active_provider_keeps_unbound_session_unmodified() {
                 label: None,
                 adapter: None,
                 models: None,
-                api_key: Some("backup-key-updated".into()),
+                credential: Some(provider_registry::CredentialRef::api_key("backup-key-updated")),
                 base_url: None,
             },
         )

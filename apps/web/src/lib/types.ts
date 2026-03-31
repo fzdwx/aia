@@ -322,8 +322,17 @@ export type ProviderListItem = {
   id: string
   label: string
   adapter: string
+  credential: {
+    type: string
+    configured: boolean
+  }
   models: ModelConfig[]
   base_url: string
+}
+
+export type ProviderCredentialInput = {
+  type: "api_key"
+  value: string
 }
 
 export type SessionSettings = {

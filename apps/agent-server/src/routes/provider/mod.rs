@@ -12,8 +12,23 @@ pub(crate) struct ProviderListItem {
     pub id: String,
     pub label: String,
     pub adapter: String,
+    pub credential: ProviderCredentialStatus,
     pub models: Vec<ModelConfigDto>,
     pub base_url: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ProviderCredentialDto {
+    #[serde(rename = "type")]
+    pub credential_type: String,
+    pub value: String,
+}
+
+#[derive(Serialize)]
+pub(crate) struct ProviderCredentialStatus {
+    #[serde(rename = "type")]
+    pub credential_type: String,
+    pub configured: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -73,8 +88,8 @@ pub(crate) struct CreateProviderRequest {
     pub id: String,
     pub label: String,
     pub adapter: String,
+    pub credential: ProviderCredentialDto,
     pub models: Vec<ModelConfigDto>,
-    pub api_key: String,
     pub base_url: String,
 }
 
@@ -82,8 +97,8 @@ pub(crate) struct CreateProviderRequest {
 pub(crate) struct UpdateProviderRequest {
     pub label: Option<String>,
     pub adapter: Option<String>,
+    pub credential: Option<ProviderCredentialDto>,
     pub models: Option<Vec<ModelConfigDto>>,
-    pub api_key: Option<String>,
     pub base_url: Option<String>,
 }
 

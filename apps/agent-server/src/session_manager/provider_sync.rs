@@ -5,7 +5,7 @@ use std::sync::Arc;
 use agent_core::ToolRegistry;
 use agent_runtime::AgentRuntime;
 use agent_store::AiaStore;
-use provider_registry::{CredentialRef, ProviderAccount, ProviderEndpoint, ProviderRegistry};
+use provider_registry::{ProviderAccount, ProviderEndpoint, ProviderRegistry};
 use session_tape::SessionProviderBinding;
 
 use crate::{
@@ -131,7 +131,7 @@ impl<'a> ProviderSyncService<'a> {
             label: input.label,
             adapter: input.adapter,
             endpoint: ProviderEndpoint { base_url: input.base_url },
-            credential: CredentialRef::api_key(input.api_key),
+            credential: input.credential,
             models: input.models,
         });
         self.sync_registry(candidate_registry).map(|_| ())
@@ -158,9 +158,7 @@ impl<'a> ProviderSyncService<'a> {
             endpoint: ProviderEndpoint {
                 base_url: input.base_url.unwrap_or(profile.endpoint.base_url),
             },
-            credential: CredentialRef::api_key(
-                input.api_key.unwrap_or_else(|| profile.credential.api_key_value().to_string()),
-            ),
+            credential: input.credential.unwrap_or(profile.credential),
             models: input.models.unwrap_or(profile.models),
         };
 

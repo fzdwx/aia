@@ -6,6 +6,7 @@ import type {
   PendingQuestionResponse,
   ModelConfig,
   ModelRef,
+  ProviderCredentialInput,
   QuestionResult,
   ProviderListItem,
   QueuedMessage,
@@ -294,8 +295,8 @@ export async function createProvider(body: {
   id: string
   label: string
   adapter: string
+  credential: ProviderCredentialInput
   models: ModelConfig[]
-  api_key: string
   base_url: string
 }): Promise<void> {
   const res = await fetch("/api/providers", {
@@ -320,8 +321,8 @@ export async function updateProvider(
   body: {
     label?: string
     adapter?: string
+    credential?: ProviderCredentialInput
     models?: ModelConfig[]
-    api_key?: string
     base_url?: string
   }
 ): Promise<void> {

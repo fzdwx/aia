@@ -210,7 +210,12 @@ export function SettingsPanel() {
           base_url: baseUrl.trim(),
         }
 
-        if (apiKey.trim()) body.api_key = apiKey.trim()
+        if (apiKey.trim()) {
+          body.credential = {
+            type: "api_key",
+            value: apiKey.trim(),
+          }
+        }
 
         await storeUpdateProvider(
           selectedProvider.id,
@@ -224,8 +229,11 @@ export function SettingsPanel() {
         id: providerId,
         label: label.trim(),
         adapter,
+        credential: {
+          type: "api_key",
+          value: apiKey.trim(),
+        },
         models: builtModels,
-        api_key: apiKey.trim(),
         base_url: baseUrl.trim(),
       })
       selectProviderName(providerId)

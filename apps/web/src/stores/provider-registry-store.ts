@@ -6,7 +6,11 @@ import {
   listProviders as apiListProviders,
   updateProvider as apiUpdateProvider,
 } from "@/lib/api"
-import type { ModelConfig, ProviderListItem } from "@/lib/types"
+import type {
+  ModelConfig,
+  ProviderCredentialInput,
+  ProviderListItem,
+} from "@/lib/types"
 
 type ProviderRegistryStore = {
   providerList: ProviderListItem[]
@@ -15,8 +19,8 @@ type ProviderRegistryStore = {
     id: string
     label: string
     adapter: string
+    credential: ProviderCredentialInput
     models: ModelConfig[]
-    api_key: string
     base_url: string
   }) => Promise<void>
   updateProvider: (
@@ -24,8 +28,8 @@ type ProviderRegistryStore = {
     body: {
       label?: string
       adapter?: string
+      credential?: ProviderCredentialInput
       models?: ModelConfig[]
-      api_key?: string
       base_url?: string
     }
   ) => Promise<void>

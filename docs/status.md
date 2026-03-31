@@ -63,6 +63,7 @@
 - 基于 `streamdown` 的统一 Markdown 渲染
 - provider / session settings 外层语义已开始按 `ProviderAccount + AdapterKind + ModelRef` 收口：provider 列表与设置面板使用 `id / label / adapter`，session 设置使用 `model_ref + reasoning_effort`
 - server 内部活动选择快照也已改成 `provider_id / model_id` 命名，避免继续在桥接层传播旧的 `name / model` 语义
+- provider 控制面已开始进入 credential phase 2：HTTP / Web 创建与更新入口不再围绕顶层 `api_key` 字段设计，而是显式走 `credential` 对象；provider 列表只暴露 `configured` 状态，不回显 secret
 
 ### 5. Session 能力
 
