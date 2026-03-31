@@ -1243,8 +1243,8 @@ Followup 入队，Steal 打断。
 - [x] `mod.rs`: 实现 `restore_queue_from_tape`（针对已落盘的 queue 事件）
 - [x] `mod.rs`: 修改 `SessionSlotFactory::create` 恢复队列（不代表 `Running` 态即时入队已完整持久化）
 - [x] `mod.rs`: 在 `handle_command` 中处理 `SubmitQueuedMessages` 命令
-- [x] `turn_execution.rs`: 新增 `submit_turn_multi` 方法
-- [x] `turn_execution.rs`: 新增 `TurnWorkerMode::Multi` 变体
+- [x] `turn_execution.rs`：队列消息通过已有 `submit_turn(session_id, prompts: Vec<String>)` 统一提交，不存在独立的 `submit_turn_multi` 接口
+- [x] `turn_execution.rs`：不存在 `TurnWorkerMode::Multi` 变体
 
 ### SSE 层改动
 
