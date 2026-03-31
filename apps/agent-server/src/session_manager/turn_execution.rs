@@ -92,6 +92,7 @@ impl<'a> TurnExecutionService<'a> {
                 trace_recorder: ToolTraceRecorder::new(self.config.store.clone()),
                 registry: self.config.registry.clone(),
                 sessions_dir: self.config.sessions_dir.clone(),
+                user_agent: self.config.user_agent.clone(),
                 session_id: session_id_owned.clone(),
                 turn_id: turn_id.clone(),
             },
@@ -178,6 +179,7 @@ pub(super) struct TurnWorkerContext {
     pub(super) trace_recorder: ToolTraceRecorder,
     pub(super) registry: provider_registry::ProviderRegistry,
     pub(super) sessions_dir: std::path::PathBuf,
+    pub(super) user_agent: String,
     pub(super) session_id: SessionId,
     pub(super) turn_id: String,
 }

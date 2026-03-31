@@ -107,3 +107,88 @@ fn provider_registry_persists_providers_and_newest_model_order() {
     );
     assert_eq!(main.default_model_id(), Some("gpt-5"));
 }
+
+#[test]
+fn legacy_provider_tables_are_migrated_to_current_schema() {
+    let store = crate::AiaStore::in_memory().expect("memory store should initialize");
+
+    store
+        .with_conn(|conn| {
+            conn.execute_batch(
+                "DROP TABLE provider_models;
+                 DROP TABLE providers;
+                 CREATE TABLE providers (
+                     name         TEXT PRIMARY KEY,
+                     kind         TEXT NOT NULL,
+                     base_url     TEXT NOT NULL,
+                     api_key      TEXT NOT NULL,
+                     created_at   TEXT NOT NULL,
+                     updated_at   TEXT NOT NULL,
+                     is_active    INTEGER NOT NULL DEFAULT 0
+                 );
+                 CREATE TABLE provider_models (
+                     provider_name       TEXT NOT NULL,
+                     model_id            TEXT NOT NULL,
+                     display_name        TEXT,
+                     context_limit       INTEGER,
+                     output_limit        INTEGER,
+                     default_temperature REAL,
+                     supports_reasoning  INTEGER NOT NULL,
+                     created_at          TEXT NOT NULL,
+                     updated_at          TEXT NOT NULL,
+                     PRIMARY KEY (provider_name, model_id),
+                     FOREIGN KEY (provider_name) REFERENCES providers(name) ON DELETE CASCADE
+                 );
+                 CREATE INDEX idx_provider_models_provider_name
+                     ON provider_models(provider_name);
+                 INSERT INTO providers (name, kind, base_url, api_key, created_at, updated_at, is_active)
+                 VALUES ('legacy-main', 'openai-responses', 'https://api.openai.com/v1', 'secret', '2026-03-01T00:00:00Z', '2026-03-02T00:00:00Z', 1);
+                 INSERT INTO provider_models (
+                     provider_name, model_id, display_name, context_limit, output_limit,
+                     default_temperature, supports_reasoning, created_at, updated_at
+                 )
+                 VALUES (
+                     'legacy-main', 'gpt-5', 'GPT-5', 200000, 8192,
+                     0.2, 1, '2026-03-01T00:00:00Z', '2026-03-02T00:00:00Z'
+                 );",
+            )?;
+            Ok(())
+        })
+        .expect("legacy schema should be installable");
+
+    store.init_provider_schema().expect("legacy provider schema should migrate on startup");
+
+    let registry = store.load_provider_registry().expect("migrated provider registry should load");
+
+    assert_eq!(registry.providers().len(), 1);
+    let provider = &registry.providers()[0];
+    assert_eq!(provider.id, "legacy-main");
+    assert_eq!(provider.label, "legacy-main");
+    assert_eq!(provider.adapter, AdapterKind::OpenAiResponses);
+    assert_eq!(provider.endpoint.base_url, "https://api.openai.com/v1");
+    assert_eq!(provider.credential.api_key_value(), "secret");
+    assert_eq!(provider.default_model_id(), Some("gpt-5"));
+
+    store
+        .with_conn(|conn| {
+            let provider_id_exists = {
+                let mut stmt = conn.prepare("PRAGMA table_info(provider_models)")?;
+                let columns =
+                    stmt.query_map([], |row| row.get::<_, String>(1))?
+                        .collect::<Result<Vec<_>, _>>()?;
+                columns.into_iter().any(|column| column == "provider_id")
+            };
+            let provider_name_exists = {
+                let mut stmt = conn.prepare("PRAGMA table_info(provider_models)")?;
+                let columns =
+                    stmt.query_map([], |row| row.get::<_, String>(1))?
+                        .collect::<Result<Vec<_>, _>>()?;
+                columns.into_iter().any(|column| column == "provider_name")
+            };
+
+            assert!(provider_id_exists);
+            assert!(!provider_name_exists);
+            Ok(())
+        })
+        .expect("migrated schema should expose current columns");
+}

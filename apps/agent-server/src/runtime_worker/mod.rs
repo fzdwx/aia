@@ -5,7 +5,7 @@ mod tests;
 
 use agent_runtime::TurnControl;
 use axum::http::StatusCode;
-use provider_registry::{AdapterKind, ModelConfig};
+use provider_registry::{AdapterKind, CredentialRef, ModelConfig};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -109,7 +109,7 @@ pub struct CreateProviderInput {
     pub label: String,
     pub adapter: AdapterKind,
     pub models: Vec<ModelConfig>,
-    pub api_key: String,
+    pub credential: CredentialRef,
     pub base_url: String,
 }
 
@@ -118,7 +118,7 @@ pub struct UpdateProviderInput {
     pub label: Option<String>,
     pub adapter: Option<AdapterKind>,
     pub models: Option<Vec<ModelConfig>>,
-    pub api_key: Option<String>,
+    pub credential: Option<CredentialRef>,
     pub base_url: Option<String>,
 }
 
