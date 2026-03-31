@@ -658,6 +658,37 @@ fn responses_流式调用在_abort_后返回取消错误() {
 }
 
 #[test]
+fn responses_请求发送阶段在_abort_后返回取消错误() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("监听成功");
+    let address = listener.local_addr().expect("读取地址成功");
+
+    let handle = thread::spawn(move || {
+        let (_stream, _) = listener.accept().expect("接受连接成功");
+        thread::sleep(std::time::Duration::from_millis(200));
+    });
+
+    let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
+        format!("http://{address}"),
+        "test-key",
+        "gpt-4.1-mini",
+    ))
+    .expect("模型创建成功");
+
+    let abort = AbortSignal::new();
+    let cancel = abort.clone();
+    thread::spawn(move || {
+        thread::sleep(std::time::Duration::from_millis(30));
+        cancel.abort();
+    });
+
+    let error = run_async(model.complete_streaming(sample_request(), &abort, &mut |_| {}))
+        .expect_err("应当因发送阶段取消而失败");
+
+    handle.join().expect("服务线程退出");
+    assert!(error.is_cancelled());
+}
+
+#[test]
 fn chat_completions_流式调用在_abort_后返回取消错误() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("监听成功");
     let address = listener.local_addr().expect("读取地址成功");
@@ -693,6 +724,39 @@ fn chat_completions_流式调用在_abort_后返回取消错误() {
 
     let error = run_async(model.complete_streaming(request, &abort, &mut |_| {}))
         .expect_err("应当因取消而失败");
+
+    handle.join().expect("服务线程退出");
+    assert!(error.is_cancelled());
+}
+
+#[test]
+fn chat_completions_请求发送阶段在_abort_后返回取消错误() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("监听成功");
+    let address = listener.local_addr().expect("读取地址成功");
+
+    let handle = thread::spawn(move || {
+        let (_stream, _) = listener.accept().expect("接受连接成功");
+        thread::sleep(std::time::Duration::from_millis(200));
+    });
+
+    let model = OpenAiChatCompletionsModel::new(OpenAiChatCompletionsConfig::new(
+        format!("http://{address}"),
+        "test-key",
+        "minum-security-llm",
+    ))
+    .expect("模型创建成功");
+
+    let mut request = sample_request();
+    request.model.name = "minum-security-llm".into();
+    let abort = AbortSignal::new();
+    let cancel = abort.clone();
+    thread::spawn(move || {
+        thread::sleep(std::time::Duration::from_millis(30));
+        cancel.abort();
+    });
+
+    let error = run_async(model.complete_streaming(request, &abort, &mut |_| {}))
+        .expect_err("应当因发送阶段取消而失败");
 
     handle.join().expect("服务线程退出");
     assert!(error.is_cancelled());

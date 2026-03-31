@@ -13,6 +13,26 @@ use crate::{
 
 const STREAM_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
+async fn send_with_abort(
+    request_builder: reqwest::RequestBuilder,
+    abort: &AbortSignal,
+) -> Result<Response, OpenAiAdapterError> {
+    let send_future = request_builder.send();
+    tokio::pin!(send_future);
+
+    loop {
+        if abort.is_aborted() {
+            return Err(OpenAiAdapterError::cancelled("OpenAI 请求在发送阶段已取消"));
+        }
+
+        match timeout(STREAM_POLL_INTERVAL, &mut send_future).await {
+            Ok(Ok(response)) => return Ok(response),
+            Ok(Err(error)) => return Err(OpenAiAdapterError::new(error.to_string())),
+            Err(_) => continue,
+        }
+    }
+}
+
 pub(crate) trait StreamingState: Default {
     fn transcript_mut(&mut self) -> &mut StreamingTranscript;
 
@@ -151,10 +171,7 @@ where
         request.user_agent.as_deref(),
     );
 
-    let response = request_builder
-        .send()
-        .await
-        .map_err(|error| OpenAiAdapterError::new(error.to_string()))?;
+    let response = send_with_abort(request_builder, abort).await?;
 
     let status = response.status();
     if !status.is_success() {
