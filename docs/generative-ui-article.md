@@ -1,5 +1,9 @@
 # 生成式 UI（Generative UI）在 aia 中的落地设想
 
+> 本文是生成式 UI 的研究/设计文章，不是当前已实施功能说明。当前项目真源请优先看 `docs/status.md`、`docs/requirements.md`、`docs/architecture.md`。
+
+- Last verified: `2026-03-30`
+
 ## 为什么现在写这篇文章
 
 目前 `aia` 已经具备几条生成式 UI 的关键前置条件：

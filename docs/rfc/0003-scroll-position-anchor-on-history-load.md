@@ -20,6 +20,19 @@ superseded_by: null
 2. 使用视口高度比例（1.5x）触发预加载，适配不同屏幕尺寸
 3. 改进加载指示器，添加旋转动画提供视觉反馈
 
+## Implementation Snapshot
+
+截至当前代码，RFC 头部的 `Implemented` 结论成立，但需要注意：本 RFC 正文里后半段保留了一版更激进的 `turn_id` / DOM anchor 设计讨论；**最终落地的主路径没有完全按那版方案实现**。
+
+当前真实实现以 `apps/web/src/features/chat/chat-messages/index.tsx` 与相关 helper 为准，主要行为是：
+
+1. 加载更早历史前记录容器的 `scrollHeight` 与 `scrollTop`
+2. 历史插入后在 `useLayoutEffect` 中按高度差恢复 `scrollTop`
+3. 预加载触发阈值按“视口高度的 `1.5x`”计算，而不是固定像素
+4. 历史加载提示与视觉反馈已经落地
+
+因此，阅读下文 `Proposal` 里关于“按第一条可见消息 `turn_id` 锚定并 `scrollIntoView` 恢复”的段落时，应把它视为**设计过程中评估过的候选方案**，而不是今天的代码事实。
+
 ## Motivation
 
 当前实现在 `handleLoadOlderTurns` 时使用 `scrollAnchorRef` 记录 `container.scrollHeight`，加载完成后通过计算高度差调整 `scrollTop`：
@@ -56,6 +69,8 @@ if (added > 0) container.scrollTop += added
 ## Proposal
 
 ### 核心思路
+
+> 历史说明：这里记录的是当时重点讨论过的一版 `turn_id` / DOM anchor 方案；最终实现收口成了更保守的“高度差恢复 + 动态阈值 + 可视反馈”。当前代码事实请以本文件前面的 `Implementation Snapshot` 为准。
 
 将锚点从"高度差"改为"第一条可见消息元素"：
 

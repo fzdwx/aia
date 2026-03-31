@@ -1,102 +1,98 @@
-> 这里是用户记录的问题追踪，ai解决后需要标记完成
+# 待办清单
 
-# ~~重要： 上下文自动压缩~~ ✅ 已完成
+> 这里只跟踪 **未完成事项**。已完成事项不再堆在这里，请分别看：
+>
+> - `docs/status.md`：当前状态
+> - `docs/evolution-log.md`：历史过程
+> - `docs/rfc/`：设计决策
 
-参考 bub / republic 实现，优化了上下文压缩机制。
+- Last reviewed: `2026-03-30`
+- 状态说明：`doing` / `todo` / `research` / `icebox`
 
-## 设计决策
+## P0｜当前主线
 
-**Handoff 语义**：写入 anchor → 附带最小继承状态（summary）→ 执行起点迁移至 anchor 之后。
+### 1. `agent-server` runtime ownership / return-path 收口
 
-**anchor_state_message 简化**：
-- 仅注入 summary 文本，格式：`[context summary]\n{summary}`
-- Role 改为 `User`（不干扰 system prompt / instructions）
-- 移除所有元数据：`source_entry_ids`、`owner`、`phase`、`next_steps`
-- 无摘要时不注入（返回 `Option<Message>`）
+- 状态：`doing`
+- 重点：继续压缩 `apps/agent-server/src/session_manager/turn_execution.rs` 中的 `runtime.take() -> worker -> RuntimeReturn` 主线
+- 目标：让 `apps/agent-server` 更像稳定驱动面，而不是持续膨胀的 app 壳
+- 验证关注：turn / cancel / history / current-turn / pending question / channel 入口回归
 
-**新增 tape_info / tape_handoff 工具**：
-- `tape_info`：返回上下文统计（entries、anchors、pressure_ratio 等），让 agent 感知上下文用量
-- `tape_handoff`：agent 主动创建 anchor 截断历史，传入 summary 作为最小继承状态
-- 两个工具当前已通过 runtime tool registry 正式注册，不再是简单 runtime 字符串拦截
+### 2. 统一工具协议的对外映射与 MCP 接入
 
-**自动压缩（安全回退）保留**：
-- 压力 ≥80% 时 pre-turn 自动压缩
-- `context_length_exceeded` 错误时重试压缩
-- 改进了 SUMMARY_PROMPT，生成更结构化的摘要
+- 状态：`todo`
+- 重点：在保持内部工具短名、稳定、与执行器解耦的前提下，对接外部模型协议与 MCP
+- 目标：避免继续把外部差异反向污染共享核心层
 
-**context_contract**：
-- 在 system instructions 中追加 `<context_contract>` 块
-- 提示 agent 使用 tape_info 和 tape_handoff 管理上下文
+### 3. stop/cancel 覆盖率补强
 
-**orphaned tool_result 过滤**：
-- `tape_handoff` 会在 tool_call 和 tool_result 之间创建 anchor
-- anchor 之前的 tool_call 被截断，留下孤立的 tool_result
-- `drop_orphaned_tool_results()` 在构建 CompletionRequest 时过滤
+- 状态：`todo`
+- 重点：
+  - 长时间 shell pipeline
+  - 慢 provider streaming
+  - 连接建立 / TLS / 代理缓冲等窗口
+- 目标：把取消语义从“主链可用”继续推进到“复杂场景也稳定”
 
-## 参考分析
+## P1｜近期事项
 
-- **bub**: ForkTapeStore 事务隔离 + context_contract 让 agent 自管理 + tape_info/tape_handoff 工具
-- **republic**: TapeQuery 丰富查询（after_anchor/between_anchors/between_dates） + TapeContext 可定制投影
-- **共同模式**: append-only 时间线、anchor 分界点、JSONL 存储
+### 4. Feishu 生产边界补强
 
----
+- 状态：`todo`
+- 重点：mention gate、群权限策略、白名单、可用范围控制
 
-# ~~一般： 前端 tool 展示问题~~ ✅ 已完成
+### 5. `Question` 控制面与 RFC 0001 完成线
 
-![tool截图](image.png)
+- 状态：`todo`
+- 重点：
+  - 继续观察 pending question 在真实 provider / 多步工具链中的边缘态
+  - 明确 RFC 0001 从 `Accepted` 升到 `Implemented` 还缺什么
+  - 判断是否要把“重启后 orphaned pending question 重新开放为 active 状态”补成正式语义，还是继续保持 hydrate 时自动 cancelled 的保守策略
+- 注意：不要把当前控制面可用，误写成“通用 suspend/resume 已完全收口”
 
-1. ~~如图所示，tool 调用的内容，都居中了~~
-   - 已修复：使用 `grid-cols-[80px_1fr_auto]` 布局替代 `flex`，确保三列（工具名、路径、状态）左对齐且结构稳定
-   - 优化了 tool 列表的间距，添加 `space-y-0.5` 提升视觉层次
+### 6. Trace 数据模型继续收口
 
----
+- 状态：`todo`
+- 重点：从当前 span store + event timeline 继续推进到 richer events / resources 形态
+- 约束：不抢在 MCP 与工具协议映射之前做 exporter / collector 集成
 
-# 重要： 是否需要支持多个会话
+### 7. 文档第二轮整理
 
-## Future TODO — 多会话隔离
+- 状态：`doing`
+- 重点：
+  - 继续整理 `docs/evolution-log.md` 中最容易误读的 `未提交 / 待本轮执行 / 历史阶段计划` 条目
+  - 审核次级文档与 RFC 正文里的过期实现叙述，特别是 `async-phases.md`、`frontend-web-guidelines.md`、`rfc/README.md`
+  - 评估 `async-phases.md`、`generative-ui-article.md` 等文档是否应进入 `archive / notes` 分层
+  - 让新文档结构长期保持“README / status / requirements / architecture / todo / evolution-log / rfc”职责分离
 
-- 参考 bub 的 workspace_hash__session_hash 命名隔离
-- 参考 republic 的 tape name 独立命名
-- 需要考虑：如何创建/切换/列出会话，后端 session 路由，前端会话列表
-- 当前 aia 已支持多会话：可创建 / 切换 / 列出 / 删除 session，session 列表元信息走 SQLite，具体磁带内容仍按每个 session 一个 jsonl 文件落盘
+## P2｜后续事项
 
-1. 怎么创建多个会话
-2. 后端server需要做哪些修改
-3. 前端怎么兼容
-4. session消息文件还是用jsonl存储吗？
-5. session有没有一些结构化信息需要用数据库存储
-6. /home/like/projects/bub /home/like/projects/republic  里面是怎么实现的
+### 8. 桌面壳接入
 
----
+- 状态：`todo`
+- 目标：复用现有 Web 前端与 Rust 核心，而不是复制第二套 agent 逻辑
 
-# Future TODO — 主题编织 / Topic Recall
+### 9. Topic Recall / 主题编织
 
-- 概念：每个 topic 绑定一个 anchor，重复 topic 触发 recall
-- bub 和 republic 中均未实现此特性
-- bub 的 tape.search（模糊搜索 entries）可作为基础
-- 需要设计：topic 识别、anchor-topic 绑定、跨 anchor recall 机制
+- 状态：`research`
+- 说明：保留为研究项，不作为当前主线
 
----
+### 10. Generative UI / Widget 系统
 
-# Tape System 架构参考笔记
+- 状态：`research`
+- 说明：保留设计研究，不抢在主链稳定前展开实现
 
-供后续开发参考：
+## Icebox｜明确不在当前阶段
 
-- **bub**: ForkTapeStore 事务隔离 + context_contract 让 agent 自管理
-- **republic**: TapeQuery 丰富查询（after_anchor/between_anchors/between_dates） + TapeContext 可定制投影
-- **共同模式**: append-only 时间线、anchor 分界点、JSONL 存储
+- 状态：`icebox`：完整 OTLP exporter / collector 集成
+- 状态：`icebox`：大规模新增 provider 家族
+- 状态：`icebox`：异步子代理调度
 
-# 生成式 UI（Generative UI）Widget 系统
+## 已从本文件移出的问题
 
-- 本地设计文章：`docs/generative-ui-article.md`
-- 外部参考：
-  - https://github.com/op7418/CodePilot/blob/85a07daa93dbc91015259f88cee64f7cc54d090e/docs/handover/generative-ui.md?plain=1#L103
+以下内容已经不再作为 TODO 挂在这里：
 
----
+- 上下文自动压缩：已完成
+- 前端 tool 展示居中问题：已完成
+- “是否需要支持多个会话”：主链已支持，多会话不再是待确认问题
 
-# 页面消息列表加载优化
-
-
----
-
-# reqeust超时时间加长
+后续如果再有新 backlog，直接按优先级补到这里，不要再把“已完成事项 + 历史分析 + 草稿问题”混写在同一个文件里。

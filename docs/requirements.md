@@ -1,110 +1,127 @@
 # 需求说明
 
+> 本文件只描述 **项目目标、边界与非目标**。当前进度看 `docs/status.md`，历史过程看 `docs/evolution-log.md`。
+
+- Last verified: `2026-03-30`
+
 ## 愿景
 
-做一个正常、好用、性能克制、跨平台的代理运行壳，以 Web 界面为当前主承接点，并可继续被桌面壳复用。
+做一个正常、好用、性能克制、跨平台的 agent harness。
+
+它应当：
+
+- 以 Web 工作台作为当前主承接面
+- 以共享 Rust 运行时作为真正核心
+- 保持桌面壳、CLI、自定义客户端都能复用同一条运行时主链
+- 不为了短期堆功能破坏长期边界
 
 ## 核心需求
 
-### 1. 交互形态
+### 1. 交互承接
 
 - 提供一个好用的 Web 界面
-- 提供桌面应用支持
+- 后续可接入桌面壳
 - 支持 Windows、Linux、macOS
-- 当前以 `apps/web` + `apps/agent-server` 作为主交互承接形态
-- 前端输入框应支持设置思考等级，并且模型/思考等级设置默认按 session 维度保存，而不是做成跨会话全局开关
-- `apps/agent-server` 除 Web 后端模式外，也应支持少量直接 CLI 驱动入口；至少要能在不打开 Web 的情况下把内嵌 `docs/self.md` 作为 system prompt 注入同一 runtime 主链上的自我进化对话，并允许启动时附加用户想要优先处理的任务
-- 作为其他客户端可驱动的控制面时，server bootstrap 还应允许嵌入方覆写共享请求超时等应用级默认值，而不是把这类客户端约束硬编码在 app 壳内部
-- HTTP server 的监听地址应保持为 run 阶段的显式配置，而不是混进 bootstrap 状态装配；CLI 和嵌入方都应能覆写默认 bind 地址而不必自行重拼 listener
+- 当前主承接形态是 `apps/web` + `apps/agent-server`
+- 除 Web 外，还应支持少量直接 CLI 驱动入口，例如 `self` 模式
 
-### 2. 运行特性
+### 2. 运行时控制面
 
-- Web 界面保持流畅、低闪烁、低阻塞
-- 作为代理运行壳时注重性能
-- 不能在内存和处理器占用上走极端
-- 不以跑分最大化为第一目标
-- 应保持 server 作为“其他客户端可驱动接口层”的能力，而不是只服务单一前端页面
+- `apps/agent-server` 必须保持为 canonical runtime control surface
+- server 不应只服务单一网页，而应继续可被其他客户端驱动
+- bootstrap 阶段应允许嵌入方覆写应用级默认值，例如请求超时、system prompt、runtime hooks
+- run 阶段应显式配置监听地址，而不是把 bind 地址混进 bootstrap 状态装配
 
-### 3. 代理能力
+### 3. 会话模型
+
+- 会话事实必须保持 append-only
+- 会话主事实以 session tape 为准，派生状态不能覆盖源事实
+- 会话需要支持：
+  - 多 session
+  - 恢复 / 重建
+  - handoff / anchor
+  - fork / merge
+  - session 级模型与思考等级
+  - 标题、最近活跃时间等元信息投影
+- session 元信息与会话事实需要分层持久化：
+  - 结构化元信息适合 SQLite
+  - 轮次与工具事实保持 jsonl tape
+
+### 4. 工具与协议
+
+- 内部只维护一套统一工具协议
+- 工具名与工具契约应保持短名、稳定、与底层执行器解耦
+- 对外兼容 Claude / Codex 风格工具规范
+- 在共享协议边界稳定后，继续推进 MCP 接入
+- 内建工具默认可用，但应保持可控、可裁剪，不与某个模型家族强耦合
+
+### 5. 代理能力
 
 - 感知不同模型的人格差异
-- 默认内建但可选启用：工具搜索、MCP、子代理、异步子代理、分叉、代理到代理协作
-- 内建常用编码工具，并且可切换启停
-- 内建编码工具的对外契约应保持短名、稳定、与具体执行器解耦，避免把底层实现细节直接暴露给模型
-- 兼容 Claude 与 Codex 风格的工具规范
-- 支持增量压缩与交接
-- 可以作为驱动其他客户端的接口层
+- 支持工具调用、上下文压缩、handoff、trace、channel 承接
 - 取消 / stop 语义需要贯穿 server、runtime、provider streaming 与工具执行路径
-- 本地 trace 诊断需要能还原 agent loop、LLM 请求与工具执行的关系
-- 本地 trace 诊断还需要能单独查看上下文压缩调用与压缩摘要日志，而不只是把它们混进普通对话请求里
-- `/api/traces/overview` 这类诊断接口的分页必须真正约束返回列表项数量；不能再出现“按 loop 分页但把整组 item 全展开返回”的伪分页语义。与此同时，overview 汇总应在本地存储层有可复用快照，而不是每次请求都全表重算。
+- 允许通过 structured question 等控制面在合适承接面里做交互，但不能把交互逻辑散落到各客户端各自实现
+
+### 6. 用户体验
+
+- Web 界面要保持流畅、低闪烁、低阻塞
+- 流式体验需要稳定，不应频繁出现布局跳动和状态漂移
+- session 列表、历史恢复、当前轮次恢复、消息队列、interrupt/cancel 都应具备清晰一致的表现
+- 配置面板、trace 工作台、channel 工作台都应在同一信息架构下继续收稳
+
+### 7. 性能与可靠性
+
+- 不以跑分最大化为目标
+- 不能在 CPU 和内存占用上走极端
+- 生产路径不能依赖 panic
+- 运行时与存储边界要清楚，避免 session tape、snapshot、SQLite 状态互相漂移
+
+### 8. 可观测性
+
+- 本地 trace 需要能还原 agent loop、LLM 请求与工具执行关系
+- 压缩日志需要能独立查看，而不是混进普通对话请求
+- trace 概览接口要有真实分页与可复用的本地聚合快照，不能靠每次全表重算
 
 ## 当前阶段边界
 
-### 已完成
+当前阶段关注的是：
 
-- Rust 工作区骨架已建立
-- 共享核心库边界已拆分为 `aia-config`、`agent-core`、`session-tape`、`agent-runtime`、`channel-bridge`、`channel-feishu`、`provider-registry`、`openai-adapter`、`agent-store`
-- `aia-config` 已承担跨 crate 复用的应用级路径、默认值、稳定标识与构造 helper
-- `channel-bridge` 已承担外部 channel 共享模型、已配置渠道档案的 store façade、session 绑定恢复、turn 预压缩、消息回执幂等 helper，以及基于 adapter trait 的通用 runtime supervisor
-- `channel-feishu` 已承担飞书 channel 的平台协议、长连接与回复控制实现，不再由 `apps/agent-server` 持有这部分细节
-- `provider-registry` 已承担本地 provider 管理模型；provider 注册表现由 `agent-store` 以 `providers` + `provider_models` 两张表持久化
-- 首个真实模型适配库 `openai-adapter` 已建立，并已同时覆盖 Responses 与 OpenAI 兼容 Chat Completions 两条协议链路
-- `openai-adapter` 当前已改为原生 async `reqwest`：单次请求与流式 SSE 不再依赖 blocking client
-- OpenAI 请求当前已自动启用 prompt caching：server 会为同一 session 生成稳定 `prompt_cache_key`，并固定使用 `24h` retention
-- `apps/agent-server` 已可编译、测试并运行，作为 Web 主界面与其他客户端的共享运行时桥接壳
-- `apps/agent-server` 启动路径、路由序列化路径与本地 store 锁中毒路径都已收口为非 panic 错误路径
-- 会话磁带、结构化锚点、handoff 事件、工具启停基础能力已落地
-- 工具调用与工具结果已进入类型化会话磁带，并能投影到后续默认上下文
-- 工具调用与工具结果现已通过稳定调用标识关联，便于后续 replay 与压缩
-- 历史轮次当前由磁带 entries 按 `meta.run_id` 重建，不再把轮次块直接落盘到 `.aia/session.jsonl`
-- `session-tape` 已补齐命名锚点、查询切片、命名磁带存储抽象与 fork / merge 语义
-- `session-tape` TapeEntry 已改为扁平 `{id, kind, payload, meta, date}` 模型，对齐 republic 数据模型
-- 旧格式 JSONL 可兼容载入并自动转换为新扁平格式
-- `.aia/session.jsonl` 当前统一以扁平 `TapeEntry` JSONL 形式 append-only 落盘
-- provider 本地资料当前落盘在 `.aia/store.sqlite3`
-- provider 仍保持“一 provider 多 model”结构；思考等级 `reasoning_effort` 默认按 session 维度保存，不再作为 provider model 持久化字段
-- channel 本地资料当前落盘在 `.aia/store.sqlite3`
-- channel 配置模型必须保持“通用 profile 元数据 + raw config payload”的结构；具体配置结构、校验与字段 schema 由各 channel adapter 定义，并由 `channel-bridge` 暴露统一 profile façade，而不是保留独立 registry crate
-- 本地 SQLite 状态当前落盘在 `.aia/store.sqlite3`
-- provider 当前已具备协议级区分能力，可在同一地址 / 模型下区分 Responses 与 Chat Completions
-- `apps/web` 已建立为实际主工作台，而不是仅布局骨架
-- Web 客户端当前已接入 provider 管理、session 列表 / 历史 / 当前轮次恢复、流式消息展示、trace 诊断视图
-- Web 客户端当前也已接入飞书 channel 管理：列表、创建、编辑、删除与启停配置
-- Web 客户端的 channel 表单定义应以 server 暴露的 supported-channel catalog 为准，而不是继续写死某个平台字段
-- 内建基础编码工具名已收口为 `Shell`、`Read`、`Write`、`Edit`、`ApplyPatch`、`Glob`、`Grep`、`CodeSearch`、`WebSearch`，其中 `Shell` 当前以内嵌 `brush` 库执行
-- `builtin-tools` 的 `shell` 已把输出聚合、abort 轮询与输出捕获改为 async 事件泵，长命令等待不再依赖同步 `recv_timeout` 循环，也不再依赖 `spawn_blocking` pipe reader 桥接
-- `builtin-tools` 的 `read` / `write` / `edit` 已切到 `tokio::fs`，`glob` / `grep` 也已改为共享的 async `.gitignore` 感知仓库遍历 + async 文件读取，不再依赖 `spawn_blocking` / `ignore::WalkBuilder`
-- 运行时事件已统一通过共享事件模型暴露，并支持多个订阅者独立消费
-- 默认上下文已改为从最新锚点之后重建，而不是无条件带上全量历史
-- `agent-runtime` 已从单次模型调用收敛为单轮内多步执行：模型 → 工具 → 再回模型
-- 工具不可用、工具执行失败、工具结果错配已改为轮次内结构化失败结果，而不是直接终止整个会话循环
-- Web 流式 turn 已与共享运行时失败语义对齐：当前轮失败会通过 SSE 发出错误事件，但不会直接结束整个交互会话
-- cached prompt usage 已贯通到 `completion.usage`、trace 存储、trace 汇总与 Web 聊天/诊断展示
-- `apps/agent-server` 当前由后台 runtime worker 独占运行时，provider / history / current-turn 读取走共享快照
-- `apps/agent-server` 当前已补齐 channel 控制面；飞书 channel 已收敛到正式长连接接入形态，不再继续维护 webhook 过渡入口
-- `agent-store` 当前已承担外部 conversation → `session_id` 映射与 channel message receipt 幂等去重
-- `apps/agent-server` 的 turn 执行已去掉 `tokio::spawn_blocking`，session manager 与 turn worker 当前都由原生 Tokio async task 承载，不再依赖独立 current-thread Tokio worker thread
-- `apps/agent-server` 的 trace 查询路由已去掉 per-request `spawn_blocking` 包装，当前直接复用共享 SQLite store 读取路径
-- provider 变更已采用事务式提交：候选 registry 校验、registry 落盘、session tape 落盘全部成功后才更新内存 runtime / tape
-- 已完成完整 stop/cancel 基线，并继续打通到 OpenAI streaming 与 embedded shell `TERM` 中断
-- 本地 trace 当前已形成 OTel-shaped 诊断模型：agent loop root span、LLM client spans、tool internal spans 与本地 event timeline
-- trace 列表读取已避免为每条记录反序列化完整 `provider_request` 大 JSON，优先依赖轻量 `request_summary` 里的用户消息预览
-- 手动 / 空闲上下文压缩调用现在也会产生日志化 trace，并以独立 compression 日志视图暴露，而不是混入普通 trace 列表
-- trace 首屏加载还需要避免同页重复请求和单连接串行放大：同一视图的摘要与分页应尽量合并成单次读取，SQLite 热查询需要有与过滤/分组形状匹配的索引
+- Web 工作台
+- `agent-server` 控制面
+- 共享 runtime / tools / store / trace 主链
+- channel 接入的桥接边界
 
-### 当前不做
+当前阶段**不要求**：
 
-- 桌面壳实现
-- 完整 MCP 接入
-- 多提供商真实适配扩展
-- 异步子代理调度
+- 完整桌面壳
+- 大规模 provider 扩展
 - 完整 OTLP exporter / collector 集成
+- 异步子代理调度
 
-### 下一阶段优先事项
+这些方向可以做，但不应抢在当前主链收口之前。
 
-- 继续补强 stop/cancel 在不同 provider 与复杂 shell pipeline 下的实际覆盖率
-- 继续补强飞书 channel 的生产级接入细节，优先补齐更细的群聊权限策略、mention gate 边界与可用范围控制
-- 继续把 runtime 驱动辅助从 `apps/agent-server` 上移到共享层
-- 在工具协议边界进一步收稳后，推进统一工具规范向外部协议映射与 MCP 接入
-- 在现有 Web / server 主路径稳定的前提下，继续补强 trace 数据模型与桌面壳复用基础
+## 当前阶段的完成判断
+
+当前阶段是否做得对，主要看这些条件：
+
+1. Web、server、runtime、store 之间的 ownership 清晰
+2. session 事实、元信息、快照与 SSE 投影不会互相漂移
+3. stop/cancel、queue、history restore、current-turn restore 等主路径稳定
+4. 工具协议保持内部统一，对外映射边界清楚
+5. trace、compression、channel、session settings 这些控制面不再各自长出第二套语义
+
+## 非目标
+
+以下内容不是本阶段的主目标：
+
+- 为了“支持更多平台”而复制第二套 agent 逻辑
+- 在共享协议未稳定前大量扩展外部协议特化分支
+- 为了短期方便把业务规则重新塞回 app 壳
+- 用临时文档流水账代替稳定的需求、架构与状态分层
+
+## 与其他文档的关系
+
+- `docs/status.md`：回答“现在做到哪了”
+- `docs/architecture.md`：回答“边界和 ownership 怎么分”
+- `docs/todo.md`：回答“接下来还没做什么”
+- `docs/rfc/*`：回答“为什么这样设计”

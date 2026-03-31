@@ -1,5 +1,27 @@
 # 演进日志
 
+## 阅读说明
+
+- 本文件是 **历史过程记录**，不是当前状态真源。
+- 当前真实结论请优先看：`docs/status.md`、`docs/requirements.md`、`docs/architecture.md` 与相关 `docs/rfc/*`。
+- `Commit` 字段含义：
+  - `hash + message`：该轮工作以独立提交落地。
+  - `未提交`：该轮没有形成独立提交；其中部分结果可能后来被吸收进别的提交、被后续实现覆盖，或只作为中间工作记录存在。
+- `Verification` 字段里出现的 `待本轮执行`、`待补充` 等表述，表示**该条目写下当时**的记录状态，不等于“截至今天仍未验证”。
+- `Update` 字段表示同一工作线程内的增量记录，不等于新的独立会话或独立提交。
+- 条目中的 `Phase 1/2/3`、`下一轮优先` 等表述，通常是当时局部改造的推进计划，不应直接视为今天仍生效的项目阶段定义。
+
+> 历史上较早的一批条目里，`未提交` 与 `待本轮执行` 较多。阅读这些条目时，不应直接把它们当成当前事实，应与当前代码和 RFC 状态一起交叉核对。
+
+## 连续主题提示
+
+- `2026-03-25 Session 107` 到 `Session 111` 是同一组 `Question` / pending-question / RFC 0001 连续推进记录。
+- 这组记录里既有设计收口，也有中途实现路径调整；当前真实边界请以 `docs/rfc/0001-question-runtime-tool.md` 与 `docs/status.md` 为准。
+- `2026-03-17 Session 10` 到 `Session 17`，以及后面的 `Session 29`，记录的是 async 主链迁移过程；这些 `Phase` 表述属于历史推进语境，当前 async 阶段已经完成。
+- `2026-03-17 Session 40` 到 `Session 55` 包含一段工具 schema 路线反复收口：前面的 `schemars` 路线后来被 `ToolArgsSchema` / derive 宏取代；当前真实实现以后半段条目和当前代码为准。
+- `2026-03-18 Session 61` 到 `Session 72` 记录的是 channel 从过渡 webhook / 旧配置语义一路收口到 SQLite + 长连接运行态的过程；越早的条目越可能带有中间形态描述。
+- `2026-03-19 Session 79` 到 `Session 80` 记录的是一度切到 `markstream-react` 的尝试，但这条路线后来已在 `2026-03-23 Session 106` 回退；当前 Markdown 主路径请以后者与 `docs/status.md` 为准。
+
 ## 2026-03-25 Session 111
 
 **Diagnosis**：`Question` RFC 虽然已经把共享协议、runtime tool 和 capability gating 落进 `agent-core` / `agent-runtime`，但 `session-tape` 仍缺少对 `question_requested/question_resolved` 的一等恢复 helper。这样 server 进入 Phase 1 的 pending question 恢复时，仍得在 `apps/agent-server` 里手写一遍“倒序扫描 event、按 `request_id` 配对”的逻辑，不利于把 append-only tape 事实语义稳定地下沉到共享层。
@@ -397,6 +419,8 @@
 **Commit**：未提交。
 **Next direction**：若 trace 数据继续增长，下一步优先评估是否把 loop 列表的 `OFFSET` 分页也收口为游标翻页，并观察 `llm_trace_summary_duration_buckets` 是否需要按常见筛选维度补更明确的索引，而不是再把 summary 读路径拉回查询期临时聚合。
 
+> 历史说明：本组条目记录的是一次切到 `markstream-react` 的尝试；该路线后来已在 `2026-03-23 Session 106` 回退。阅读这里时，不应把 `markstream-react` 视为当前主路径。
+
 ## 2026-03-19 Session 80
 
 **Diagnosis**：虽然上一轮已把共享 Markdown renderer 切到 `markstream-react`，但接入仍有两个直接影响聊天观感的缺口：一是没有把当前明暗主题透传给 renderer，代码块等富节点仍可能沿用默认浅色语义；二是表格与代码块的默认边框/阴影比 aia 现有聊天视觉更重，切换后有明显“第三方组件感”。
@@ -626,6 +650,8 @@
 **Verification**：`cargo fmt --all`、`cargo test -p agent-server`、`./node_modules/.bin/vp test src/stores/chat-store.test.ts`、`./node_modules/.bin/tsc --noEmit` 通过。
 **Commit**：未提交。
 **Next direction**：如果还要继续降低“done → turn_completed”间隔，下一步应进一步追 `openai-adapter` / completion 汇总阶段，确认 `StreamEvent::Done` 是否被过早发出，再决定是否需要引入一个更靠近模型完成语义的 runtime 事件，而不是复用传输层 done。
+
+> 历史说明：本组条目记录的是 channel 早期过渡形态，里面会出现 webhook 入口、`.aia/channels.json`、临时桥接等中间状态。当前真实边界以后续 `Session 62-72` 的收口结果与 `docs/status.md` / `docs/architecture.md` 为准。
 
 ## 2026-03-18 Session 61
 
@@ -870,6 +896,8 @@
 **Verification**：`cargo test -p builtin-tools edit -- --nocapture` 通过；`cargo test -p builtin-tools apply_patch -- --nocapture` 通过（含 move/alias/per-file metadata 回归）；`cargo fmt --all` 通过；`cargo check` 通过。
 **Commit**：未提交（当前会话未执行 `git commit`）；建议提交信息：`feat: add standalone apply_patch tool`
 **Next direction**：优先继续检查内建工具协议里还缺哪些 Codex/Claude 兼容细节（例如更完整的 patch 验证、权限元数据与 UI 可直接消费的 diff 摘要），或继续把这层兼容元数据下沉到共享工具定义，而不是散落在边缘适配层。
+
+> 历史说明：本组条目开头仍在使用 `schemars` 路线；这条路线后来已在 `2026-03-18 Session 51-55` 被自研 `ToolArgsSchema` / derive 宏取代。阅读这里时，请不要把 `schemars` 误认为当前实现真相。
 
 ## 2026-03-17 Session 40
 
@@ -1222,6 +1250,8 @@
 **验证**：`cargo check` 通过；`cargo test -p builtin-tools shell -- --nocapture` 通过；`cargo test -p agent-server session_manager -- --nocapture` 通过；`cargo test -p agent-server` 通过（因 localhost listener 测试需脱离沙箱执行）。
 **提交**：`2730d9c` `refactor: asyncify shell worker and turn execution`
 **下次方向**：继续把其余可能长时间占用线程的工具路径收口为更原生的 async / cancel 模型，并进一步减少 `apps/agent-server` 在运行中 `session/info` 上对 tape 快照回退和 runtime handoff 的依赖。
+
+> 历史说明：从这里开始的一组条目记录的是 async 主链迁移过程；文中的 Phase 划分是当时的分步计划，不表示今天仍处于该阶段。当前结论是 async 主链已完成，后续重点转向 ownership / return-path 与共享层收口。
 
 ## 2026-03-17 Session 10
 

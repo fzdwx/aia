@@ -1,5 +1,10 @@
 # 异步化阶段设计
 
+> 本文保留 async 主链迁移时的设计分阶段与最终结论，当前更接近**历史专题总结**，不是项目当前阶段真源。
+
+- Last verified: `2026-03-30`
+- 当前阶段与下一优先级请看：`docs/status.md`
+
 ## 目标
 
 把 `aia` 从“server 用 `spawn_blocking` 包裹同步 runtime”的执行模型，逐步推进到“核心主链原生 async、provider/tool 执行原生 async、server 不再依赖 blocking turn wrapper”的架构，同时保持：
@@ -186,7 +191,7 @@
    - `docs/evolution-log.md`
 5. 验证通过后提交，不把阶段性可用成果留在工作树里漂移
 
-## 当前状态
+## 最终结论（当前有效）
 
 当前仓库已完成 **Phase 1**、**Phase 2**、**Phase 3** 与 **Phase 4**：
 
@@ -199,13 +204,13 @@
 - `apps/agent-server` 的 session manager 与 turn 执行都已切到原生 Tokio async task：不再使用 `tokio::spawn_blocking`、`std::thread::Builder`、`LocalSet` 或 `spawn_local` 承载 turn 主链；运行中 `session/info` 也改为直接读取内存中的 `ContextStats` 快照
 - `agent-store` 已补齐共享 async façade：session / trace 访问通过共享 `spawn_blocking` 边界异步暴露给 server，`apps/agent-server` 的 `routes::trace`、`routes::session`、`session_manager` 与 `ServerModel` 均已改走 async store API，不再在 async 路由或 turn 路径里直接调用同步 SQLite 访问
 
-因此，本轮异步化改造的阶段性结论是：
+因此，本轮异步化改造的最终结论是：
 
 1. 生产代码的 provider、tool、runtime turn loop、server session manager、trace/session store 访问都已收口到 async 调用面
 2. `spawn_blocking` 已不再作为 server turn 执行包装层存在；目前仅保留在共享 `agent-store` 内部，作为 `rusqlite` 同步驱动的受控桥接边界
 3. 后续可以继续优化内部实现复杂度（例如 `session_manager` 的 runtime ownership / return-path），但这已不再阻塞本设计文档定义的异步化阶段完成标准
 
-因此，下一步最高优先级变为：
+在 async 主链完成之后，后续延伸重点变为：
 
 1. 继续压缩 `apps/agent-server` 内部的 runtime ownership / return-path 复杂度，把当前 async 主链上的剩余实现样板继续下沉或收口
 2. 在 async 主链与工具边界稳定后，优先推进统一工具协议映射与 MCP 接入，而不是继续堆厚客户端界面

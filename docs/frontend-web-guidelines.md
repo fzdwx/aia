@@ -2,6 +2,10 @@
 
 本规范适用于 `apps/web`，用于约束后续 Web 界面的结构、视觉、一致性与可维护性。
 
+> 本文是 **前端约束文档**，不是当前进度播报。当前真实状态与优先级请优先看 `docs/status.md` 与 `docs/todo.md`。
+
+- Last verified: `2026-03-30`
+
 ## 1. 基本原则
 
 1. Web 前端只负责界面、交互与展示，不重写代理运行时逻辑。
@@ -13,55 +17,74 @@
 ## 2. 运行时桥接架构
 
 ```
-React (Vite :5173)  ──proxy──>  axum server (:3434)
-     │                               │
-  POST /api/turn          Tokio async task
-     │                               │
-  EventSource             AgentRuntime
-  GET /api/events         handle_turn_streaming()
-  (全局 SSE)              broadcast::channel
+React (`App` + Zustand stores) ──proxy──> axum server (`apps/agent-server`)
+            │                                    │
+     HTTP control plane                    session manager
+     + global EventSource                  + AgentRuntime
+            │                                    │
+       `src/lib/api.ts`                   SSE / HTTP / channel bridge
 ```
 
-### HTTP API
+### Web 主路径接口
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/providers` | 返回当前 provider 信息 |
-| GET | `/api/session/history` | 返回已完成 turn 的历史页（最新一页默认 10 条，可用 `before_turn_id` 继续加载更早历史） |
-| GET | `/api/session/current-turn` | 返回当前运行中的 turn 快照（如果存在） |
-| GET | `/api/events` | 全局 SSE 事件流（stream / status / turn_completed / error） |
-| POST | `/api/turn` | 发送用户消息，202 fire-and-forget，事件通过 SSE 返回 |
+当前 Web 主路径主要消费这些接口族：
+
+| 类别 | 典型接口 | 说明 |
+|------|----------|------|
+| session 列表 | `GET /api/sessions`、`POST /api/sessions`、`DELETE /api/sessions/{id}` | session 列表与创建/删除 |
+| session 水合 | `GET /api/session/history`、`GET /api/session/current-turn`、`GET /api/session/info` | 历史页、当前运行中 turn、上下文压力 |
+| session 设置 | `GET /api/session/settings`、`PUT /api/session/settings` | session 级 provider/model/reasoning 绑定 |
+| question 控制面 | `GET /api/session/question`、`PUT /api/session/question`、`DELETE /api/session/question` | pending question 拉取、回答、取消 |
+| 消息与队列 | `POST /api/session/message`、`GET /api/session/queue`、`DELETE /api/session/queue/{id}`、`POST /api/session/interrupt` | Web 主路径优先走 queue-aware 消息入口，而不是直接依赖旧的 `POST /api/turn` |
+| provider / channel | `GET /api/providers/list`、`/api/providers/*`、`/api/channels`、`/api/channels/catalog` | Settings 工作台使用 |
+| trace | `GET /api/traces/overview`、`GET /api/traces/dashboard`、`GET /api/traces/{id}` | Trace 工作台使用 |
+| 全局事件流 | `GET /api/events` | 所有 session 的 SSE 结构化事件流 |
 
 ### SSE 事件类型
 
-- `stream`：流式内容增量（thinking_delta / text_delta / tool_output_delta）
-- `status`：轮次状态变更（waiting / thinking / working / generating）
+- `stream`：流式内容增量（thinking / text / tool lifecycle）
+- `status`：轮次状态变更（`waiting` / `waiting_for_question` / `thinking` / `working` / `generating` / `finishing` / `cancelled`）
+- `current_turn_started`：运行中 turn 的首个完整快照
 - `turn_completed`：完整 `TurnLifecycle` 数据
-- `error`：错误信息
+- `context_compressed`：压缩完成提示
+- `sync_required`：客户端落后，需要重拉 session 状态
+- `error`：结构化错误事件
+- `session_created` / `session_updated` / `session_deleted`：session 列表投影事件
+- `turn_cancelled` / `turn_interrupted`：取消与打断相关事件
+- `message_queued` / `message_deleted` / `queue_processing`：消息队列投影事件
 
-### 前端状态机
+### 前端状态模型
 
 ```
-idle → (submitTurn) → active/waiting → thinking → working → generating → idle
-                                  ↑         ↓         ↓
-                                  └─────────┴─────────┘ (状态可交替)
+chatState: idle | active
+
+active session 内的细粒度 turn 状态：
+waiting → thinking / working / generating → finishing
+   ├─→ waiting_for_question
+   └─→ cancelled
 ```
 
-- `waiting`：已发送，等待 AI 响应
-- `thinking`：模型思考中（收到 thinking_delta）
-- `working`：工具调用执行中（收到 tool_output_delta）
-- `generating`：文本生成中（收到 text_delta）
+- `chatState` 只表达“当前 session 是否有运行中 turn”
+- 更细的执行阶段由 `StreamingTurn.status` / `CurrentTurnSnapshot.status` 表达
+- 当进入 `waiting_for_question` 时，输入区会切换为 `PendingQuestionComposer`，而不是继续展示普通输入框
 
 ## 3. 目录与边界
 
 - `src/App.tsx`：页面编排与顶层布局，不承担细碎组件实现。
+- `src/features/chat/`：聊天时间线、输入区、工具渲染、diff、消息分组等聊天特性代码。
+- `src/features/navigation/`：侧栏、主视图切换、settings / trace 导航承接。
+- `src/features/settings/`：provider / channel 配置工作台。
+- `src/features/trace/`：trace overview、workspace、detail modal、inspector。
+- `src/features/channels/`：channel 专题 UI（如微信登录、channel 表单辅助）。
+- `src/stores/`：Zustand store 边界；聊天、settings、trace、provider、channel、pending question 分层放在这里。
 - `src/components/ui/`：通过 `shadcn` 生成或维护的基础组件。
-- `src/components/`：项目级组合组件，例如会话面板、消息列表、状态指示器。
-- `src/hooks/`：React hooks，如 `use-chat.ts`（全局 SSE 连接与状态管理）。
+- `src/components/`：少量跨 feature 复用的低层展示组件，例如 Markdown、theme provider、通用 AI elements。
 - `src/lib/api.ts`：HTTP + SSE 客户端，封装所有与后端的通信。
 - `src/lib/types.ts`：TypeScript 类型定义，镜像 Rust 侧类型。
 - `src/lib/`：纯工具函数、常量、视图映射辅助。
 - `src/index.css`：全局设计令牌、基础排版、背景、主题变量、动画与少量通用工具类。
+
+原则上：**feature 内的展示与状态不要回流到 `src/components/` 里变成新的杂物堆。**
 
 ## 4. 组件规范
 
@@ -113,19 +136,22 @@ idle → (submitTurn) → active/waiting → thinking → working → generating
 
 Web 主界面按以下信息层次组织：
 
-1. 左侧边栏：provider 信息（模型名、连接状态指示灯）
-2. 中央消息列表：已完成的 turn（thinking / assistant / tool / failure 块）+ 流式 turn
-3. 底部输入框：发送区域，streaming 时禁用
-4. 流式状态：shimmer 文字显示当前阶段（Waiting / Thinking / Working / Generating）
+1. 左侧边栏：session 列表，或 settings / trace 的次级导航
+2. 主内容区：在 chat / settings / trace 三个工作台之间切换
+3. 聊天工作台：历史 turn、流式 turn、工具时间线、压缩提示、错误与滚动恢复
+4. 输入区：模型选择、思考等级、消息队列提示、发送/打断按钮
+5. question 场景：存在 pending question 时，用 `PendingQuestionComposer` 直接替换普通输入区
 
 ## 10. 运行时桥接规范
 
 1. React 不直接编排 agent loop。
 2. Web 端通过全局 SSE（`EventSource`）消费 `/api/events` 的结构化事件流。
-3. 消息提交通过 `POST /api/turn` fire-and-forget，响应通过 SSE 返回。
-4. `useChat` hook 是唯一的事件消费入口，管理 turns / streamingTurn / chatState / error。
-5. 会话恢复通过 `GET /api/session/history` + `GET /api/session/current-turn` 加载，provider 信息通过 `GET /api/providers` 加载。
-6. 流式 tool 输出（`tool_output_delta`）按 `invocation_id` 分组实时渲染，不等 turn_completed。
+3. SSE 连接入口在 `src/lib/api.ts` 的 `connectEvents(...)`；当前由 `App.tsx` 连接，并把事件交给 `useChatStore().handleSseEvent(...)` 投影。
+4. Web 主发送路径优先走 `POST /api/session/message`，让 server 统一决定“立即开始 / 入队等待”；不要在前端平行重做一套 busy 判定。
+5. session 切换时的水合不只包含 `history/current-turn/info`，还会补拉 `session settings`、`pending question` 与消息队列等附属状态。
+6. `useChatStore` 负责聊天主链、SSE 投影与 session 水合；`session-settings-store`、`pending-question-store`、`trace-store`、`provider-registry-store`、`channels-store`、`workbench-store` 分别承接各自边界，不要把这些状态重新糊回一个超级 store。
+7. 流式 tool 输出按 `invocation_id` 分组实时渲染，不等 `turn_completed`。
+8. 收到 `sync_required` 时，应优先重拉当前 session 与相关工作台数据，而不是假设本地流式状态仍然可靠。
 
 ## 11. 开发工作流
 

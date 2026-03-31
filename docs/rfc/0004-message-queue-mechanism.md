@@ -20,6 +20,23 @@ superseded_by: null
 2. **ESC 打断** - 用户按 ESC 可立即打断当前 turn
 3. **自动处理** - turn 结束后自动处理队列中的消息
 
+## Implementation Snapshot
+
+截至当前代码，RFC 头部的 `Implemented` 结论成立。当前真实实现重点是：
+
+1. Web 主发送路径已经切到 `POST /api/session/message`，由 server 决定“立即开始 / 入队等待”
+2. 队列相关控制面与 SSE 事件已存在：`message_queued`、`message_deleted`、`turn_interrupted`、`queue_processing`
+3. session 内存态包含 `message_queue`、`interrupt_requested`、`queue_processing` 等字段
+4. queue 中的消息会在 turn 返回后继续处理；删除与 dequeue 事实会写入 tape
+5. “等待 question 时不接受普通 turn”这条约束仍优先于消息队列
+6. 当前 `handle_queue_message(...)` 在 session 处于 `Running` 时不会立即把 `message_queued` 追加进 tape，而是只更新内存队列并广播 SSE，以避免和正在持有 runtime/tape 的 TurnWorker 发生并发写入冲突；因此如果 server 在当前 turn 结束前重启，这段时间里临时入队的消息仍可能丢失。`restore_queue_from_tape(...)` 只能恢复那些已经存在于 tape 中的 queue 事件
+
+阅读下文时要注意：正文里有不少大段伪代码和中间命名，是 RFC 起草时的说明稿，不等于逐行对应当前代码。当前实现应优先对照：
+
+- `apps/agent-server/src/session_manager/{mod.rs,message_queue.rs,types.rs,handle.rs,turn_execution.rs}`
+- `apps/agent-server/src/routes/session/{mod.rs,handlers.rs}`
+- `apps/agent-server/src/sse/mod.rs`
+
 ## Motivation
 
 当前用户在 agent 执行 turn 时发送消息：
@@ -317,6 +334,8 @@ pub(crate) async fn send_message(
 
 ### 状态转换
 
+> 历史说明：这是提案阶段的概念图，用来解释 queue / interrupt 主线，不保证逐项映射当前实现中的具体类型名与内部状态字段。
+
 ```
                     ┌──────────┐
                     │   Idle   │
@@ -354,13 +373,13 @@ pub(crate) async fn send_message(
 | Idle | - | 立即开始新 turn | `submit_turn()` 正常调用 |
 | Running | tool 执行中 | 入队 | `handle_queue_message` |
 | Running | chat 生成中 | 入队 | `handle_queue_message` |
-| Running | 有 pending question | 入队 | `handle_queue_message` |
+| Running | 有 pending question | **拒绝普通 turn**，由 pending question 控制面接管 | question / turn 路由约束 |
 
-**注意**：`WaitingForQuestion` 是 `TurnStatus`（SSE 层状态），不是 `SlotStatus`。
-当 session 有 pending question 时，`SlotStatus` 仍为 `Running`。
-判断条件是 `!slot.pending_question_waiters.is_empty()` 或 tape 中有 pending question。
+**注意**：`waiting_for_question` 是 turn / SSE 语义，不是独立 `SlotStatus`。当前代码里，如果 session 正在等待 question 回答，普通消息不会继续走队列主路径，而是先要求用户回答或取消当前问题。
 
 ### 消息入队实现
+
+> 历史说明：下面这段提案伪代码把 `Running` 时的入队描述成“立刻追加 `message_queued` 到 tape”。当前实现已经改成更保守的版本：运行中普通入队只写内存 `message_queue` 并广播 `message_queued` SSE，不在这一刻直接 append jsonl。真正会稳定落盘的是后续的 `message_deleted` / `message_dequeued` 等事实，所以这段代码不能直接当作当前 crash-safe 持久化行为说明。
 
 ```rust
 // session_manager/mod.rs
@@ -727,6 +746,8 @@ struct QueueProcessingData {
 
 ### 持久化与恢复
 
+> 历史说明：本节保留的是提案阶段对“完整 queue 事件链落盘后可恢复”的设计说明。当前代码里，`restore_queue_from_tape(...)` 的确存在，也会根据 `message_queued` / `message_deleted` / `message_dequeued` 重建队列；但运行中普通入队路径目前不会立即写入 `message_queued`。所以“重启恢复”目前只对**已经落盘**的 queue 事件成立，不应解读为“所有运行中的临时入队消息都具备无损 crash-recovery”。
+
 #### 恢复逻辑
 
 Server 启动加载 session 时（`SessionSlotFactory::create`）：
@@ -900,6 +921,8 @@ Agent 会看到三条独立的 user message，上下文清晰。
 
 #### TurnExecutionService 新增方法
 
+> 历史说明：这里保留的是提案时的多消息 worker 设计稿。当前实现最终收口为 `submit_turn(session_id, prompts: Vec<String>)` 这类统一入口，而不是单独长期保留一个 `submit_turn_multi(...)` 公开接口。
+
 ```rust
 // session_manager/turn_execution.rs
 
@@ -978,11 +1001,13 @@ impl TurnWorker {
 
 ### 并发控制
 
+> 历史说明：这一节保留了提案阶段的简化矩阵。当前代码里，“等待 question 时的普通消息处理”优先遵守 question 控制面约束，而不是简单等同于“继续入队”。
+
 | SlotStatus | 额外条件 | Message | Interrupt | Delete Queue |
 |------------|---------|---------|-----------|--------------|
 | Idle | - | ✓ 立即开始 turn | ✗ 返回 false | ✓ 允许 |
 | Running | - | ✓ 入队 | ✓ 打断 | ✗ 返回错误 |
-| Running | 有 pending question | ✓ 入队 | ✓ 打断+取消问题 | ✗ 返回错误 |
+| Running | 有 pending question | 以 pending question 控制面优先，不直接作为普通消息入队保证 | ✓ 打断+取消问题 | ✗ 返回错误 |
 
 **注意**：`WaitingForQuestion` 是 `TurnStatus`，不是 `SlotStatus`。
 
@@ -1132,6 +1157,8 @@ Followup 入队，Steal 打断。
 
 ## Rollout Plan
 
+> 历史说明：下面的 Phase / Checklist 是 RFC 落地时的实施清单，很多条目已经完成；其中凡涉及“重启后恢复 queue”的表述，都应按上面的 `Implementation Snapshot` 理解为“基于已落盘事件的恢复能力”，而不是当前实现已经提供完整的运行中即时入队持久化保证。
+
 ### Phase 1：数据模型与队列基础
 
 **改动文件**：
@@ -1174,8 +1201,8 @@ Followup 入队，Steal 打断。
 - `session_manager/mod.rs` - 新增 `restore_queue_from_tape`，修改 `SessionSlotFactory`
 
 **功能**：
-- Server 重启后队列状态恢复
-- 完整的 tape 事件记录
+- 基于已落盘 queue 事件的重建 / 恢复
+- queue 相关 tape 事件链路建立（但 `Running` 态即时入队仍有未落盘窗口）
 
 ### Phase 5：UI 集成
 
@@ -1191,7 +1218,7 @@ Followup 入队，Steal 打断。
 2. 消息在当前 turn 运行时入队
 3. 用户按 ESC 可立即打断 turn
 4. Turn 结束后自动处理队列消息
-5. Server 重启后队列状态可恢复
+5. 若 queue 事件已经落盘，Server 重启后队列状态可恢复；当前 `Running` 态即时入队仍存在崩溃丢失窗口
 6. 所有操作有清晰的 SSE 事件反馈
 7. 队列满时返回明确错误而非静默丢弃
 
@@ -1213,8 +1240,8 @@ Followup 入队，Steal 打断。
 - [x] `mod.rs`: 实现 `handle_interrupt_turn`
 - [x] `mod.rs`: 修改 `handle_runtime_return`，通过 `command_tx` 触发队列处理
 - [x] `mod.rs`: 实现 `drain_queue` 返回 `Vec<String>`
-- [x] `mod.rs`: 实现 `restore_queue_from_tape`
-- [x] `mod.rs`: 修改 `SessionSlotFactory::create` 恢复队列
+- [x] `mod.rs`: 实现 `restore_queue_from_tape`（针对已落盘的 queue 事件）
+- [x] `mod.rs`: 修改 `SessionSlotFactory::create` 恢复队列（不代表 `Running` 态即时入队已完整持久化）
 - [x] `mod.rs`: 在 `handle_command` 中处理 `SubmitQueuedMessages` 命令
 - [x] `turn_execution.rs`: 新增 `submit_turn_multi` 方法
 - [x] `turn_execution.rs`: 新增 `TurnWorkerMode::Multi` 变体
@@ -1241,7 +1268,7 @@ Followup 入队，Steal 打断。
 - [x] 入队消息后验证 `position` 正确递增
 - [x] 入队消息后再发一条，验证 `position` 正确
 - [x] 打断 turn 后，队列消息被正确处理
-- [x] Server 重启后，队列从 tape 恢复
+- [x] Server 重启后，队列可从**已存在的** tape queue 事件恢复
 - [x] 队列满时拒绝新消息（返回错误）
 - [x] 在 Idle 时删除队列消息
 - [ ] 在 Running 时删除队列消息返回错误 (需要更复杂的测试设置)

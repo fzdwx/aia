@@ -1,286 +1,142 @@
 # 项目状态
 
+> 本文件只保留 **当前真实状态**。详细历史看 `docs/evolution-log.md`，未完成事项看 `docs/todo.md`。
+
+- Last verified: `2026-03-30`
+- Current source of truth: 以当前代码与 RFC 头部状态为准；本文件负责做压缩后的事实对齐
+
 ## 当前阶段
 
-- 阶段：Web 界面实现
-- 当前细分步骤：Web 界面 ↔ 运行时桥接收口
-- 最新默认提示词收口：`agent-prompts` 现已新增共享 `aia-agents.md` 模板、`AiaAgentsPromptContext` 与 `render_aia_agents_prompt(...)` 渲染入口；模板中的平台、工作路径、本地日期、星期与时区都不再硬编码，而是由 `apps/agent-server` 基于真实运行时采集后注入。与此同时，`SessionManagerConfig.system_prompt` 与 `ServerBootstrapOptions.system_prompt` 也都已收口为 `Option<String>`：默认情况下 session 会渲染 `aia-agents` 并追加 `Context Contract`，但如果嵌入方或用户显式传入 system prompt，就直接使用用户给定文本，不再额外拼装 block/guideline。对应测试已覆盖共享渲染、session prompt 默认/覆盖路径，以及 bootstrap 透传链路。
-- 最新 system prompt 配置收口：`agent-prompts::SystemPromptConfig` 已去掉 `custom_prompt`，并把 `prompt_guidelines` 收口为更直接的 `guidelines`。当前这个共享配置只负责在给定 base prompt 之上追加 guideline / section / context block；真正的“整段 system prompt 替换”统一留在外层的 `Option<String>` 覆盖路径处理，避免共享层继续保留第二套替换语义。
-- 最新前端进展：`apps/web` 的 `Channels` 入口已改成 transport-centric 配置台：左侧常驻 sidebar 在 `channels` 视图下直接列出 server 返回的全部 supported channel type，右侧主面板只展示当前 type 的 schema 配置项与启停状态；对应的 catalog/profile 读取、CRUD 与当前选中 transport 也已从 `chat-store` 拆到独立 `channels-store`，避免继续把配置面板状态混进会话/SSE 主链。
-- 最新前端分层收口：`apps/web` 当前又继续按 feature ownership 收紧目录边界：`channels`、`settings`、`trace`、`chat-input` 与 `navigation` 相关实现都已收进 `src/features/*`，`App` / workspace 入口也已直接引用 feature，而不再绕经 `components` 的单文件转发壳；与此同时，聊天历史滚动 helper 也已迁回 `features/chat/chat-messages`，`channels/index.tsx` 里的微信扫码登录流已进一步独立为 `features/channels/weixin-login.tsx` 子模块，`trace/index.tsx` 的 loop / llm / tool inspector 体系也已整体拆到 `features/trace/inspector.tsx`，`settings/index.tsx` 的 provider 工作台表单区块也已拆到 `features/settings/provider-form-sections.tsx`；更关键的是，工作台导航态已从 `chat-store` 中抽离到 `stores/workbench-store.ts`，provider 注册表已从 `chat-store` 中抽离到 `stores/provider-registry-store.ts`，`chat-store` 与 `session-settings-store` 的直接跨 store 协调也已继续收口到 `stores/session-settings-coordinator.ts`，而 `handleSseEvent` 中最重的流式 block 投影逻辑也已拆到 `stores/chat-sse-projection.ts`，让“运行时状态”“工作台导航状态”“Provider 注册表”和“会话设置协调”开始按职责分治；当前 `channels` 仍维持为 `settings` 工作台内部的子分区，而不是独立页面入口；当前 `src/components` 已基本只剩共享 UI primitives、markdown、主题与可复用视觉元素，并已通过 `just web-check`、`just web-test`、`just web-typecheck` 与 `just web-build` 验证。
-- 最新前端消息渲染收口：`apps/web` 的 chat message text surface 当前已借鉴 `opencode` 的部分交互细节，收口到“单列消息流 + 顶角 copy 按钮 + user bubble / assistant text part”组合，消息正文不再依赖旧的 `You / aia` 标题行来切段，也不再采用左右分栏式摆放；不过消息内容宽度仍保持本项目原有的单列全宽承载，而没有沿用 `opencode` 那种更窄的阅读列。与此同时，`Streamdown` 承接的 markdown 排版也已同步压平标题层级、收紧列表/引用/代码块节奏，并保留现有 code copy、math 与 mermaid 能力，继续与已改造过的 tool timeline / thinking 视觉语义并存。
-- 最新前端工具时间线对齐：`apps/web` 的 chat tool timeline 已按更接近 `opencode` 的事实收口为“上下文探索组 + 独立工具行”双轨语义，其中只有 `read` / `glob` / `grep` / `list` 会合并进上下文探索组，`codesearch`、`websearch`、`shell`、文件编辑类与未知工具都会保留独立工具行；与此同时，组头状态词、摘要标签、详情标题与常见工具名已统一收口到共享文案源，进行中不可折叠、已完成可折叠、问题忽略、未知工具降级与详情视觉语义等边缘态也都已补齐；最近又把 tool row 与 context group 的展开动画从 `height:auto + spring` 收口为固定时长 tween，减少展开/折叠时的轻微抖动，并让 `write / edit / apply_patch` 这类编辑工具在行尾显示 `+ / -` 变更摘要、正文直接显示结果或 diff 内容，而不是再走额外展开层，并已通过对应前端测试、`just web-check` 与 `just web-build` 验证。
-- 最新前端 session 所有权收口：`apps/web` 当前已把 active session 的 ownership 与 model / reasoning mutation 责任继续收回 `chat-store`；`session-settings-store` 只保留 session settings 的水合与更新资源态，不再镜像 active session，也不再反向写 `chat-store`。与此同时，`switchSessionModel(...)` 与 `setSessionReasoningEffort(...)` 现在会在 mutation 完成后统一等待 provider 列表刷新，`ModelSelector` / `ChatInput` 组件侧不再拼 `.then(refreshProviders())` 式胶水，避免 UI 在 session 列表投影与 provider 面板之间出现短暂不同步。
-- 最新前端配置台收口：`apps/web` 的 `Settings` 已继续收口成更接近真实设置应用的二级工作区：外层 app sidebar 进入 `Settings` 后只负责切换 `Providers / Channels` 两个设置分类，而右侧主区域再承接对应分类的 item 列表与详情编辑区，形成“左分类，右侧列表 + 详情”的两级信息架构；原本独立的 `Channels` 配置入口也因此并回 settings workspace，继续避免再保留第二套路由级配置页面。
-- 最新前端排版收口：`apps/web` 当前已把全局字体栈从默认感较强的 `Inter` 收口为更贴近工程工作台气质的 `IBM Plex Sans + IBM Plex Mono`，并在 `src/index.css` 中补齐 `display/title/body-sm/caption/meta` 等排版 token 与 `workspace-brand / workspace-section-label / workspace-panel-title / workspace-panel-copy / workspace-meta / workspace-code` 语义类；与此同时，`Sidebar`、`ChatInput`、`ModelSelector`、`Settings`、`Channels`、`TracePanel`、`TraceDetailModal` 以及 `Card / Dialog / Textarea` 等基础组件已开始消费统一 class，而不再继续在组件里散写大批 `text-[10px..15px]` 与零散说明文样式，前端主路径的排版层级开始真正回到“全局定义、组件消费”的单一路径。
-- 最新前端规范落成：`docs/frontend-web-guidelines.md` 现已继续补齐“排版与语义类规范”与“工作台排版约束”两组明确规则，正式把侧边栏与 `Trace` 页面这几轮收口中沉淀出的经验写成约束：同一语义角色必须有唯一主要入口，基础组件标题控制权不得长期留在调用处覆盖，`caption/meta/micro/nano` 只用于弱化信息，`loading/empty/error/no-selection` 等 fallback state 必须在同一工作台里共用稳定层级，而不是继续混用原生 `text-sm/xs` 与局部 tracking 旁路。
-- 最新工具时间线收口：`apps/web/src/features/chat/tool-timeline.tsx` 与 `apps/web/src/features/chat/tool-rendering/ui.tsx` 已按 `opencode` 会话页的时间线气质重新调整——不再走误判过的“独立卡片块”方向，而是改成更接近 `packages/app` 的极简行列表：组标题轻量化、工具项改为单行主信息 + 弱化副信息、运行中状态维持细粒度行内提示，展开后详情继续以内嵌内容区承接；当前目标是让 tool timeline 更像消息流里的轻量记录，而不是另起一层表格或卡面系统。
-- 最新 session 历史滚动 RFC：已新增 `RFC 0003 Session History Scroll Stability` 草案，收口 Web 聊天区在 session 初次水合、Markdown 富内容重排与向上分页补页时的统一滚动语义；当前明确把两个已知问题定为同一根因——底部跟随依赖 `scrollHeight` 猜测、历史补页依赖总高度差补偿——并提出以 `bottom sentinel + visible turn anchor` 为核心的状态机方案，避免“自动滚不到真正底部”和“快速上滚时被顶到最上方”继续各修各的。
-- 最新 session 自动重命名进展：`RFC 0002 Session Auto Rename` 已继续推进到 Phase 2 的后端主链。`agent-store` 现已为 `sessions` 表补上内部调度字段 `user_turn_count_since_last_rename` 与 `rename_after_user_turns`，并提供计数递增、命中阈值与应用自动标题的 store API；`apps/agent-server/src/session_manager/auto_rename.rs` 也已新增独立 `SessionAutoRenameService`，在 turn 成功完成后按 `3~5` 次用户对话节奏异步调度一次低优先级标题生成，请求 kind 记为 `session_rename`，并在标题规范化成功后通过既有 `session_updated` SSE 增量投影给 Web。当前实现已覆盖默认/自动标题可重命名、`manual/channel` 不覆盖、基础标题清洗与相关后端测试；前端打字机动画仍留在后续 Phase 3。
-- 最新 title prompt 收口：session 自动重命名所使用的 title generator 提示词已从 `apps/agent-server` 内联字符串收口到共享 `crates/agent-prompts/prompts/title-generator.md`，并通过 `agent_prompts::render_title_generator_prompt(...)` 渲染最近用户消息摘要，避免 server 壳层继续维护独立提示词字面量。
-- 最新 session 列表动画进展：`apps/web` 已开始承接 `RFC 0002` 的 Phase 3 表现层语义。`chat-store` 现已新增 `sessionTitleAnimations` 局部状态，并在收到 `session_updated` 时区分“标题变化”与“仅 `last_active_at` 变化”两条路径：标题变化会触发轻量逐字打字机动画，只有活跃时间变化则直接 settle 不动画；`SidebarSessions` 也已改为优先渲染 `renderedTitle`，并继续在第二行显示最近活跃时间。对应前端 store 测试已覆盖“标题变化会动画”和“仅活跃时间变化不动画”两种行为。
-- 最新微信 client 进展：workspace 已新增共享 `crates/weixin-client`，先对齐 SunCodexClaw 当前依赖的 iLink/OpenClaw 私有微信协议，而不是直接耦合到官方 `access_token + media_id` 模型。当前 crate 已补齐扫码登录、二维码轮询、长轮询更新、文本发送、typing 状态、媒体上传发送与附件下载 helper，并通过本地假服务测试锁住关键 HTTP 头、消息体与 CDN 上传流程，为后续 `channel-weixin` 适配留出稳定低层边界。
-- 最新微信 channel 集成：workspace 当前又新增 `crates/channel-weixin`，并已把 `weixin` transport 接入 `channel-bridge`、`apps/agent-server` 的 adapter catalog 与 `/api/channels/catalog` 控制面。当前用户已可在 `Settings / Channels` 中看到并配置 `Weixin` transport；服务端运行态则通过长轮询消费微信消息、自动绑定 session、触发 turn，并把最终文本回答回写到微信。与此同时，`apps/agent-server` 还补了微信扫码登录路由，`apps/web` 的 `channels` 面板也为 `weixin` transport 增加了工作台式扫码区：用户可以直接获取二维码、轮询登录状态，并在登录成功后自动创建或更新 profile，而不需要手动复制 token。
-- 最新 Trace 视图收口：`apps/web` 的 `Trace` 页面现已拆成独立 `Overview` dashboard 与 `Conversation/Compression` explorer 两个子工作台：sidebar 顶部只负责页面导航，进入 explorer 后才显示 loop 列表与分页；overview 侧则不再自己并发拼三份 `/api/traces/summary`，而是改由 `trace-overview-store` 读取新的 `/api/traces/dashboard` 分析接口，一次拿到 KPI 卡片、失败态汇总、`input/output/cache` token 趋势图、年度活跃热力图与 conversation/compression 两条入口摘要，避免继续把累计信号和当前页 waterfall 混在同一块面板里。对应的当前 active loop / selected node 也已上提到 `trace-store`，避免继续把选择态散在 `TracePanel` 本地 state 里。
-- 最新 trace 汇总收口：`agent-store` 的 overview summary 已不再在每次 span 写入后全量扫描 `llm_trace_loops`。当前写路径会先刷新受影响的单个 loop 快照，再按该 loop 的旧值/新值差量维护 `llm_trace_overview_summaries`；其中 `unique_models` 与 `p95_duration_ms` 分别由新增的 `llm_trace_summary_model_counts`、`llm_trace_summary_duration_buckets` 辅助表精确维护，`llm_trace_loops` 也已补齐每 loop 的 input/output token 累计列，避免 summary 再回头扫描原始 span 表。
-- 最新 trace dashboard 收口：为了支撑 overview 的失败态 / token / 行变更 / session 活跃指标，`agent-store` 现已把 `session_id` 从 runtime → trace 记录链路贯通到 SQLite，并把 `llm_trace_loops` 再扩展为携带 `session_id`、估算成本、代码增删行的 loop 级分析记录；`/api/traces/dashboard` 会先只对 `llm_trace_dirty_loops` 标记的脏 trace 做 loop reconciliation，再按时间窗聚合出失败/部分失败计数与 token 趋势。与此同时，年度 activity 热力图已从“读时扫描 `llm_trace_loops` 做 `GROUP BY day + COUNT(DISTINCT session_id)`”收口为写时维护的 `llm_trace_activity_daily` / `llm_trace_activity_daily_sessions` 日桶物化表，dashboard 读路径只需按天范围读取固定桶，同时 `llm_trace_loops` 也补上独立 `latest_started_at_ms` 索引，减少 month/week summary 与 trend 的全表扫描。
-- 最新后端进展：`agent-store` 已承接 channel 映射/幂等表、provider 注册表与配置档案持久化，`apps/agent-server` 已补齐 `/api/channels` 控制面，并把飞书 channel 从过渡 webhook 入口收口为正式长连接 worker。当前长连接会按 profile 启停与重连，收到事件后先快速确认，再异步走既有 `session_manager.submit_turn(...)` 主链与飞书回复链路。
-- 最新 provider 持久化收口：provider 注册表已继续从单行 JSON 快照收口到 `agent-store` 的规范化 SQLite 结构：`providers` 承接 provider 基本资料，`provider_models` 承接“一 provider 多 model”清单；`apps/agent-server` 启动与 provider CRUD 都直接读写这两张表。与此同时，provider 侧 `ModelConfig.reasoning_effort` 已移除，思考等级只继续保留在 session tape 的 `provider_binding` / session settings 这一层。
-- 最新 provider 默认模型语义收口：provider 档案不再单独持久化额外的默认模型字段；当前默认模型统一取 `models` 列表首项，而 `agent-store` 会按 `provider_models.created_at` 倒序恢复模型顺序，避免再维护第二套“模型列表 + 额外活动模型”状态。
-- 最新驱动接口收口：`agent-prompts` 现已补上共享 `SystemPromptConfig + build_system_prompt(...)` 组合入口，`agent-runtime` 新增 `RuntimeHooks`，把 `before_agent_start`、`input`、`before_provider_request`、`tool_call`、`tool_result`、`turn_start/turn_end` 这组真正会影响外部客户端驱动面的生命周期钩子收口为稳定接口；`apps/agent-server` 的 `SessionManagerConfig` 也已直接承接这两类共享配置，让 session manager 不再把 system prompt 写死在 app 壳内部。
-- 最新 `Question` / `Tape*` tool 所有权再收口：`Question`、`TapeInfo`、`TapeHandoff` 已统一回到 `builtin-tools` 注册表；工具是否需要交互能力或 runtime 上下文，改由工具自身声明，`agent-runtime` 不再维护第二份 runtime tool registry，而是统一通过 `ToolExecutionContext.runtime` 提供 host 能力，并在 `visible_tools()` 中按 capability 过滤可见工具。server 继续只负责 `question_requested/question_resolved` append-only 持久化、pending 查询与 `/api/session/question` 控制面；对应 host 能力入口也已收口到 `RuntimeToolHost` + `ServerRuntimeToolContext`，而 `agent-runtime` 侧的上下文适配层则改名为 `runtime_tool_context_adapter.rs`。
-- 最新 `Question` 协议再收口：单个问题项现在只保留 `question` 作为展示文案，不再额外携带 `header`；推荐项也从 `recommended_option_ids[]` 收紧为单值 `recommended_option_id`，避免模型/UI 两侧继续承接多余形态。与此同时，`PUT /api/session/question` 现在只负责落 `question_resolved` 并唤醒等待中的 server-side host question runtime context，而不再伪造一条给 runtime 恢复专用的 `tool_result(Question)`。
-- 最新 `Question` 阻塞修正：`apps/agent-server` 的 `SessionCommand::AskQuestion` 不再在 session manager 主循环里内联等待用户回答；当前实现改为“同步登记 pending question + 后台等待结果回填”的两段式路径。这样 `ResolvePendingQuestion`、`CancelPendingQuestion`、其他 session command 与 runtime return 在提问期间仍可继续被主循环消费，不会再因为单个 `Question` 把整个 manager 卡住。
-- 最新重启恢复修正：`apps/agent-server` 现在会在 session 启动恢复阶段清理两类不可续跑的残留状态——孤立 pending question 会自动补成 `question_resolved(cancelled)`，而任意未完成 turn（不仅限 `Question` 流）也会自动补成 `turn_failed("服务器重启，当前轮次已取消")`。这样重启后 Web 不会再因为 stale `current_turn` 或 waiting 状态把输入区永久锁死，用户可以直接继续发送下一条消息。
-- 最新 bootstrap 收口：`apps/agent-server` 现已补成 `lib + bin` 双入口，外部嵌入方不再需要手写 `SessionManagerConfig` 或复制启动装配，而是可以直接走 `bootstrap_state_with_options(ServerBootstrapOptions)` 把 `data_dir/workspace_root/user_agent/request_timeout/system_prompt/runtime_hooks` 一次性注入到共享 control-plane façade；与此同时，HTTP 监听地址也已从 bootstrap 状态装配中分离为独立 `ServerRunOptions`，嵌入方或 CLI 可在 `run_server_with_options(...)` / `--bind <addr>` 阶段覆写，而不必回退到更低层自己手拼 listener。
-- 最新工具扩展：`builtin-tools` 已新增 `codesearch`，按 `opencode` 的 `codesearch.ts` 语义接入 Exa Code API（`https://mcp.exa.ai/mcp`），支持 `query + tokensNum(1000-50000, default 5000)`，返回最新库/API 代码示例与文档上下文；共享工具描述、注册表与回归测试也已同步补齐。
-- 最新工具扩展补齐：`builtin-tools` 现又新增 `websearch`，按 `opencode` 的 `websearch.ts` 语义接入 Exa Web Search（同走 `https://mcp.exa.ai/mcp`），支持 `query`、`numResults`、`livecrawl`、`type` 与 `contextMaxCharacters`；其中共享描述会把“当前年份”替换为 `2026`，提醒模型在搜索最新资讯时显式带上今年年份。
-- 最新 `read` 工具补齐：`builtin-tools::Read` 当前除了文本文件继续按既有 `offset + limit` 返回带行号内容外，也会对常见图片扩展名（如 `png/jpg/webp/gif/svg`）直接返回 `data:<mime>;base64,...` URL，方便多模态模型直接消费；结果 details 里也会补 `is_image`、`mime_type` 与 `encoding=data_url`，对应回归测试已覆盖文本/图片两条路径。
-- 最新会话设置收口：Web 输入框现已支持直接设置当前 session 的思考等级（`Auto/Low/Medium/High`），而模型选择也已从“切全局 active provider/model”改为写入当前 session 的 provider binding。`apps/agent-server` 新增 `/api/session/settings` 读写接口，并把 `reasoning_effort` 和 provider/model 一起落到 session tape 的 `provider_binding` 事件中；因此不同 session 现在可拥有各自独立的模型与思考等级，不再互相污染。
-- 最新 session 当前模型权威收口：`GET /api/sessions` 现已改为通过 `session_manager` 投影当前 session 的真实 model，而不再直接信任 SQLite `sessions.model`；`PUT /api/session/settings` 也不再顺手把当前模型回写进 SQLite。对于 session tape 损坏、导致 `hydrate_slots()` 跳过的异常恢复路径，列表现在会显式返回 `unavailable`，避免继续泄漏陈旧数据库 model。
-- 最新 SessionSlot 状态机收口：`apps/agent-server` 的 `SessionSlot` 已从 `status + runtime + running_turn + pending_provider_binding` 的隐式组合，收口为显式 `Idle / Running` execution 状态机，并通过 `begin_turn / finish_turn / replace_pending_provider_binding` 等迁移方法统一驱动 turn 启停与 provider sync，减少不可能状态继续靠字段组合推断。
-- 最新共享模型契约收口：`agent-core` 现已成为 `ReasoningEffort` 与 `ModelLimit` 的统一来源；`provider-registry::ModelConfig.limit` 直接复用共享 `ModelLimit`，`ModelIdentity.reasoning_effort` 也已改成共享 enum，而 `apps/agent-server` 本地的 reasoning helper 退化为对共享类型的薄门面。当前内部模型构建和 OpenAI adapter 请求映射都已改走共享 enum，但 session route / session tape 仍暂时保留字符串边界，留待下一阶段再硬化持久化协议。
-- 最新 session tape 恢复硬化：`session-tape` 现已新增严格的 `try_latest_provider_binding()` 恢复入口；当最新 `provider_binding` 事件损坏时，不再通过 `.ok()` 静默降级成“没有绑定”。`apps/agent-server` 的 slot 恢复与空闲态 session settings 读取已改走这条严格路径，启动时若某个 session tape 的最新 provider binding 损坏，会记录恢复错误；列表继续以 `unavailable` 标识异常 session，而直接读取该 session settings 时会显式返回 recovery failed 错误。
-- 最新前端 session 设置收口：`apps/web` 已把 session 级模型/思考等级状态从 `chat-store` 拆到独立 `session-settings-store`，聊天主 store 不再同时承载会话历史流和 session 设置控制面；输入框顶部当前也改为复用统一 `Select` 组件，把思考等级放到模型选择器旁边，并且只有当前模型 `supports_reasoning=true` 时才显示。思考等级枚举也已和产品约定对齐为 `minimal|low|medium|high|xhigh`。
-- 最新输入区稳定性收口：session 级模型/思考等级控件现在会显式区分 `hydrating`、`updating` 与 `error` 状态。切 session 或提交设置更新时，输入区顶部控件会进入 disabled/loading 态而不是短暂显示旧 session 的值；若 `/api/session/settings` 读取或更新失败，也会在输入区下方直接暴露错误文案，避免 silent flicker。
-- 最新模型切换修复：`ModelSelector` 不再手动接管 Base UI `Select` 的 `open` 生命周期，也不再用 `document.mousedown` 抢先关闭 portal 弹层；点击模型项时现在会稳定触发真正的 `PUT /api/session/settings`，不再出现“只有思考等级才会调用接口”的问题。
-- 最新 session settings 运行态约束：当某个 session 的 turn 正在运行时，`/api/session/settings` 现在明确拒绝模型/思考等级更新，前端模型 selector 与思考等级 selector 也会同步禁用。`SessionSlot` 仍保留内存态 `provider_binding` 快照，仅用于运行中安全读取当前 settings，避免再因 update path 与 turn 追加写并发而打坏 session tape。
-- 最新 channel 持久化收口：`channel-registry` crate 已从工作区移除；`ChannelProfile` 现统一由 `channel-bridge::ChannelProfileRegistry` 作为 store façade 管理，`apps/agent-server` 启动时直接从 `agent-store` 的 `channel_profiles` 表加载。`/api/channels` 的增删改也已先写 SQLite 再更新内存快照，避免 store 失败后 runtime 继续拿到脏 profile 状态。
-- 最新后端架构收口：`apps/agent-server/src/routes/channel` 等资源路由已统一采用目录模块；局部请求/响应类型直接并回各自 `mod.rs`，配置脱敏/合并、持久化回滚事务与 handler/tests 继续留在同级子模块，避免继续为只服务单一路由的 DTO 额外挂一个薄文件。
-- 最新宿主桥接收口：`apps/agent-server/src/channel_host` 也已从单文件拆成目录模块；当前由 façade `mod.rs` 暴露稳定装配接口，宿主 trait 实现、SSE→channel 事件映射与运行态装配分别下沉，继续把 `agent-server` 保持在“桥接壳层”而非巨石入口。
-- 最新 channel-feishu 收口：`crates/channel-feishu/src/lib.rs` 已收回为薄 façade，公开接口继续保持 `build_feishu_runtime_adapter` 与 `FeishuMessageTarget`，具体实现整体下沉到 `runtime.rs`，不再把 2800+ 行实现细节长期堆在 crate 根文件。
-- 最新 channel-feishu 内部细拆：`crates/channel-feishu/src/runtime.rs` 又继续按职责拆出 `config.rs`、`protocol.rs`、`card.rs` 与 `tests.rs`；配置 schema/解析、协议 DTO/帧编解码、卡片状态机/请求构造与测试已分层，主流程文件开始回到“长连接与回复编排主线”角色。
-- 最新 session_manager 收口：`apps/agent-server/src/session_manager/mod.rs` 在先前拆出 `query_ops` 之后，又继续把 provider 注册表同步与 turn worker/SSE 投影主线下沉到 `session_manager/{provider_sync,turn_execution}.rs`；同时根模块也已从“散落函数集合”收口为 `SessionManagerLoop`、`SessionSlotFactory` 等职责对象，provider/query/turn/tool-trace 分别由显式服务对象承接，避免同一模块继续混合运行时归还、SSE 广播与 provider 重绑细节。
-- 最新 self-chat 收口：`agent-server self` 不再在运行时读取 `docs/self.md`，并且该文件内容现已作为 self session 的 system prompt 在 bootstrap 时直接注入；首轮用户消息只负责触发本轮 wake 并可附带用户指定的启动任务，不再把整份 `self.md` 再塞进首条 user prompt。
-- 最新 Web Markdown 回退：`apps/web` 的共享 Markdown 渲染入口已从 `markstream-react` 切回 `streamdown`，继续保持 `MarkdownContent` 门面不变，把渲染器差异收口在 `markdown-content-rich.tsx` 内部；聊天与推理区重新走 `streamdown + @streamdown/code + @streamdown/cjk + @streamdown/mermaid + @streamdown/math` 组合，避免继续依赖 `markstream-react` 的节点协议、自定义代码块组件和额外样式覆盖链路。
-- 最新 Web Markdown 依赖收口：`apps/web` 已移除 `markstream-react`、`stream-markdown`、`stream-markdown-parser` 与 `shiki` 相关耦合，重新恢复 `streamdown` 依赖、KaTeX 样式和基于 `data-streamdown` 的样式入口；对应回归测试也已改回验证 `streamdown` 的基础结构输出，以及表格、代码块、Mermaid 和数学公式渲染能力。
-- 最新 model 收口：`apps/agent-server/src/model/mod.rs` 现作为目录根模块承接 provider 选择、model 构建与带 trace 的完成链路；先前只做一层转发的 `factory/runner/bootstrap` 已并回根模块，只保留真正独立的 `model/trace.rs` 负责 `ModelTraceRecorder` 与 trace 持久化细节，避免在根层再挂一排同名薄文件。
-- 最新 bootstrap 收口：`apps/agent-server/src/bootstrap/mod.rs` 现直接承接 `ServerBootstrap` 启动主线；路径/工作区发现、持久化依赖加载、默认 session 补种、snapshot 构建、`AppState` 装配与 channel runtime 激活都留在同一个目录根模块里，不再额外保留 `bootstrap.rs + startup.rs` 双层跳转。
-- 最新 agent-server 路由收口：`apps/agent-server/src/routes/mod.rs` 现统一 merge 各资源子 router，`apps/agent-server/src/server/mod.rs` 只负责 listener 启动；`provider`、`session`、`trace`、`turn` 等资源模块都已改为目录形态并去掉独立 `dto.rs`，根层也不再保留 `routes.rs`、`server.rs` 这类扁平入口文件。
-- 最新 channel 抽象进展：`channel-bridge` 现在不只承接 session 绑定恢复、turn 前预压缩与消息回执幂等 helper，还新增了通用 `ChannelRuntimeAdapter` / `ChannelRuntimeSupervisor` 与去平台化的 `ChannelRuntimeHost` / `ChannelRuntimeEvent` 边界；与此同时新增 `channel-feishu` crate，飞书 WebSocket、CardKit、回复控制与协议实现已从 `apps/agent-server` 迁出，`agent-server` 现在只保留宿主注册、状态装配与 SSE→通用 channel 运行时事件映射。
-- 最新飞书修复进展：私聊回复路径已从“总是 reply 当前消息”收紧为“私聊按 `chat_id` 直发、群聊按需 reply/thread”；SSE 现已补齐 `current_turn_started` 事件，前端对外部 channel 触发的当前执行态支持即时显示与流式恢复，不再依赖手动刷新；飞书消息进入处理中后会先加 `Typing` 表情，结束后再移除；同时飞书回包已进一步切到 `CardKit`：先创建 card entity，再用 `element_id` 按流事件更新正文，最后关闭 streaming mode 并收口为最终卡片。
-- 最新飞书消息覆盖修复：同一个 turn 内若模型产出多段 assistant message，飞书最终卡片不再只取最后一段 `assistant_message`，而是优先按 `TurnBlock::Assistant` 顺序拼接所有回复块，避免后一段覆盖前一段。
-- 最新飞书流式关联修复：飞书 `CardKit` 回复链已从“按 `session_id` 监听 SSE”升级为“按 server 侧 `turn_id` 监听 SSE”；`CurrentTurnStarted/Status/Stream/Error/TurnCancelled/TurnCompleted` 现都携带同一轮的 turn 关联 ID，跨 turn 不再共享同一张流式卡片。
-- 最新飞书控制器对齐进展：回复管线已进一步收口成 per-dispatch controller 形态；单个 turn 现在由一个独立 controller 持有 `reply_mode + 卡片状态 + flush 时钟`，流中文本与完成态段落分离累计，更接近 `openclaw-lark` 的单 controller / 单卡片模型。
-- 最新飞书后台删除修复：session 在后台被删除后，`channel_session_bindings` 现在会一并清理；即使历史脏数据残留，飞书入口在发现 binding 指向已删除 session 时也会自动新建 session 并回写绑定，不再出现“只记日志、不回消息”的 stale binding 黑洞。
-- 最新 turn 时序修复：`StreamEvent::Done` 到达后，server 现在会立刻把当前 turn 状态切到 `finishing`，前端可立即从“仍在生成”切到“收尾中”；同时 tool trace 持久化已移出 `turn_completed` 之前的关键路径，避免工具 trace 写盘继续阻塞终态 SSE。
-- 当前步骤补记：当前已完成 session 当前模型单一权威源与 `SessionSlot` 显式状态机两轮收口；下一步进入共享 provider/model/reasoning 契约统一，优先消灭 `agent-core`、`provider-registry`、`session-tape` 之间平行重复的字符串化模型语义。
-- 当前步骤：在 Web + server 主路径稳定的基础上，继续收口“可作为其他客户端驱动接口”的 server 形态，并把全异步主链推进到 Phase 4 的原生 async 收口态：`builtin-tools` 的文件/搜索工具、`agent-core` / `agent-runtime` 的 async + `Send` 边界，以及 `apps/agent-server` 的 session manager / turn 执行都已切到 Tokio async task；当前又补齐了一层真正面向客户端驱动的共享扩展面：system prompt 不再写死在 `agent-server`，而是改由 `agent-prompts::SystemPromptConfig` 组合；request / tool / turn 生命周期则统一经由 `agent-runtime::RuntimeHooks` 暴露，让外部 client 可以在不分叉 runtime loop 的前提下覆写 prompt、短路工具、改写工具结果或注入额外 provider request 上下文。与此同时，`/api/events` 在 `tokio::broadcast` 消费者落后时不再静默吞掉 `Lagged` 错误，而会显式发出 `sync_required` 事件；`apps/web` 收到该事件后会主动重拉 session 列表与当前 active session 的 `history/current-turn/info`，把 SSE 在线分发层与 session tape / snapshot 的持久化恢复边界真正接上。与此同时，`LanguageModel` 已收口为单一 `complete_streaming(request, abort, sink)` 入口，`agent-runtime` 对外 turn 入口也已收口为单一异步 `handle_turn_streaming(user_input, control, sink)`，上下文压缩入口也已只保留异步 `auto_compress_now()`，并且压缩请求现在会生成独立 trace context、落到本地 trace store；Web 侧又进一步把普通对话 trace 与 compression 日志拆成独立视图，避免压缩调用继续混进现有 trace 列表；与此同时，trace 首屏数据也已改成单次 `/api/traces/overview` 读取，前端同页重复刷新会被 store 合并，`agent-store` 还为 `span_kind/request_kind/trace_id/started_at_ms`、`trace_id` 与 `duration_ms` 热路径补上复合索引，减少单连接 SQLite 下的全表扫描与串行放大；`runtime::tool_calls` 里的 runtime-tool / 普通 tool 生命周期记账逻辑不仅已收口到共享 helper，也已进一步按 `tool_calls::{execute,lifecycle,types}` 模块化；`agent-core::CompletionRequest`、`agent-runtime` 与 `openai-adapter` 现已补齐 `parallel_tool_calls` 共享开关，Responses / Chat Completions 请求会显式发送该字段，而 runtime 也开始按“只读类工具可并行、写入/交互类工具串行”执行同一批工具调用；`agent-store` 的 SQLite 访问也已统一经由 `AiaStore::with_conn(...)` 显式包住锁边界，并新增了共享 `first_session_id()` / `SessionRecord::new(...)` helper，减少 `apps/agent-server` 在默认 session 解析和 session 记录构造上的重复样板；现在 trace 列表页又改为优先读取 `request_summary.user_message`，避免在列表接口里为每一行都反序列化完整 `provider_request` 大 JSON，同时 `apps/agent-server` 也开始按 `request_kind` 独立过滤普通 trace 与 compression 日志；`apps/agent-server` 的 live current-turn 更新与 tape→snapshot 重建也已开始共用 `runtime_worker::projection` helper，避免 `CurrentTurnBlock` / `CurrentToolOutput` 投影语义继续在 `session_manager` 与 `runtime_worker` 两边漂移；`openai-adapter` 里两条协议共享的 HTTP/request helper、协议专属 payload 类型，以及流式请求驱动 / SSE transcript 解析也已分别收口到共享模块与协议子模块；旧的 `complete` / `complete_streaming_with_abort` / `handle_turn*` / `block_on_sync(auto_compress_now_async)` 同步包装已移除，跨协议共用的 `payloads.rs` 也已拆散；本轮又把剩余的流式 tool-call 累积细节进一步收口为共享 `StreamingToolCallAccumulator`：Responses / Chat Completions 现在共用 invocation id、工具名、参数 delta 与 detected 去重状态的累积 helper，Responses 额外补齐了 `response.output_item.added.item.call_id` 的兼容读取，Chat Completions 也补了“同一工具重复发送 name delta 只发一次 `tool_call_detected`”回归，继续减少协议特有流式状态机里的重复样板；下一批热点则回到 `agent-store` / `apps/agent-server` 之间还能继续下沉的共享查询/投影逻辑，以及 server/runtime ownership 路径的进一步收口
+- 阶段：**Web 界面实现**
+- 当前细分步骤：**Web 界面 ↔ 运行时桥接收口**
+- 下一优先方向：
+  1. 继续压缩 `apps/agent-server` 的 runtime ownership / return-path 复杂度
+  2. 推进统一工具协议的对外映射与 MCP 接入
+  3. 继续补强 stop/cancel、channel 边界与 trace 诊断稳定性
 
-- 当前聚焦修正（已按实际代码核对）：`apps/agent-server/src/lib.rs` 已稳定导出 `bootstrap_state_with_options(...)`、`run_server_with_options(...)` 与 `run_self_chat(...)`；`apps/agent-server/src/bootstrap/mod.rs` 也已把 `request_timeout`、`system_prompt`、`runtime_hooks` 收口为高层 bootstrap 选项，而 `apps/agent-server/src/server/mod.rs` 则把监听地址独立成 `ServerRunOptions`。但从 `apps/agent-server/src/session_manager/turn_execution.rs` 仍以 `runtime.take() -> worker -> RuntimeReturn` 归还运行时、以及 `apps/agent-server/src/channel_host/runtime.rs` 当前仍只注册 `build_feishu_runtime_adapter(...)` 这两处可以看出，眼下真正还在继续收口的是 server 驱动面与宿主边界，而不是继续做 async 改造或把 Web 界面再往外铺。
-- 当前步骤补充：工具时间线的 `opencode` 风格对齐已完成，当前进入文档同步与最终验证波。本轮状态记录与 Web README 已按实际实现补齐“上下文探索组、独立工具行、统一微文案、边缘态规则与前端验证已完成”这些事实，同时继续保持阶段叙事不偏离“Web 界面 ↔ 运行时桥接收口，下一优先仍是统一工具协议映射与 MCP 接入”。
+## 当前已确认事实
 
-## 已完成
+### 1. 主承接面
 
-- 完成 Web 工具时间线 `opencode` 风格对齐：上下文探索工具现只按 `read` / `glob` / `grep` / `list` 连续分组，`codesearch`、`websearch`、`shell`、文件编辑类与未知工具保持独立工具行；共享微文案、详情视觉语义、进行中/完成态折叠规则、问题忽略与未知工具降级也已统一收口，并通过前端测试、`just web-check` 与 `just web-build` 验证
-- 完成 `apps/web` 目录分层新一轮收口：`channels/settings/trace/chat-input/navigation` 的业务实现已继续迁入 `features`，单文件重导出壳已删除，`components` 基本只剩共享 UI/markdown/theme；当前又从大文件扫描结果中优先拆出 `channels` 的微信扫码登录子模块、`trace` 的 inspector 子模块、`settings` 的 provider 表单区块，并把工作台导航态、provider 注册表以及 session-settings 协调边界继续从 `chat-store` 中抽离，继续缩小超大 feature 入口与总控 store 的职责面
-- 建立 Rust 工作区
-- 建立 `aia-config`
-- 建立 `agent-core`
-- 建立 `session-tape`
-- 建立 `agent-runtime`
-- 建立 `provider-registry`
-- 建立 `openai-adapter`
-- 建立 `channel-weixin`
-- 建立 `weixin-client`
-- 建立 `agent-store`
-- 建立 `apps/web` Web 工程骨架并演进为实际主工作台
-- 完成最小可运行验证与基础测试覆盖
-- 完成项目级命名从 `like` 收敛为 `aia`
-- 完成本地 provider 注册、活动项持久化与协议类型区分
-- 完成 OpenAI Responses 与 OpenAI 兼容 Chat Completions 双协议适配
-- 完成会话磁带扁平化、锚点、handoff、fork / merge、查询切片与旧格式兼容
-- 完成结构化工具调用 / 工具结果贯穿运行时主链，并统一沉淀为可重建请求的会话条目
-- 完成 OpenAI Responses 与 Chat Completions 的原生工具链路映射
-- 完成运行时单轮多步模型 / 工具循环、预算提示、文本收尾步与独立工具调用上限
-- 完成 `apps/web` 首页从模板页替换为项目主界面骨架
-- 完成 `apps/web` 工作台首页重构，并接入基础 UI 组件体系
-- 完成 Web 主界面信息结构收敛：左侧边栏、中央消息列表、底部输入框
-- 完成 `docs/frontend-web-guidelines.md`，明确 Web 前端开发规范与运行时边界
-- 完成 `apps/agent-server` axum HTTP+SSE 服务器，桥接 Web 前端到共享运行时
-- 完成全局 SSE 事件流架构（`GET /api/events`），基于 `broadcast::channel` 向所有客户端推送事件
-- 完成 `POST /api/turn` fire-and-forget 消息提交，响应通过全局 SSE 返回
-- 完成 provider、session、history、current-turn、handoff、cancel、trace 等主接口
-- 完成 Rust 侧核心类型（`StreamEvent`、`TurnLifecycle`、`TurnBlock` 等）的序列化支持
-- 完成前端全局 store：统一管理 SSE 连接、流式状态累积、turn 完成回收与 provider 当前状态刷新
-- 完成流式轮次状态指示：waiting → thinking → working → generating
-- 完成流式 tool output 实时渲染，按 invocation_id 分组展示，不等 turn 完成
-- 完成 Vite 开发代理配置（`/api` → `http://localhost:3434`）
-- 完成移除 `apps/agent-cli` 包，并同步清理工作区与文档中的 CLI 主入口叙事
-- 完成核心 Rust crates 的内部模块化收口：`provider-registry`、`agent-core`、`session-tape`、`openai-adapter`、`agent-runtime`、`aia-config` 已保持薄 façade + 职责模块
-- 完成 `provider-registry` 与 `apps/agent-server` 之间的 provider 多模型配置接口对齐，并兼容旧单模型本地落盘格式
-- 完成 `agent-runtime` 深一层内部拆分：主循环、请求构造、工具执行、事件缓冲、错误与测试已进一步解耦
-- 完成内建编码工具命名收口为 `shell`、`read`、`write`、`edit`、`glob`、`grep`
-- 完成 `shell` 内建工具改为内嵌 `brush` 库执行，并补齐 stdout / stderr / exit_code 结构化回传与基础测试
-- 完成 `apps/agent-server` 向 runtime 显式传入 `workspace_root`，保证相对路径工具调用语义稳定
-- 完成 Web 端 provider 创建、更新、删除、切换与当前 provider / provider 列表刷新链路
-- 完成 Web 端 Channels 配置链路：`AppView`/Sidebar/MainContent 已接入 `channels` 视图，前端 store 与 `/api/channels` 的 list/create/update/delete 已连通，当前先只支持飞书 channel
-- 完成 channel profile 持久化迁移：已配置 channel 档案当前统一落盘到 `.aia/store.sqlite3`
-- 完成 `channel-registry` crate 退场：共享 profile 模型与 store façade 已并入 `channel-bridge`，旧 `.aia/channels.json` 路径约定也已从共享配置中移除
-- 完成 channel 配置模型再收口：`ChannelProfile` 现只保留通用 profile 元数据 + raw `config` payload，具体配置结构与校验改由 adapter 自己定义；旧版 Feishu 裸配置 JSON 继续可读
-- 完成 channel catalog 首轮打通：`channel-bridge` 现在额外提供 `ChannelAdapterCatalog` 与 `SupportedChannelDefinition.config_schema`；`agent-server` 已暴露支持的 channel catalog，Web 端 Channels 面板可按 server 下发的 schema 动态渲染，而不是继续写死 Feishu 表单
-- 完成命名与边界收口：代码层把“已配置渠道档案”的 store façade 统一命名为 `ChannelProfileRegistry`，并把运行时支持的实现目录明确命名为 `ChannelAdapterCatalog`，避免两类 registry 继续混淆
-- 完成 `channel-bridge` 首轮 trait 化落地：共享 `ChannelSessionService` / `ChannelBindingStore` 契约、session 绑定恢复、turn 预压缩、消息回执幂等 helper，以及 adapter 化 `ChannelRuntimeSupervisor` 已从 `apps/agent-server` 抽离，供多渠道入口复用
-- 完成 `channel-feishu` 首轮迁移：飞书协议、长连接、回复控制、卡片流式状态与相关单测已迁入独立 crate，`agent-server` 只保留宿主桥接
-- 完成 `agent-store` 的 channel 动态索引：外部会话键 → `session_id` 映射与 `message_id` 幂等去重已进入 SQLite
-- 完成飞书 channel 正式长连接桥接：`apps/agent-server` 当前会按 channel 配置维护飞书长连接 worker，复用既有消息解析、会话映射、SQLite 幂等去重、`session_manager.submit_turn(...)` 与回复发送链路；原 webhook 过渡入口已移除
-- 完成飞书入口确认路径收口：长连接事件收到后会先回确认帧，再异步执行自动压缩、turn 提交、等待 SSE 完成与飞书回复，避免把平台 3 秒确认窗口直接绑死在模型/工具执行时长上
-- 修复飞书私聊 `open_id cross app`：私聊场景不再走 `sender.open_id` 直发，而是优先使用 p2p `chat_id`（从事件载荷或 `chat_p2p/batch_query` 解析）作为 `receive_id_type=chat_id` 的发送目标；群聊仍保留 reply / thread 语义
-- 修复飞书外部消息刷新后才可见：server 发送 `current_turn_started`，web 在缺少本地 `streamingTurn` 时会主动从 `/api/session/current-turn` 恢复当前执行态，支持外部消息即时渲染与流式恢复
-- 修复飞书配置热更新的失活 worker 漏重启：同 fingerprint 但已退出的长连接 worker 现在也会在 `sync_feishu_runtime(...)` 中被重新拉起，不再卡到只能靠进程重启恢复
-- 完成飞书处理中表情生命周期：收到用户消息开始处理时会对原消息添加 `Typing` reaction，处理结束后按返回的 `reaction_id` 删除，避免“处理中”状态残留
-- 完成飞书 CardKit 流式回复：收到消息后会先创建 `CardKit` card entity，再发送引用 `card_id` 的 interactive 消息；处理中正文通过单个 markdown `element_id` 流式更新，最终关闭 streaming mode 并更新为完整卡片
-- 收紧飞书卡片视觉层级：按“直接回复内容”的格式呈现，不再额外显示 header 和用户消息区块；完成态保留可折叠思考过程、工具状态和耗时 footer
-- 修复同一 turn 多段回复覆盖：完成态回复内容现改为从 `turn.blocks` 中提取全部 assistant 块并按顺序拼接；如果没有 assistant 块才回退到单段 `assistant_message`
-- 收口跨 turn 串写风险：aia 当前飞书桥接已补上 server 侧 `turn_id` 关联，`submit_turn` 会返回本次 turn 关联 ID，飞书 bridge 和 self-chat 都按 `session_id + turn_id` 双键过滤流式事件；`openclaw-lark` 的 per-dispatch controller 隔离思路已在这一层被对齐到可用语义
-- 对齐 `openclaw-lark` 的累计语义：流中文本现在独立保存为 `streaming_text`，完成态段落保存为 `completed_segments`；最终卡片优先展示完成段落，流中卡片优先展示正在累积的正文，这更接近 `openclaw-lark` 的 `accumulatedText/completedText` 分离模型
-- 修复后台删除后的飞书会话失联：删除 session 时会同步删除该 session 对应的 channel binding；对于旧版本遗留的脏 binding，飞书入口也会在 `resolve_session_id(...)` 阶段做活性检查并自动 rebinding 到新 session
-- 缩短 turn 终态感知延迟：前端原先只在 `turn_completed` 才结束活跃状态；当前已新增 `finishing` 终末状态，并在 `StreamEvent::Done` 后立即广播，使 UI 不再长时间停留在 `generating`。同时 `persist_tool_trace_spans(...)` 改为异步后台写入，减少完成事件前的尾延迟
-- 完成 provider 变更的事务式提交：候选 registry 校验、registry 落盘、session tape 落盘全部成功后才提交到内存 runtime / tape
-- 完成 provider 持久化失败路径回归测试，保证落盘失败不会留下 registry / runtime / tape 分叉状态
-- 完成 Web 端 Markdown 渲染入口收敛为共享前端组件，并统一消息排版样式
-- 完成 `apps/agent-server` 运行时拥有关系重构：当前由 `session_manager::SessionManagerLoop` 持有每个 session 的 `AgentRuntime`、provider 同步与 session 持久化主线；turn 执行经 `turn_execution` 把 runtime 取出后交给异步 worker，再通过 `RuntimeReturn` 归还，HTTP 路由继续通过 `SessionManagerHandle` 与共享快照访问运行态
-- 完成 provider 当前信息 / provider 列表快照化读取，长时间 shell / model turn 不再阻塞轻量查询接口
-- 完成 session history / current-turn 快照化读取：运行中的 agent loop 不再把 `/api/session/history` 挂起，页面刷新时也能直接恢复当前进行中的 turn
-- 完成 session jsonl 实时 append 落盘：agent loop 过程中新增的用户消息、thinking、tool 调用结果与完成/失败事件都会立即写入 `.aia/session.jsonl`
-- 完成 Web 端用户消息的乐观渲染，提交后立即显示到消息列表，而不是等流式完成再落入 completed turn
-- 完成 trace 记录对真实 HTTP 状态码的保留：不再在成功路径硬编码 `200`
-- 完成 trace 列表按 agent loop 聚合展示与 recent loops 分页
-- 完成共享协议层与 trace/UI 对 provider 私有 checkpoint 概念的移除
-- 完成 Web trace 页收口为更接近 tracing 产品的三栏视图：左侧 recent loops，中间 span timeline，右侧 inspector
-- 完成 `agent-store` 侧本地 span store 能力：LLM spans 与 tool spans 共用本地 trace/root span 语义
-- 完成 `llm-trace` 本地 event timeline 落盘：记录 request started、首个 reasoning/text delta、tool-call detected、response completed/failed
-- 完成 runtime tool span 的后端真实落盘：工具执行不再只是前端临时推导节点
-- 完成流式工具事件语义拆分：`tool_call_detected` 与 `tool_call_started` 不再混用
-- 完成 `tape_info` / `tape_handoff` 从 runtime 特判式实现收口到 `Tool` trait + runtime tool registry
-- 完成真实 token usage 贯通到 turn 主链、session history 与 Web 展示
-- 完成自动上下文压缩触发修正与 `context_compressed` 可观测性补齐
-- 完成提交前的后端自动压缩收口：高压力下会先 idle auto-compress 再启动 turn
-- 完成 Web 历史消息体验优化：切换 session / 水合历史时直接跳到底部，历史按页加载
-- 完成 Web 历史分页交互收口：消息列表上滚接近顶部时自动加载前一页，替代显式点击按钮
-- 完成 Web 历史翻页定位重构：只以 `user message` 作为上下文锚点恢复位置，并关闭浏览器默认滚动锚定，减少提前触发加载时的顶跳与漂移
-- 完成 Web 历史翻页锚点补偿修正：加载前一页后优先按首个可见消息锚点恢复视口，减少定位漂移
-- 完成 Web session 切换流畅度收口：store 维护按 session 的本地快照缓存，切换时保留上一帧内容并显示轻量 loading 提示，不再先清空消息区造成闪烁
-- 完成 Web session 切换滚动收口：每次切换 session 时都强制跳到最新消息底部，不再保留旧会话的局部滚动位置
-- 完成 Web 聊天列表首轮渲染减载：消息项引入 memo，长历史列表改为轻量窗口化渲染，并按 session 恢复滚动位置；历史分页加载时不再意外强制滚到底部
-- 完成 Web 聊天列表第二轮滚动/窗口化收口：窗口化从估算高度升级为动态测量高度，切换 session 时明确滚动到最新消息底部，避免旧会话中段位置残留带来困惑
-- 完成 Web 聊天列表第三轮锚定稳定性收口：已移除动态测量窗口化与锚定补偿机制，优先选择更稳定、可预测的消息渲染路径，避免流式与展开/收起场景下的潜在抖动
-- 完成 Web session 切换首屏收口：切换前仅同步保存旧 session 的最后一个 turn 快照；切入新 session 时先展示/拉取最后一个 turn，再后台补齐其余历史，减少主线程阻塞与首屏等待
-- 完成 Web session 快照瘦身：`_sessionSnapshots` 退化为最小 UI snapshot，只保留最后一个 turn 与 streaming/UI 状态，不再长期缓存历史页副本
-- 完成 Web session 后台补历史收口：首屏只进最后一个 turn，其余历史改为空闲时增量补页，并在切走 session 时取消后台补页，减少与滚动/streaming 的竞争
-- 完成 Web idle 调度抽象：session 后台补历史不再写死 `setTimeout`，优先使用浏览器 `requestIdleCallback`，并保留 fallback 与测试可控注入
-- 完成 Web 端 turn 提交请求的 `keepalive` 加固
-- 完成 provider 注册表加载的旧路径兼容：当 `.aia/providers.json` 缺失时，自动回退读取 `.aia/sessions/providers.json`
-- 完成完整的 stop/cancel 基线：server 暴露 `POST /api/turn/cancel`，session manager 能中断运行中 turn，runtime 把取消信号传到工具执行上下文，Web 输入区提供 stop 按钮并显示 cancelled 状态
-- 完成 stop/cancel 第二阶段基线：runtime 会把 abort 继续传到 OpenAI streaming 调用；embedded `brush` shell 在收到取消后会向当前作业发送 `TERM` 并尽快收尾；`TurnLifecycle` 新增共享 `outcome` 字段；server 取消 API 只负责触发 abort，真正的 cancelled SSE 由 worker 在轮次结束时统一发出一次
-- 完成全异步主链 Phase 1 收口：`agent-core` 的 `LanguageModel` / `ToolExecutor` / `Tool` 已切换为 async trait，`agent-runtime` 新增 async turn 主链并保留同步包装入口，相关 mock / 测试实现也已统一迁到 async trait 用法
-- 完成全异步主链 Phase 2：`openai-adapter` 已从 `reqwest::blocking` 切到 async `reqwest`，Responses / Chat Completions 的单次请求与流式 SSE 都改为原生 async HTTP / chunk streaming，同时保留 abort / cancel 语义
-- 完成全异步主链 Phase 3 的关键长任务路径收口：`builtin-tools` 的 `shell` 已把 stdout/stderr 聚合、abort 轮询与输出捕获都改为 async 事件泵，并移除自建 thread + current-thread runtime；当前 `brush` 执行直接挂在 Tokio task 上，输出改为异步 tail 临时 capture 文件，不再依赖 `spawn_blocking`
-- 完成全异步主链 Phase 3 的内建文件/搜索工具收口：`read` / `write` / `edit` 已切到 `tokio::fs`，`glob` / `grep` 也已改为共享的 async `.gitignore` 感知仓库遍历 + async 文件读取，不再依赖 `spawn_blocking` / `ignore::WalkBuilder` 扫描仓库
-- 完成全异步主链 Phase 4 的 server 原生 async 收口：`apps/agent-server` 的 session manager 与 turn 执行都已切到 Tokio async task，移除了 `tokio::spawn_blocking`、`std::thread::Builder`、`LocalSet` 与 `spawn_local`；运行中 `session/info` 也改为读取内存中的 `ContextStats` 快照，而不是回退磁带
-- 完成 trace 查询路由的 async 控制面收口：`/api/traces`、`/api/traces/{id}`、`/api/traces/overview` 与 `/api/traces/dashboard` 已去掉 per-request `spawn_blocking` 包装，直接复用共享 SQLite store 读取路径，并补齐了路由回归测试；旧的独立 `/api/traces/summary` 入口已在 overview/dashboard 收口后移除，避免继续保留无调用的重复控制面
-- 完成 `apps/agent-server` 路由模块化：`routes.rs` 不再承载全部 provider/session/trace/turn handler，现已拆分为 `provider`、`session`、`trace`、`turn`、`common` 与独立测试模块，并把重复的 session 解析、JSON/error/ok 响应 helper 收口到共享模块
-- 完成 `apps/agent-server` 的 `session_manager` 模块化：主文件只保留 session loop、slot 生命周期与 provider/runtime 同步逻辑；命令发送模板、共享类型、current-turn 流式投影、tool trace 持久化与测试都已分别拆到 `session_manager::{handle,types,current_turn,tool_trace,tests}`
-- 完成 `apps/agent-server` 的 `session_manager` 第二轮收口：provider 注册表同步与 turn worker/SSE 投影已进一步拆到 `session_manager::{provider_sync,turn_execution}`，主文件继续缩回 façade 式编排入口
-- 完成 `apps/agent-server` 的 `model` 模块化：主文件只保留 `ServerModel`、provider 选择与 trace 落盘主流程；bootstrap mock、trace helper 与测试分别拆到 `model::{bootstrap,trace,tests}`
-- 完成 `agent-store::trace` 模块化：根文件只保留 trace 类型与 trait；schema 初始化、store 实现、row 映射/JSON 解码与测试分别拆到 `trace::{schema,store,mapping,tests}`，并收口了重复的 JSON 列解析逻辑
-- 完成 `apps/agent-server` 的 `runtime_worker` 模块化：根文件只保留薄 façade；共享类型、tape 快照重建/legacy decode helper 与测试分别拆到 `runtime_worker::{types,snapshots,tests}`
-- 完成 `agent-runtime::runtime::turn` 模块化：根文件只保留薄入口；turn 主驱动、completion segment 处理与共享 turn buffer / success-failure context 已分别拆到 `turn::{driver,segments,types}`，并收口了重复的失败上下文拼装
-- 完成 `builtin-tools::shell` 模块化：根文件只保留 `ShellTool` 契约与结果组装；capture 文件/事件泵、embedded brush 执行主流程与测试分别拆到 `shell::{capture,execution,tests}`
-- 完成 `openai-adapter::responses` 模块化：根模块只保留 Responses 配置与模型入口；请求构造/HTTP helper、响应体解析、流式状态累积与 `LanguageModel` 客户端入口分别拆到 `responses::{request,parsing,streaming,client}`
-- 完成 `openai-adapter::chat_completions` 模块化：根模块只保留 Chat Completions 配置与模型入口；请求构造/HTTP helper、响应体解析、流式状态累积与 `LanguageModel` 客户端入口分别拆到 `chat_completions::{request,parsing,streaming,client}`
-- 完成 `openai-adapter` payload 类型按协议归位：原先跨协议共用的 `payloads.rs` 已拆成 `responses::payloads` 与 `chat_completions::payloads`，避免 Responses / Chat Completions 继续共存于同一组边缘层数据结构里
-- 完成 `openai-adapter` 共享流式驱动收口：Responses / Chat Completions 的 `complete_streaming` 已共用顶层 streaming request driver、SSE transcript 记录与 `data:` JSON 行解析 helper，不再在两条协议里重复维护请求发送、状态码失败处理和 `[DONE]`/JSON 解析模板
-- 完成 `LanguageModel` 历史入口清理：共享 trait 已收口为单一 `complete_streaming(request, abort, sink)`，runtime 压缩、server trace 桥接、OpenAI 适配器与相关测试/mocks 都已改走统一流式入口
-- 完成 `agent-runtime::runtime::turn::driver` 失败路径收口：重复的 `record_turn_failure + return Err(...)` 样板已压缩为共享 `fail_turn` helper
-- 完成 `agent-runtime` turn 公开入口清理：同步 `handle_turn` 与历史命名 `handle_turn_streaming_with_control_async` 已移除，对外统一为异步 `handle_turn_streaming(user_input, control, sink)`；`apps/agent-server` 与 runtime 测试已改走同一条异步入口
-- 完成 `agent-runtime` 压缩入口清理：同步 `auto_compress_now` 包装与 `block_on_sync` helper 已移除，对外统一为异步 `auto_compress_now()`；`apps/agent-server` 的 session manager 已直接 await 共享 runtime 压缩入口
-- 完成 `agent-runtime::runtime::tool_calls` 生命周期记账收口：runtime tool 与普通 tool 的成功/失败记录、事件发布与 `seen_tool_calls` 更新已改走共享 helper，减少重复分支和后续语义漂移风险
-- 完成 `agent-runtime::runtime::tool_calls` 模块化：根文件只保留薄入口；工具调用主流程、生命周期落盘/事件发布与共享上下文类型已分别拆到 `tool_calls::{execute,lifecycle,types}`，并用共享构造 helper 收口重复的 lifecycle context / started event 样板
-- 完成 `agent-store` SQLite 锁边界收口：session / trace / schema 初始化与 legacy 迁移已统一通过 `AiaStore::with_conn(...)` 访问共享 `Mutex<Connection>`，不再让各模块直接持有 `MutexGuard`；`session::update_session()` 也已去掉动态 SQL + `Box<dyn ToSql>`，改为显式分支
-- 完成 `agent-store` / `agent-server` 的一轮 session helper 收口：`AiaStore::first_session_id()` 与 `SessionRecord::new(...)` 已下沉到共享 store/types 层，server 启动和路由默认 session 解析不再为“取第一条 session”整表加载，也不再在多个壳层重复手拼 `SessionRecord`
-- 完成 trace overview 的 loop 级存储收口：`agent-store` 在 span 入库时同步维护 `llm_trace_loops` 聚合表，`/api/traces/overview` 现在直接按 agent loop 返回分页项，不再把单次模型调用误当作最终列表语义，也不再依赖前端临时按 `trace_id` 二次拼装
-- 完成 `apps/agent-server` current-turn 投影 helper 收口：live stream 更新与 tape 快照重建共享 `runtime_worker::projection` 中的 `CurrentTurnBlock` / `CurrentToolOutput` 投影 helper，不再在 `session_manager::current_turn` 与 `runtime_worker::snapshots` 各自维护一套对象归一化、tool block 构造和状态推断逻辑
-- 完成 `agent-runtime` / `openai-adapter` 的并行工具调用首轮落地：共享 `CompletionRequest` 新增 `parallel_tool_calls`，Responses / Chat Completions 请求会显式发送该字段；runtime 对同一批工具调用开始按策略执行——`read` / `glob` / `grep` 等只读类工具可并行准备与执行，而 `shell` / `write` / `edit` / runtime tools 继续保持串行，避免文件系统冲突与交互副作用
-- 完成独立内建 `apply_patch` 工具：`edit` 保持单文件精确唯一替换语义不变，同时新增短名稳定的 `apply_patch` 工具承接 `*** Begin Patch` / `*** End Patch` 风格多文件补丁，支持 `Update File`、`Add File`、`Delete File`，让 Codex/Claude 风格补丁映射无需借道 shell，也避免把两种编辑语义继续混在同一个工具里；其每文件结果元数据现也已收口为共享强类型结构，而不是继续在实现里手写 `serde_json::Value`
-- 完成 SSE 落后客户端显式重同步：`apps/agent-server` 的 `/api/events` 在 `broadcast` 消费者落后时会发出 `sync_required` 事件，而不是静默丢弃；`apps/web` 收到后会主动补拉 session 列表与当前 session 的历史、当前 turn、上下文压力，避免事件流与本地 UI 状态无声漂移
-- 完成工具参数 schema 共享 helper 收口：`agent-core::ToolDefinition` 除支持手写 JSON 外，也支持基于自研最小 `ToolArgsSchema` trait 与 derive 宏生成统一参数 schema；当前 `builtin-tools`、runtime tape tools 与测试中的常规参数结构体已切到 `#[derive(ToolArgsSchema)]` 自动生成，`ApplyPatchToolArgs` 也已收口为单 struct + 别名字段模型来复用这条能力；该 helper 继续只覆盖当前真实需要的 object/properties/required/additionalProperties/description/minimum/minProperties 子集，避免再引入外部反射式 schema 依赖
-- 补齐 `ToolArgsSchema` 用户态清单文档：新增 `docs/tool-schema-derive.md`，明确支持的字段类型、结构边界、`tool_schema(...)` 可用键与 `serde` 协作范围，避免把可发现性完全寄托在编辑器对 derive helper attribute 的内部键提示上
-- 扩展 `ToolArgsSchema` derive 高频能力：当前已补 `bool` / `Option<bool>`、有符号整数族、`Vec<String>` / `Option<Vec<String>>`，以及字段级 `minimum` / `maximum` 数值约束，让下一批简单工具参数不必再回退到手写 schema
-- 完成 `ToolArgsSchema` compile-fail 诊断回归：`agent-core` 现用 `trybuild` 锁住容器级/字段级非法 `tool_schema(...)` 键与无符号负数约束等关键错误文案，避免 derive 宏后续扩展时悄悄把用户态诊断弄差
-- 完成真实工具调用到 typed args 的统一收口：`agent-core::ToolCall` 新增共享 `parse_arguments()`，当前 `builtin-tools` 与 runtime tools 的 `call()` 已改为直接反序列化结构化参数，而不再手工散落 `str_arg/opt_*_arg/arguments.get(...)` 取值
-- 完成真实工具 description 的集中管理：`agent-prompts` 现通过 `prompts/tool/` 目录下的 Markdown 文件统一管理内建工具与 runtime tools 的共享 description，`builtin-tools` / `agent-runtime` 的真实 `ToolDefinition` 已改为复用这些文本，不再各 crate 自带字面量
-- 完成 `agent-store` async façade 收口：session / trace 的 SQLite 访问已通过共享 async store API 暴露给 `apps/agent-server` 与 `ServerModel`，trace/session 路由、session manager 初始化与 turn/tool trace 落盘不再在 async 路径里直接调用同步 store 方法
-- 完成 `agent-store` SQLite 锁中毒恢复：trace/session 读写与 schema 初始化不再因 `Mutex<Connection>` poisoned 而 panic
-- 完成 `aia-config` 共享配置 crate：把 `.aia` 路径、默认 session 标题、server 默认地址 / 事件缓冲 / 请求超时、统一 user agent 组装，以及 trace / span / prompt-cache 稳定前缀从 `apps/agent-server` 与相关共享 crate 中收口
-- 完成 `aia-config` 内部模块化：拆为 `paths`、`server`、`identifiers` 三类共享配置模块，`lib.rs` 保持薄 façade
-- 完成 `provider-registry`、`session-tape`、`apps/agent-server`、`agent-runtime` 对共享配置默认值与 helper 的首轮接入
-- 完成 `apps/agent-server` 启动路径错误收口：provider 注册表、SQLite store、sessions 目录、默认 session、模型构建、端口绑定与 server serve 失败不再 `expect` panic
-- 完成 `runtime_worker` 历史重建解码告警收口：legacy `turn_record` 与 `turn_completed.usage` 损坏时不再无声忽略，而会输出明确诊断并尽量保留其余可重建轮次数据
-- 完成 `agent-core` / `agent-runtime` 时间辅助函数收口：tool invocation id、turn id 与时间戳生成在系统时钟回拨到 `UNIX_EPOCH` 之前时不再 panic
-- 完成 `builtin-tools` shell 测试稳定性修正：stdout delta 断言不再假设嵌入式 shell 只会回传单个输出块
-- 完成 `apps/web` 工具链切换到 Vite+ 工作流，并引入子目录级 `apps/web/AGENTS.md` 约束
-- 完成 trace 列表读取瘦身：`agent-store` 的列表查询改为从 `request_summary.user_message` 读取轻量用户消息预览，不再为每条列表项反序列化完整 `provider_request`
-- 完成上下文压缩调用 trace 化：`agent-runtime::auto_compress_now()` 现在会生成独立压缩 trace context，`apps/agent-server` 会把压缩请求持久化到 trace store，`apps/web` 的 trace 面板也会显式标识 compression activity
-- 完成工具参数 schema 对外收口：当前 `builtin-tools` 与 runtime tape tools 已统一通过手写裸 JSON 或 derive schema helper 暴露稳定外部契约；`apply_patch` 参数也已从未标记枚举收口为单 struct + `patch` / `patchText` 可选别名字段模型，在保持原有兼容语义的同时复用 derive 能力；共享 schema 归一化仍保留为后备能力，用于清洗手写 JSON 与 derive helper 的输出细节
-- 完成 compression 日志独立视图：`apps/agent-server` 的 trace 列表/汇总已支持按 `request_kind` 过滤，`apps/web` 把普通对话 trace 与上下文压缩日志拆成独立视图，不再混合展示
-- 完成 trace 首屏请求合并与查询提速：`apps/agent-server` 新增 `/api/traces/overview` 单次概览读取，`apps/web` 的 trace store 会合并同页重复刷新，`agent-store` 也已为 trace 列表/汇总热点查询补齐复合索引
-- 修正 `/api/traces/overview` 分页语义：`agent-store` 的 trace page 现真正按返回 `items` 数量分页，`page_size` 不再只是“loop 数上限”；同时 overview summary 也已落到本地 SQLite 快照表 `llm_trace_overview_summaries`，并进一步收口为由 loop 差量驱动的增量维护路径，避免每次 span 写入都重扫整张聚合表
-- 完成 `agent-server` 基础 CLI 双入口：二进制默认仍启动 HTTP+SSE server，同时新增 `self` 子命令以内嵌 `docs/self.md` 作为 system prompt 直接进入终端对话；其 turn 提交、自动预压缩与事件消费复用同一套 session manager / runtime 主链，而不是另造一条 CLI 专用 agent loop
-- 完成 `apps/agent-server` bootstrap 请求超时收口：`ServerBootstrapOptions` 现可显式注入共享 `RequestTimeoutConfig`，session manager 新建 runtime 时会统一复用该配置；默认值继续来自 `aia-config::DEFAULT_SERVER_REQUEST_TIMEOUT_MS`，而嵌入方可按客户端场景覆写，而不必再依赖 app 壳内硬编码
-- 完成 `openai-adapter` 流式 tool-call 累积 helper 收口：Responses / Chat Completions 现在共用 `StreamingToolCallAccumulator`，统一承接 invocation id、工具名、参数 delta 与 detected 去重状态；其中 Responses 额外兼容 `response.output_item.added.item.call_id`，Chat Completions 也补齐“重复 name delta 不重复发 `tool_call_detected`”回归，继续减少协议特有流式状态机里的重复样板
-- 完成 `apps/agent-server` server 监听地址收口：新增 `ServerRunOptions` 与 `run_server_with_options(...)`，把 HTTP listener 配置从 bootstrap 状态装配中拆开；CLI 也已支持 `--bind <addr>` 覆写监听地址，默认值仍保持 `aia-config::DEFAULT_SERVER_BIND_ADDR`
-- 完成 provider 注册表规范化 SQLite 持久化：`agent-store` 现通过 `providers` + `provider_models` 两张表承接 provider 基本资料与模型列表；`apps/agent-server` bootstrap 与 provider CRUD 已直接读写这两张表，provider 侧 `reasoning_effort` 也已移除，避免和 session 级设置重复建模
-- 完成 `agent-server self` 启动任务注入：`self` 子命令现可在启动时附带用户想优先处理的任务文本，并把它作为首轮 user-direction message 发送，而不必先进对话后再手动补一条说明
-- 完成 `agent-server self` 首批内建命令：`/help`、`/status`、`/compress`、`/handoff <name> <summary>` 已接到现有 session manager 命令面，便于在终端自我进化模式下查看命令说明、上下文压力、手动压缩和创建 handoff，而不必回到 Web；格式错误的内建命令也会在本地直接返回 usage，而不是误发给模型
-- 完成 Web 聊天区一次 session 切换滚动抖动收口：`ChatMessages` 在切换 session 时改为用 `useLayoutEffect` 同步恢复到底部，避免首帧先渲染旧滚动位置再跳动到最新消息
-- 完成 `read` 工具元信息文案纠偏：聊天内工具时间线里，`read` 的 meta 改为显示真实 1-based 行号范围（如 `L121-160`），不再把 `offset` 和 `lines_read` 误显示成含糊区间
-- 完成内建 `codesearch` 工具：共享工具注册表现可直接向 Exa Code API 请求编程相关代码/文档上下文，并兼容 SSE 风格返回体解析、默认 30 秒超时与取消语义
-- 完成 Web Markdown renderer 回退：共享 `MarkdownContent` 已重新改回 `streamdown`，聊天正文与推理内容继续复用同一门面，但不再依赖 `markstream-react` 的节点协议与自定义代码块组件
-- 完成 Web Markdown 依赖与样式回收：`apps/web` 已恢复 `streamdown` / `@streamdown/*` 依赖、KaTeX 样式与 `data-streamdown` 样式入口，并补回代码块、表格、Mermaid 与数学公式回归测试
-- 完成 session 级模型设置：`apps/web` 的模型选择器与输入框思考等级现在都绑定当前 session；`apps/agent-server` 通过 `/api/session/settings` 持久化每个 session 的 provider/model/reasoning_effort，切换 session 时会恢复对应设置
+- `apps/web` 是当前主客户端工作台
+- `apps/agent-server` 是当前 canonical runtime control surface，而不是只服务单一前端页面的薄后端
+- `agent-server` 同时提供：
+  - HTTP + SSE server
+  - `self` CLI 模式
+  - 可嵌入的 `bootstrap_state_with_options(...)` / `run_server_with_options(...)` façade
 
-## 正在进行
+### 2. 共享核心结构
 
-- 进入工具时间线实现后的最终验证波，当前只做事实对齐与文档同步，不把尚未单列实施的 `search-tools.tsx` 专项收口写成额外已完成阶段
-- 继续观察 `Question` 恢复闭环在真实 provider / 更复杂多步工具链中的稳定性，尤其是“等待态 turn 被替换而非追加新 turn”的历史/快照投影是否仍有边缘态需要补强
-- 继续收口 `apps/agent-server/src/session_manager/turn_execution.rs` 里 `runtime.take() -> worker -> RuntimeReturn` 这条 ownership / return-path 主线，并判断哪些驱动辅助适合上移到 `agent-runtime`
-- 观察 `SystemPromptConfig`、`RuntimeHooks`、`ServerBootstrapOptions` 与 `ServerRunOptions` 这组驱动接口的稳定性，避免 app 壳装配细节重新回流到共享层
-- 继续评估 `channel-feishu` 与 `channel-bridge` 之间是否还有可再压缩的宿主接口；若未来出现第二个 transport，再只抽已证明重复的部分，避免过早泛化
-- 观察内嵌 `brush` 作为 shell 运行时的实际稳定性、命令兼容性与中断语义
-- 继续把 trace 数据模型从“本地 span store + event timeline”推进到更完整的 resources / richer events 模型，但暂不抢在工具协议映射与 MCP 之前做 exporter / collector 集成
-- 继续观察 provider settings 与 channels settings 这两条配置面板在同一信息架构下的扩展性，避免后续新增更多配置面时把状态流和表单模式做散
-- 继续补强飞书 channel 的 mention / 群权限策略、可用范围与白名单控制，避免长连接主链落地后权限边界仍然过粗
-- 验证 stop/cancel 目前对长时间 shell / 外部 provider streaming 的实际覆盖率；当前已打通 server→runtime→tool context，并进一步补上 OpenAI streaming 读取中的取消检查与 shell 作业 `TERM` 中断，后续仍需继续观察 provider/运行时在不同上游和复杂 shell pipeline 下的真实中断覆盖率
-- 当前 OpenAI adapter 已切到 async `reqwest` + async chunk streaming；后续观察重点转为不同上游是否仍在连接建立、TLS、代理缓冲或服务端长时间不刷新的窗口里残留取消迟滞
-- 全异步主链已完成 Phase 1-4：`shell`、文件工具、搜索工具、session manager / turn worker、runtime 公共 turn / 压缩 API、trace/session store 访问与 provider I/O 都已统一到 async 调用面；当前后续重点转为 runtime ownership / return-path 简化、共享层继续抽象，以及剩余实现样板的继续压缩
-- 继续盘点跨 crate 的超大文件与重复逻辑热点；在 `routes`、`session_manager`、`model`、`runtime_worker`、`agent-store::trace`、`agent-runtime::runtime::turn`、`agent-runtime::runtime::tool_calls`、`builtin-tools::shell`、`openai-adapter::responses` 与 `openai-adapter::chat_completions` 完成拆分后，`agent-store` / `agent-server` 之间也已先后收掉默认 session 查询、记录构造、async store 边界与 current-turn 投影 helper 样板；`openai-adapter` 本轮又继续收掉一批 Responses / Chat Completions 共通的流式 tool-call 累积细节，下一批优先候选回到 `agent-store` / `apps/agent-server` 之间还能继续下沉的共享查询/投影逻辑，以及 server/runtime ownership 路径的进一步收口
-- 持续校准哪些跨 crate 应用级常量应该进入 `aia-config`，哪些应继续留在协议层、运行时或算法层
-- 继续观察工具协议对外映射里的个别特殊参数形态，优先维持模型可见 schema 简洁稳定，而不是让内部反序列化联合体直接外泄
+当前工作区已稳定围绕这些核心 crate 组织：
+
+- `aia-config`
+- `agent-core`
+- `agent-prompts`
+- `agent-runtime`
+- `session-tape`
+- `builtin-tools`
+- `agent-store`
+- `openai-adapter`
+- `provider-registry`
+- `channel-bridge`
+- `channel-feishu`
+- `channel-weixin`
+- `weixin-client`
+
+### 3. 持久化形态
+
+- `.aia/store.sqlite3`：session 元信息、provider、channel、trace 等结构化数据
+- `.aia/sessions/*.jsonl`：每个 session 一个 append-only tape
+- session 元信息与 tape 事实已明确分层：
+  - 元信息走 SQLite
+  - 轮次与工具事实走 jsonl tape
+
+### 4. Web 主路径
+
+`apps/web` 当前已经具备：
+
+- session 列表 / 创建 / 切换 / 删除
+- 历史与 current-turn 恢复
+- SSE 流式消息、工具时间线、错误与重同步处理
+- session 级模型 / 思考等级设置
+- Settings / Providers / Channels / Trace 工作台
+- 基于 `streamdown` 的统一 Markdown 渲染
+
+### 5. Session 能力
+
+以下能力已落地并贯通到前后端：
+
+- session 元信息字段：`title_source`、`auto_rename_policy`、`last_active_at`
+- `session_updated` SSE 投影
+- 自动重命名服务
+- sidebar 标题动画与最近活跃时间显示
+- 消息队列与 interrupt / cancel 主链（运行中即时入队目前以内存队列 + SSE 为主，崩溃恢复只覆盖已落盘 queue 事件）
+- session 级 provider/model/reasoning 设置
+
+### 6. RFC 状态
+
+按 RFC 文档头部与代码现状核对：
+
+- `RFC 0002 Session Auto Rename`：**Implemented**
+- `RFC 0003 Scroll Position Anchor on History Load`：**Implemented**
+- `RFC 0004 Message Queue and Interrupt Mechanism`：**Implemented**
+- `RFC 0001 Question Runtime Tool`：**Accepted**
+  - 说明：pending question 的共享类型、server 控制面和 Web 承接已存在
+  - 但“通用 suspend/resume 原语完全定稿并宣告收口”这件事还没有被提升到 `Implemented`
+  - 另外，重启后 orphaned pending question 当前会被 hydrate 路径显式记为 cancelled，而不是恢复成可继续回答的 active pending 状态
+
+### 7. Channel 与外部承接
+
+- Feishu transport 已接入正式长连接 worker
+- Weixin transport 已接入 catalog、profile 配置与运行态主链
+- Web 已具备微信扫码登录控制面
+- channel 持久化已统一进入 SQLite，而不是继续维护独立 registry 文件
+
+### 8. Trace 与可观测性
+
+当前已具备：
+
+- 本地 trace / overview / dashboard
+- agent loop 级聚合
+- compression 日志独立视图
+- `sync_required` 事件与前端重拉恢复
+- loop、token、失败态、session activity 等聚合读路径
+
+### 9. Async 主链结论
+
+异步化阶段本身已经完成。
+
+当前结论是：
+
+- provider I/O、tool 执行、runtime turn loop、server session manager 都已切到 async 调用面
+- 后续重点是 **简化 ownership / return-path 与共享层继续收口**
+- 当前不再把“继续 async 化”作为主目标本身
+
+## 当前工作重点
+
+1. 收口 `apps/agent-server/src/session_manager/turn_execution.rs` 里的 `runtime.take() -> worker -> RuntimeReturn` 主线
+2. 统一内部工具协议向外部模型协议映射，并开始 MCP 接入
+3. 补强 stop/cancel 在长 shell、慢 provider streaming、复杂上游网络窗口下的真实覆盖率
+4. 继续补强 Feishu 的 mention / 权限 / 白名单等生产边界
+5. 继续推进 trace 的 richer events / resources 形态，但不抢在 MCP 与工具映射之前
 
 ## 下一步
 
-工具时间线文档同步完成后，下一步进入最终验证波；阶段优先级本身不变，仍优先推进统一工具协议映射与 MCP 接入，而不是继续扩张更多客户端表层能力。
-
-1. 直接沿 `apps/agent-server/src/channel_host/runtime.rs`、`channel-bridge` 与 `channel-feishu` 继续收口宿主接口，再压缩 `apps/agent-server/src/session_manager/turn_execution.rs` 这条 runtime ownership / return-path 主线，让 `apps/agent-server` 更像稳定驱动面而不是持续膨胀的 app 壳
-2. 优先推进统一工具协议向外部协议映射与 MCP 接入，继续保持模型可见工具短名、稳定、与执行器解耦，而不是继续堆厚客户端界面
-3. 继续把 `SystemPromptConfig`、`RuntimeHooks`、bootstrap / run options 这一层驱动辅助从 `apps/agent-server` 往共享层沉，降低其他客户端复用成本
-4. 在工具协议边界进一步收稳后，把本地 trace 从当前 span record + event timeline 继续推进到更完整的 resources / richer events 形态
-5. 桌面壳接入
+1. 优先继续收口 server 驱动面与宿主边界，而不是继续扩张客户端表层能力
+2. 在工具协议边界稳定的前提下推进 MCP 接入
+3. 继续下沉可复用驱动辅助，降低其他客户端复用 `agent-server` 的成本
+4. 观察 `Question` 控制面在真实 provider / 多步工具链下的边缘稳定性，并明确 RFC 0001 的完成线
 
 ## 暂时不做
 
-1. 抢先做完整 OTLP exporter / collector 集成
-2. 在共享协议边界未稳定前继续大幅扩展新的 app 壳层
+- 桌面壳完整实现
+- 完整 OTLP exporter / collector 集成
+- 大规模新增 provider 家族
+- 异步子代理调度
 
-## 为什么当前先做 Web，而不是继续堆终端界面
+## 风险与注意事项
 
-因为共享运行时、会话模型和工具协议主链已经稳定，继续维护独立终端壳只会增加重复界面成本。当前更合理的方向是让 `apps/web` 直接承接主界面，再由桌面壳复用同一 Web 前端与 Rust 核心；而在主界面主路径已经收口后，下一优先级应回到统一工具规范的外部映射与 MCP 接入，而不是继续提前堆厚更多客户端表层能力。
-
-当前 trace 观测性也遵循同样原则：先把共享语义边界收稳，再谈 exporter 和外部 tracing 平台对接；如果工具协议和运行时事件边界还没完全稳定，就过早绑定某个 tracing 后端，只会让后续协议演进成本更高。
-
-## 阻塞
-
-- `apps/web` 的 Channels CRUD 前端链路当前无新增硬阻塞
-- 当前无硬阻塞；已知非阻断事项主要是前端生产包体积提示偏大，以及 `shell` 的中断能力与长任务取消语义仍可继续增强
-- 最新后端工具命名收口：模型可见工具名已从下划线/小写风格统一改为 PascalCase，当前稳定集合为 `Shell`、`Read`、`Write`、`Edit`、`ApplyPatch`、`Glob`、`Grep`、`CodeSearch`、`WebSearch`、`TapeInfo`、`TapeHandoff`；`apps/web` 的工具时间线、渲染器与状态仓库也已直接切到这套真实名字。
+- `docs/status.md` 必须继续保持“短、准、当前态”；历史细节不要再堆回这里
+- `apps/agent-server/src/session_manager/turn_execution.rs` 仍是当前实现复杂度热点
+- `RFC 0001` 不应被误写成“已完全实现”；当前是控制面与承接面可用，但抽象收口尚未正式完成
+- 桌面壳尚未开工；当前跨平台方向仍以 Web + server 复用为主

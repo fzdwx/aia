@@ -15,14 +15,15 @@ superseded_by: null
 
 ## Summary
 
-为 `aia` 引入内部 `Question` 工具能力：仅在当前 session 支持交互式组件时向模型暴露该工具；问题请求与结果均使用结构化 JSON；当前实现通过统一工具注册表 + runtime host/context 完成提问与等待语义，并可通过 append-only session tape 恢复 pending question。
+为 `aia` 引入内部 `Question` 工具能力：仅在当前 session 支持交互式组件时向模型暴露该工具；问题请求与结果均使用结构化 JSON；当前实现通过统一工具注册表 + runtime host/context 完成提问与等待语义，并通过 append-only session tape 保留 pending question 事实与相关投影。需要注意的是，当前重启后的 hydrate 路径会先清理 orphaned pending question，而不是自动恢复原等待链路。
 
 ## Implementation Snapshot
 
 截至当前实现，RFC 的主体方向保持成立，但有两点需要以代码事实为准：
 
 1. `Question`、`TapeInfo`、`TapeHandoff` 的工具实现当前都放在 `builtin-tools`，而不是再由 `agent-runtime` 维护第二份 runtime tool 注册表。
-2. `Question` 并没有落成“通用 suspend/resume 原语”，而是通过 `ToolExecutionContext.runtime_host` 进入 server 侧 host 能力；server 会先同步落 `question_requested`、登记 waiter 并立刻回到 session manager 主循环，再由独立等待任务在用户回答后把结构化结果回给当前 tool call。pending question 的恢复覆盖控制面与 UI 恢复，不等同于进程重启后原阻塞 future 自动续跑。
+2. `Question` 并没有落成“通用 suspend/resume 原语”，而是通过 `ToolExecutionContext.runtime_host` 进入 server 侧 host 能力；server 会先同步落 `question_requested`、登记 waiter 并立刻回到 session manager 主循环，再由独立等待任务在用户回答后把结构化结果回给当前 tool call。
+3. 当前同进程内可以通过 `/api/session/question` 和 Web pending-question composer 读取 / 回答 active pending question；但进程重启后的 orphaned pending question 目前会在 `SessionSlotFactory::create() -> reconcile_orphaned_inflight_state(...)` 中被追加 `question_resolved(cancelled)` 清理，而不是重新开放为可继续回答的 active pending question。历史 turn 仍可能在 history 投影中保留 `waiting_for_question` outcome，用于表达该轮曾在这里等待过用户回答。
 
 当前代码边界如下：
 
@@ -61,6 +62,8 @@ superseded_by: null
 5. 支持 AI 为选项给出“推荐项 + 推荐理由”
 6. 支持 server 停机、重启后从 session tape 恢复“仍在等待回答”的状态
 7. 保持 append-only tape 语义，不通过覆写 session 派生状态替代源事实
+
+> 当前实现补充：`question_requested/question_resolved` 的事实落盘、同进程控制面读取与回答链路已经完成；但“进程重启后仍把同一个 pending question 重新开放为 active 状态继续等待回答”还没有落地，hydrate 路径当前会先把 orphaned pending question 记为 cancelled。
 
 ## Non-Goals
 
@@ -325,6 +328,8 @@ superseded_by: null
 
 ### 状态机
 
+> 历史说明：这里沿用了较早期的 `WaitingForQuestion` 命名来描述“等待回答中的 turn 语义”。当前实现里，这层语义主要体现在 `TurnOutcome::WaitingForQuestion`、SSE `status = waiting_for_question`、pending question 控制面与 session tape 恢复上，而不是一个独立、长期常驻的 runtime 内建状态机类型。
+
 当前实现仍然需要显式 question 等待态：
 
 - `Idle`
@@ -409,6 +414,8 @@ superseded_by: null
 - 即使未来要在 trace、dashboard、session info 里单独观察“用户澄清交互”，也有明确事件可投影
 
 ### 恢复逻辑
+
+> 历史说明：下面三条是 RFC 希望达到的目标恢复语义。当前实现的 hydrate 路径更保守：`SessionSlotFactory::create()` 会调用 `reconcile_orphaned_inflight_state(...)`；如果发现未配对的 `question_requested`，会追加 `question_resolved(status = cancelled, reason = "server restarted before the pending question could be resumed")` 来清理 orphaned pending question，而不是把它重新挂成一个可继续回答的 active pending question。与此同时，history 投影仍可能保留 `TurnOutcome::WaitingForQuestion`，用于表达该轮历史上曾在这里等待过用户回答。
 
 server 启动或 session hydrate 时：
 
@@ -495,7 +502,7 @@ server 启动或 session hydrate 时：
 额外约束：
 
 - 同一 session 同时最多只允许一个 pending question，因此不需要在 control-plane 再引入第二层 question 集合资源
-- 当 session 处于 `WaitingForQuestion` 时，不接受新的普通 `POST /api/turn` 提交；此时只允许三类交互：读取当前 pending question、提交当前 question 的回答、取消当前 question
+- 当 session 处于等待 question 回答状态时，不接受新的普通 turn 提交；此时只允许三类交互：读取当前 pending question、提交当前 question 的回答、取消当前 question
 
 ## UI / Channel 行为
 
@@ -507,6 +514,8 @@ Web 应作为首个正式承接面：
 - 明确展示推荐项和推荐理由
 - 用户提交后把结构化结果发回 server
 - timeline 继续显示这次 `Question` 调用的历史记录
+
+> 当前实现补充：Web 现在采用的是“直接替换输入区”的 pending question composer，而不是额外再弹独立 modal；这里保留 `modal / drawer / inline composer` 是为了表达承接形态范围，不是限定今天必须同时支持三种 UI。
 
 现有 `question` renderer 可继续承担“历史 / 已完成工具结果”的展示，不承担 pending 交互本身。
 
@@ -529,8 +538,10 @@ Web 应作为首个正式承接面：
 
 `Question` 允许模型在生成选项时同时生成：
 
-- `recommended_option_ids[]`
+- `recommended_option_id`
 - `recommendation_reason`
+
+> 历史说明：更早的草案里这里曾写成 `recommended_option_ids[]`。当前共享类型与实现已经收口为单值 `recommended_option_id`。
 
 约束：
 
@@ -562,6 +573,8 @@ Web 应作为首个正式承接面：
 
 - 在 tape 中追加 `question_requested` / `question_resolved`
 - 恢复时依据这两类事实重建 `WaitingForQuestion`
+
+> 当前实现补充：现在已经不会把 orphaned pending question 静默留在不一致状态里；hydrate 时会显式补一条 `question_resolved(cancelled)` 写回 tape。但“重启后仍把它恢复成 active pending question 继续等待用户回答”还没有完成。
 
 ### 3. 把不可用能力暴露给模型
 
@@ -622,7 +635,7 @@ Web 应作为首个正式承接面：
 Web 等承接面应尽量把这层语义显式投影到交互上，例如：
 
 - 输入区提示“请先回答当前问题或取消该问题”
-- 若用户尝试发送普通消息，前端直接拦截并提示，而不是把它提交成新的 `POST /api/turn`
+- 若用户尝试发送普通消息，前端直接拦截并提示，而不是把它提交成新的普通 turn 请求
 
 ### 3.1 Session capability 在恢复后变化
 
@@ -661,12 +674,12 @@ Web 等承接面应尽量把这层语义显式投影到交互上，例如：
 当前进度：
 
 - 已完成：`agent-core` 的共享 `Question*` 类型、`SessionInteractionCapabilities`、`RuntimeToolContext` / `RuntimeToolHost`；`agent-prompts` 的 `question` 工具描述；`builtin-tools` 中的 `Question` / `TapeInfo` / `TapeHandoff` 实现；`agent-runtime` 的 capability gating 与上下文注入；`session-tape` / `agent-server` 的 `question_requested/question_resolved` 落盘、控制面与 waiter 链路；`apps/web` 的 pending question UI
-- 未完成：真正意义上的“进程重启后原阻塞 tool future 自动恢复续跑”主链；超时语义仍未落地
+- 未完成：真正意义上的“进程重启后原阻塞 tool future 自动恢复续跑”主链；重启后把 orphaned pending question 重新开放为 active pending 状态的恢复语义；超时语义仍未落地
 
 ### Phase 2：server control-plane
 
 - `apps/agent-server`：新增 `GET/PUT/DELETE /api/session/question` 控制面
-- `SessionSlot` / session state：补 `WaitingForQuestion`
+- `SessionSlot` / session state：补 pending question 控制面与等待语义
 
 当前进度：已完成。
 
@@ -733,3 +746,5 @@ Web 等承接面应尽量把这层语义显式投影到交互上，例如：
 - runtime 可恢复原 turn 并拿到结构化 `QuestionResult`
 - 停机重启后仍能恢复 pending question
 - 不支持交互式组件的 session 不会暴露 `Question`
+
+> 当前实现说明：前四条里的“结构化 question 请求 / 结果、control-plane、Web 承接、同进程内等待并继续执行”已经基本具备；最后这条“停机重启后仍能恢复 pending question”目前只完成了事实保留与历史投影的一部分，尚未实现为重启后重新开放同一个 active pending question。
