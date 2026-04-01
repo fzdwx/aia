@@ -380,16 +380,30 @@ export type DiffLine = {
   html: string
 }
 
+export type SplitCell = {
+  kind: "ctx" | "add" | "del"
+  ln?: number
+  html: string
+}
+
+export type SplitPair = {
+  left?: SplitCell | null
+  right?: SplitCell | null
+}
+
 export type DiffHunk = {
   old_start: number
   old_count: number
   new_start: number
   new_count: number
   lines: DiffLine[]
+  split_pairs?: SplitPair[]
 }
 
 export type DiffResponse = {
   hunks: DiffHunk[]
+  added: number
+  removed: number
 }
 
 export async function computeDiff(
@@ -400,6 +414,7 @@ export async function computeDiff(
         old_content: string
         new_content: string
         theme?: string
+        style?: string
       }
     | { mode: "patch"; patch: string; theme?: string }
 ): Promise<DiffResponse> {

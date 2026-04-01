@@ -15,6 +15,8 @@ pub(crate) enum DiffRequest {
         new_content: String,
         #[serde(default)]
         theme: Option<String>,
+        #[serde(default)]
+        style: Option<String>,
     },
     #[serde(rename = "patch")]
     Patch {
@@ -27,6 +29,8 @@ pub(crate) enum DiffRequest {
 #[derive(Serialize)]
 pub(crate) struct DiffResponse {
     pub hunks: Vec<DiffHunk>,
+    pub added: u32,
+    pub removed: u32,
 }
 
 #[derive(Serialize)]
@@ -36,6 +40,8 @@ pub(crate) struct DiffHunk {
     pub new_start: u32,
     pub new_count: u32,
     pub lines: Vec<DiffLine>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub split_pairs: Vec<SplitPair>,
 }
 
 #[derive(Serialize)]
@@ -45,6 +51,22 @@ pub(crate) struct DiffLine {
     pub old_ln: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub new_ln: Option<u32>,
+    pub html: String,
+}
+
+#[derive(Serialize)]
+pub(crate) struct SplitPair {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub left: Option<SplitCell>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub right: Option<SplitCell>,
+}
+
+#[derive(Serialize)]
+pub(crate) struct SplitCell {
+    pub kind: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ln: Option<u32>,
     pub html: String,
 }
 

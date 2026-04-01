@@ -141,18 +141,54 @@ function buildHunkHeader(header: string, lines: string[]) {
 function countPatchChanges(lines: string[]) {
   let added = 0
   let removed = 0
+  let i = 0
 
-  for (const line of lines) {
-    if (line.startsWith("+++ ") || line.startsWith("--- ")) continue
+  while (i < lines.length) {
+    const line = lines[i]!
 
-    if (line.startsWith("+")) {
-      added += 1
+    if (line.startsWith("+++ ") || line.startsWith("--- ")) {
+      i++
       continue
     }
 
+    // Collect consecutive del/add block and dedup identical pairs
     if (line.startsWith("-")) {
-      removed += 1
+      const dels: string[] = []
+      while (
+        i < lines.length &&
+        lines[i]!.startsWith("-") &&
+        !lines[i]!.startsWith("--- ")
+      ) {
+        dels.push(lines[i]!.slice(1))
+        i++
+      }
+      const adds: string[] = []
+      while (
+        i < lines.length &&
+        lines[i]!.startsWith("+") &&
+        !lines[i]!.startsWith("+++ ")
+      ) {
+        adds.push(lines[i]!.slice(1))
+        i++
+      }
+      const paired = Math.min(dels.length, adds.length)
+      for (let j = 0; j < paired; j++) {
+        if (dels[j] === adds[j]) continue
+        removed++
+        added++
+      }
+      removed += dels.length - paired
+      added += adds.length - paired
+      continue
     }
+
+    if (line.startsWith("+")) {
+      added++
+      i++
+      continue
+    }
+
+    i++
   }
 
   return { added, removed }

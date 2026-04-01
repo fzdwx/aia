@@ -8,21 +8,29 @@ use syntect::{
     parsing::{SyntaxReference, SyntaxSet},
 };
 
-use super::{DiffHunk, DiffLine, DiffRequest, DiffResponse};
+use super::{DiffHunk, DiffLine, DiffRequest, DiffResponse, SplitCell, SplitPair};
 
 static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
-static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
+
+static GITHUB_DARK: LazyLock<Theme> = LazyLock::new(|| {
+    let bytes = include_bytes!("../../../themes/github-dark.tmTheme");
+    let cursor = std::io::Cursor::new(bytes);
+    ThemeSet::load_from_reader(&mut std::io::BufReader::new(cursor))
+        .expect("failed to load github-dark theme")
+});
+
+static GITHUB_LIGHT: LazyLock<Theme> = LazyLock::new(|| {
+    let bytes = include_bytes!("../../../themes/github-light.tmTheme");
+    let cursor = std::io::Cursor::new(bytes);
+    ThemeSet::load_from_reader(&mut std::io::BufReader::new(cursor))
+        .expect("failed to load github-light theme")
+});
 
 fn resolve_theme(name: Option<&str>) -> &'static Theme {
-    let key = match name {
-        Some("light") => "InspiredGitHub",
-        Some("dark") | None => "base16-ocean.dark",
-        Some(other) => other,
-    };
-    THEME_SET
-        .themes
-        .get(key)
-        .unwrap_or_else(|| THEME_SET.themes.values().next().unwrap())
+    match name {
+        Some("light") => &GITHUB_LIGHT,
+        _ => &GITHUB_DARK,
+    }
 }
 
 fn resolve_syntax(file_name: &str) -> &'static SyntaxReference {
@@ -87,18 +95,137 @@ fn html_escape_into(buf: &mut String, text: &str) {
     }
 }
 
+// ── Split pairs ──────────────────────────────────────────────────
+
+fn build_split_pairs(lines: &[DiffLine]) -> Vec<SplitPair> {
+    let mut pairs = Vec::new();
+    let mut i = 0;
+
+    while i < lines.len() {
+        if lines[i].kind == "ctx" {
+            pairs.push(SplitPair {
+                left: Some(SplitCell {
+                    kind: "ctx",
+                    ln: lines[i].old_ln,
+                    html: lines[i].html.clone(),
+                }),
+                right: Some(SplitCell {
+                    kind: "ctx",
+                    ln: lines[i].new_ln,
+                    html: lines[i].html.clone(),
+                }),
+            });
+            i += 1;
+            continue;
+        }
+
+        let mut dels: Vec<usize> = Vec::new();
+        let mut adds: Vec<usize> = Vec::new();
+        while i < lines.len() && lines[i].kind == "del" {
+            dels.push(i);
+            i += 1;
+        }
+        while i < lines.len() && lines[i].kind == "add" {
+            adds.push(i);
+            i += 1;
+        }
+
+        let max_len = dels.len().max(adds.len());
+        for j in 0..max_len {
+            let left = dels.get(j).map(|&idx| SplitCell {
+                kind: "del",
+                ln: lines[idx].old_ln,
+                html: lines[idx].html.clone(),
+            });
+            let right = adds.get(j).map(|&idx| SplitCell {
+                kind: "add",
+                ln: lines[idx].new_ln,
+                html: lines[idx].html.clone(),
+            });
+            pairs.push(SplitPair { left, right });
+        }
+    }
+
+    pairs
+}
+
+/// Fast path for new files: skip diff, just highlight all lines as "add".
+fn compute_all_add(
+    file_name: &str,
+    content: &str,
+    theme: &Theme,
+    want_split: bool,
+) -> DiffResponse {
+    let syntax = resolve_syntax(file_name);
+    let raw_lines: Vec<&str> = content.lines().collect();
+    let count = raw_lines.len() as u32;
+
+    let lines: Vec<DiffLine> = raw_lines
+        .iter()
+        .enumerate()
+        .map(|(i, text)| {
+            let html = highlight_line(text, syntax, theme);
+            DiffLine {
+                kind: "add",
+                old_ln: None,
+                new_ln: Some(i as u32 + 1),
+                html,
+            }
+        })
+        .collect();
+
+    let split_pairs = if want_split {
+        lines
+            .iter()
+            .map(|line| SplitPair {
+                left: None,
+                right: Some(SplitCell {
+                    kind: "add",
+                    ln: line.new_ln,
+                    html: line.html.clone(),
+                }),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    DiffResponse {
+        hunks: vec![DiffHunk {
+            old_start: 0,
+            old_count: 0,
+            new_start: 1,
+            new_count: count,
+            lines,
+            split_pairs,
+        }],
+        added: count,
+        removed: 0,
+    }
+}
+
+// ── Contents diff ────────────────────────────────────────────────
+
 fn compute_contents_diff(
     file_name: &str,
     old_content: &str,
     new_content: &str,
     theme: &Theme,
+    want_split: bool,
 ) -> DiffResponse {
+    // Fast path: old_content is empty → all lines are additions, skip diff
+    if old_content.is_empty() && !new_content.is_empty() {
+        return compute_all_add(file_name, new_content, theme, want_split);
+    }
+
     let syntax = resolve_syntax(file_name);
     let diff = TextDiff::configure()
         .algorithm(similar::Algorithm::Patience)
         .diff_lines(old_content, new_content);
 
     let mut hunks = Vec::new();
+    let mut total_added: u32 = 0;
+    let mut total_removed: u32 = 0;
 
     for group in diff.grouped_ops(3) {
         let mut lines = Vec::new();
@@ -126,6 +253,7 @@ fn compute_contents_diff(
                         });
                     }
                     ChangeTag::Delete => {
+                        total_removed += 1;
                         lines.push(DiffLine {
                             kind: "del",
                             old_ln: change.old_index().map(|i| i as u32 + 1),
@@ -134,6 +262,7 @@ fn compute_contents_diff(
                         });
                     }
                     ChangeTag::Insert => {
+                        total_added += 1;
                         lines.push(DiffLine {
                             kind: "add",
                             old_ln: None,
@@ -145,43 +274,220 @@ fn compute_contents_diff(
             }
         }
 
+        let split_pairs = if want_split {
+            build_split_pairs(&lines)
+        } else {
+            Vec::new()
+        };
+
         hunks.push(DiffHunk {
             old_start,
             old_count,
             new_start,
             new_count,
             lines,
+            split_pairs,
         });
     }
 
-    DiffResponse { hunks }
+    DiffResponse {
+        hunks,
+        added: total_added,
+        removed: total_removed,
+    }
+}
+
+// ── Patch diff ───────────────────────────────────────────────────
+
+/// Intermediate line before highlighting.
+struct RawLine {
+    kind: &'static str,
+    content: String,
+}
+
+/// Dedup consecutive del/add pairs where the raw content is identical → ctx.
+fn dedup_identical_changes(lines: Vec<RawLine>) -> Vec<RawLine> {
+    let mut result = Vec::with_capacity(lines.len());
+    let mut i = 0;
+
+    while i < lines.len() {
+        if lines[i].kind != "del" {
+            result.push(RawLine {
+                kind: lines[i].kind,
+                content: std::mem::take(&mut { lines[i].content.clone() }),
+            });
+            i += 1;
+            continue;
+        }
+
+        // Collect consecutive dels
+        let del_start = i;
+        while i < lines.len() && lines[i].kind == "del" {
+            i += 1;
+        }
+        let del_end = i;
+
+        // Collect consecutive adds
+        let add_start = i;
+        while i < lines.len() && lines[i].kind == "add" {
+            i += 1;
+        }
+        let add_end = i;
+
+        let del_count = del_end - del_start;
+        let add_count = add_end - add_start;
+        let paired = del_count.min(add_count);
+
+        for j in 0..paired {
+            let d = &lines[del_start + j];
+            let a = &lines[add_start + j];
+            if d.content == a.content {
+                result.push(RawLine {
+                    kind: "ctx",
+                    content: d.content.clone(),
+                });
+            } else {
+                result.push(RawLine {
+                    kind: "del",
+                    content: d.content.clone(),
+                });
+                result.push(RawLine {
+                    kind: "add",
+                    content: a.content.clone(),
+                });
+            }
+        }
+
+        // Remaining unpaired dels
+        for j in paired..del_count {
+            result.push(RawLine {
+                kind: "del",
+                content: lines[del_start + j].content.clone(),
+            });
+        }
+        // Remaining unpaired adds
+        for j in paired..add_count {
+            result.push(RawLine {
+                kind: "add",
+                content: lines[add_start + j].content.clone(),
+            });
+        }
+    }
+
+    result
+}
+
+/// Parsed hunk before highlighting.
+struct RawHunk {
+    file_name: String,
+    old_start: u32,
+    new_start: u32,
+    lines: Vec<RawLine>,
 }
 
 fn compute_patch_diff(patch: &str, theme: &Theme) -> DiffResponse {
-    let mut file_name = "file.txt";
+    // First pass: parse patch into raw hunks
+    let raw_hunks = parse_patch_into_raw_hunks(patch);
+
     let mut hunks = Vec::new();
-    let mut current_lines: Vec<DiffLine> = Vec::new();
+    let mut total_added: u32 = 0;
+    let mut total_removed: u32 = 0;
+
+    for raw_hunk in raw_hunks {
+        // Dedup identical del/add pairs into ctx
+        let processed = dedup_identical_changes(raw_hunk.lines);
+
+        let syntax = resolve_syntax(&raw_hunk.file_name);
+        let mut lines = Vec::new();
+        let mut old_ln = raw_hunk.old_start;
+        let mut new_ln = raw_hunk.new_start;
+
+        for raw in &processed {
+            let html = highlight_line(&raw.content, syntax, theme);
+            match raw.kind {
+                "ctx" => {
+                    lines.push(DiffLine {
+                        kind: "ctx",
+                        old_ln: Some(old_ln),
+                        new_ln: Some(new_ln),
+                        html,
+                    });
+                    old_ln += 1;
+                    new_ln += 1;
+                }
+                "del" => {
+                    total_removed += 1;
+                    lines.push(DiffLine {
+                        kind: "del",
+                        old_ln: Some(old_ln),
+                        new_ln: None,
+                        html,
+                    });
+                    old_ln += 1;
+                }
+                "add" => {
+                    total_added += 1;
+                    lines.push(DiffLine {
+                        kind: "add",
+                        old_ln: None,
+                        new_ln: Some(new_ln),
+                        html,
+                    });
+                    new_ln += 1;
+                }
+                _ => {}
+            }
+        }
+
+        // Recalculate counts after dedup
+        let old_count = lines
+            .iter()
+            .filter(|l| l.kind == "ctx" || l.kind == "del")
+            .count() as u32;
+        let new_count = lines
+            .iter()
+            .filter(|l| l.kind == "ctx" || l.kind == "add")
+            .count() as u32;
+
+        // Patch mode is always unified, no split_pairs
+        hunks.push(DiffHunk {
+            old_start: raw_hunk.old_start,
+            old_count,
+            new_start: raw_hunk.new_start,
+            new_count,
+            lines,
+            split_pairs: Vec::new(),
+        });
+    }
+
+    DiffResponse {
+        hunks,
+        added: total_added,
+        removed: total_removed,
+    }
+}
+
+fn parse_patch_into_raw_hunks(patch: &str) -> Vec<RawHunk> {
+    let mut file_name = "file.txt".to_string();
+    let mut hunks = Vec::new();
+    let mut current_lines: Vec<RawLine> = Vec::new();
     let mut old_start: u32 = 1;
     let mut new_start: u32 = 1;
-    let mut old_count: u32 = 0;
-    let mut new_count: u32 = 0;
     let mut in_hunk = false;
 
     for raw_line in patch.lines() {
         if let Some(rest) = raw_line.strip_prefix("diff --git ") {
-            // Extract file name from "a/path b/path"
             if let Some(b_part) = rest.split(' ').nth(1) {
-                file_name = b_part.strip_prefix("b/").unwrap_or(b_part);
+                file_name = b_part.strip_prefix("b/").unwrap_or(b_part).to_string();
             }
             continue;
         }
 
         if raw_line.starts_with("--- ") || raw_line.starts_with("+++ ") {
-            // Also try to extract name from +++ header
             if raw_line.starts_with("+++ ") {
                 let path = raw_line[4..].trim();
                 if path != "/dev/null" {
-                    file_name = path.strip_prefix("b/").unwrap_or(path);
+                    file_name = path.strip_prefix("b/").unwrap_or(path).to_string();
                 }
             }
             continue;
@@ -190,26 +496,20 @@ fn compute_patch_diff(patch: &str, theme: &Theme) -> DiffResponse {
         if raw_line.starts_with("@@") {
             // Flush previous hunk
             if in_hunk && !current_lines.is_empty() {
-                hunks.push(DiffHunk {
+                hunks.push(RawHunk {
+                    file_name: file_name.clone(),
                     old_start,
-                    old_count,
                     new_start,
-                    new_count,
                     lines: std::mem::take(&mut current_lines),
                 });
             }
 
-            // Parse @@ -old_start,old_count +new_start,new_count @@
-            if let Some((os, oc, ns, nc)) = parse_hunk_header(raw_line) {
+            if let Some((os, _, ns, _)) = parse_hunk_header(raw_line) {
                 old_start = os;
-                old_count = oc;
                 new_start = ns;
-                new_count = nc;
             } else {
                 old_start = 1;
-                old_count = 0;
                 new_start = 1;
-                new_count = 0;
             }
             in_hunk = true;
             continue;
@@ -219,62 +519,39 @@ fn compute_patch_diff(patch: &str, theme: &Theme) -> DiffResponse {
             continue;
         }
 
-        let syntax = resolve_syntax(file_name);
-
         if let Some(content) = raw_line.strip_prefix('+') {
-            let html = highlight_line(content, syntax, theme);
-            new_count = new_count.wrapping_add(0); // count tracked by header
-            current_lines.push(DiffLine {
+            current_lines.push(RawLine {
                 kind: "add",
-                old_ln: None,
-                new_ln: Some(new_start + count_kind(&current_lines, "add", "ctx")),
-                html,
+                content: content.to_string(),
             });
         } else if let Some(content) = raw_line.strip_prefix('-') {
-            let html = highlight_line(content, syntax, theme);
-            current_lines.push(DiffLine {
+            current_lines.push(RawLine {
                 kind: "del",
-                old_ln: Some(old_start + count_kind(&current_lines, "del", "ctx")),
-                new_ln: None,
-                html,
+                content: content.to_string(),
             });
         } else {
             let content = raw_line.strip_prefix(' ').unwrap_or(raw_line);
-            let html = highlight_line(content, syntax, theme);
-            let old_ln = old_start + count_kind(&current_lines, "del", "ctx");
-            let new_ln = new_start + count_kind(&current_lines, "add", "ctx");
-            current_lines.push(DiffLine {
+            current_lines.push(RawLine {
                 kind: "ctx",
-                old_ln: Some(old_ln),
-                new_ln: Some(new_ln),
-                html,
+                content: content.to_string(),
             });
         }
     }
 
     // Flush last hunk
     if !current_lines.is_empty() {
-        hunks.push(DiffHunk {
+        hunks.push(RawHunk {
+            file_name,
             old_start,
-            old_count,
             new_start,
-            new_count,
             lines: current_lines,
         });
     }
 
-    DiffResponse { hunks }
-}
-
-fn count_kind(lines: &[DiffLine], kind1: &str, kind2: &str) -> u32 {
-    lines
-        .iter()
-        .filter(|l| l.kind == kind1 || l.kind == kind2)
-        .count() as u32
+    hunks
 }
 
 fn parse_hunk_header(line: &str) -> Option<(u32, u32, u32, u32)> {
-    // @@ -old_start,old_count +new_start,new_count @@
     let line = line.strip_prefix("@@")?;
     let line = line.trim_start();
     let end = line.find("@@")?;
@@ -311,9 +588,11 @@ pub(crate) async fn compute_diff(
             old_content,
             new_content,
             theme,
+            style,
         } => {
             let theme = resolve_theme(theme.as_deref());
-            compute_contents_diff(&file_name, &old_content, &new_content, theme)
+            let want_split = style.as_deref() == Some("split");
+            compute_contents_diff(&file_name, &old_content, &new_content, theme, want_split)
         }
         DiffRequest::Patch { patch, theme } => {
             let theme = resolve_theme(theme.as_deref());
