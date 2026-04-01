@@ -1,7 +1,6 @@
 import { MultiFileDiff, PatchDiff, Virtualizer } from "@pierre/diffs/react"
 import type { FileContents } from "@pierre/diffs"
-import { useMemo } from "react"
-import type { ReactNode } from "react"
+import { useMemo, useState, useRef, useEffect, useTransition, type ReactNode } from "react"
 
 import { useTheme } from "@/components/theme-provider"
 
@@ -62,6 +61,56 @@ function PierreDiffScrollContainer({ children }: { children: ReactNode }) {
   )
 }
 
+// 通用的延迟渲染 hook
+function useDeferredRender() {
+  const [shouldRender, setShouldRender] = useState(false)
+  const [isPending, startTransition] = useTransition()
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const element = ref.current
+    if (!element) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          startTransition(() => {
+            setShouldRender(true)
+          })
+          observer.disconnect()
+        }
+      },
+      { rootMargin: "200px" }
+    )
+
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+
+  return { ref, shouldRender, isPending }
+}
+
+// 通用的延迟渲染容器
+function DeferredDiffContainer({
+  children,
+}: {
+  children: ReactNode
+}) {
+  const { ref, shouldRender, isPending } = useDeferredRender()
+
+  return (
+    <div ref={ref} className="tool-timeline-patch-diff-container">
+      {shouldRender ? (
+        children
+      ) : (
+        <div className="tool-timeline-patch-diff-placeholder" aria-hidden="true">
+          {isPending ? "Loading..." : ""}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function PierrePatchDiffOutput({ patch }: { patch: string }) {
   const options = usePierreDiffOptions("unified")
 
@@ -74,6 +123,15 @@ export function PierrePatchDiffOutput({ patch }: { patch: string }) {
         style={PIERRE_DIFF_HOST_STYLE}
       />
     </PierreDiffScrollContainer>
+  )
+}
+
+// 延迟版本的 PatchDiff
+export function DeferredPierrePatchDiffOutput({ patch }: { patch: string }) {
+  return (
+    <DeferredDiffContainer>
+      <PierrePatchDiffOutput patch={patch} />
+    </DeferredDiffContainer>
   )
 }
 
@@ -116,5 +174,29 @@ export function PierreMultiFileDiffOutput({
         style={PIERRE_DIFF_HOST_STYLE}
       />
     </PierreDiffScrollContainer>
+  )
+}
+
+// 延迟版本的 MultiFileDiff
+export function DeferredPierreMultiFileDiffOutput({
+  fileName,
+  oldContent,
+  newContent,
+  diffStyle,
+}: {
+  fileName: string
+  oldContent: string
+  newContent: string
+  diffStyle: "unified" | "split"
+}) {
+  return (
+    <DeferredDiffContainer>
+      <PierreMultiFileDiffOutput
+        fileName={fileName}
+        oldContent={oldContent}
+        newContent={newContent}
+        diffStyle={diffStyle}
+      />
+    </DeferredDiffContainer>
   )
 }
