@@ -67,6 +67,7 @@ impl ResponsesStreamingState {
                 arguments: self.current_tool.parsed_arguments(),
                 detected_at_ms: now_timestamp_ms(),
             });
+            self.current_tool.mark_detection_emitted();
         }
         self.tool_calls.push((id, tool_name, self.current_tool.raw_arguments().to_string()));
         self.current_tool.clear();
@@ -126,6 +127,18 @@ impl StreamingState for ResponsesStreamingState {
             Some("response.function_call_arguments.delta") => {
                 let delta = event["delta"].as_str().unwrap_or("");
                 self.current_tool.push_arguments_delta(delta);
+                // 每次收到 arguments delta 后检查是否有新的完整参数 key 解析出来
+                if self.current_tool.detection_emitted() && self.current_tool.check_new_parsed_keys() {
+                    if let Some(tool_name) = self.current_tool.tool_name().map(ToString::to_string) {
+                        let id = self.current_tool.invocation_id_or(|| format!("openai-stream-call-{}", self.tool_calls.len() + 1));
+                        sink(StreamEvent::ToolCallDetected {
+                            invocation_id: id,
+                            tool_name,
+                            arguments: self.current_tool.parsed_arguments(),
+                            detected_at_ms: now_timestamp_ms(),
+                        });
+                    }
+                }
             }
             Some("response.output_item.added") => {
                 let item = &event["item"];
@@ -139,6 +152,16 @@ impl StreamingState for ResponsesStreamingState {
                     if let Some(tool_name) = item["name"].as_str().filter(|value| !value.is_empty())
                     {
                         self.current_tool.set_tool_name(tool_name.to_string());
+                        // 有 name 就发首次 detection
+                        let id = self.current_tool.invocation_id_or(|| format!("openai-stream-call-{}", self.tool_calls.len() + 1));
+                        sink(StreamEvent::ToolCallDetected {
+                            invocation_id: id,
+                            tool_name: tool_name.to_string(),
+                            arguments: self.current_tool.parsed_arguments(),
+                            detected_at_ms: now_timestamp_ms(),
+                        });
+                        self.current_tool.mark_detection_emitted();
+                        self.current_tool.check_new_parsed_keys();
                     }
                 }
             }

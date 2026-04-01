@@ -952,20 +952,31 @@ fn responses_流式工具调用支持_call_id_字段() {
         CompletionSegment::ToolUse(ToolCall { tool_name, invocation_id, .. })
             if tool_name == "search_code" && invocation_id == "call_from_call_id"
     )));
+    // 第一次 detection：output_item.added 时 name 到达
+    // 第二次 detection：arguments delta 解析出完整参数 key
     assert!(matches!(
         deltas.as_slice(),
         [
             StreamEvent::ToolCallDetected {
-                invocation_id,
-                tool_name,
-                arguments,
-                detected_at_ms,
+                invocation_id: first_invocation_id,
+                tool_name: first_tool_name,
+                arguments: first_arguments,
+                detected_at_ms: first_detected_at_ms,
+            },
+            StreamEvent::ToolCallDetected {
+                invocation_id: second_invocation_id,
+                tool_name: second_tool_name,
+                arguments: second_arguments,
+                detected_at_ms: second_detected_at_ms,
             },
             StreamEvent::Done,
-        ] if invocation_id == "call_from_call_id"
-            && tool_name == "search_code"
-            && arguments == &json!({"query":"agent-runtime"})
-            && *detected_at_ms > 0
+        ] if first_invocation_id == "call_from_call_id"
+            && first_tool_name == "search_code"
+            && *first_detected_at_ms > 0
+            && second_invocation_id == "call_from_call_id"
+            && second_tool_name == "search_code"
+            && second_arguments == &json!({"query":"agent-runtime"})
+            && *second_detected_at_ms > 0
     ));
 }
 
@@ -1498,19 +1509,29 @@ fn 聊天补全流式调用可逐段收到文本与工具() {
             StreamEvent::TextDelta { text: first_text },
             StreamEvent::TextDelta { text: second_text },
             StreamEvent::ToolCallDetected {
-                invocation_id,
-                tool_name,
-                arguments,
-                detected_at_ms,
+                invocation_id: first_invocation_id,
+                tool_name: first_tool_name,
+                arguments: first_arguments,
+                detected_at_ms: first_detected_at_ms,
+            },
+            StreamEvent::ToolCallDetected {
+                invocation_id: second_invocation_id,
+                tool_name: second_tool_name,
+                arguments: second_arguments,
+                detected_at_ms: second_detected_at_ms,
             },
             StreamEvent::Done,
         ] if text == "先分析"
             && first_text == "答"
             && second_text == "案"
-            && invocation_id == "call_1"
-            && tool_name == "search_code"
-            && arguments == &Value::default()
-            && *detected_at_ms > 0
+            && first_invocation_id == "call_1"
+            && first_tool_name == "search_code"
+            && first_arguments == &Value::default()
+            && *first_detected_at_ms > 0
+            && second_invocation_id == "call_1"
+            && second_tool_name == "search_code"
+            && second_arguments == &json!({"query": "agent-runtime"})
+            && *second_detected_at_ms > 0
     ));
 }
 
@@ -1601,19 +1622,31 @@ fn 聊天补全流式工具调用重复发送名称时只检测一次() {
                 && invocation_id == "call_1"
                 && arguments == &json!({"query":"agent-runtime"})
     )));
+    // 第一次 detection：name 到达时发，arguments 尚未完整
+    // 第二次 detection：参数补完后新 key 解析出来时发
     assert!(matches!(
         deltas.as_slice(),
         [
             StreamEvent::ToolCallDetected {
-                invocation_id,
-                tool_name,
-                arguments,
-                detected_at_ms,
+                invocation_id: first_invocation_id,
+                tool_name: first_tool_name,
+                arguments: first_arguments,
+                detected_at_ms: first_detected_at_ms,
+            },
+            StreamEvent::ToolCallDetected {
+                invocation_id: second_invocation_id,
+                tool_name: second_tool_name,
+                arguments: second_arguments,
+                detected_at_ms: second_detected_at_ms,
             },
             StreamEvent::Done,
-        ] if invocation_id == "call_1"
-            && tool_name == "search_code"
-            && arguments == &Value::default()
-            && *detected_at_ms > 0
+        ] if first_invocation_id == "call_1"
+            && first_tool_name == "search_code"
+            && first_arguments == &Value::default()
+            && *first_detected_at_ms > 0
+            && second_invocation_id == "call_1"
+            && second_tool_name == "search_code"
+            && second_arguments == &json!({"query": "agent-runtime"})
+            && *second_detected_at_ms > 0
     ));
 }

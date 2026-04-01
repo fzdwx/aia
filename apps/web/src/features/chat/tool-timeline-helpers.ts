@@ -184,10 +184,11 @@ export function coalesceStreamingToolOutputs(
         existing.output.length >= tool.output.length
           ? existing.output
           : tool.output,
-      outputSegments: [
-        ...(existing.outputSegments ?? []),
-        ...(tool.outputSegments ?? []),
-      ],
+      // 如果任一方已完成，则清理 segments 释放内存
+      outputSegments:
+        existing.completed || tool.completed
+          ? undefined
+          : [...(existing.outputSegments ?? []), ...(tool.outputSegments ?? [])],
       completed: existing.completed || tool.completed,
       resultContent: hasText(existing.resultContent)
         ? existing.resultContent

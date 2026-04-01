@@ -41,6 +41,19 @@ impl ChatCompletionsStreamingState {
             .and_then(|value| value.as_str())
         {
             state.push_arguments_delta(arguments_delta);
+            // 每次收到 arguments delta 后检查是否有新的完整参数 key 解析出来
+            if state.detection_emitted() && state.check_new_parsed_keys() {
+                let invocation_id =
+                    state.invocation_id_or(|| format!("openai-chat-stream-call-{}", index + 1));
+                if let Some(tool_name) = state.tool_name().map(ToString::to_string) {
+                    sink(StreamEvent::ToolCallDetected {
+                        invocation_id,
+                        tool_name,
+                        arguments: state.parsed_arguments(),
+                        detected_at_ms: now_timestamp_ms(),
+                    });
+                }
+            }
         }
         if let Some(name) = tool_delta
             .get("function")
@@ -57,6 +70,8 @@ impl ChatCompletionsStreamingState {
                     detected_at_ms: now_timestamp_ms(),
                 });
                 state.mark_detection_emitted();
+                // 首次 detection 时也记录已有的 parsed keys
+                state.check_new_parsed_keys();
             }
             state.set_tool_name(name.to_string());
         }

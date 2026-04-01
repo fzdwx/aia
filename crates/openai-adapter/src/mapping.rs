@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use agent_core::{ConversationItem, Role};
 use serde_json::{Value, json};
 
@@ -9,6 +11,8 @@ pub(crate) struct StreamingToolCallAccumulator {
     tool_name: Option<String>,
     arguments: String,
     emitted_detection: bool,
+    /// 已通过 ToolCallDetected 事件发送过的参数 key 集合
+    emitted_arg_keys: BTreeSet<String>,
 }
 
 impl StreamingToolCallAccumulator {
@@ -48,11 +52,26 @@ impl StreamingToolCallAccumulator {
         self.emitted_detection = true;
     }
 
+    /// 检查当前累积的 arguments 是否解析出了新的完整参数 key，
+    /// 如果有则更新内部跟踪并返回 true。
+    pub(crate) fn check_new_parsed_keys(&mut self) -> bool {
+        let Ok(Value::Object(map)) = serde_json::from_str::<Value>(&self.arguments) else {
+            return false;
+        };
+        let current_keys: BTreeSet<String> = map.keys().cloned().collect();
+        if current_keys.len() > self.emitted_arg_keys.len() {
+            self.emitted_arg_keys = current_keys;
+            return true;
+        }
+        false
+    }
+
     pub(crate) fn clear(&mut self) {
         self.invocation_id = None;
         self.tool_name = None;
         self.arguments.clear();
         self.emitted_detection = false;
+        self.emitted_arg_keys.clear();
     }
 
     pub(crate) fn is_empty(&self) -> bool {

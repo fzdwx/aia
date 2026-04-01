@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "vite-plus/test"
 import assert from "node:assert/strict"
 
-import { __setIdleSchedulerForTests, useChatStore } from "./chat-store"
+import {
+  __getSessionSnapshotForTests,
+  __resetSessionSnapshotCacheForTests,
+  __setIdleSchedulerForTests,
+  __setSessionSnapshotForTests,
+  useChatStore,
+} from "./chat-store"
 import { usePendingQuestionStore } from "./pending-question-store"
 import { useProviderRegistryStore } from "./provider-registry-store"
 import { switchActiveSessionModel } from "./session-settings-runtime"
@@ -36,13 +42,13 @@ const initialState = {
   contextPressure: null,
   lastCompression: null,
   _pendingPrompt: null,
-  _sessionSnapshots: {},
 }
 
 describe("chat store submitTurn", () => {
   const originalFetch = globalThis.fetch
 
   beforeEach(() => {
+    __resetSessionSnapshotCacheForTests()
     useChatStore.setState(initialState)
     usePendingQuestionStore.setState({
       pendingQuestion: null,
@@ -808,33 +814,6 @@ describe("chat store submitTurn", () => {
         status: "thinking",
         blocks: [{ type: "text", content: "旧中的输出" }],
       },
-      _sessionSnapshots: {
-        "session-1": {
-          latestTurn: {
-            turn_id: "turn-stale",
-            started_at_ms: 1,
-            finished_at_ms: 2,
-            source_entry_ids: [9],
-            user_messages: ["过期问题"],
-            blocks: [{ kind: "assistant", content: "过期答案" }],
-            assistant_message: "过期答案",
-            thinking: null,
-            tool_invocations: [],
-            usage: null,
-            failure_message: null,
-            outcome: "succeeded",
-          },
-          streamingTurn: {
-            userMessages: ["旧中的执行"],
-            status: "thinking",
-            blocks: [{ type: "text", content: "旧中的输出" }],
-          },
-          chatState: "active",
-          contextPressure: 0.1,
-          lastCompression: null,
-          messageQueue: [],
-        },
-      },
     })
 
     useChatStore.getState().handleSseEvent({
@@ -873,23 +852,6 @@ describe("chat store submitTurn", () => {
       },
       turns: [],
       error: null,
-      _sessionSnapshots: {
-        "session-1": {
-          latestTurn: null,
-          streamingTurn: {
-            userMessages: ["hello world"],
-            status: "cancelled",
-            blocks: [
-              { type: "thinking", content: "先分析" },
-              { type: "text", content: "部分回答" },
-            ],
-          },
-          chatState: "idle",
-          contextPressure: null,
-          lastCompression: null,
-          messageQueue: [],
-        },
-      },
     })
 
     const completedEvent: SseEvent = {
@@ -924,10 +886,10 @@ describe("chat store submitTurn", () => {
     expect(state.turns[0]?.outcome).toBe("cancelled")
     expect(state.turns[0]?.assistant_message).toBe("部分回答")
     assert.equal(
-      state._sessionSnapshots["session-1"]?.latestTurn?.turn_id,
+      __getSessionSnapshotForTests("session-1")?.latestTurn?.turn_id,
       "turn-cancelled-1"
     )
-    expect(state._sessionSnapshots["session-1"]?.streamingTurn).toBe(null)
+    expect(__getSessionSnapshotForTests("session-1")?.streamingTurn).toBe(null)
   })
 
   test("switchSession hydrates latest turn first, idles in the second turn, then pages older history", async () => {
@@ -1128,7 +1090,7 @@ describe("chat store submitTurn", () => {
 
     const duringHydration = useChatStore.getState()
     assert.equal(
-      duringHydration._sessionSnapshots["session-1"]?.latestTurn?.turn_id,
+      __getSessionSnapshotForTests("session-1")?.latestTurn?.turn_id,
       "turn-1-latest"
     )
 
@@ -1221,50 +1183,6 @@ describe("chat store submitTurn", () => {
           outcome: "succeeded",
         },
       ],
-      _sessionSnapshots: {
-        "session-1": {
-          latestTurn: {
-            turn_id: "turn-1",
-            started_at_ms: 1,
-            finished_at_ms: 2,
-            source_entry_ids: [1],
-            user_messages: ["old session question"],
-            blocks: [{ kind: "assistant", content: "old session answer" }],
-            assistant_message: "old session answer",
-            thinking: null,
-            tool_invocations: [],
-            usage: null,
-            failure_message: null,
-            outcome: "succeeded",
-          },
-          streamingTurn: null,
-          chatState: "idle",
-          contextPressure: null,
-          lastCompression: null,
-          messageQueue: [],
-        },
-        "session-2": {
-          latestTurn: {
-            turn_id: "turn-2-cached",
-            started_at_ms: 10,
-            finished_at_ms: 20,
-            source_entry_ids: [2],
-            user_messages: ["cached question"],
-            blocks: [{ kind: "assistant", content: "cached answer" }],
-            assistant_message: "cached answer",
-            thinking: null,
-            tool_invocations: [],
-            usage: null,
-            failure_message: null,
-            outcome: "succeeded",
-          },
-          streamingTurn: null,
-          chatState: "idle",
-          contextPressure: 0.1,
-          lastCompression: null,
-          messageQueue: [],
-        },
-      },
     })
 
     const switchPromise = useChatStore.getState().switchSession("session-2")
@@ -1322,7 +1240,7 @@ describe("chat store submitTurn", () => {
     expect(hydrated.sessionHydrating).toBe(false)
     expect(hydrated.turns[0]?.turn_id).toBe("turn-2-live")
     assert.equal(
-      hydrated._sessionSnapshots["session-1"]?.latestTurn?.turn_id,
+      __getSessionSnapshotForTests("session-1")?.latestTurn?.turn_id,
       "turn-1"
     )
 
@@ -1505,29 +1423,28 @@ describe("chat store submitTurn", () => {
         },
       ],
       streamingTurn: null,
-      _sessionSnapshots: {
-        "session-2": {
-          latestTurn: {
-            turn_id: "turn-session-2",
-            started_at_ms: 10,
-            finished_at_ms: 20,
-            source_entry_ids: [2],
-            user_messages: ["下一个会话问题"],
-            blocks: [{ kind: "assistant", content: "下一个会话答案" }],
-            assistant_message: "下一个会话答案",
-            thinking: null,
-            tool_invocations: [],
-            usage: null,
-            failure_message: null,
-            outcome: "succeeded",
-          },
-          streamingTurn: null,
-          chatState: "idle",
-          contextPressure: 0.2,
-          lastCompression: null,
-          messageQueue: [],
-        },
+    })
+
+    __setSessionSnapshotForTests("session-2", {
+      latestTurn: {
+        turn_id: "turn-session-2",
+        started_at_ms: 10,
+        finished_at_ms: 20,
+        source_entry_ids: [2],
+        user_messages: ["下一个会话问题"],
+        blocks: [{ kind: "assistant", content: "下一个会话答案" }],
+        assistant_message: "下一个会话答案",
+        thinking: null,
+        tool_invocations: [],
+        usage: null,
+        failure_message: null,
+        outcome: "succeeded",
       },
+      streamingTurn: null,
+      chatState: "idle",
+      contextPressure: 0.2,
+      lastCompression: null,
+      messageQueue: [],
     })
 
     useChatStore.getState().handleSseEvent({
@@ -1701,29 +1618,28 @@ describe("chat store submitTurn", () => {
           outcome: "succeeded",
         },
       ],
-      _sessionSnapshots: {
-        "session-1": {
-          latestTurn: {
-            turn_id: "turn-current",
-            started_at_ms: 11,
-            finished_at_ms: 12,
-            source_entry_ids: [2],
-            user_messages: ["current question"],
-            blocks: [{ kind: "assistant", content: "current answer" }],
-            assistant_message: "current answer",
-            thinking: null,
-            tool_invocations: [],
-            usage: null,
-            failure_message: null,
-            outcome: "succeeded",
-          },
-          streamingTurn: null,
-          chatState: "idle",
-          contextPressure: null,
-          lastCompression: null,
-          messageQueue: [],
-        },
+    })
+
+    __setSessionSnapshotForTests("session-1", {
+      latestTurn: {
+        turn_id: "turn-current",
+        started_at_ms: 11,
+        finished_at_ms: 12,
+        source_entry_ids: [2],
+        user_messages: ["current question"],
+        blocks: [{ kind: "assistant", content: "current answer" }],
+        assistant_message: "current answer",
+        thinking: null,
+        tool_invocations: [],
+        usage: null,
+        failure_message: null,
+        outcome: "succeeded",
       },
+      streamingTurn: null,
+      chatState: "idle",
+      contextPressure: null,
+      lastCompression: null,
+      messageQueue: [],
     })
 
     await useChatStore.getState().loadOlderTurns()
@@ -1734,7 +1650,7 @@ describe("chat store submitTurn", () => {
       ["turn-older", "turn-current"]
     )
     assert.equal(
-      state._sessionSnapshots["session-1"]?.latestTurn?.turn_id,
+      __getSessionSnapshotForTests("session-1")?.latestTurn?.turn_id,
       "turn-current"
     )
 

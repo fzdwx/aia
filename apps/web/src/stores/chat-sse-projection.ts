@@ -4,6 +4,7 @@ import type {
   SseEvent,
   StreamingBlock,
   StreamingTurn,
+  ToolOutputSegment,
   TurnStatus,
 } from "@/lib/types"
 
@@ -45,10 +46,8 @@ export function currentTurnToStreamingTurn(
               startedAtMs: block.tool.started_at_ms ?? undefined,
               finishedAtMs: block.tool.finished_at_ms ?? undefined,
               output: block.tool.output,
-              outputSegments:
-                block.tool.output.length > 0
-                  ? [{ stream: "stdout", text: block.tool.output }]
-                  : undefined,
+              // 已完成的工具不需要 segments，只保留 output 字符串
+              outputSegments: undefined,
               completed: block.tool.completed,
               resultContent: block.tool.result_content ?? undefined,
               resultDetails: block.tool.result_details ?? undefined,
@@ -190,15 +189,34 @@ export function applyStreamEventToBlocks(
         StreamingBlock,
         { type: "tool" }
       >
+      // 合并相邻的同类型 segment，避免无限累积
+      const existingSegments = block.tool.outputSegments ?? []
+      const lastSegment = existingSegments[existingSegments.length - 1]
+      let outputSegments: ToolOutputSegment[]
+
+      if (lastSegment && lastSegment.stream === data.stream) {
+        // 合并到上一个 segment，避免创建新对象
+        outputSegments = [
+          ...existingSegments.slice(0, -1),
+          { stream: lastSegment.stream, text: lastSegment.text + data.text }
+        ]
+      } else {
+        // 限制最大 segment 数量，防止内存无限增长
+        const MAX_SEGMENTS = 200
+        outputSegments = [
+          ...(existingSegments.length >= MAX_SEGMENTS
+            ? existingSegments.slice(-MAX_SEGMENTS + 1)
+            : existingSegments),
+          { stream: data.stream, text: data.text },
+        ]
+      }
+
       nextBlocks[existingIndex] = {
         ...block,
         tool: {
           ...block.tool,
           output: block.tool.output + data.text,
-          outputSegments: [
-            ...(block.tool.outputSegments ?? []),
-            { stream: data.stream, text: data.text },
-          ],
+          outputSegments,
         },
       }
     } else {
@@ -241,6 +259,8 @@ export function applyStreamEventToBlocks(
           resultContent: data.content,
           resultDetails: data.details,
           failed: data.failed,
+          // 工具完成后清理 segments，只保留 output 字符串，释放内存
+          outputSegments: undefined,
         },
       }
     }

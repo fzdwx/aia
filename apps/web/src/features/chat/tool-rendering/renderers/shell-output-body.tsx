@@ -17,12 +17,13 @@ export function ShellOutputBody({
 }: ShellOutputBodyProps) {
   const preRef = useRef<HTMLPreElement | null>(null)
   const shouldFollowRef = useRef(true)
-  const followTrigger =
-    segments.length > 0
-      ? segments
-          .map((segment) => `${segment.stream}:${segment.text}`)
-          .join("\u0000")
-      : (output ?? "")
+  // segments 可能在工具完成后被清理，此时使用 output
+  const hasStreamingSegments = segments.length > 0
+  const followTrigger = hasStreamingSegments
+    ? segments
+        .map((segment) => `${segment.stream}:${segment.text}`)
+        .join("\u0000")
+    : (output ?? "")
 
   useEffect(() => {
     const element = preRef.current
@@ -53,7 +54,6 @@ export function ShellOutputBody({
     element.scrollTop = element.scrollHeight
   }, [followTrigger])
 
-  const hasStreamingSegments = segments.length > 0
   let segmentOffset = 0
 
   return (
