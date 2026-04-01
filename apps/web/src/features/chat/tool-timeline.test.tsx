@@ -790,7 +790,7 @@ describe("tool timeline", () => {
     expect(source).toContain(".tool-timeline-patch-stat")
   })
 
-  test("styles pierre virtualizer as the scroll container", () => {
+  test("styles diff virtualizer as the scroll container", () => {
     const source = loadWebCssSource()
 
     expect(source).toContain(".tool-timeline-pierre-virtualizer")
@@ -801,7 +801,7 @@ describe("tool timeline", () => {
     expect(source).toContain("min-width: 100%")
   })
 
-  test("configures Vite workers for Pierre diff highlighting", () => {
+  test("configures Vite workers for diff highlighting", () => {
     const source = loadViteConfigSource()
 
     expect(source).toContain("worker:")
@@ -1010,7 +1010,7 @@ describe("tool timeline", () => {
     expect(source).toContain("onExpandedChange(item.id, !showDetails)")
   })
 
-  test("keeps timeline groups free of the pierre provider wrapper", () => {
+  test("keeps timeline groups free of the diff provider wrapper", () => {
     const source = loadToolTimelineSource()
 
     expect(source).not.toContain("PierreDiffProvider")

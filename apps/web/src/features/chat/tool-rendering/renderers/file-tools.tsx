@@ -16,7 +16,7 @@ import {
   truncateInline,
 } from "../helpers"
 import { ExpandableOutput, ToolDetailSection } from "../ui"
-import { DeferredPierreMultiFileDiffOutput } from "../../diff/pierre-diff"
+import { DeferredServerMultiFileDiffOutput } from "../../diff/server-diff"
 
 function getToolFileName(data: Parameters<ToolRenderer["renderDetails"]>[0]) {
   const args = normalizeToolArguments(data.arguments)
@@ -154,7 +154,7 @@ export function createWriteRenderer(): ToolRenderer {
       if (!contents) return null
 
       return (
-        <DeferredPierreMultiFileDiffOutput
+        <DeferredServerMultiFileDiffOutput
           fileName={fileName}
           oldContent={contents.oldContent}
           newContent={contents.newContent}
@@ -197,7 +197,7 @@ export function createEditRenderer(): ToolRenderer {
       const newString = getStringValue(args, "new_string") ?? ""
       if (oldString || newString) {
         return (
-          <DeferredPierreMultiFileDiffOutput
+          <DeferredServerMultiFileDiffOutput
             fileName={fileName}
             oldContent={oldString}
             newContent={newString}

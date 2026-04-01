@@ -193,7 +193,8 @@ export async function sendMessage(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ message, session_id: sessionId }),
   })
-  if (!res.ok) throw new Error(`POST /api/session/message failed: ${res.status}`)
+  if (!res.ok)
+    throw new Error(`POST /api/session/message failed: ${res.status}`)
   return (await res.json()) as QueueMessageResponse
 }
 
@@ -210,25 +211,24 @@ export async function deleteQueuedMessage(
   messageId: string,
   sessionId?: string
 ): Promise<void> {
-  const params = sessionId
-    ? `?session_id=${encodeURIComponent(sessionId)}`
-    : ""
+  const params = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ""
   const res = await fetch(
     `/api/session/queue/${encodeURIComponent(messageId)}${params}`,
     { method: "DELETE" }
   )
   if (!res.ok)
-    throw new Error(`DELETE /api/session/queue/${messageId} failed: ${res.status}`)
+    throw new Error(
+      `DELETE /api/session/queue/${messageId} failed: ${res.status}`
+    )
 }
 
 export async function interruptTurn(sessionId?: string): Promise<boolean> {
-  const params = sessionId
-    ? `?session_id=${encodeURIComponent(sessionId)}`
-    : ""
+  const params = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ""
   const res = await fetch(`/api/session/interrupt${params}`, {
     method: "POST",
   })
-  if (!res.ok) throw new Error(`POST /api/session/interrupt failed: ${res.status}`)
+  if (!res.ok)
+    throw new Error(`POST /api/session/interrupt failed: ${res.status}`)
   const payload = (await res.json()) as { interrupted?: boolean }
   return payload.interrupted === true
 }
@@ -369,6 +369,47 @@ export async function switchProvider(name: string): Promise<ProviderInfo> {
   if (!res.ok)
     throw new Error(`POST /api/providers/switch failed: ${res.status}`)
   return res.json() as Promise<ProviderInfo>
+}
+
+// ── Diff computation ───────────────────────────────────────────
+
+export type DiffLine = {
+  kind: "ctx" | "add" | "del"
+  old_ln?: number
+  new_ln?: number
+  html: string
+}
+
+export type DiffHunk = {
+  old_start: number
+  old_count: number
+  new_start: number
+  new_count: number
+  lines: DiffLine[]
+}
+
+export type DiffResponse = {
+  hunks: DiffHunk[]
+}
+
+export async function computeDiff(
+  body:
+    | {
+        mode: "contents"
+        file_name: string
+        old_content: string
+        new_content: string
+        theme?: string
+      }
+    | { mode: "patch"; patch: string; theme?: string }
+): Promise<DiffResponse> {
+  const res = await fetch("/api/diff", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(`POST /api/diff failed: ${res.status}`)
+  return res.json() as Promise<DiffResponse>
 }
 
 /**

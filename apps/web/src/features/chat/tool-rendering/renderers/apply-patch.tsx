@@ -9,7 +9,7 @@ import {
   getStringValue,
   truncateInline,
 } from "../helpers"
-import { DeferredPierrePatchDiffOutput } from "../../diff/pierre-diff"
+import { DeferredServerPatchDiffOutput } from "../../diff/server-diff"
 import { useState } from "react"
 
 type ApplyPatchOperation = {
@@ -38,10 +38,7 @@ function DeferredPatchOperation({ entry }: { entry: ApplyPatchOperation }) {
       }}
     >
       <summary className="tool-timeline-patch-summary">
-        <span
-          className="tool-timeline-patch-path"
-          title={entry.displayPath}
-        >
+        <span className="tool-timeline-patch-path" title={entry.displayPath}>
           <span className="tool-timeline-patch-filename">
             {entry.fileName}
             {entry.directory ? (
@@ -66,7 +63,7 @@ function DeferredPatchOperation({ entry }: { entry: ApplyPatchOperation }) {
         </span>
       </summary>
       <div className="tool-timeline-patch-body">
-        {isOpen && <DeferredPierrePatchDiffOutput patch={entry.patch} />}
+        {isOpen && <DeferredServerPatchDiffOutput patch={entry.patch} />}
       </div>
     </details>
   )

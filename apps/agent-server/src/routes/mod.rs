@@ -5,6 +5,7 @@ use crate::state::SharedState;
 
 mod channel;
 mod common;
+mod diff;
 mod provider;
 mod session;
 #[cfg(test)]
@@ -22,6 +23,7 @@ pub fn build_router(state: SharedState) -> Router {
         .merge(trace::router())
         .merge(session::router())
         .merge(turn::router())
+        .merge(diff::router())
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
