@@ -53,7 +53,10 @@ pub(crate) fn apply_user_agent(
 pub(crate) fn http_client(request: &CompletionRequest) -> Result<Client, OpenAiAdapterError> {
     let mut builder = Client::builder();
     if let Some(timeout_ms) = request.timeout.as_ref().and_then(|timeout| timeout.read_timeout_ms) {
-        builder = builder.timeout(Duration::from_millis(timeout_ms));
+        let duration = Duration::from_millis(timeout_ms);
+        // 使用 connect_timeout 而非全局 timeout，避免 streaming 请求被总时间限制断开。
+        // streaming 只要有持续数据流就不应超时，connect_timeout 只限制建立连接的时间。
+        builder = builder.connect_timeout(duration);
     }
     builder.build().map_err(|error| OpenAiAdapterError::new(error.to_string()))
 }
