@@ -37,7 +37,7 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
 
       <div
         data-component="assistant-message"
-        className="group/turn flex w-full flex-col gap-4 [&>*[data-type='tools']+*[data-type='tools']]:mt-1.5"
+        className="group/turn flex w-full flex-col gap-4 [&>*[data-type='tools']+*[data-type='tools']]:-mt-3 [&>*[data-type='thinking']+*[data-type='tools']]:-mt-3 [&>*[data-type='tools']+*[data-type='thinking']]:-mt-3"
       >
         {grouped.map((group, i) => {
           if (group.type === "tools") {
@@ -46,6 +46,14 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
                 <MemoizedToolGroup
                   items={group.invocations.map(fromInvocation)}
                 />
+              </div>
+            )
+          }
+
+          if (group.type === "single" && group.block.kind === "thinking") {
+            return (
+              <div key={i} data-type="thinking">
+                <ThinkingBlock content={group.block.content} />
               </div>
             )
           }
@@ -65,6 +73,23 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
 function StreamingView({ streaming }: { streaming: StreamingTurn }) {
   const groups = groupStreamingBlocks(streaming.blocks)
   const userMessages = streaming.userMessages ?? []
+  const renderedGroups = groups.map((group, index) => {
+    const previousGroup = index > 0 ? groups[index - 1] : null
+
+    if (
+      group.type === "tools" &&
+      group.mergeKey === "context" &&
+      previousGroup?.type === "tools" &&
+      previousGroup.mergeKey === "context"
+    ) {
+      return {
+        key: `${group.mergeKey}-${group.tools[0]?.invocationId ?? index}`,
+        group,
+      }
+    }
+
+    return { key: `group-${index}`, group }
+  })
 
   return (
     <div className="mb-8 animate-[message-in_250ms_ease-out_both]">
@@ -76,16 +101,16 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
 
       <div
         data-component="assistant-message"
-        className="flex w-full flex-col gap-4 [&>*[data-type='tools']+*[data-type='tools']]:mt-1.5"
+        className="flex w-full flex-col gap-4 [&>*[data-type='tools']+*[data-type='tools']]:-mt-3 [&>*[data-type='thinking']+*[data-type='tools']]:-mt-3 [&>*[data-type='tools']+*[data-type='thinking']]:-mt-3"
       >
-        {groups.map((group, i) => {
-          const isLastGroup = i === groups.length - 1
+        {renderedGroups.map(({ key, group }, i) => {
+          const isLastGroup = i === renderedGroups.length - 1
 
           if (group.type === "thinking") {
             const isLast = isLastGroup && streaming.status === "thinking"
 
             return (
-              <div key={i} data-type="text">
+              <div key={key} data-type="thinking">
                 <ThinkingBlock content={group.content} isStreaming={isLast} />
               </div>
             )
@@ -93,17 +118,16 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
 
           if (group.type === "tools") {
             return (
-              <div key={i} data-type="tools">
+              <div key={key} data-type="tools">
                 <MemoizedStreamingToolGroup
                   toolOutputs={group.tools}
-                  keepContextGroupsOpen
                 />
               </div>
             )
           }
 
           return (
-            <div key={i} data-type="text">
+            <div key={key} data-type="text">
               <AssistantTextBlock
                 content={group.content}
                 streaming={isLastGroup && streaming.status === "generating"}

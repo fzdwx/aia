@@ -8,13 +8,17 @@ import type {
 import { isContextExplorationTool } from "@/features/chat/tool-timeline-helpers"
 
 export type BlockGroup =
-    | { type: "single"; block: TurnBlock }
-    | { type: "tools"; invocations: TurnLifecycle["tool_invocations"] }
+  | { type: "single"; block: TurnBlock }
+  | { type: "tools"; invocations: TurnLifecycle["tool_invocations"] }
 
 export type StreamingBlockGroup =
-    | { type: "thinking"; content: string }
-    | { type: "text"; content: string }
-    | { type: "tools"; tools: StreamingToolOutput[] }
+  | { type: "thinking"; content: string }
+  | { type: "text"; content: string }
+  | {
+      type: "tools"
+      tools: StreamingToolOutput[]
+      mergeKey?: "context"
+    }
 
 export function groupBlocks(blocks: TurnBlock[]): BlockGroup[] {
   const result: BlockGroup[] = []
@@ -23,16 +27,16 @@ export function groupBlocks(blocks: TurnBlock[]): BlockGroup[] {
     if (block.kind === "tool_invocation") {
       const last = result[result.length - 1]
       const isContextTool = isContextExplorationTool(
-          block.invocation.call.tool_name
+        block.invocation.call.tool_name
       )
       const lastInvocation =
-          last && last.type === "tools"
-              ? last.invocations[last.invocations.length - 1]
-              : null
+        last && last.type === "tools"
+          ? last.invocations[last.invocations.length - 1]
+          : null
       const canAppendToContextGroup =
-          lastInvocation != null &&
-          isContextTool &&
-          isContextExplorationTool(lastInvocation.call.tool_name)
+        lastInvocation != null &&
+        isContextTool &&
+        isContextExplorationTool(lastInvocation.call.tool_name)
 
       if (canAppendToContextGroup && last && last.type === "tools") {
         last.invocations.push(block.invocation)
@@ -48,7 +52,7 @@ export function groupBlocks(blocks: TurnBlock[]): BlockGroup[] {
 }
 
 export function groupStreamingBlocks(
-    blocks: StreamingTurn["blocks"]
+  blocks: StreamingTurn["blocks"]
 ): StreamingBlockGroup[] {
   const groups: StreamingBlockGroup[] = []
 
@@ -57,16 +61,20 @@ export function groupStreamingBlocks(
       const last = groups[groups.length - 1]
       const isContextTool = isContextExplorationTool(block.tool.toolName)
       const lastTool =
-          last && last.type === "tools" ? last.tools[last.tools.length - 1] : null
+        last && last.type === "tools" ? last.tools[last.tools.length - 1] : null
       const canAppendToContextGroup =
-          lastTool != null &&
-          isContextTool &&
-          isContextExplorationTool(lastTool.toolName)
+        lastTool != null &&
+        isContextTool &&
+        isContextExplorationTool(lastTool.toolName)
 
       if (canAppendToContextGroup && last && last.type === "tools") {
         last.tools.push(block.tool)
       } else {
-        groups.push({ type: "tools", tools: [block.tool] })
+        groups.push({
+          type: "tools",
+          tools: [block.tool],
+          mergeKey: isContextTool ? "context" : undefined,
+        })
       }
     } else {
       groups.push(block)

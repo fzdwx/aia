@@ -12,6 +12,7 @@ import {
   StatusIndicator,
   UserMessageBlock,
 } from "./message-sections"
+import { groupStreamingBlocks } from "./message-sections/grouping"
 import { formatDurationMs } from "./tool-timeline-helpers"
 
 function renderWithTheme(element: ReactElement) {
@@ -62,6 +63,64 @@ function loadToolTimelineDurationHookSource() {
 }
 
 describe("chat message status surfaces", () => {
+  test("keeps streaming context groups on a stable merge key as new tools arrive", () => {
+    const initialGroups = groupStreamingBlocks([
+      {
+        type: "tool",
+        tool: {
+          invocationId: "tool-read",
+          toolName: "Read",
+          arguments: { file_path: "docs/status.md" },
+          detectedAtMs: 100,
+          output: "status",
+          completed: true,
+          finishedAtMs: 120,
+          resultContent: "status",
+        },
+      },
+    ])
+
+    const updatedGroups = groupStreamingBlocks([
+      {
+        type: "tool",
+        tool: {
+          invocationId: "tool-read",
+          toolName: "Read",
+          arguments: { file_path: "docs/status.md" },
+          detectedAtMs: 100,
+          output: "status",
+          completed: true,
+          finishedAtMs: 120,
+          resultContent: "status",
+        },
+      },
+      {
+        type: "tool",
+        tool: {
+          invocationId: "tool-grep",
+          toolName: "Grep",
+          arguments: { pattern: "phase", path: "docs" },
+          detectedAtMs: 121,
+          output: "phase",
+          completed: true,
+          finishedAtMs: 130,
+          resultContent: "phase",
+        },
+      },
+    ])
+
+    expect(initialGroups).toHaveLength(1)
+    expect(updatedGroups).toHaveLength(1)
+    expect(initialGroups[0]).toMatchObject({
+      type: "tools",
+      mergeKey: "context",
+    })
+    expect(updatedGroups[0]).toMatchObject({
+      type: "tools",
+      mergeKey: "context",
+    })
+  })
+
   test("merges only consecutive context exploration tools", () => {
     const html = renderWithTheme(
       <MemoizedTurnView
@@ -128,11 +187,11 @@ describe("chat message status surfaces", () => {
     expect(html.match(/Explored/g)).toHaveLength(1)
     expect(html).toContain('aria-expanded="false"')
     expect(html).not.toContain('data-component="context-tool-group-list"')
-    expect(html).toContain("1 read")
-    expect(html).toContain("1 search")
+    expect(html).toContain(">1</span> read")
+    expect(html).toContain(">1</span> search")
   })
 
-  test("keeps explored groups expanded only on the active streaming turn", () => {
+  test("keeps explored groups collapsed on completed and streaming turns by default", () => {
     const completedHtml = renderWithTheme(
       <MemoizedTurnView
         turn={{
@@ -236,8 +295,10 @@ describe("chat message status surfaces", () => {
     expect(completedHtml).not.toContain(
       'data-component="context-tool-group-list"'
     )
-    expect(streamingHtml).toContain('aria-expanded="true"')
-    expect(streamingHtml).toContain('data-component="context-tool-group-list"')
+    expect(streamingHtml).toContain('aria-expanded="false"')
+    expect(streamingHtml).not.toContain(
+      'data-component="context-tool-group-list"'
+    )
   })
 
   test("breaks context groups on non-context tools and non-tool blocks", () => {
@@ -347,9 +408,9 @@ describe("chat message status surfaces", () => {
     )
 
     expect(html.match(/Explored/g)).toHaveLength(3)
-    expect(html.match(/1 search/g)).toHaveLength(1)
-    expect(html).toContain("1 read")
-    expect(html).toContain("1 list")
+    expect(html).toContain(">1</span> search")
+    expect(html).toContain(">1</span> read")
+    expect(html).toContain(">1</span> list")
     expect(html).toContain("Shell")
     expect(html).toContain("Done searching.")
   })
@@ -461,7 +522,7 @@ describe("chat message status surfaces", () => {
 
     expect(source).toContain("scrollToBottomInstant")
     expect(source).toContain("scrollToBottomSmooth")
-    expect(source).toContain("if (turns.length === 0 && !streamingTurn) return")
+    expect(source).toContain("if (!hasContent)")
     expect(source).not.toContain("historyTriggerRef")
     expect(source).not.toContain("bottomAnchorRef")
     expect(source).not.toContain("previousScrollHeightRef")
@@ -488,7 +549,7 @@ describe("chat message status surfaces", () => {
     expect(timelineSource).toContain(
       "useDurationTicker(item.finishedAtMs == null)"
     )
-    expect(timelineSource).toContain("useDurationTicker(active.length > 0)")
+    expect(timelineSource).toContain("useDurationTicker(hasActive)")
   })
 
   test("formats live tool durations in smooth seconds", () => {

@@ -130,7 +130,7 @@ describe("tool timeline", () => {
     expect(html).not.toContain("Running tools")
   })
 
-  test("keeps completed explored groups expanded while the turn is still streaming", () => {
+  test("can keep completed explored groups expanded while the turn is still streaming when enabled", () => {
     const html = renderWithTheme(
       <StreamingToolGroup
         keepContextGroupsOpen
@@ -162,7 +162,7 @@ describe("tool timeline", () => {
       />
     )
 
-    expect(html).toContain('aria-expanded="true"')
+    expect(html).not.toContain('aria-expanded="false"')
     expect(html).toContain('data-component="context-tool-group-list"')
     expect(html).toContain("apps/web/src/components")
     expect(html).toContain("renderDetails")
@@ -336,9 +336,9 @@ describe("tool timeline", () => {
 
     expect(html).toContain('aria-expanded="false"')
     expect(html).toContain("Explored")
-    expect(html).toContain("1 read")
-    expect(html).toContain("1 search")
-    expect(html).toContain("1 list")
+    expect(html).toContain(">1</span> read")
+    expect(html).toContain(">1</span> search")
+    expect(html).toContain(">1</span> list")
     expect(html).toContain('data-state="visible"')
     expect(html).not.toContain('data-component="context-tool-group-list"')
     expect(html).not.toContain("Running")
@@ -356,6 +356,17 @@ describe("tool timeline", () => {
     expect(source).toContain("toolTimelineCopy")
     expect(source).not.toContain('running: "Exploring"')
     expect(source).not.toContain('completed: "Explored"')
+  })
+
+  test("animates context group trigger when new tools join the group", () => {
+    const source = loadContextGroupSource()
+
+    expect(source).toContain("const CONTEXT_GROUP_FLASH_MS = 520")
+    expect(source).toContain("const hasNewItem =")
+    expect(source).toContain("setHighlightTrigger((current) => current + 1)")
+    expect(source).toContain("animate={triggerAnimation}")
+    expect(source).toContain("backgroundColor:")
+    expect(source).toContain('transformOrigin: "left center"')
   })
 
   test("renders standalone tools without context-group titles", () => {
@@ -455,11 +466,9 @@ describe("tool timeline", () => {
     expect(shellHtml).toContain("Run workspace checks")
     expect(shellHtml).toContain('data-slot="tool-subtitle"')
     expect(shellHtml).toContain('data-slot="tool-duration"')
-    expect(readHtml).toContain("tool-timeline.tsx")
-    expect(readHtml).toContain('data-slot="tool-file-name"')
-    expect(readHtml).toContain('data-slot="tool-subtitle"')
-    expect(readHtml).toContain('data-slot="tool-meta"')
-    expect(readHtml).toContain("L2~21")
+    expect(readHtml).toContain("Exploring")
+    expect(readHtml).toContain('data-component="context-tool-group-trigger"')
+    expect(readHtml).toContain(">1</span> read")
   })
 
   test("renders running shell subtitle directly from started-event arguments", () => {
@@ -970,19 +979,17 @@ describe("tool timeline", () => {
     const source = loadToolTimelineSource()
     const contextSource = loadContextGroupSource()
 
-    expect(source).toContain(
-      "const isContextGroup = visibleItems.every((item) =>"
-    )
+    expect(source).toContain("const isContextGroup = visibleItems.every(")
     expect(source).toContain("isContextExplorationTool(item.toolName)")
     expect(source).toContain('const isRunning = status === "running"')
     expect(source).toContain(
       'data-component="tool-group" data-variant="standalone"'
     )
     expect(source).toContain("setOpen((current) => !current)")
-    expect(source).toContain('status="running"')
+    expect(source).toContain('status={hasActive ? "running" : "completed"}')
     expect(source).toContain("keepContextGroupsOpen = false")
     expect(source).toContain(
-      "const shouldKeepOpen = isContextGroup && (isRunning || keepContextGroupsOpen)"
+      "const shouldKeepOpen = isContextGroup && keepContextGroupsOpen"
     )
     expect(source).toContain("if (!isContextGroup) {")
     expect(source).toContain("} else if (wasOpenRef.current) {")
