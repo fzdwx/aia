@@ -188,7 +188,10 @@ export function coalesceStreamingToolOutputs(
       outputSegments:
         existing.completed || tool.completed
           ? undefined
-          : [...(existing.outputSegments ?? []), ...(tool.outputSegments ?? [])],
+          : [
+              ...(existing.outputSegments ?? []),
+              ...(tool.outputSegments ?? []),
+            ],
       completed: existing.completed || tool.completed,
       resultContent: hasText(existing.resultContent)
         ? existing.resultContent

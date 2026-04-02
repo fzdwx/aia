@@ -190,11 +190,12 @@ export function ToolGroup({
   onExpandedChange?: (id: string, expanded: boolean) => void
 }) {
   const visibleItems = items.filter(shouldRenderToolItem)
-  const isContextGroup = visibleItems.every((item) =>
-    isContextExplorationTool(item.toolName)
+  const isContextGroup = visibleItems.every(
+    (item) =>
+      !item.toolName || isContextExplorationTool(item.toolName)
   )
   const isRunning = status === "running"
-  const shouldKeepOpen = isContextGroup && (isRunning || keepContextGroupsOpen)
+  const shouldKeepOpen = isContextGroup && keepContextGroupsOpen
   const [open, setOpen] = useState(shouldKeepOpen)
   const wasOpenRef = useRef(shouldKeepOpen)
 
@@ -248,10 +249,9 @@ export function StreamingToolGroup({
   keepContextGroupsOpen?: boolean
 }) {
   const coalescedToolOutputs = coalesceStreamingToolOutputs(toolOutputs)
-  const completed = coalescedToolOutputs.filter((t) => t.completed)
-  const active = coalescedToolOutputs.filter((t) => !t.completed)
   const [expandedToolIds, setExpandedToolIds] = useState<Set<string>>(new Set())
-  useDurationTicker(active.length > 0)
+  const hasActive = coalescedToolOutputs.some((t) => !t.completed)
+  useDurationTicker(hasActive)
 
   useEffect(() => {
     const visibleIds = new Set(
@@ -281,26 +281,13 @@ export function StreamingToolGroup({
 
   return (
     <div data-component="tool-timeline-stream">
-      {completed.length > 0 && (
-        <ToolGroup
-          key="completed"
-          items={completed.map(fromStreamingTool)}
-          keepContextGroupsOpen={keepContextGroupsOpen}
-          expandedToolIds={expandedToolIds}
-          onExpandedChange={handleExpandedChange}
-        />
-      )}
-
-      {active.length > 0 && (
-        <ToolGroup
-          key="active"
-          items={active.map(fromStreamingTool)}
-          status="running"
-          keepContextGroupsOpen={keepContextGroupsOpen}
-          expandedToolIds={expandedToolIds}
-          onExpandedChange={handleExpandedChange}
-        />
-      )}
+      <ToolGroup
+        items={coalescedToolOutputs.map(fromStreamingTool)}
+        status={hasActive ? "running" : "completed"}
+        keepContextGroupsOpen={keepContextGroupsOpen}
+        expandedToolIds={expandedToolIds}
+        onExpandedChange={handleExpandedChange}
+      />
     </div>
   )
 }

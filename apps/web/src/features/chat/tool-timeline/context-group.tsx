@@ -1,5 +1,4 @@
 import { AnimatePresence, motion } from "motion/react"
-import { useEffect, useMemo, useRef, useState } from "react"
 
 import {
   AnimatedCountList,
@@ -19,8 +18,6 @@ import { toolTimelineCopy } from "@/features/chat/tool-timeline-copy"
 const CONTEXT_GROUP_TRANSITION = {
   height: { duration: 0.18, ease: [0.16, 1, 0.3, 1] },
 } as const
-
-const CONTEXT_GROUP_FLASH_MS = 520
 
 function ContextToolTriggerRow({ item }: { item: ToolRowItem }) {
   const trigger = contextToolTrigger(item)
@@ -143,44 +140,11 @@ export function ContextToolGroup({
   onToggle: () => void
 }) {
   const countItems = buildCountItems(items)
-  const itemIds = useMemo(() => items.map((item) => item.id), [items])
-  const previousItemIdsRef = useRef<string[]>(itemIds)
-  const [highlightTrigger, setHighlightTrigger] = useState(0)
-
-  useEffect(() => {
-    const previousItemIds = previousItemIdsRef.current
-    const hasNewItem =
-      itemIds.length > previousItemIds.length &&
-      previousItemIds.every((id, index) => itemIds[index] === id)
-
-    if (hasNewItem) {
-      setHighlightTrigger((current) => current + 1)
-    }
-
-    previousItemIdsRef.current = itemIds
-  }, [itemIds])
-
-  const triggerAnimation =
-    highlightTrigger > 0
-      ? {
-          scale: [1, 1.012, 1],
-          backgroundColor: [
-            "color-mix(in oklab, var(--accent) 0%, transparent)",
-            "color-mix(in oklab, var(--accent) 12%, transparent)",
-            "color-mix(in oklab, var(--accent) 0%, transparent)",
-          ],
-        }
-      : undefined
 
   return (
     <div data-component="tool-group" data-variant="context">
       {isRunning ? (
-        <motion.div
-          data-component="context-tool-group-trigger"
-          animate={triggerAnimation}
-          transition={{ duration: CONTEXT_GROUP_FLASH_MS / 1000, ease: [0.16, 1, 0.3, 1] }}
-          style={{ transformOrigin: "left center" }}
-        >
+        <div data-component="context-tool-group-trigger">
           <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-amber-500/70" />
           <ToolStatusTitle
             active
@@ -188,18 +152,15 @@ export function ContextToolGroup({
             doneText={toolTimelineCopy.groupStatus.completed}
           />
           <AnimatedCountList items={countItems} />
-        </motion.div>
+        </div>
       ) : (
-        <motion.button
+        <button
           type="button"
           onClick={onToggle}
           aria-expanded={open}
           data-interactive="true"
           data-component="context-tool-group-trigger"
           className="transition-colors hover:text-foreground focus-visible:outline-none"
-          animate={triggerAnimation}
-          transition={{ duration: CONTEXT_GROUP_FLASH_MS / 1000, ease: [0.16, 1, 0.3, 1] }}
-          style={{ transformOrigin: "left center" }}
         >
           <ToolStatusTitle
             active={false}
@@ -213,7 +174,7 @@ export function ContextToolGroup({
           >
             <AnimatedCountList items={countItems} />
           </span>
-        </motion.button>
+        </button>
       )}
       <AnimatePresence initial={false}>
         {open ? <ContextToolGroupList items={items} /> : null}

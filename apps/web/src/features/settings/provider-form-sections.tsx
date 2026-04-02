@@ -319,7 +319,8 @@ export function ProviderModelCatalogSection({
       </div>
 
       <p className="workspace-meta mt-2 text-muted-foreground">
-        Turn on Reasoning if this model supports session-level thinking controls.
+        Turn on Reasoning if this model supports session-level thinking
+        controls.
       </p>
     </section>
   )

@@ -198,7 +198,7 @@ export function applyStreamEventToBlocks(
         // 合并到上一个 segment，避免创建新对象
         outputSegments = [
           ...existingSegments.slice(0, -1),
-          { stream: lastSegment.stream, text: lastSegment.text + data.text }
+          { stream: lastSegment.stream, text: lastSegment.text + data.text },
         ]
       } else {
         // 限制最大 segment 数量，防止内存无限增长

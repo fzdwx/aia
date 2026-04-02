@@ -52,6 +52,13 @@ function loadWebCssSource() {
   ).replace(/\s+/g, " ")
 }
 
+function loadAnimatedCountListSource() {
+  return readFileSync(
+    new URL("../../components/ai-elements/animated-count-list.tsx", import.meta.url),
+    "utf8"
+  ).replace(/\s+/g, " ")
+}
+
 function loadViteConfigSource() {
   return readFileSync(
     new URL("../../../vite.config.ts", import.meta.url),
@@ -358,15 +365,23 @@ describe("tool timeline", () => {
     expect(source).not.toContain('completed: "Explored"')
   })
 
-  test("animates context group trigger when new tools join the group", () => {
-    const source = loadContextGroupSource()
+  test("animates context counts with layout and gentle entry motion", () => {
+    const source = loadAnimatedCountListSource()
 
-    expect(source).toContain("const CONTEXT_GROUP_FLASH_MS = 520")
-    expect(source).toContain("const hasNewItem =")
-    expect(source).toContain("setHighlightTrigger((current) => current + 1)")
-    expect(source).toContain("animate={triggerAnimation}")
-    expect(source).toContain("backgroundColor:")
-    expect(source).toContain('transformOrigin: "left center"')
+    expect(source).toContain("<motion.span layout")
+    expect(source).toContain(
+      "initial={{ opacity: 0, width: 0, y: 4, scale: 0.98 }}"
+    )
+    expect(source).toContain(
+      'animate={{ opacity: 1, width: "auto", y: 0, scale: 1 }}'
+    )
+    expect(source).toContain(
+      "exit={{ opacity: 0, width: 0, y: -2, scale: 0.98 }}"
+    )
+    expect(source).toContain("layout: { duration: 0.22")
+    expect(source).toContain(
+      'initial={{ scale: 1.22, color: "var(--text-strong)" }}'
+    )
   })
 
   test("renders standalone tools without context-group titles", () => {
