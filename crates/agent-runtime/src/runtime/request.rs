@@ -1,6 +1,4 @@
-use agent_core::{
-    CompletionRequest, ConversationItem, LanguageModel, ToolDefinition, ToolExecutor,
-};
+use agent_core::{CompletionRequest, ConversationItem, LanguageModel, ToolDefinition, ToolExecutor};
 
 use crate::ContextStats;
 
@@ -15,6 +13,23 @@ where
     M: LanguageModel,
     T: ToolExecutor,
 {
+    pub(super) fn should_preflight_compress(&self) -> bool {
+        let Some(context_limit) = self.model_identity.limit.as_ref().and_then(|limit| limit.context)
+        else {
+            return false;
+        };
+        let Some(last_input_tokens) = self.current_input_tokens() else {
+            return false;
+        };
+
+        let pressure_ratio = last_input_tokens as f64 / context_limit as f64;
+        if pressure_ratio < self.context_pressure_threshold {
+            return false;
+        }
+
+        self.has_new_context_since_last_usage_sample() || self.has_pending_tool_results()
+    }
+
     pub(super) fn build_completion_request(
         &self,
         turn_id: &str,
@@ -70,11 +85,31 @@ where
     }
 
     fn current_input_tokens(&self) -> Option<u32> {
-        if self.has_anchor_after_last_completed_turn() {
+        if self.has_anchor_after_last_completed_turn() && !self.has_new_context_since_last_usage_sample() {
             return None;
         }
 
         self.last_input_tokens.map(|value| value.min(u32::MAX as u64) as u32)
+    }
+
+    fn has_new_context_since_last_usage_sample(&self) -> bool {
+        let Some(last_completed_turn_index) = self.latest_completed_turn_index() else {
+            return !self.tape.entries().is_empty();
+        };
+
+        self.tape
+            .entries()
+            .iter()
+            .skip(last_completed_turn_index.saturating_add(1))
+            .any(|entry| {
+                entry.as_message().is_some()
+                    || entry.as_tool_call().is_some()
+                    || entry.as_tool_result().is_some()
+            })
+    }
+
+    fn has_pending_tool_results(&self) -> bool {
+        self.tape.default_view().entries.iter().any(|entry| entry.as_tool_result().is_some())
     }
 
     fn has_anchor_after_last_completed_turn(&self) -> bool {

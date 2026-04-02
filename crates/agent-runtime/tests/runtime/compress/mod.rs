@@ -21,6 +21,13 @@ fn detects_context_window() {
 }
 
 #[test]
+fn detects_input_longer_than_model_context_length() {
+    assert!(is_context_length_error(
+        "The input (227574 tokens) is longer than the model's context length (202752 tokens)"
+    ));
+}
+
+#[test]
 fn does_not_match_unrelated_errors() {
     assert!(!is_context_length_error("rate limit exceeded"));
     assert!(!is_context_length_error("internal server error"));

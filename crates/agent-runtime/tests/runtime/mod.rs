@@ -53,7 +53,7 @@ where
     M: LanguageModel,
     T: ToolExecutor,
 {
-    run_async(runtime.handle_turn_streaming(user_input, control, |_| {}))
+    run_async(runtime.handle_turn_streaming(vec![user_input.into()], control, |_| {}))
 }
 
 #[test]
@@ -350,6 +350,77 @@ impl LanguageModel for BudgetRecordingModel {
     ) -> Result<Completion, Self::Error> {
         mutex_lock(&self.seen_requests).push(request);
         Ok(Completion::text("预算检查完成"))
+    }
+}
+
+struct PreflightCompressionModel {
+    seen_requests: Mutex<Vec<CompletionRequest>>,
+    completion_requests: Mutex<Vec<CompletionRequest>>,
+}
+
+impl PreflightCompressionModel {
+    fn new() -> Self {
+        Self {
+            seen_requests: Mutex::new(Vec::new()),
+            completion_requests: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl LanguageModel for PreflightCompressionModel {
+    type Error = CoreError;
+
+    async fn complete_streaming(
+        &self,
+        request: CompletionRequest,
+        _abort: &AbortSignal,
+        _sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
+    ) -> Result<Completion, Self::Error> {
+        mutex_lock(&self.seen_requests).push(request.clone());
+
+        let request_kind = request
+            .trace_context
+            .as_ref()
+            .map(|context| context.request_kind.as_str())
+            .unwrap_or("completion");
+
+        if request_kind == "compression" {
+            return Ok(Completion::text(
+                "## 1. Current Task Objective\n压缩\n\n## 2. Progress So Far\n压缩\n\n## 3. Key Context\n压缩\n\n## 4. Key Findings\n压缩\n\n## 5. Unfinished Items\n压缩\n\n## 6. Recommended Handoff Path\n压缩\n\n## 7. Risks and Warnings\n压缩\n\nFirst step for the next Agent: 压缩"
+                    .to_string(),
+            ));
+        }
+
+        let completion_index = mutex_lock(&self.completion_requests).len();
+        mutex_lock(&self.completion_requests).push(request.clone());
+
+        if completion_index == 0 {
+            return Ok(Completion {
+                segments: vec![CompletionSegment::ToolUse(ToolCall::new("search"))],
+                stop_reason: CompletionStopReason::ToolUse,
+                usage: Some(CompletionUsage {
+                    input_tokens: 300,
+                    output_tokens: 20,
+                    total_tokens: 320,
+                    cached_tokens: 0,
+                }),
+                response_body: None,
+                http_status_code: None,
+            });
+        }
+
+        let saw_summary = request.conversation.iter().any(|item| {
+            item.as_message().is_some_and(|message| {
+                message.role == Role::User && message.content.contains("[context summary]")
+            })
+        });
+
+        if !saw_summary {
+            return Err(CoreError::new("expected preflight compression summary before completion"));
+        }
+
+        Ok(Completion::text("预压缩后继续完成"))
     }
 }
 
@@ -1151,6 +1222,30 @@ fn 运行时不会自动追加最大步数收尾消息() {
 }
 
 #[test]
+fn 运行时会在每次模型调用前预压缩上下文() {
+    let mut identity = ModelIdentity::new("local", "preflight-compress", ModelDisposition::Balanced);
+    identity.limit = Some(agent_core::ModelLimit { context: Some(400), output: Some(80) });
+    let model = PreflightCompressionModel::new();
+    let mut runtime = AgentRuntime::new(model, StubTools, identity).with_context_pressure_threshold(0.5);
+
+    let output = run_turn(
+        &mut runtime,
+        "这是一段会把上下文推高很多很多很多很多很多很多很多很多很多很多很多很多的输入，用来触发预压缩检查",
+    )
+    .expect("应先压缩再继续完成");
+
+    assert_eq!(output.assistant_text, "预压缩后继续完成");
+    assert!(runtime.tape().entries().iter().any(|entry| entry.anchor_name() == Some("context_compression")));
+    let requests = mutex_lock(&runtime.model.completion_requests);
+    assert_eq!(requests.len(), 2);
+    assert!(requests[1].conversation.iter().any(|item| {
+        item.as_message().is_some_and(|message| {
+            message.role == Role::User && message.content.contains("[context summary]")
+        })
+    }));
+}
+
+#[test]
 fn 运行时会默认请求模型允许并行工具调用() {
     let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced);
     let model = BudgetRecordingModel::new();
@@ -1265,7 +1360,7 @@ fn 大写_shell_在并行路径里也会实时发出输出增量() {
 
     let handle = std::thread::spawn(move || {
         let control = TurnControl::new(AbortSignal::new());
-        run_async(runtime.handle_turn_streaming("执行 Shell", control, &mut |event| {
+        run_async(runtime.handle_turn_streaming(vec!["执行 Shell".to_string()], control, &mut |event| {
             if matches!(event, agent_core::StreamEvent::ToolOutputDelta { .. }) {
                 let _ = delta_observed_tx.send(());
             }
@@ -1298,7 +1393,7 @@ fn 并行_shell_会在各自完成时单独发出完成事件() {
 
     let handle = std::thread::spawn(move || {
         let control = TurnControl::new(AbortSignal::new());
-        run_async(runtime.handle_turn_streaming("并行执行 Shell", control, &mut |event| {
+        run_async(runtime.handle_turn_streaming(vec!["并行执行 Shell".to_string()], control, &mut |event| {
             if let agent_core::StreamEvent::ToolCallCompleted { content, .. } = event {
                 let _ = completed_tx.send(content);
             }
@@ -1827,7 +1922,7 @@ fn 成功轮会聚合成完整轮次块事件() {
                 started_at_ms,
                 finished_at_ms,
                 source_entry_ids,
-                user_message,
+                user_messages,
                 blocks: _,
                 assistant_message: Some(assistant_message),
                 thinking: None,
@@ -1840,7 +1935,7 @@ fn 成功轮会聚合成完整轮次块事件() {
             if turn_id.starts_with("turn-")
             && started_at_ms <= finished_at_ms
             && !source_entry_ids.is_empty()
-            && user_message == "你好"
+            && user_messages == &vec!["你好".to_string()]
             && assistant_message == "已收到：你好"
             && tool_invocations.len() == 1
             && matches!(
@@ -1874,7 +1969,7 @@ fn 工具失败后成功收尾的轮次也会聚合完整块事件() {
                 started_at_ms,
                 finished_at_ms,
                 source_entry_ids,
-                user_message,
+                user_messages,
                 blocks: _,
                 assistant_message: Some(assistant_message),
                 thinking: _,
@@ -1887,7 +1982,7 @@ fn 工具失败后成功收尾的轮次也会聚合完整块事件() {
             if turn_id.starts_with("turn-")
             && started_at_ms <= finished_at_ms
             && !source_entry_ids.is_empty()
-            && user_message == "你好"
+            && user_messages == &vec!["你好".to_string()]
             && assistant_message == "已收到：你好"
             && tool_invocations.len() == 1
             && matches!(

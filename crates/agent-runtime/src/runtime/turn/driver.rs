@@ -55,6 +55,9 @@ where
                 );
             }
 
+            self.maybe_auto_compress_before_completion(&turn_id, &mut llm_step_index)
+                .await?;
+
             let request = self.prepare_request_with_hooks(
                 &turn_id,
                 "completion",
@@ -266,5 +269,19 @@ where
         {
             *step_index = step_index.saturating_add(1);
         }
+    }
+
+    async fn maybe_auto_compress_before_completion(
+        &mut self,
+        turn_id: &str,
+        llm_step_index: &mut u32,
+    ) -> Result<(), RuntimeError> {
+        if !self.should_preflight_compress() {
+            return Ok(());
+        }
+
+        self.compress_context(Some(turn_id), *llm_step_index).await?;
+        *llm_step_index = llm_step_index.saturating_add(1);
+        Ok(())
     }
 }

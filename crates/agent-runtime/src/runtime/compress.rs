@@ -77,6 +77,8 @@ pub(super) fn is_context_length_error(message: &str) -> bool {
     let lowered = message.to_lowercase();
     lowered.contains("context_length_exceeded")
         || lowered.contains("maximum context length")
+        || lowered.contains("longer than the model's context length")
+        || lowered.contains("longer than the models context length")
         || lowered.contains("too many tokens")
         || lowered.contains("context window")
 }
