@@ -58,4 +58,15 @@ describe("MarkdownRenderer", () => {
     expect(html).toContain("katex")
     expect(html).toContain("Euler")
   })
+
+  test("falls back to plain text for oversized streaming markdown", () => {
+    const content = `${"a".repeat(16_000)}**tail**`
+    const html = renderToStaticMarkup(
+      <MarkdownRenderer content={content} streaming />
+    )
+
+    expect(html).toContain("tail")
+    expect(html).not.toContain("data-streamdown")
+    expect(html).not.toContain("<strong")
+  })
 })

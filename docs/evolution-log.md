@@ -22,6 +22,19 @@
 - `2026-03-18 Session 61` 到 `Session 72` 记录的是 channel 从过渡 webhook / 旧配置语义一路收口到 SQLite + 长连接运行态的过程；越早的条目越可能带有中间形态描述。
 - `2026-03-19 Session 79` 到 `Session 80` 记录的是一度切到 `markstream-react` 的尝试，但这条路线后来已在 `2026-03-23 Session 106` 回退；当前 Markdown 主路径请以后者与 `docs/status.md` 为准。
 
+## 2026-04-02 Session 112
+
+**Diagnosis**：用户反馈 Web 前端在流式渲染 Markdown 时内存占用偏大，尤其是超长 `thinking` 内容或生成出很多 text block 的场景。顺着 `apps/web` 的链路排查后确认，热点不只是 `streamdown` 本身，而是前端把每个 `thinking_delta` / `text_delta` 都立即投影到 store 并触发整棵流式消息重渲染；同时 `StreamingView` 中所有文本组都会继续以 `streaming` 模式渲染，导致已经稳定的旧块也跟着反复参与流式 Markdown 解析。
+**Decision**：先做两层前端收口，而不是贸然更换 Markdown 引擎：一是在 SSE 接入层把相邻的 `thinking_delta` / `text_delta` 按帧合并后再派发，降低 store 更新频率与对象 churn；二是在渲染层只让当前活跃的最后一个文本块保持 `streaming` 模式，并为超大流式 Markdown 增加纯文本降级路径，避免长文本持续触发高成本的 Markdown 解析与 AST/React 节点膨胀。
+**Changes**：
+- `apps/web/src/lib/api.ts`、`apps/web/src/lib/api.test.ts`：新增 stream 文本增量合帧逻辑；相邻同 session / turn / kind 的 `thinking_delta` 与 `text_delta` 会在约一帧内合并后再派发，并补“会合并文本增量”“遇到非文本 stream 事件会先 flush”测试。
+- `apps/web/src/components/markdown-content-rich.tsx`、`apps/web/src/components/markdown-content.test.tsx`：流式 Markdown 明确传 `mode="streaming"`，并为超大流式内容增加 plain-text fallback，补对应回归测试。
+- `apps/web/src/features/chat/message-sections.tsx`、`apps/web/src/features/chat/message-sections/message-blocks.tsx`：流式消息中只有最后一个仍在生成的文本块继续走 `streaming` 渲染；`ThinkingBlock` 打开态也改为把 `isStreaming` 透传给 Markdown 门面，同时把最后一行预览改成线性扫描，避免反复 `split("\n")` 产生大数组。
+- `docs/status.md`、`docs/evolution-log.md`：同步记录本轮 Web 流式 Markdown 内存/重渲染压力收口。
+**Verification**：待本轮执行 `just web-test` 与 `just web-typecheck`。
+**Commit**：未提交。
+**Next direction**：如果后续还要继续压流式 Markdown 的峰值开销，优先评估是否要进一步利用 `streamdown` 的 `Block` / `parseMarkdownIntoBlocks` 做块级尾部更新，而不是直接重写一套新的 Markdown 渲染器。
+
 ## 2026-03-25 Session 111
 
 **Diagnosis**：`Question` RFC 虽然已经把共享协议、runtime tool 和 capability gating 落进 `agent-core` / `agent-runtime`，但 `session-tape` 仍缺少对 `question_requested/question_resolved` 的一等恢复 helper。这样 server 进入 Phase 1 的 pending question 恢复时，仍得在 `apps/agent-server` 里手写一遍“倒序扫描 event、按 `request_id` 配对”的逻辑，不利于把 append-only tape 事实语义稳定地下沉到共享层。

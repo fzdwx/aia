@@ -9,6 +9,8 @@ import type { IconMap } from "streamdown"
 
 import { cn } from "@/lib/utils"
 
+const OVERSIZE_STREAMING_MARKDOWN_THRESHOLD = 16_000
+
 const code = createCodePlugin({
   themes: ["github-light", "github-dark"],
 })
@@ -74,16 +76,26 @@ export const MarkdownRenderer = memo(
     content: string
     className?: string
     streaming?: boolean
-  }) => (
-    <div className={cn("markdown-content", className)}>
-      <Streamdown
-        components={markdownComponents}
-        icons={markdownIcons}
-        plugins={{ cjk, code, math, mermaid }}
-        remend={streaming ? undefined : { bold: false, boldItalic: false }}
-      >
-        {content}
-      </Streamdown>
-    </div>
-  )
+  }) => {
+    const shouldUsePlainTextFallback =
+      streaming && content.length >= OVERSIZE_STREAMING_MARKDOWN_THRESHOLD
+
+    return (
+      <div className={cn("markdown-content", className)}>
+        {shouldUsePlainTextFallback ? (
+          <div className="break-words whitespace-pre-wrap">{content}</div>
+        ) : (
+          <Streamdown
+            mode={streaming ? "streaming" : "static"}
+            components={markdownComponents}
+            icons={markdownIcons}
+            plugins={{ cjk, code, math, mermaid }}
+            remend={streaming ? undefined : { bold: false, boldItalic: false }}
+          >
+            {content}
+          </Streamdown>
+        )}
+      </div>
+    )
+  }
 )

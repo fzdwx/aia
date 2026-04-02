@@ -403,10 +403,8 @@ describe("chat message status surfaces", () => {
   test("uses a roomier stack gap between text and auxiliary blocks", () => {
     const source = loadMessageSectionsSource()
 
-    expect(source).toContain(
-      'className="group/turn flex w-full flex-col gap-4"'
-    )
-    expect(source).toContain('className="flex w-full flex-col gap-4"')
+    expect(source).toContain('className="group/turn flex w-full flex-col gap-4')
+    expect(source).toContain('className="flex w-full flex-col gap-4')
   })
 
   test("uses shared auxiliary scale for turn meta and compression notice", () => {
@@ -461,7 +459,8 @@ describe("chat message status surfaces", () => {
   test("drops session scroll restoration refs while keeping bottom-follow entrypoint", () => {
     const source = loadChatMessagesSource()
 
-    expect(source).toContain("scrollToBottom()")
+    expect(source).toContain("scrollToBottomInstant")
+    expect(source).toContain("scrollToBottomSmooth")
     expect(source).toContain("if (turns.length === 0 && !streamingTurn) return")
     expect(source).not.toContain("historyTriggerRef")
     expect(source).not.toContain("bottomAnchorRef")

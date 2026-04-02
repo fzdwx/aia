@@ -59,3 +59,92 @@ test("connectEvents maps default SSE message error envelopes to chat error event
 
   dispose()
 })
+
+test("connectEvents batches adjacent text stream deltas before dispatch", async () => {
+  vi.useFakeTimers()
+  vi.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource)
+  const onEvent = vi.fn()
+
+  const dispose = connectEvents(onEvent)
+
+  MockEventSource.instance?.emit("stream", {
+    session_id: "session-1",
+    turn_id: "turn-1",
+    kind: "text_delta",
+    text: "hello",
+  })
+  MockEventSource.instance?.emit("stream", {
+    session_id: "session-1",
+    turn_id: "turn-1",
+    kind: "text_delta",
+    text: " world",
+  })
+
+  expect(onEvent).not.toHaveBeenCalled()
+
+  await vi.advanceTimersByTimeAsync(16)
+
+  expect(onEvent).toHaveBeenCalledTimes(1)
+  expect(onEvent).toHaveBeenCalledWith({
+    type: "stream",
+    data: {
+      session_id: "session-1",
+      turn_id: "turn-1",
+      kind: "text_delta",
+      text: "hello world",
+    },
+  })
+
+  dispose()
+  vi.useRealTimers()
+})
+
+test("connectEvents flushes pending text delta before non-text stream event", () => {
+  vi.useFakeTimers()
+  vi.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource)
+  const onEvent = vi.fn()
+
+  const dispose = connectEvents(onEvent)
+
+  MockEventSource.instance?.emit("stream", {
+    session_id: "session-1",
+    turn_id: "turn-1",
+    kind: "thinking_delta",
+    text: "step 1",
+  })
+  MockEventSource.instance?.emit("stream", {
+    session_id: "session-1",
+    turn_id: "turn-1",
+    kind: "tool_call_started",
+    invocation_id: "Shell:1",
+    tool_name: "Shell",
+    arguments: { command: "echo ok" },
+    started_at_ms: 123,
+  })
+
+  expect(onEvent).toHaveBeenCalledTimes(2)
+  expect(onEvent).toHaveBeenNthCalledWith(1, {
+    type: "stream",
+    data: {
+      session_id: "session-1",
+      turn_id: "turn-1",
+      kind: "thinking_delta",
+      text: "step 1",
+    },
+  })
+  expect(onEvent).toHaveBeenNthCalledWith(2, {
+    type: "stream",
+    data: {
+      session_id: "session-1",
+      turn_id: "turn-1",
+      kind: "tool_call_started",
+      invocation_id: "Shell:1",
+      tool_name: "Shell",
+      arguments: { command: "echo ok" },
+      started_at_ms: 123,
+    },
+  })
+
+  dispose()
+  vi.useRealTimers()
+})

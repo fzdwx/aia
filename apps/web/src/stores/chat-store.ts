@@ -51,6 +51,24 @@ const SESSION_TITLE_ANIMATION_TICK_MS = 36
 
 const defaultIdleScheduler = createIdleScheduler()
 
+function readLastActiveSessionId(): string | null {
+  if (typeof localStorage === "undefined") return null
+  try {
+    return localStorage.getItem("lastActiveSessionId")
+  } catch {
+    return null
+  }
+}
+
+function persistLastActiveSessionId(sessionId: string) {
+  if (typeof localStorage === "undefined") return
+  try {
+    localStorage.setItem("lastActiveSessionId", sessionId)
+  } catch {
+    // ignore storage failures
+  }
+}
+
 type IdleHandle = number
 
 type SessionSnapshot = {
@@ -284,7 +302,10 @@ type ChatStore = {
 let latestSessionLoadId = 0
 let pendingHistoryHydrationAbort: AbortController | null = null
 let pendingHistoryHydrationIdleHandle: IdleHandle | null = null
-const sessionTitleAnimationTimers = new Map<string, ReturnType<typeof globalThis.setTimeout>>()
+const sessionTitleAnimationTimers = new Map<
+  string,
+  ReturnType<typeof globalThis.setTimeout>
+>()
 let scheduleIdleWork: IdleScheduler = defaultIdleScheduler.schedule
 let cancelIdleWork: IdleCanceller = defaultIdleScheduler.cancel
 
@@ -610,11 +631,11 @@ export const useChatStore = create<ChatStore>((set, get) => {
     initialize: () => {
       apiFetchSessions()
         .then((sessions) => {
-          const lastActiveId = localStorage.getItem("lastActiveSessionId")
+          const lastActiveId = readLastActiveSessionId()
           const activeId =
-            (lastActiveId && sessions.some((s) => s.id === lastActiveId))
+            lastActiveId && sessions.some((s) => s.id === lastActiveId)
               ? lastActiveId
-              : sessions[0]?.id ?? null
+              : (sessions[0]?.id ?? null)
           set({
             sessions,
             sessionTitleAnimations: Object.fromEntries(
@@ -630,7 +651,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             activeSessionId: activeId,
           })
           if (activeId) {
-            localStorage.setItem("lastActiveSessionId", activeId)
+            persistLastActiveSessionId(activeId)
             void hydrateSession(activeId)
             void hydrateSessionSettingsForSession(activeId)
             void usePendingQuestionStore.getState().hydrateForSession(activeId)
@@ -1025,7 +1046,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
           if (event.data.session_id !== activeId) break
           const deletedId = event.data.message_id
           set((state) => {
-            const filteredQueue = state.messageQueue.filter((m) => m.id !== deletedId)
+            const filteredQueue = state.messageQueue.filter(
+              (m) => m.id !== deletedId
+            )
             updateSessionSnapshot(
               activeId,
               (snapshot) => ({
@@ -1292,7 +1315,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         return
       }
       cancelPendingHistoryHydration()
-      localStorage.setItem("lastActiveSessionId", id)
+      persistLastActiveSessionId(id)
       await hydrateSession(id)
       await hydrateSessionSettingsForSession(id)
       await usePendingQuestionStore.getState().hydrateForSession(id)

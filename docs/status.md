@@ -2,7 +2,7 @@
 
 > 本文件只保留 **当前真实状态**。详细历史看 `docs/evolution-log.md`，未完成事项看 `docs/todo.md`。
 
-- Last verified: `2026-03-30`
+- Last verified: `2026-04-02`
 - Current source of truth: 以当前代码与 RFC 头部状态为准；本文件负责做压缩后的事实对齐
 
 ## 当前阶段
@@ -61,6 +61,7 @@
 - session 级模型 / 思考等级设置
 - Settings / Providers / Channels / Trace 工作台
 - 基于 `streamdown` 的统一 Markdown 渲染
+- SSE 文本增量合帧与超大流式 Markdown 降级，降低长 thinking / 大文本块场景下的前端内存与重渲染压力
 
 ### 5. Session 能力
 

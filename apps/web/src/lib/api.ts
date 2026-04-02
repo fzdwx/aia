@@ -427,11 +427,69 @@ export async function computeDiff(
   return res.json() as Promise<DiffResponse>
 }
 
+const STREAM_EVENT_FLUSH_DELAY_MS = 16
+
 /**
  * Connect to the global SSE stream. Returns a cleanup function.
  */
 export function connectEvents(onEvent: (event: SseEvent) => void): () => void {
   const es = new EventSource("/api/events")
+  let pendingTextDelta: Extract<SseEvent, { type: "stream" }>["data"] | null =
+    null
+  let streamFlushTimer: ReturnType<typeof globalThis.setTimeout> | null = null
+
+  function flushPendingTextDelta() {
+    if (!pendingTextDelta) return
+    onEvent({
+      type: "stream",
+      data: pendingTextDelta,
+    })
+    pendingTextDelta = null
+  }
+
+  function schedulePendingTextDeltaFlush() {
+    if (streamFlushTimer != null) return
+    streamFlushTimer = globalThis.setTimeout(() => {
+      streamFlushTimer = null
+      flushPendingTextDelta()
+    }, STREAM_EVENT_FLUSH_DELAY_MS)
+  }
+
+  function clearPendingTextDeltaFlush() {
+    if (streamFlushTimer == null) return
+    globalThis.clearTimeout(streamFlushTimer)
+    streamFlushTimer = null
+  }
+
+  function emitStreamEvent(
+    data: Extract<SseEvent, { type: "stream" }>["data"]
+  ) {
+    if (data.kind !== "text_delta" && data.kind !== "thinking_delta") {
+      clearPendingTextDeltaFlush()
+      flushPendingTextDelta()
+      onEvent({ type: "stream", data })
+      return
+    }
+
+    if (
+      pendingTextDelta &&
+      pendingTextDelta.session_id === data.session_id &&
+      pendingTextDelta.turn_id === data.turn_id &&
+      pendingTextDelta.kind === data.kind
+    ) {
+      pendingTextDelta = {
+        ...pendingTextDelta,
+        text: pendingTextDelta.text + data.text,
+      }
+      schedulePendingTextDeltaFlush()
+      return
+    }
+
+    clearPendingTextDeltaFlush()
+    flushPendingTextDelta()
+    pendingTextDelta = data
+    schedulePendingTextDeltaFlush()
+  }
 
   function maybeEmitEnvelopeError(raw: Record<string, unknown>): boolean {
     const error = raw.error
@@ -471,6 +529,12 @@ export function connectEvents(onEvent: (event: SseEvent) => void): () => void {
       try {
         const data = JSON.parse(e.data as string) as Record<string, unknown>
         if (type === "error" && maybeEmitEnvelopeError(data)) return
+        if (type === "stream") {
+          emitStreamEvent(data as Extract<SseEvent, { type: "stream" }>["data"])
+          return
+        }
+        clearPendingTextDeltaFlush()
+        flushPendingTextDelta()
         onEvent({ type, data } as SseEvent)
       } catch {
         // skip malformed
@@ -504,5 +568,9 @@ export function connectEvents(onEvent: (event: SseEvent) => void): () => void {
   es.addEventListener("turn_interrupted", handle("turn_interrupted"))
   es.addEventListener("queue_processing", handle("queue_processing"))
 
-  return () => es.close()
+  return () => {
+    clearPendingTextDeltaFlush()
+    flushPendingTextDelta()
+    es.close()
+  }
 }

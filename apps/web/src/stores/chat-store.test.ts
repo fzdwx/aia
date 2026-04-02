@@ -1184,6 +1184,27 @@ describe("chat store submitTurn", () => {
         },
       ],
     })
+    __setSessionSnapshotForTests("session-2", {
+      latestTurn: {
+        turn_id: "turn-2-cached",
+        started_at_ms: 7,
+        finished_at_ms: 8,
+        source_entry_ids: [2],
+        user_messages: ["cached question"],
+        blocks: [{ kind: "assistant", content: "cached answer" }],
+        assistant_message: "cached answer",
+        thinking: null,
+        tool_invocations: [],
+        usage: null,
+        failure_message: null,
+        outcome: "succeeded",
+      },
+      streamingTurn: null,
+      chatState: "idle",
+      contextPressure: null,
+      lastCompression: null,
+      messageQueue: [],
+    })
 
     const switchPromise = useChatStore.getState().switchSession("session-2")
 

@@ -7,6 +7,24 @@ import { MessageCopyButton } from "./message-copy-button"
 
 export const MESSAGE_READING_MEASURE = "w-full"
 
+function findLastNonEmptyLine(content: string): string {
+  for (let index = content.length - 1; index >= 0; index -= 1) {
+    if (content[index] !== "\n" && content[index] !== "\r") {
+      let start = index
+      while (
+        start > 0 &&
+        content[start - 1] !== "\n" &&
+        content[start - 1] !== "\r"
+      ) {
+        start -= 1
+      }
+      return content.slice(start, index + 1).trim()
+    }
+  }
+
+  return ""
+}
+
 export function AssistantTextBlock({
   content,
   streaming = false,
@@ -48,7 +66,7 @@ export function ThinkingBlock({
   isStreaming?: boolean
 }) {
   const [open, setOpen] = useState(isStreaming)
-  const lastLine = content.trim().split("\n").pop() ?? ""
+  const lastLine = findLastNonEmptyLine(content)
 
   useEffect(() => {
     if (isStreaming) {
@@ -85,7 +103,11 @@ export function ThinkingBlock({
       </button>
       {open ? (
         <div className="text-body-sm leading-body-sm mt-2.5 border-l-2 border-border/30 pl-3">
-          <MarkdownContent content={content} className="opacity-50" />
+          <MarkdownContent
+            content={content}
+            streaming={isStreaming}
+            className="opacity-50"
+          />
         </div>
       ) : null}
     </div>
