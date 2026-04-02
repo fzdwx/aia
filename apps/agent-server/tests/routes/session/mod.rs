@@ -7,7 +7,9 @@ use axum::{
 use provider_registry::{ProviderProfile, ProviderRegistry};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::{ResolvePendingQuestionRequest, SendMessageRequest, UpdateSessionSettingsRequest, handlers};
+use super::{
+    ResolvePendingQuestionRequest, SendMessageRequest, UpdateSessionSettingsRequest, handlers,
+};
 use crate::routes::session::SessionQuery;
 use crate::routes::test_support::{
     test_state_with_session_manager, test_state_with_session_manager_setup,
@@ -767,8 +769,7 @@ async fn cancel_pending_question_records_cancelled_result() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn send_message_when_idle_returns_started() {
-    let (state, root) =
-        test_state_with_session_manager("message-queue-idle", sample_registry());
+    let (state, root) = test_state_with_session_manager("message-queue-idle", sample_registry());
     let session = state
         .session_manager
         .create_session(Some("Queue Test".into()))
@@ -795,8 +796,7 @@ async fn send_message_when_idle_returns_started() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn queue_message_when_running_returns_queued_with_position() {
-    let (state, root) =
-        test_state_with_session_manager("message-queue-running", sample_registry());
+    let (state, root) = test_state_with_session_manager("message-queue-running", sample_registry());
     let session = state
         .session_manager
         .create_session(Some("Queue Running".into()))
@@ -811,22 +811,19 @@ async fn queue_message_when_running_returns_queued_with_position() {
         .expect("turn should start");
 
     // 等待 turn 真正开始（变成 Running 状态）
-    let became_running = tokio::time::timeout(
-        std::time::Duration::from_millis(2000),
-        async {
-            loop {
-                let current = state
-                    .session_manager
-                    .get_current_turn(session.id.clone())
-                    .await
-                    .expect("get current turn");
-                if current.is_some() {
-                    return;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let became_running = tokio::time::timeout(std::time::Duration::from_millis(2000), async {
+        loop {
+            let current = state
+                .session_manager
+                .get_current_turn(session.id.clone())
+                .await
+                .expect("get current turn");
+            if current.is_some() {
+                return;
             }
-        },
-    )
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
     .await;
     assert!(became_running.is_ok(), "turn should have started");
 
@@ -856,8 +853,7 @@ async fn queue_message_when_running_returns_queued_with_position() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn get_queue_returns_queued_messages() {
-    let (state, root) =
-        test_state_with_session_manager("message-queue-get", sample_registry());
+    let (state, root) = test_state_with_session_manager("message-queue-get", sample_registry());
     let session = state
         .session_manager
         .create_session(Some("Queue Get".into()))
@@ -874,7 +870,13 @@ async fn get_queue_returns_queued_messages() {
     // 等待 Running
     tokio::time::timeout(std::time::Duration::from_millis(2000), async {
         loop {
-            if state.session_manager.get_current_turn(session.id.clone()).await.expect("get").is_some() {
+            if state
+                .session_manager
+                .get_current_turn(session.id.clone())
+                .await
+                .expect("get")
+                .is_some()
+            {
                 return;
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -884,16 +886,8 @@ async fn get_queue_returns_queued_messages() {
     .expect("should become running");
 
     // 入队两条消息
-    state
-        .session_manager
-        .queue_message(session.id.clone(), "Msg 1".into())
-        .await
-        .expect("queue 1");
-    state
-        .session_manager
-        .queue_message(session.id.clone(), "Msg 2".into())
-        .await
-        .expect("queue 2");
+    state.session_manager.queue_message(session.id.clone(), "Msg 1".into()).await.expect("queue 1");
+    state.session_manager.queue_message(session.id.clone(), "Msg 2".into()).await.expect("queue 2");
 
     // 获取队列
     let queue = state.session_manager.get_queue(session.id.clone()).await.expect("get queue");
@@ -922,17 +916,20 @@ async fn interrupt_turn_sets_flag_and_cancels() {
         .expect("turn should start");
 
     // 等待 Running（说明 turn 真正开始了）
-    let became_running = tokio::time::timeout(
-        std::time::Duration::from_millis(2000),
-        async {
-            loop {
-                if state.session_manager.get_current_turn(session.id.clone()).await.expect("get").is_some() {
-                    return;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let became_running = tokio::time::timeout(std::time::Duration::from_millis(2000), async {
+        loop {
+            if state
+                .session_manager
+                .get_current_turn(session.id.clone())
+                .await
+                .expect("get")
+                .is_some()
+            {
+                return;
             }
-        },
-    )
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
     .await;
     assert!(became_running.is_ok(), "turn should have started");
 
@@ -947,7 +944,7 @@ async fn interrupt_turn_sets_flag_and_cancels() {
     // 验证不能再次打断（interrupt_requested 已设置）
     // 注：如果 turn 已结束，会返回 false；如果还在运行且已设置 interrupt，也会返回 true 但不会重复取消
     // 我们只验证第一次 interrupt 返回 true
-    
+
     // 不等待 turn 结束 - 在假 URL 环境下 turn 会卡住
     // 这个测试只验证 interrupt 能被调用并设置标志
 
@@ -959,7 +956,7 @@ async fn queue_persists_to_tape_and_restores() {
     let suffix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
     let root = std::env::temp_dir().join(format!("aia-message-queue-persist-{suffix}"));
     let session_id = "session-queue-persist";
-    
+
     let (state, root) =
         test_state_with_session_manager_setup(root.clone(), sample_registry(), |root, store| {
             store
@@ -974,21 +971,23 @@ async fn queue_persists_to_tape_and_restores() {
             let session_path = root.join("sessions").join(format!("{session_id}.jsonl"));
             let mut tape = session_tape::SessionTape::load_jsonl_or_default(&session_path)
                 .expect("tape should load");
-            
-            tape.append_entry(
-                session_tape::TapeEntry::event("message_queued", Some(serde_json::json!({
+
+            tape.append_entry(session_tape::TapeEntry::event(
+                "message_queued",
+                Some(serde_json::json!({
                     "id": "msg_persist_1",
                     "content": "Persisted message content",
                     "queued_at_ms": 1234567890u64
-                })))
-            );
-            tape.append_entry(
-                session_tape::TapeEntry::event("message_queued", Some(serde_json::json!({
+                })),
+            ));
+            tape.append_entry(session_tape::TapeEntry::event(
+                "message_queued",
+                Some(serde_json::json!({
                     "id": "msg_persist_2",
                     "content": "Second persisted message",
                     "queued_at_ms": 1234567891u64
-                })))
-            );
+                })),
+            ));
             tape.save_jsonl(&session_path).expect("tape should save");
         });
 
@@ -1007,7 +1006,7 @@ async fn queue_persists_to_tape_and_restores() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_body_json(response).await;
     let messages = body.get("messages").and_then(|v| v.as_array()).expect("messages array");
-    
+
     assert_eq!(messages.len(), 2, "should restore 2 messages from tape");
     assert_eq!(messages[0].get("id"), Some(&serde_json::json!("msg_persist_1")));
     assert_eq!(messages[0].get("content"), Some(&serde_json::json!("Persisted message content")));
@@ -1021,7 +1020,7 @@ async fn message_deleted_event_removes_from_restored_queue() {
     let suffix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
     let root = std::env::temp_dir().join(format!("aia-message-queue-delete-{suffix}"));
     let session_id = "session-queue-delete";
-    
+
     let (state, root) =
         test_state_with_session_manager_setup(root.clone(), sample_registry(), |root, store| {
             store
@@ -1035,28 +1034,31 @@ async fn message_deleted_event_removes_from_restored_queue() {
             let session_path = root.join("sessions").join(format!("{session_id}.jsonl"));
             let mut tape = session_tape::SessionTape::load_jsonl_or_default(&session_path)
                 .expect("tape should load");
-            
+
             // 入队两条消息
-            tape.append_entry(
-                session_tape::TapeEntry::event("message_queued", Some(serde_json::json!({
+            tape.append_entry(session_tape::TapeEntry::event(
+                "message_queued",
+                Some(serde_json::json!({
                     "id": "msg_del_1",
                     "content": "Will be deleted",
                     "queued_at_ms": 1000u64
-                })))
-            );
-            tape.append_entry(
-                session_tape::TapeEntry::event("message_queued", Some(serde_json::json!({
+                })),
+            ));
+            tape.append_entry(session_tape::TapeEntry::event(
+                "message_queued",
+                Some(serde_json::json!({
                     "id": "msg_del_2",
                     "content": "Will remain",
                     "queued_at_ms": 2000u64
-                })))
-            );
+                })),
+            ));
             // 删除第一条
-            tape.append_entry(
-                session_tape::TapeEntry::event("message_deleted", Some(serde_json::json!({
+            tape.append_entry(session_tape::TapeEntry::event(
+                "message_deleted",
+                Some(serde_json::json!({
                     "id": "msg_del_1"
-                })))
-            );
+                })),
+            ));
             tape.save_jsonl(&session_path).expect("tape should save");
         });
 
@@ -1075,7 +1077,7 @@ async fn message_deleted_event_removes_from_restored_queue() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_body_json(response).await;
     let messages = body.get("messages").and_then(|v| v.as_array()).expect("messages array");
-    
+
     assert_eq!(messages.len(), 1, "deleted message should not be restored");
     assert_eq!(messages[0].get("id"), Some(&serde_json::json!("msg_del_2")));
     assert_eq!(messages[0].get("content"), Some(&serde_json::json!("Will remain")));

@@ -27,11 +27,7 @@ export function AnimatedCountList({
   if (visibleItems.length === 0) return null
 
   return (
-    <motion.span
-      layout
-      className={className}
-      data-slot="context-group-counts"
-    >
+    <motion.span layout className={className} data-slot="context-group-counts">
       <AnimatePresence initial={false}>
         {visibleItems.map((item, index) => (
           <motion.span
@@ -57,7 +53,11 @@ export function AnimatedCountList({
               animate={{ scale: 1, color: "var(--muted-foreground)" }}
               transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
               className="inline-block"
-              style={{ display: "inline-block", originX: "50%", originY: "50%" }}
+              style={{
+                display: "inline-block",
+                originX: "50%",
+                originY: "50%",
+              }}
             >
               {item.count}
             </motion.span>{" "}

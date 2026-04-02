@@ -303,7 +303,8 @@ impl SessionManagerLoop {
         let queued_messages = {
             if let Some(slot) = self.slots.get_mut(&ret.session_id) {
                 let session_path = slot.session_path.clone();
-                if let Err(error) = refresh_runtime_tape_from_disk(&session_path, &mut ret.runtime) {
+                if let Err(error) = refresh_runtime_tape_from_disk(&session_path, &mut ret.runtime)
+                {
                     let _ = self.config.broadcast_tx.send(SsePayload::Error {
                         session_id: ret.session_id.clone(),
                         turn_id: None,
@@ -361,9 +362,12 @@ impl SessionManagerLoop {
                     // 通过 runtime 追加 dequeued 事件到 tape（会有正确的 ID 分配）
                     if let Some(runtime) = slot.runtime_mut() {
                         for msg in &messages {
-                            let entry = TapeEntry::event("message_dequeued", Some(serde_json::json!({
-                                "id": msg.id
-                            })));
+                            let entry = TapeEntry::event(
+                                "message_dequeued",
+                                Some(serde_json::json!({
+                                    "id": msg.id
+                                })),
+                            );
                             let _ = runtime.append_tape_entry(entry);
                         }
                     }
@@ -752,10 +756,10 @@ impl SessionManagerLoop {
 
                 // 注意：不在 Running 状态下直接写入文件，避免与 TurnWorker 的写入冲突
                 // 消息队列会在 turn 结束后处理，那时候会正确写入 tape
-                // 
+                //
                 // 如果服务器在 turn 运行期间重启，内存中的队列会丢失，
                 // 但这是可接受的，因为用户可以重新发送消息
-                
+
                 // 更新内存状态
                 let position = slot.message_queue.len() as u32 + 1;
                 slot.message_queue.push(QueuedMessage {
@@ -769,7 +773,14 @@ impl SessionManagerLoop {
                     session_id: session_id.to_string(),
                     message_id: message_id.clone(),
                     position,
-                    content_preview: slot.message_queue.last().unwrap().content.chars().take(50).collect(),
+                    content_preview: slot
+                        .message_queue
+                        .last()
+                        .unwrap()
+                        .content
+                        .chars()
+                        .take(50)
+                        .collect(),
                 });
 
                 Ok(QueueMessageResponse {
@@ -820,9 +831,12 @@ impl SessionManagerLoop {
 
         // 通过 runtime 追加删除事件到 tape（会有正确的 ID 分配）
         if let Some(runtime) = slot.runtime_mut() {
-            let entry = TapeEntry::event("message_deleted", Some(serde_json::json!({
-                "id": message_id
-            })));
+            let entry = TapeEntry::event(
+                "message_deleted",
+                Some(serde_json::json!({
+                    "id": message_id
+                })),
+            );
             runtime.append_tape_entry(entry).map_err(|error| {
                 RuntimeWorkerError::internal(format!("session append failed: {error}"))
             })?;
@@ -866,10 +880,10 @@ impl SessionManagerLoop {
         let _ = self.cancel_pending_question(session_id);
 
         // 广播 SSE 事件
-        let _ = self.config.broadcast_tx.send(SsePayload::TurnInterrupted {
-            session_id: session_id.to_string(),
-            turn_id,
-        });
+        let _ = self
+            .config
+            .broadcast_tx
+            .send(SsePayload::TurnInterrupted { session_id: session_id.to_string(), turn_id });
 
         Ok(true)
     }
@@ -1108,7 +1122,7 @@ fn prompt_cache_for_selection(
 
 fn restore_queue_from_tape(tape: &SessionTape) -> Vec<QueuedMessage> {
     use std::collections::HashSet;
-    
+
     let mut queue: Vec<QueuedMessage> = Vec::new();
     let mut deleted: HashSet<String> = HashSet::new();
 

@@ -35,10 +35,7 @@ fn resolve_theme(name: Option<&str>) -> &'static Theme {
 
 fn resolve_syntax(file_name: &str) -> &'static SyntaxReference {
     let ss = &*SYNTAX_SET;
-    ss.find_syntax_for_file(file_name)
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| ss.find_syntax_plain_text())
+    ss.find_syntax_for_file(file_name).ok().flatten().unwrap_or_else(|| ss.find_syntax_plain_text())
 }
 
 fn highlight_line(line: &str, syntax: &SyntaxReference, theme: &Theme) -> String {
@@ -165,12 +162,7 @@ fn compute_all_add(
         .enumerate()
         .map(|(i, text)| {
             let html = highlight_line(text, syntax, theme);
-            DiffLine {
-                kind: "add",
-                old_ln: None,
-                new_ln: Some(i as u32 + 1),
-                html,
-            }
+            DiffLine { kind: "add", old_ln: None, new_ln: Some(i as u32 + 1), html }
         })
         .collect();
 
@@ -179,11 +171,7 @@ fn compute_all_add(
             .iter()
             .map(|line| SplitPair {
                 left: None,
-                right: Some(SplitCell {
-                    kind: "add",
-                    ln: line.new_ln,
-                    html: line.html.clone(),
-                }),
+                right: Some(SplitCell { kind: "add", ln: line.new_ln, html: line.html.clone() }),
             })
             .collect()
     } else {
@@ -274,27 +262,12 @@ fn compute_contents_diff(
             }
         }
 
-        let split_pairs = if want_split {
-            build_split_pairs(&lines)
-        } else {
-            Vec::new()
-        };
+        let split_pairs = if want_split { build_split_pairs(&lines) } else { Vec::new() };
 
-        hunks.push(DiffHunk {
-            old_start,
-            old_count,
-            new_start,
-            new_count,
-            lines,
-            split_pairs,
-        });
+        hunks.push(DiffHunk { old_start, old_count, new_start, new_count, lines, split_pairs });
     }
 
-    DiffResponse {
-        hunks,
-        added: total_added,
-        removed: total_removed,
-    }
+    DiffResponse { hunks, added: total_added, removed: total_removed }
 }
 
 // ── Patch diff ───────────────────────────────────────────────────
@@ -342,35 +315,20 @@ fn dedup_identical_changes(lines: Vec<RawLine>) -> Vec<RawLine> {
             let d = &lines[del_start + j];
             let a = &lines[add_start + j];
             if d.content == a.content {
-                result.push(RawLine {
-                    kind: "ctx",
-                    content: d.content.clone(),
-                });
+                result.push(RawLine { kind: "ctx", content: d.content.clone() });
             } else {
-                result.push(RawLine {
-                    kind: "del",
-                    content: d.content.clone(),
-                });
-                result.push(RawLine {
-                    kind: "add",
-                    content: a.content.clone(),
-                });
+                result.push(RawLine { kind: "del", content: d.content.clone() });
+                result.push(RawLine { kind: "add", content: a.content.clone() });
             }
         }
 
         // Remaining unpaired dels
         for j in paired..del_count {
-            result.push(RawLine {
-                kind: "del",
-                content: lines[del_start + j].content.clone(),
-            });
+            result.push(RawLine { kind: "del", content: lines[del_start + j].content.clone() });
         }
         // Remaining unpaired adds
         for j in paired..add_count {
-            result.push(RawLine {
-                kind: "add",
-                content: lines[add_start + j].content.clone(),
-            });
+            result.push(RawLine { kind: "add", content: lines[add_start + j].content.clone() });
         }
     }
 
@@ -417,22 +375,12 @@ fn compute_patch_diff(patch: &str, theme: &Theme) -> DiffResponse {
                 }
                 "del" => {
                     total_removed += 1;
-                    lines.push(DiffLine {
-                        kind: "del",
-                        old_ln: Some(old_ln),
-                        new_ln: None,
-                        html,
-                    });
+                    lines.push(DiffLine { kind: "del", old_ln: Some(old_ln), new_ln: None, html });
                     old_ln += 1;
                 }
                 "add" => {
                     total_added += 1;
-                    lines.push(DiffLine {
-                        kind: "add",
-                        old_ln: None,
-                        new_ln: Some(new_ln),
-                        html,
-                    });
+                    lines.push(DiffLine { kind: "add", old_ln: None, new_ln: Some(new_ln), html });
                     new_ln += 1;
                 }
                 _ => {}
@@ -440,14 +388,8 @@ fn compute_patch_diff(patch: &str, theme: &Theme) -> DiffResponse {
         }
 
         // Recalculate counts after dedup
-        let old_count = lines
-            .iter()
-            .filter(|l| l.kind == "ctx" || l.kind == "del")
-            .count() as u32;
-        let new_count = lines
-            .iter()
-            .filter(|l| l.kind == "ctx" || l.kind == "add")
-            .count() as u32;
+        let old_count = lines.iter().filter(|l| l.kind == "ctx" || l.kind == "del").count() as u32;
+        let new_count = lines.iter().filter(|l| l.kind == "ctx" || l.kind == "add").count() as u32;
 
         // Patch mode is always unified, no split_pairs
         hunks.push(DiffHunk {
@@ -460,11 +402,7 @@ fn compute_patch_diff(patch: &str, theme: &Theme) -> DiffResponse {
         });
     }
 
-    DiffResponse {
-        hunks,
-        added: total_added,
-        removed: total_removed,
-    }
+    DiffResponse { hunks, added: total_added, removed: total_removed }
 }
 
 fn parse_patch_into_raw_hunks(patch: &str) -> Vec<RawHunk> {
@@ -520,32 +458,18 @@ fn parse_patch_into_raw_hunks(patch: &str) -> Vec<RawHunk> {
         }
 
         if let Some(content) = raw_line.strip_prefix('+') {
-            current_lines.push(RawLine {
-                kind: "add",
-                content: content.to_string(),
-            });
+            current_lines.push(RawLine { kind: "add", content: content.to_string() });
         } else if let Some(content) = raw_line.strip_prefix('-') {
-            current_lines.push(RawLine {
-                kind: "del",
-                content: content.to_string(),
-            });
+            current_lines.push(RawLine { kind: "del", content: content.to_string() });
         } else {
             let content = raw_line.strip_prefix(' ').unwrap_or(raw_line);
-            current_lines.push(RawLine {
-                kind: "ctx",
-                content: content.to_string(),
-            });
+            current_lines.push(RawLine { kind: "ctx", content: content.to_string() });
         }
     }
 
     // Flush last hunk
     if !current_lines.is_empty() {
-        hunks.push(RawHunk {
-            file_name,
-            old_start,
-            new_start,
-            lines: current_lines,
-        });
+        hunks.push(RawHunk { file_name, old_start, new_start, lines: current_lines });
     }
 
     hunks
@@ -570,26 +494,15 @@ fn parse_hunk_header(line: &str) -> Option<(u32, u32, u32, u32)> {
 
 fn parse_range(s: &str) -> (u32, u32) {
     if let Some((start, count)) = s.split_once(',') {
-        (
-            start.parse().unwrap_or(1),
-            count.parse().unwrap_or(0),
-        )
+        (start.parse().unwrap_or(1), count.parse().unwrap_or(0))
     } else {
         (s.parse().unwrap_or(1), 1)
     }
 }
 
-pub(crate) async fn compute_diff(
-    Json(body): Json<DiffRequest>,
-) -> impl IntoResponse {
+pub(crate) async fn compute_diff(Json(body): Json<DiffRequest>) -> impl IntoResponse {
     let result = tokio::task::spawn_blocking(move || match body {
-        DiffRequest::Contents {
-            file_name,
-            old_content,
-            new_content,
-            theme,
-            style,
-        } => {
+        DiffRequest::Contents { file_name, old_content, new_content, theme, style } => {
             let theme = resolve_theme(theme.as_deref());
             let want_split = style.as_deref() == Some("split");
             compute_contents_diff(&file_name, &old_content, &new_content, theme, want_split)
@@ -603,10 +516,9 @@ pub(crate) async fn compute_diff(
 
     match result {
         Ok(response) => (StatusCode::OK, Json(response)).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Err(e) => {
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e.to_string() })))
+                .into_response()
+        }
     }
 }

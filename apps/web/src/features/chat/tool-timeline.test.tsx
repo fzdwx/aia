@@ -54,7 +54,10 @@ function loadWebCssSource() {
 
 function loadAnimatedCountListSource() {
   return readFileSync(
-    new URL("../../components/ai-elements/animated-count-list.tsx", import.meta.url),
+    new URL(
+      "../../components/ai-elements/animated-count-list.tsx",
+      import.meta.url
+    ),
     "utf8"
   ).replace(/\s+/g, " ")
 }

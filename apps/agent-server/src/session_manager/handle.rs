@@ -12,7 +12,7 @@ use crate::runtime_worker::{
 use agent_core::{QuestionRequest, QuestionResult};
 use session_tape::SessionProviderBinding;
 
-use super::message_queue::{QueuedMessage, QueueMessageResponse};
+use super::message_queue::{QueueMessageResponse, QueuedMessage};
 use super::types::SessionCommand;
 
 #[cfg(test)]

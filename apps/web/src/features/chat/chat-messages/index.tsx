@@ -48,8 +48,8 @@ export function ChatMessages() {
     scrollHeight: number
     scrollTop: number
   } | null>(null)
-  const handleLoadOlderTurnsRef = useRef<() => Promise<void>>(
-    () => Promise.resolve()
+  const handleLoadOlderTurnsRef = useRef<() => Promise<void>>(() =>
+    Promise.resolve()
   )
   const smoothScrollingRef = useRef(false)
 

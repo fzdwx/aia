@@ -100,9 +100,7 @@ pub(super) async fn run_embedded_brush(
             .transpose()
             .map_err(|e| CoreError::new(format!("embedded shell exited without status: {e}")))?
             .unwrap_or(FORCED_TERMINATE_EXIT_CODE),
-        Err(join_error) if join_error.is_cancelled() => {
-            forced_terminate_exit_code(finished)
-        }
+        Err(join_error) if join_error.is_cancelled() => forced_terminate_exit_code(finished),
         Err(_) => FORCED_TERMINATE_EXIT_CODE,
     };
 
@@ -110,11 +108,7 @@ pub(super) async fn run_embedded_brush(
 }
 
 fn forced_terminate_exit_code(finished: Option<Result<i32, CoreError>>) -> i32 {
-    if let Some(Ok(code)) = finished {
-        code
-    } else {
-        FORCED_TERMINATE_EXIT_CODE
-    }
+    if let Some(Ok(code)) = finished { code } else { FORCED_TERMINATE_EXIT_CODE }
 }
 
 async fn run_embedded_brush_in_task(

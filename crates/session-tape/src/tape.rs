@@ -181,7 +181,9 @@ impl SessionTape {
             .iter()
             .position(|entry| entry.id == after_entry_id)
             .map(|index| index + 1)
-            .ok_or_else(|| SessionTapeError::new(format!("未找到插入锚点位置：{after_entry_id}")))?;
+            .ok_or_else(|| {
+                SessionTapeError::new(format!("未找到插入锚点位置：{after_entry_id}"))
+            })?;
 
         let name = name.into();
         let anchor_state = state;
@@ -191,19 +193,14 @@ impl SessionTape {
         anchor_entry.id = anchor_id;
         let event_id = self.next_id;
         self.next_id += 1;
-        let mut event_entry = TapeEntry::event(
-            "handoff",
-            Some(serde_json::json!({"anchor_entry_id": anchor_id})),
-        );
+        let mut event_entry =
+            TapeEntry::event("handoff", Some(serde_json::json!({"anchor_entry_id": anchor_id})));
         event_entry.id = event_id;
 
         self.entries.insert(insert_index, anchor_entry);
         self.entries.insert(insert_index + 1, event_entry);
 
-        Ok(Handoff {
-            anchor: Anchor { entry_id: anchor_id, name, state: anchor_state },
-            event_id,
-        })
+        Ok(Handoff { anchor: Anchor { entry_id: anchor_id, name, state: anchor_state }, event_id })
     }
 
     pub fn latest_anchor(&self) -> Option<Anchor> {
@@ -250,7 +247,11 @@ impl SessionTape {
             .collect()
     }
 
-    fn assemble_view_with_lower_bound(&self, anchor: Option<&Anchor>, lower_bound: u64) -> SessionView {
+    fn assemble_view_with_lower_bound(
+        &self,
+        anchor: Option<&Anchor>,
+        lower_bound: u64,
+    ) -> SessionView {
         let entries =
             self.entries.iter().filter(|entry| entry.id > lower_bound).cloned().collect::<Vec<_>>();
         let messages = entries.iter().filter_map(project_message).collect::<Vec<_>>();

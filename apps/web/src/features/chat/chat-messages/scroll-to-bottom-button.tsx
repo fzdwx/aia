@@ -11,8 +11,8 @@ export function ScrollToBottomButton({
     <div
       className={
         isAtBottom
-          ? "pointer-events-none flex justify-center py-2 transition-opacity duration-200 opacity-0"
-          : "flex justify-center py-2 transition-opacity duration-200 opacity-100"
+          ? "pointer-events-none flex justify-center py-2 opacity-0 transition-opacity duration-200"
+          : "flex justify-center py-2 opacity-100 transition-opacity duration-200"
       }
     >
       <button

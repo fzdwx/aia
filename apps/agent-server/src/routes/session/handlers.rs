@@ -12,8 +12,8 @@ use agent_core::ReasoningEffort;
 
 use super::{
     AutoCompressRequest, CreateSessionRequest, HandoffRequest, PendingQuestionResponse,
-    ResolvePendingQuestionRequest, SessionInfoResponse, SessionQuery, SessionSettingsResponse,
-    SendMessageRequest, UpdateSessionSettingsRequest,
+    ResolvePendingQuestionRequest, SendMessageRequest, SessionInfoResponse, SessionQuery,
+    SessionSettingsResponse, UpdateSessionSettingsRequest,
 };
 use crate::routes::common::{
     JsonResponse, json_response, require_session_id, resolve_session_id,
@@ -350,7 +350,10 @@ pub(crate) async fn delete_queued_message(
     };
 
     match state.session_manager.delete_queued_message(session_id, message_id.clone()).await {
-        Ok(()) => json_response(StatusCode::OK, serde_json::json!({ "deleted": true, "message_id": message_id })),
+        Ok(()) => json_response(
+            StatusCode::OK,
+            serde_json::json!({ "deleted": true, "message_id": message_id }),
+        ),
         Err(error) => runtime_worker_error_response(error),
     }
 }

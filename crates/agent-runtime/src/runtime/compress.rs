@@ -61,62 +61,60 @@ where
             },
         )?;
 
-        let completion = match self
-            .model
-            .complete_streaming(request, &AbortSignal::new(), &mut |_| {})
-            .await
-        {
-            Ok(completion) => completion,
-            Err(error) if turn_id.is_some() && is_context_length_error(&error.to_string()) => {
-                let (fallback_conversation, fallback_compressed_until_entry_id) =
-                    self.fallback_compression_conversation(turn_id);
-                if fallback_conversation.len() < MIN_ENTRIES_FOR_COMPRESSION {
-                    return Err(RuntimeError::model(error));
-                }
-                let fallback_request = self.prepare_request_with_hooks(
-                    turn_id.unwrap_or("compression"),
-                    "compression",
-                    step_index,
-                    CompletionRequest {
-                        model: self.model_identity.clone(),
-                        instructions: Some(agent_prompts::handoff_summary(summary_max_tokens)),
-                        conversation: fallback_conversation,
-                        max_output_tokens: Some(summary_max_tokens),
-                        available_tools: Vec::new(),
-                        parallel_tool_calls: Some(false),
-                        prompt_cache: None,
-                        user_agent: None,
-                        timeout: self.request_timeout.clone(),
-                        trace_context: turn_id.map(|turn_id| {
-                            build_llm_trace_context(
-                                self.session_id.as_deref(),
-                                turn_id,
-                                turn_id,
-                                "compression",
-                                step_index,
-                            )
+        let completion =
+            match self.model.complete_streaming(request, &AbortSignal::new(), &mut |_| {}).await {
+                Ok(completion) => completion,
+                Err(error) if turn_id.is_some() && is_context_length_error(&error.to_string()) => {
+                    let (fallback_conversation, fallback_compressed_until_entry_id) =
+                        self.fallback_compression_conversation(turn_id);
+                    if fallback_conversation.len() < MIN_ENTRIES_FOR_COMPRESSION {
+                        return Err(RuntimeError::model(error));
+                    }
+                    let fallback_request = self.prepare_request_with_hooks(
+                        turn_id.unwrap_or("compression"),
+                        "compression",
+                        step_index,
+                        CompletionRequest {
+                            model: self.model_identity.clone(),
+                            instructions: Some(agent_prompts::handoff_summary(summary_max_tokens)),
+                            conversation: fallback_conversation,
+                            max_output_tokens: Some(summary_max_tokens),
+                            available_tools: Vec::new(),
+                            parallel_tool_calls: Some(false),
+                            prompt_cache: None,
+                            user_agent: None,
+                            timeout: self.request_timeout.clone(),
+                            trace_context: turn_id.map(|turn_id| {
+                                build_llm_trace_context(
+                                    self.session_id.as_deref(),
+                                    turn_id,
+                                    turn_id,
+                                    "compression",
+                                    step_index,
+                                )
+                            }),
+                        },
+                    )?;
+                    let completion = self
+                        .model
+                        .complete_streaming(fallback_request, &AbortSignal::new(), &mut |_| {})
+                        .await
+                        .map_err(RuntimeError::model)?;
+                    let summary = completion.plain_text();
+                    self.record_handoff_at(
+                        fallback_compressed_until_entry_id,
+                        "context_compression",
+                        json!({
+                            "summary": summary,
+                            "compressed_until_entry_id": fallback_compressed_until_entry_id,
                         }),
-                    },
-                )?;
-                let completion = self.model
-                    .complete_streaming(fallback_request, &AbortSignal::new(), &mut |_| {})
-                    .await
-                    .map_err(RuntimeError::model)?;
-                let summary = completion.plain_text();
-                self.record_handoff_at(
-                    fallback_compressed_until_entry_id,
-                    "context_compression",
-                    json!({
-                        "summary": summary,
-                        "compressed_until_entry_id": fallback_compressed_until_entry_id,
-                    }),
-                    "system",
-                )?;
-                self.publish_event(RuntimeEvent::ContextCompressed { summary });
-                return Ok(());
-            }
-            Err(error) => return Err(RuntimeError::model(error)),
-        };
+                        "system",
+                    )?;
+                    self.publish_event(RuntimeEvent::ContextCompressed { summary });
+                    return Ok(());
+                }
+                Err(error) => return Err(RuntimeError::model(error)),
+            };
         let summary = completion.plain_text();
 
         self.record_handoff_at(
@@ -145,7 +143,8 @@ where
         conversation: Vec<ConversationItem>,
     ) -> (Vec<ConversationItem>, u64) {
         if turn_id.is_none() {
-            let compressed_until_entry_id = self.tape.entries().last().map(|entry| entry.id).unwrap_or(0);
+            let compressed_until_entry_id =
+                self.tape.entries().last().map(|entry| entry.id).unwrap_or(0);
             return (conversation, compressed_until_entry_id);
         }
 
@@ -156,20 +155,18 @@ where
         match cutoff {
             Some(index) => {
                 let trimmed = conversation.into_iter().take(index + 1).collect::<Vec<_>>();
-                let compressed_until_entry_id = self
-                    .tape
-                    .default_view()
-                    .entries
-                    .get(index)
-                    .map(|entry| entry.id)
-                    .unwrap_or(0);
+                let compressed_until_entry_id =
+                    self.tape.default_view().entries.get(index).map(|entry| entry.id).unwrap_or(0);
                 (trimmed, compressed_until_entry_id)
             }
             None => (Vec::new(), 0),
         }
     }
 
-    fn fallback_compression_conversation(&self, turn_id: Option<&str>) -> (Vec<ConversationItem>, u64) {
+    fn fallback_compression_conversation(
+        &self,
+        turn_id: Option<&str>,
+    ) -> (Vec<ConversationItem>, u64) {
         let Some(turn_id) = turn_id else {
             return (Vec::new(), 0);
         };
@@ -177,7 +174,8 @@ where
             return (Vec::new(), 0);
         };
 
-        let conversation = self.tape
+        let conversation = self
+            .tape
             .entries()
             .iter()
             .filter(|entry| entry.id <= last_usage_entry_id)

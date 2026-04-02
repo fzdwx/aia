@@ -11,8 +11,7 @@ use session_tape::SessionProviderBinding;
 use crate::{
     model::{ServerModel, build_model_from_selection},
     runtime_worker::{
-        CreateProviderInput, ProviderInfoSnapshot, RuntimeWorkerError,
-        UpdateProviderInput,
+        CreateProviderInput, ProviderInfoSnapshot, RuntimeWorkerError, UpdateProviderInput,
     },
 };
 

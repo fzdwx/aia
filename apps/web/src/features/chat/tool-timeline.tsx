@@ -191,8 +191,7 @@ export function ToolGroup({
 }) {
   const visibleItems = items.filter(shouldRenderToolItem)
   const isContextGroup = visibleItems.every(
-    (item) =>
-      !item.toolName || isContextExplorationTool(item.toolName)
+    (item) => !item.toolName || isContextExplorationTool(item.toolName)
   )
   const isRunning = status === "running"
   const shouldKeepOpen = isContextGroup && keepContextGroupsOpen

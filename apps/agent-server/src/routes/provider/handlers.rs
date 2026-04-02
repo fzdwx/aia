@@ -11,10 +11,7 @@ use crate::{
     state::SharedState,
 };
 
-use super::{
-    CreateProviderRequest, ModelConfigDto, ProviderListItem,
-    UpdateProviderRequest,
-};
+use super::{CreateProviderRequest, ModelConfigDto, ProviderListItem, UpdateProviderRequest};
 use crate::routes::common::{
     JsonResponse, error_response, ok_response, runtime_worker_error_response,
 };
@@ -23,13 +20,7 @@ pub(crate) async fn list_providers(
     State(state): State<SharedState>,
 ) -> Json<Vec<ProviderListItem>> {
     let registry = read_lock(&state.provider_registry_snapshot);
-    Json(
-        registry
-            .providers()
-            .iter()
-            .map(|provider| provider_list_item(provider))
-            .collect(),
-    )
+    Json(registry.providers().iter().map(|provider| provider_list_item(provider)).collect())
 }
 
 pub(crate) async fn create_provider(

@@ -37,7 +37,7 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
 
       <div
         data-component="assistant-message"
-        className="group/turn flex w-full flex-col gap-4 [&>*[data-type='tools']+*[data-type='tools']]:-mt-3 [&>*[data-type='thinking']+*[data-type='tools']]:-mt-3 [&>*[data-type='tools']+*[data-type='thinking']]:-mt-3"
+        className="group/turn flex w-full flex-col gap-4 [&>*[data-type='thinking']+*[data-type='tools']]:-mt-3 [&>*[data-type='tools']+*[data-type='thinking']]:-mt-3 [&>*[data-type='tools']+*[data-type='tools']]:-mt-3"
       >
         {grouped.map((group, i) => {
           if (group.type === "tools") {
@@ -101,7 +101,7 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
 
       <div
         data-component="assistant-message"
-        className="flex w-full flex-col gap-4 [&>*[data-type='tools']+*[data-type='tools']]:-mt-3 [&>*[data-type='thinking']+*[data-type='tools']]:-mt-3 [&>*[data-type='tools']+*[data-type='thinking']]:-mt-3"
+        className="flex w-full flex-col gap-4 [&>*[data-type='thinking']+*[data-type='tools']]:-mt-3 [&>*[data-type='tools']+*[data-type='thinking']]:-mt-3 [&>*[data-type='tools']+*[data-type='tools']]:-mt-3"
       >
         {renderedGroups.map(({ key, group }, i) => {
           const isLastGroup = i === renderedGroups.length - 1
@@ -119,9 +119,7 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
           if (group.type === "tools") {
             return (
               <div key={key} data-type="tools">
-                <MemoizedStreamingToolGroup
-                  toolOutputs={group.tools}
-                />
+                <MemoizedStreamingToolGroup toolOutputs={group.tools} />
               </div>
             )
           }
