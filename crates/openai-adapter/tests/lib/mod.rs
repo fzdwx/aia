@@ -619,6 +619,92 @@ fn responses_流式失败消息包含请求路径() {
 }
 
 #[test]
+fn responses_首包前_503_会自动重试并成功() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("监听成功");
+    let address = listener.local_addr().expect("读取地址成功");
+
+    let handle = thread::spawn(move || {
+        let (mut first_stream, _) = listener.accept().expect("首次接受连接成功");
+        let mut buffer = [0_u8; 4096];
+        let _ = first_stream.read(&mut buffer).expect("读取首次请求成功");
+        let failed = "HTTP/1.1 503 Service Unavailable\r\ncontent-type: application/json\r\nconnection: close\r\n\r\n{\"error\":\"temporary\"}";
+        first_stream
+            .write_all(failed.as_bytes())
+            .expect("写回首次失败响应成功");
+        drop(first_stream);
+
+        let (mut second_stream, _) = listener.accept().expect("二次接受连接成功");
+        let _ = second_stream.read(&mut buffer).expect("读取二次请求成功");
+        let sse_body = [
+            r#"data: {"type":"response.output_text.delta","delta":"retry ok"}"#,
+            r#"data: [DONE]"#,
+        ]
+        .join("\n\n");
+        let success = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n{sse_body}\n\n"
+        );
+        second_stream
+            .write_all(success.as_bytes())
+            .expect("写回二次成功响应成功");
+    });
+
+    let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
+        format!("http://{address}"),
+        "test-key",
+        "gpt-4.1-mini",
+    ))
+    .expect("模型创建成功");
+
+    let completion = complete_model(&model, sample_request()).expect("重试后应成功");
+
+    handle.join().expect("服务线程退出");
+    assert_eq!(completion.plain_text(), "retry ok");
+}
+
+#[test]
+fn responses_发出文本增量后断流不会自动重试() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("监听成功");
+    let address = listener.local_addr().expect("读取地址成功");
+
+    let handle = thread::spawn(move || {
+        let (mut first_stream, _) = listener.accept().expect("首次接受连接成功");
+        let mut buffer = [0_u8; 4096];
+        let _ = first_stream.read(&mut buffer).expect("读取首次请求成功");
+        let partial = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n";
+        first_stream
+            .write_all(partial.as_bytes())
+            .expect("写回部分响应成功");
+        first_stream.flush().expect("刷新部分响应成功");
+        drop(first_stream);
+
+        thread::sleep(std::time::Duration::from_millis(250));
+        listener.set_nonblocking(true).expect("设置非阻塞成功");
+        let no_second = listener.accept();
+        assert!(no_second.is_err(), "不应再发起第二次重试连接");
+    });
+
+    let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
+        format!("http://{address}"),
+        "test-key",
+        "gpt-4.1-mini",
+    ))
+    .expect("模型创建成功");
+
+    let mut deltas = Vec::new();
+    let error = run_async(model.complete_streaming(sample_request(), &AbortSignal::new(), &mut |event| {
+        deltas.push(event);
+    }))
+    .expect_err("已产出 delta 后断流应直接失败");
+
+    handle.join().expect("服务线程退出");
+    assert!(!error.is_cancelled());
+    assert!(matches!(
+        deltas.as_slice(),
+        [StreamEvent::TextDelta { text }] if text == "partial"
+    ));
+}
+
+#[test]
 fn responses_流式调用在_abort_后返回取消错误() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("监听成功");
     let address = listener.local_addr().expect("读取地址成功");

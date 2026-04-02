@@ -11,6 +11,7 @@ use super::capture::{
 const EMBEDDED_SHELL_NAME: &str = "brush";
 
 const FORCED_TERMINATE_EXIT_CODE: i32 = 130;
+const ABORT_DRAIN_GRACE_PERIOD: std::time::Duration = std::time::Duration::from_millis(200);
 
 #[derive(Debug)]
 pub(super) struct EmbeddedShellExecution {
@@ -56,11 +57,19 @@ pub(super) async fn run_embedded_brush(
     let mut stderr_closed = false;
     let mut finished = None;
     let mut killed = false;
+    let mut abort_draining_started_at = None;
 
     while !(stdout_closed && stderr_closed && finished.is_some()) {
         if abort.is_aborted() && !killed {
             killed = true;
+            abort_draining_started_at = Some(std::time::Instant::now());
             shell_handle.abort();
+        }
+
+        if let Some(started_at) = abort_draining_started_at
+            && started_at.elapsed() >= ABORT_DRAIN_GRACE_PERIOD
+        {
+            break;
         }
 
         match tokio::time::timeout(SHELL_EVENT_POLL_INTERVAL, event_rx.recv()).await {

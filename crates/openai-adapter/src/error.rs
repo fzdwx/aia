@@ -6,15 +6,28 @@ pub struct OpenAiAdapterError {
     status_code: Option<u16>,
     response_body: Option<String>,
     cancelled: bool,
+    retryable: bool,
 }
 
 impl OpenAiAdapterError {
     pub fn new(message: impl Into<String>) -> Self {
-        Self { message: message.into(), status_code: None, response_body: None, cancelled: false }
+        Self {
+            message: message.into(),
+            status_code: None,
+            response_body: None,
+            cancelled: false,
+            retryable: false,
+        }
     }
 
     pub fn cancelled(message: impl Into<String>) -> Self {
-        Self { message: message.into(), status_code: None, response_body: None, cancelled: true }
+        Self {
+            message: message.into(),
+            status_code: None,
+            response_body: None,
+            cancelled: true,
+            retryable: false,
+        }
     }
 
     pub fn with_status_code(mut self, status_code: Option<u16>) -> Self {
@@ -24,6 +37,11 @@ impl OpenAiAdapterError {
 
     pub fn with_response_body(mut self, response_body: Option<String>) -> Self {
         self.response_body = response_body;
+        self
+    }
+
+    pub fn with_retryable(mut self, retryable: bool) -> Self {
+        self.retryable = retryable;
         self
     }
 
@@ -37,6 +55,10 @@ impl OpenAiAdapterError {
 
     pub fn is_cancelled(&self) -> bool {
         self.cancelled
+    }
+
+    pub fn is_retryable(&self) -> bool {
+        self.retryable
     }
 }
 
