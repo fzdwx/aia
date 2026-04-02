@@ -210,10 +210,9 @@ impl TurnWorker {
 
         let prompts = std::mem::take(&mut self.prompts);
         let turn_control = self.turn_control.clone();
-        let result = self.runtime.handle_turn_streaming(
-            prompts,
-            turn_control,
-            |event| {
+        let result = self
+            .runtime
+            .handle_turn_streaming(prompts, turn_control, |event| {
                 Self::handle_stream_event(
                     &event,
                     &mut current_status,
@@ -222,8 +221,8 @@ impl TurnWorker {
                     &stream_turn_id,
                     &stream_snapshot,
                 );
-            },
-        ).await;
+            })
+            .await;
         *write_lock(&self.context.context_stats_snapshot) = self.runtime.context_stats();
 
         match result {
@@ -333,6 +332,7 @@ impl TurnWorker {
             StreamEvent::ToolCallDetected { .. } => current_status.clone(),
             StreamEvent::ToolCallStarted { .. } => CurrentStatusInner::Working,
             StreamEvent::ToolOutputDelta { .. } => CurrentStatusInner::Working,
+            StreamEvent::Retrying { .. } => CurrentStatusInner::Retrying,
             StreamEvent::Done => CurrentStatusInner::Finishing,
             _ => current_status.clone(),
         };

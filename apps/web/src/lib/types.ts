@@ -226,6 +226,7 @@ export type TurnStatus =
   | "thinking"
   | "working"
   | "generating"
+  | "retrying"
   | "finishing"
   | "cancelled"
 

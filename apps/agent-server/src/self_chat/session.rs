@@ -165,6 +165,7 @@ fn render_status(status: TurnStatus, streamed_text: bool) -> Result<(), ServerIn
         TurnStatus::Thinking => println!("[status] thinking"),
         TurnStatus::Working => println!("[status] working"),
         TurnStatus::Generating => {}
+        TurnStatus::Retrying => println!("[status] retrying"),
         TurnStatus::Finishing => println!("[status] finishing"),
         TurnStatus::Cancelled => println!("[status] cancelled"),
     }
@@ -215,6 +216,13 @@ fn render_stream_event(
             }
             let status = if *failed { "failed" } else { "ok" };
             println!("[tool:done] {tool_name} #{invocation_id} {status}");
+        }
+        StreamEvent::Retrying { attempt, max_attempts, reason } => {
+            if *streamed_text {
+                println!();
+                *streamed_text = false;
+            }
+            println!("[retry] {attempt}/{max_attempts} {reason}");
         }
         StreamEvent::Log { text } => {
             if *streamed_text {

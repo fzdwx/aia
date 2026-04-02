@@ -23,6 +23,7 @@ pub(crate) enum CurrentStatusInner {
     Thinking,
     Working,
     Generating,
+    Retrying,
     Finishing,
 }
 
@@ -33,6 +34,7 @@ impl CurrentStatusInner {
             Self::Thinking => TurnStatus::Thinking,
             Self::Working => TurnStatus::Working,
             Self::Generating => TurnStatus::Generating,
+            Self::Retrying => TurnStatus::Retrying,
             Self::Finishing => TurnStatus::Finishing,
         }
     }
@@ -152,6 +154,6 @@ pub(crate) fn update_current_turn_from_stream(
                 tool.failed = Some(*failed);
             }
         }
-        StreamEvent::Log { .. } | StreamEvent::Done => {}
+        StreamEvent::Log { .. } | StreamEvent::Retrying { .. } | StreamEvent::Done => {}
     }
 }

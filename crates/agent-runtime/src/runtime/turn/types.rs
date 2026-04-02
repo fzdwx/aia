@@ -45,6 +45,7 @@ impl TurnBuffers {
             | StreamEvent::ToolCallStarted { .. }
             | StreamEvent::ToolOutputDelta { .. }
             | StreamEvent::ToolCallCompleted { .. }
+            | StreamEvent::Retrying { .. }
             | StreamEvent::Log { .. }
             | StreamEvent::Done => {}
         }

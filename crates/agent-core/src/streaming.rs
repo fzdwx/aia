@@ -130,6 +130,11 @@ pub enum StreamEvent {
         failed: bool,
         finished_at_ms: u64,
     },
+    Retrying {
+        attempt: u32,
+        max_attempts: u32,
+        reason: String,
+    },
     Log {
         text: String,
     },

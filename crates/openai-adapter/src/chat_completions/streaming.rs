@@ -119,7 +119,12 @@ impl StreamingState for ChatCompletionsStreamingState {
             .get("reasoning_content")
             .and_then(|value| value.as_str())
             .filter(|text| !text.is_empty())
-            .or_else(|| delta.get("reasoning").and_then(|value| value.as_str()).filter(|text| !text.is_empty()));
+            .or_else(|| {
+                delta
+                    .get("reasoning")
+                    .and_then(|value| value.as_str())
+                    .filter(|text| !text.is_empty())
+            });
 
         if let Some(reasoning) = reasoning_text {
             self.thinking_buf.push_str(reasoning);

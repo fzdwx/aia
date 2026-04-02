@@ -47,6 +47,7 @@ fn map_turn_status(status: TurnStatus) -> ChannelTurnStatus {
         TurnStatus::Thinking => ChannelTurnStatus::Thinking,
         TurnStatus::Working => ChannelTurnStatus::Working,
         TurnStatus::Generating => ChannelTurnStatus::Generating,
+        TurnStatus::Retrying => ChannelTurnStatus::Waiting,
         TurnStatus::Finishing => ChannelTurnStatus::Finishing,
         TurnStatus::Cancelled => ChannelTurnStatus::Cancelled,
     }

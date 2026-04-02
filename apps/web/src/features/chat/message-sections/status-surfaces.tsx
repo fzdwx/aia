@@ -7,6 +7,7 @@ const STATUS_LABELS: Record<StreamingTurn["status"], string> = {
   thinking: "Thinking",
   working: "Working",
   generating: "Generating",
+  retrying: "Retrying",
   finishing: "Wrapping up",
   cancelled: "Cancelled",
 }

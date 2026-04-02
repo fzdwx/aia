@@ -235,6 +235,7 @@ impl TraceEventCollector {
             StreamEvent::ToolCallStarted { .. }
             | StreamEvent::ToolOutputDelta { .. }
             | StreamEvent::ToolCallCompleted { .. }
+            | StreamEvent::Retrying { .. }
             | StreamEvent::Log { .. } => {}
         }
     }

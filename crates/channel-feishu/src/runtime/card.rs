@@ -295,7 +295,7 @@ pub(super) fn apply_stream_event_to_feishu_card_state(
         agent_core::StreamEvent::Done => {
             state.finished_at_ms = Some(current_timestamp_ms());
         }
-        agent_core::StreamEvent::Log { .. } => {}
+        agent_core::StreamEvent::Retrying { .. } | agent_core::StreamEvent::Log { .. } => {}
     }
 }
 

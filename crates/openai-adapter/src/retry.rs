@@ -63,7 +63,7 @@ pub(crate) fn should_retry(error: &OpenAiAdapterError) -> bool {
         Some(408 | 429 | 500 | 502 | 503 | 504) => true,
         Some(400 | 401 | 403 | 404 | 422) => false,
         Some(_) => false,
-        None => true,
+        None => false,
     }
 }
 
@@ -71,7 +71,7 @@ pub(crate) fn backoff_delay(policy: RetryPolicy, attempt: u32) -> Duration {
     let factor = 1_u32.checked_shl(attempt.saturating_sub(1)).unwrap_or(u32::MAX);
     let scaled_base = policy.base_delay.saturating_mul(factor);
     let capped = scaled_base.min(policy.max_delay);
-    capped.saturating_add(policy.jitter.min(Duration::from_millis(50)))
+    capped.saturating_add(policy.jitter)
 }
 
 #[cfg(test)]
@@ -80,21 +80,15 @@ mod tests {
 
     #[test]
     fn only_text_thinking_and_tool_detection_are_visible_events() {
-        assert!(is_visible_stream_event(&StreamEvent::TextDelta {
-            text: "hi".into()
-        }));
-        assert!(is_visible_stream_event(&StreamEvent::ThinkingDelta {
-            text: "hmm".into()
-        }));
+        assert!(is_visible_stream_event(&StreamEvent::TextDelta { text: "hi".into() }));
+        assert!(is_visible_stream_event(&StreamEvent::ThinkingDelta { text: "hmm".into() }));
         assert!(is_visible_stream_event(&StreamEvent::ToolCallDetected {
             invocation_id: "tool-1".into(),
             tool_name: "Read".into(),
             arguments: serde_json::json!({}),
             detected_at_ms: 1,
         }));
-        assert!(!is_visible_stream_event(&StreamEvent::Log {
-            text: "debug".into()
-        }));
+        assert!(!is_visible_stream_event(&StreamEvent::Log { text: "debug".into() }));
         assert!(!is_visible_stream_event(&StreamEvent::Done));
     }
 

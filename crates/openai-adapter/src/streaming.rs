@@ -284,14 +284,10 @@ where
                     && should_retry(&error) =>
             {
                 let delay = backoff_delay(policy, attempt_index);
-                sink(StreamEvent::Log {
-                    text: format!(
-                        "请求失败（{}），{:.1}s 后重试（{}/{}）",
-                        error,
-                        delay.as_secs_f64(),
-                        attempt_index,
-                        policy.max_attempts,
-                    ),
+                sink(StreamEvent::Retrying {
+                    attempt: attempt_index,
+                    max_attempts: policy.max_attempts,
+                    reason: error.to_string(),
                 });
                 sleep_with_abort(delay, abort).await?;
             }

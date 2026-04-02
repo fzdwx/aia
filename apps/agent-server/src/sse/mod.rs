@@ -15,6 +15,7 @@ pub enum TurnStatus {
     Thinking,
     Working,
     Generating,
+    Retrying,
     Finishing,
     Cancelled,
 }
