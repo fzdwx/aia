@@ -61,7 +61,7 @@
 - session 级模型 / 思考等级设置
 - Settings / Providers / Channels / Trace 工作台
 - 基于 `streamdown` 的统一 Markdown 渲染
-- SSE 文本增量合帧与超大流式 Markdown 降级，降低长 thinking / 大文本块场景下的前端内存与重渲染压力
+- SSE 文本增量合帧、`streamdown` block-level tail update 与超大流式 Markdown 降级，降低长 thinking / 大文本块场景下的前端内存与重渲染压力
 
 ### 5. Session 能力
 

@@ -1,10 +1,16 @@
-import { createElement, memo, type ComponentPropsWithoutRef } from "react"
+import {
+  createElement,
+  memo,
+  useMemo,
+  useRef,
+  type ComponentPropsWithoutRef,
+} from "react"
 import { Check, Copy } from "lucide-react"
 import { cjk } from "@streamdown/cjk"
 import { createCodePlugin } from "@streamdown/code"
 import { math } from "@streamdown/math"
 import { mermaid } from "@streamdown/mermaid"
-import { Streamdown } from "streamdown"
+import { parseMarkdownIntoBlocks, Streamdown } from "streamdown"
 import type { IconMap } from "streamdown"
 
 import { cn } from "@/lib/utils"
@@ -67,6 +73,79 @@ const markdownComponents = {
   inlineCode: withClasses("code", "inline-code"),
 } as const
 
+type StreamingMarkdownBlockCache = {
+  content: string
+  blocks: string[]
+}
+
+export function computeStreamingMarkdownBlocks(
+  content: string,
+  previous: StreamingMarkdownBlockCache | null
+): StreamingMarkdownBlockCache {
+  if (!previous || previous.blocks.length === 0) {
+    return {
+      content,
+      blocks: parseMarkdownIntoBlocks(content),
+    }
+  }
+
+  if (!content.startsWith(previous.content)) {
+    return {
+      content,
+      blocks: parseMarkdownIntoBlocks(content),
+    }
+  }
+
+  const suffix = content.slice(previous.content.length)
+  if (suffix.length === 0) {
+    return previous
+  }
+
+  const stableBlocks = previous.blocks.slice(0, -1)
+  const previousTail = previous.blocks[previous.blocks.length - 1] ?? ""
+  const reparsedTail = parseMarkdownIntoBlocks(previousTail + suffix)
+
+  return {
+    content,
+    blocks: [...stableBlocks, ...reparsedTail],
+  }
+}
+
+function StreamingMarkdownRenderer({
+  content,
+  className,
+}: {
+  content: string
+  className?: string
+}) {
+  const cacheRef = useRef<StreamingMarkdownBlockCache | null>(null)
+
+  const blockCache = useMemo(() => {
+    const next = computeStreamingMarkdownBlocks(content, cacheRef.current)
+    cacheRef.current = next
+    return next
+  }, [content])
+
+  const parseMarkdownIntoBlocksFn = useMemo(
+    () => () => blockCache.blocks,
+    [blockCache.blocks]
+  )
+
+  return (
+    <div className={cn("markdown-content", className)}>
+      <Streamdown
+        mode="streaming"
+        components={markdownComponents}
+        icons={markdownIcons}
+        plugins={{ cjk, code, math, mermaid }}
+        parseMarkdownIntoBlocksFn={parseMarkdownIntoBlocksFn}
+      >
+        {content}
+      </Streamdown>
+    </div>
+  )
+}
+
 export const MarkdownRenderer = memo(
   ({
     content,
@@ -80,13 +159,19 @@ export const MarkdownRenderer = memo(
     const shouldUsePlainTextFallback =
       streaming && content.length >= OVERSIZE_STREAMING_MARKDOWN_THRESHOLD
 
+    if (streaming && !shouldUsePlainTextFallback) {
+      return (
+        <StreamingMarkdownRenderer content={content} className={className} />
+      )
+    }
+
     return (
       <div className={cn("markdown-content", className)}>
         {shouldUsePlainTextFallback ? (
           <div className="break-words whitespace-pre-wrap">{content}</div>
         ) : (
           <Streamdown
-            mode={streaming ? "streaming" : "static"}
+            mode="static"
             components={markdownComponents}
             icons={markdownIcons}
             plugins={{ cjk, code, math, mermaid }}

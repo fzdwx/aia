@@ -1,7 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, test } from "vite-plus/test"
 
-import { MarkdownRenderer } from "@/components/markdown-content-rich"
+import {
+  computeStreamingMarkdownBlocks,
+  MarkdownRenderer,
+} from "@/components/markdown-content-rich"
 
 describe("MarkdownRenderer", () => {
   test("renders basic markdown structure", () => {
@@ -68,5 +71,49 @@ describe("MarkdownRenderer", () => {
     expect(html).toContain("tail")
     expect(html).not.toContain("data-streamdown")
     expect(html).not.toContain("<strong")
+  })
+
+  test("streaming block cache only reparses the tail block on append", () => {
+    const initial = computeStreamingMarkdownBlocks(
+      "# Title\n\nFirst paragraph.\n\nSecond",
+      null
+    )
+
+    expect(initial.blocks).toEqual([
+      "# Title\n\n",
+      "First paragraph.",
+      "\n\n",
+      "Second",
+    ])
+
+    const appended = computeStreamingMarkdownBlocks(
+      "# Title\n\nFirst paragraph.\n\nSecond line extended",
+      initial
+    )
+
+    expect(appended.blocks).toEqual([
+      "# Title\n\n",
+      "First paragraph.",
+      "\n\n",
+      "Second line extended",
+    ])
+  })
+
+  test("streaming block cache falls back to full parse when prefix changes", () => {
+    const initial = computeStreamingMarkdownBlocks(
+      "Paragraph one\n\nParagraph two",
+      null
+    )
+
+    const replaced = computeStreamingMarkdownBlocks(
+      "Changed completely\n\nParagraph two",
+      initial
+    )
+
+    expect(replaced.blocks).toEqual([
+      "Changed completely",
+      "\n\n",
+      "Paragraph two",
+    ])
   })
 })
