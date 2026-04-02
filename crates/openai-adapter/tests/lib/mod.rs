@@ -628,9 +628,7 @@ fn responses_首包前_503_会自动重试并成功() {
         let mut buffer = [0_u8; 4096];
         let _ = first_stream.read(&mut buffer).expect("读取首次请求成功");
         let failed = "HTTP/1.1 503 Service Unavailable\r\ncontent-type: application/json\r\nconnection: close\r\n\r\n{\"error\":\"temporary\"}";
-        first_stream
-            .write_all(failed.as_bytes())
-            .expect("写回首次失败响应成功");
+        first_stream.write_all(failed.as_bytes()).expect("写回首次失败响应成功");
         drop(first_stream);
 
         let (mut second_stream, _) = listener.accept().expect("二次接受连接成功");
@@ -643,9 +641,7 @@ fn responses_首包前_503_会自动重试并成功() {
         let success = format!(
             "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n{sse_body}\n\n"
         );
-        second_stream
-            .write_all(success.as_bytes())
-            .expect("写回二次成功响应成功");
+        second_stream.write_all(success.as_bytes()).expect("写回二次成功响应成功");
     });
 
     let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
@@ -671,9 +667,7 @@ fn responses_发出文本增量后断流不会自动重试() {
         let mut buffer = [0_u8; 4096];
         let _ = first_stream.read(&mut buffer).expect("读取首次请求成功");
         let partial = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n";
-        first_stream
-            .write_all(partial.as_bytes())
-            .expect("写回部分响应成功");
+        first_stream.write_all(partial.as_bytes()).expect("写回部分响应成功");
         first_stream.flush().expect("刷新部分响应成功");
         drop(first_stream);
 
@@ -691,10 +685,11 @@ fn responses_发出文本增量后断流不会自动重试() {
     .expect("模型创建成功");
 
     let mut deltas = Vec::new();
-    let error = run_async(model.complete_streaming(sample_request(), &AbortSignal::new(), &mut |event| {
-        deltas.push(event);
-    }))
-    .expect_err("已产出 delta 后断流应直接失败");
+    let error =
+        run_async(model.complete_streaming(sample_request(), &AbortSignal::new(), &mut |event| {
+            deltas.push(event);
+        }))
+        .expect_err("已产出 delta 后断流应直接失败");
 
     handle.join().expect("服务线程退出");
     assert!(!error.is_cancelled());
@@ -702,6 +697,49 @@ fn responses_发出文本增量后断流不会自动重试() {
         deltas.as_slice(),
         [StreamEvent::TextDelta { text }] if text == "partial"
     ));
+}
+
+#[test]
+fn responses_收到_completed_后即使没有_done_也会成功收尾() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("监听成功");
+    let address = listener.local_addr().expect("读取地址成功");
+
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("接受连接成功");
+        let mut buffer = [0_u8; 4096];
+        let _ = stream.read(&mut buffer).expect("读取请求成功");
+
+        let sse_body = [
+            r#"data: {"type":"response.output_text.delta","delta":"partial"}"#,
+            r#"data: {"type":"response.completed","response":{"id":"resp_test","status":"completed"}}"#,
+        ]
+        .join("\n\n");
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n{sse_body}\n\n"
+        );
+
+        stream.write_all(response.as_bytes()).expect("写回响应成功");
+        stream.flush().expect("刷新响应成功");
+    });
+
+    let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
+        format!("http://{address}"),
+        "test-key",
+        "gpt-4.1-mini",
+    ))
+    .expect("模型创建成功");
+
+    let mut deltas = Vec::new();
+    let completion =
+        run_async(model.complete_streaming(sample_request(), &AbortSignal::new(), &mut |event| {
+            deltas.push(event);
+        }))
+        .expect("有 completed 时应成功完成");
+
+    handle.join().expect("服务线程退出");
+    assert_eq!(completion.plain_text(), "partial");
+    assert_eq!(completion.stop_reason, CompletionStopReason::Stop);
+    assert_eq!(deltas, vec![StreamEvent::TextDelta { text: "partial".into() }, StreamEvent::Done,]);
 }
 
 #[test]
@@ -943,6 +981,161 @@ fn 流式调用可解析_done_事件里的推理摘要文本() {
         vec![
             StreamEvent::ThinkingDelta { text: "先分析".into() },
             StreamEvent::TextDelta { text: "答案".into() },
+            StreamEvent::Done,
+        ]
+    );
+}
+
+#[test]
+fn reasoning_done_事件会用完整文本覆盖先前片段() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("监听成功");
+    let address = listener.local_addr().expect("读取地址成功");
+
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("接受连接成功");
+        let mut buffer = [0_u8; 4096];
+        let _ = stream.read(&mut buffer).expect("读取请求成功");
+
+        let sse_body = [
+            r#"data: {"type":"response.reasoning_summary_text.delta","delta":"Considering logging and retries"}"#,
+            r#"data: {"type":"response.reasoning_summary_text.done","text":"Considering logging and retries\n\n**Evaluating jitter adjustments**"}"#,
+            r#"data: {"type":"response.output_text.done","text":"答案"}"#,
+            r#"data: [DONE]"#,
+        ]
+        .join("\n\n");
+
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n{sse_body}\n\n"
+        );
+        stream.write_all(response.as_bytes()).expect("写回响应成功");
+    });
+
+    let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
+        format!("http://{address}"),
+        "test-key",
+        "gpt-4.1-mini",
+    ))
+    .expect("模型创建成功");
+
+    let mut deltas = Vec::new();
+    let completion =
+        run_async(model.complete_streaming(sample_request(), &AbortSignal::new(), &mut |event| {
+            deltas.push(event);
+        }))
+        .expect("流式调用成功");
+
+    handle.join().expect("服务线程退出");
+    assert_eq!(
+        completion.thinking_text(),
+        Some("Considering logging and retries\n\n**Evaluating jitter adjustments**".into())
+    );
+    assert_eq!(completion.plain_text(), "答案");
+    assert_eq!(
+        deltas,
+        vec![
+            StreamEvent::ThinkingDelta { text: "Considering logging and retries".into() },
+            StreamEvent::ThinkingDelta { text: "\n\n**Evaluating jitter adjustments**".into() },
+            StreamEvent::TextDelta { text: "答案".into() },
+            StreamEvent::Done,
+        ]
+    );
+}
+
+#[test]
+fn output_text_done_事件会补齐先前片段() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("监听成功");
+    let address = listener.local_addr().expect("读取地址成功");
+
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("接受连接成功");
+        let mut buffer = [0_u8; 4096];
+        let _ = stream.read(&mut buffer).expect("读取请求成功");
+
+        let sse_body = [
+            r#"data: {"type":"response.output_text.delta","delta":"第一段"}"#,
+            r#"data: {"type":"response.output_text.done","text":"第一段\n\n第二段"}"#,
+            r#"data: [DONE]"#,
+        ]
+        .join("\n\n");
+
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n{sse_body}\n\n"
+        );
+        stream.write_all(response.as_bytes()).expect("写回响应成功");
+    });
+
+    let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
+        format!("http://{address}"),
+        "test-key",
+        "gpt-4.1-mini",
+    ))
+    .expect("模型创建成功");
+
+    let mut deltas = Vec::new();
+    let completion =
+        run_async(model.complete_streaming(sample_request(), &AbortSignal::new(), &mut |event| {
+            deltas.push(event);
+        }))
+        .expect("流式调用成功");
+
+    handle.join().expect("服务线程退出");
+    assert_eq!(completion.plain_text(), "第一段\n\n第二段");
+    assert_eq!(
+        deltas,
+        vec![
+            StreamEvent::TextDelta { text: "第一段".into() },
+            StreamEvent::TextDelta { text: "\n\n第二段".into() },
+            StreamEvent::Done,
+        ]
+    );
+}
+
+#[test]
+fn reasoning_done_事件在非前缀修正时记录日志并保留最终完成文本() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("监听成功");
+    let address = listener.local_addr().expect("读取地址成功");
+
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("接受连接成功");
+        let mut buffer = [0_u8; 4096];
+        let _ = stream.read(&mut buffer).expect("读取请求成功");
+
+        let sse_body = [
+            r#"data: {"type":"response.reasoning_summary_text.delta","delta":"Alpha Beta"}"#,
+            r#"data: {"type":"response.reasoning_summary_text.done","text":"Alpha\n\nBeta"}"#,
+            r#"data: [DONE]"#,
+        ]
+        .join("\n\n");
+
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n{sse_body}\n\n"
+        );
+        stream.write_all(response.as_bytes()).expect("写回响应成功");
+    });
+
+    let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
+        format!("http://{address}"),
+        "test-key",
+        "gpt-4.1-mini",
+    ))
+    .expect("模型创建成功");
+
+    let mut deltas = Vec::new();
+    let completion =
+        run_async(model.complete_streaming(sample_request(), &AbortSignal::new(), &mut |event| {
+            deltas.push(event);
+        }))
+        .expect("流式调用成功");
+
+    handle.join().expect("服务线程退出");
+    assert_eq!(completion.thinking_text(), Some("Alpha\n\nBeta".into()));
+    assert_eq!(
+        deltas,
+        vec![
+            StreamEvent::ThinkingDelta { text: "Alpha Beta".into() },
+            StreamEvent::Log {
+                text: "[sse] provider completed text diverged from streamed text; authoritative done payload retained for final completion only".into(),
+            },
             StreamEvent::Done,
         ]
     );

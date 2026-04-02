@@ -41,11 +41,58 @@ pub(super) struct ResponsesStreamingState {
     response_id: Option<String>,
     response_status: Option<String>,
     incomplete_reason: Option<String>,
+    saw_terminal_event: bool,
     usage: Option<CompletionUsage>,
     transcript: StreamingTranscript,
 }
 
 impl ResponsesStreamingState {
+    fn reconcile_done_text(
+        current: &mut String,
+        done_text: String,
+        sink: &mut (dyn FnMut(StreamEvent) + Send),
+        emit: impl FnOnce(String) -> StreamEvent,
+    ) {
+        if current.is_empty() {
+            current.push_str(&done_text);
+            sink(emit(done_text));
+            return;
+        }
+
+        if done_text == *current {
+            return;
+        }
+
+        if let Some(suffix) = done_text.strip_prefix(current.as_str()) {
+            if !suffix.is_empty() {
+                current.push_str(suffix);
+                sink(emit(suffix.to_string()));
+            }
+            return;
+        }
+
+        if let Some(suffix) = current.strip_prefix(done_text.as_str()) {
+            if !suffix.is_empty() {
+                let rollback = suffix.chars().count();
+                sink(StreamEvent::Log {
+                    text: format!(
+                        "[sse] provider completed text diverged from streamed text; reconciled authoritative done payload by trimming {rollback} chars"
+                    ),
+                });
+            }
+            *current = done_text;
+            return;
+        }
+
+        if !current.is_empty() {
+            sink(StreamEvent::Log {
+                text: "[sse] provider completed text diverged from streamed text; authoritative done payload retained for final completion only".to_string(),
+            });
+        }
+
+        *current = done_text;
+    }
+
     fn finish_current_tool_call(&mut self, sink: &mut (dyn FnMut(StreamEvent) + Send)) {
         if self.current_tool.is_empty() {
             self.current_tool.clear();
@@ -102,11 +149,10 @@ impl StreamingState for ResponsesStreamingState {
                 }
             }
             Some("response.output_text.done") => {
-                if !self.saw_text_delta
-                    && let Some(text) = extract_stream_text(&event["text"])
-                {
-                    self.text_buf.push_str(&text);
-                    sink(StreamEvent::TextDelta { text });
+                if let Some(text) = extract_stream_text(&event["text"]) {
+                    Self::reconcile_done_text(&mut self.text_buf, text, sink, |text| {
+                        StreamEvent::TextDelta { text }
+                    });
                 }
             }
             Some(
@@ -117,8 +163,12 @@ impl StreamingState for ResponsesStreamingState {
             ) => {
                 if let Some(delta) = extract_reasoning_stream_text(event) {
                     let is_done_event = kind.ends_with(".done");
-                    if !is_done_event || !self.saw_reasoning_delta {
-                        self.saw_reasoning_delta = self.saw_reasoning_delta || !is_done_event;
+                    if is_done_event {
+                        Self::reconcile_done_text(&mut self.thinking_buf, delta, sink, |text| {
+                            StreamEvent::ThinkingDelta { text }
+                        });
+                    } else {
+                        self.saw_reasoning_delta = true;
                         self.thinking_buf.push_str(&delta);
                         sink(StreamEvent::ThinkingDelta { text: delta });
                     }
@@ -128,9 +178,14 @@ impl StreamingState for ResponsesStreamingState {
                 let delta = event["delta"].as_str().unwrap_or("");
                 self.current_tool.push_arguments_delta(delta);
                 // 每次收到 arguments delta 后检查是否有新的完整参数 key 解析出来
-                if self.current_tool.detection_emitted() && self.current_tool.check_new_parsed_keys() {
-                    if let Some(tool_name) = self.current_tool.tool_name().map(ToString::to_string) {
-                        let id = self.current_tool.invocation_id_or(|| format!("openai-stream-call-{}", self.tool_calls.len() + 1));
+                if self.current_tool.detection_emitted()
+                    && self.current_tool.check_new_parsed_keys()
+                {
+                    if let Some(tool_name) = self.current_tool.tool_name().map(ToString::to_string)
+                    {
+                        let id = self.current_tool.invocation_id_or(|| {
+                            format!("openai-stream-call-{}", self.tool_calls.len() + 1)
+                        });
                         sink(StreamEvent::ToolCallDetected {
                             invocation_id: id,
                             tool_name,
@@ -153,7 +208,9 @@ impl StreamingState for ResponsesStreamingState {
                     {
                         self.current_tool.set_tool_name(tool_name.to_string());
                         // 有 name 就发首次 detection
-                        let id = self.current_tool.invocation_id_or(|| format!("openai-stream-call-{}", self.tool_calls.len() + 1));
+                        let id = self.current_tool.invocation_id_or(|| {
+                            format!("openai-stream-call-{}", self.tool_calls.len() + 1)
+                        });
                         sink(StreamEvent::ToolCallDetected {
                             invocation_id: id,
                             tool_name: tool_name.to_string(),
@@ -174,6 +231,7 @@ impl StreamingState for ResponsesStreamingState {
                 return Err(OpenAiAdapterError::new(message));
             }
             Some("response.completed") => {
+                self.saw_terminal_event = true;
                 if self.response_id.is_none() {
                     self.response_id = event["response"]["id"].as_str().map(ToString::to_string);
                 }
@@ -199,6 +257,10 @@ impl StreamingState for ResponsesStreamingState {
         }
 
         Ok(())
+    }
+
+    fn saw_terminal_event(&self) -> bool {
+        self.saw_terminal_event
     }
 
     fn into_completion(self, status_code: u16) -> Completion {

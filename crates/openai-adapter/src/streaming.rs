@@ -2,13 +2,14 @@ use std::time::Duration;
 
 use agent_core::{AbortSignal, Completion, CompletionRequest, StreamEvent};
 use futures_util::StreamExt;
-use reqwest::Response;
+use reqwest::{Client, Response};
 use serde_json::Value;
 use tokio::time::timeout;
 
 use crate::{
     OpenAiAdapterError,
     http::{apply_user_agent, http_client, request_failure},
+    retry::{RetryPolicy, StreamingAttemptState, backoff_delay, should_retry},
 };
 
 const STREAM_POLL_INTERVAL: Duration = Duration::from_millis(25);
@@ -27,7 +28,25 @@ async fn send_with_abort(
 
         match timeout(STREAM_POLL_INTERVAL, &mut send_future).await {
             Ok(Ok(response)) => return Ok(response),
-            Ok(Err(error)) => return Err(OpenAiAdapterError::new(error.to_string())),
+            Ok(Err(error)) => {
+                return Err(OpenAiAdapterError::new(error.to_string()).with_retryable(true));
+            }
+            Err(_) => continue,
+        }
+    }
+}
+
+async fn sleep_with_abort(delay: Duration, abort: &AbortSignal) -> Result<(), OpenAiAdapterError> {
+    let sleep = tokio::time::sleep(delay);
+    tokio::pin!(sleep);
+
+    loop {
+        if abort.is_aborted() {
+            return Err(OpenAiAdapterError::cancelled("OpenAI 流式请求已取消"));
+        }
+
+        match timeout(STREAM_POLL_INTERVAL, &mut sleep).await {
+            Ok(_) => return Ok(()),
             Err(_) => continue,
         }
     }
@@ -41,6 +60,10 @@ pub(crate) trait StreamingState: Default {
         event: &Value,
         sink: &mut (dyn FnMut(StreamEvent) + Send),
     ) -> Result<(), OpenAiAdapterError>;
+
+    fn saw_terminal_event(&self) -> bool {
+        false
+    }
 
     fn into_completion(self, status_code: u16) -> Completion;
 }
@@ -111,12 +134,13 @@ pub(crate) async fn stream_lines_with_abort<H>(
     abort: &AbortSignal,
     sink: &mut (dyn FnMut(StreamEvent) + Send),
     mut handle_line: H,
-) -> Result<(), OpenAiAdapterError>
+) -> Result<bool, OpenAiAdapterError>
 where
     H: FnMut(&str, &mut (dyn FnMut(StreamEvent) + Send)) -> Result<bool, OpenAiAdapterError>,
 {
     let mut stream = response.bytes_stream();
     let mut pending = Vec::new();
+    let mut saw_done = false;
 
     loop {
         if abort.is_aborted() {
@@ -128,44 +152,47 @@ where
                 pending.extend_from_slice(&chunk);
                 while let Some(line) = drain_next_line(&mut pending)? {
                     if handle_line(&line, sink)? {
-                        return Ok(());
+                        return Ok(true);
                     }
                 }
             }
-            Ok(Some(Err(error))) => return Err(OpenAiAdapterError::new(error.to_string())),
+            Ok(Some(Err(error))) => {
+                return Err(OpenAiAdapterError::new(error.to_string()).with_retryable(true));
+            }
             Ok(None) => break,
             Err(_) => continue,
         }
     }
 
     if let Some(line) = drain_remaining_line(&mut pending)? {
-        let _ = handle_line(&line, sink)?;
+        if handle_line(&line, sink)? {
+            saw_done = true;
+        }
     }
 
     if abort.is_aborted() {
         Err(OpenAiAdapterError::cancelled("OpenAI 流式请求已取消"))
     } else {
-        Ok(())
+        Ok(saw_done)
     }
 }
 
-pub(crate) async fn complete_streaming_request<S>(
+async fn run_single_streaming_attempt<S>(
     endpoint_url: &str,
+    client: &Client,
     api_key: &str,
     request: &CompletionRequest,
-    request_body: Value,
+    request_body: &Value,
     abort: &AbortSignal,
     sink: &mut (dyn FnMut(StreamEvent) + Send),
 ) -> Result<Completion, OpenAiAdapterError>
 where
     S: StreamingState,
 {
-    // Check abort before making the request
     if abort.is_aborted() {
         return Err(OpenAiAdapterError::cancelled("OpenAI 流式请求已取消"));
     }
 
-    let client = http_client(request)?;
     let request_builder = apply_user_agent(
         client.post(endpoint_url).bearer_auth(api_key).json(&request_body),
         request.user_agent.as_deref(),
@@ -186,7 +213,7 @@ where
     }
 
     let mut state = S::default();
-    stream_lines_with_abort(response, abort, sink, |line, sink| {
+    let saw_done = stream_lines_with_abort(response, abort, sink, |line, sink| {
         match state.transcript_mut().parse_json_line(line)? {
             ParsedSseLine::Ignore => Ok(false),
             ParsedSseLine::Done => Ok(true),
@@ -198,8 +225,81 @@ where
     })
     .await?;
 
+    if !saw_done && !state.saw_terminal_event() {
+        return Err(OpenAiAdapterError::new("OpenAI 流式响应在完成前提前结束").with_retryable(true));
+    }
+
     sink(StreamEvent::Done);
     Ok(state.into_completion(status.as_u16()))
+}
+
+pub(crate) async fn complete_streaming_request<S>(
+    endpoint_url: &str,
+    api_key: &str,
+    request: &CompletionRequest,
+    request_body: Value,
+    abort: &AbortSignal,
+    sink: &mut (dyn FnMut(StreamEvent) + Send),
+) -> Result<Completion, OpenAiAdapterError>
+where
+    S: StreamingState,
+{
+    if abort.is_aborted() {
+        return Err(OpenAiAdapterError::cancelled("OpenAI 流式请求已取消"));
+    }
+
+    let client = http_client(request)?;
+    let policy = RetryPolicy::default();
+
+    for attempt_index in 1..=policy.max_attempts {
+        if abort.is_aborted() {
+            return Err(OpenAiAdapterError::cancelled("OpenAI 流式请求已取消"));
+        }
+
+        let mut attempt_state = StreamingAttemptState::default();
+        let mut tracked_sink = |event: StreamEvent| {
+            attempt_state.record_event(&event);
+            sink(event);
+        };
+
+        let result = run_single_streaming_attempt::<S>(
+            endpoint_url,
+            &client,
+            api_key,
+            request,
+            &request_body,
+            abort,
+            &mut tracked_sink,
+        )
+        .await;
+
+        match result {
+            Ok(completion) => return Ok(completion),
+            Err(error) if error.is_cancelled() || abort.is_aborted() => {
+                return Err(OpenAiAdapterError::cancelled("OpenAI 流式请求已取消"));
+            }
+            Err(error)
+                if attempt_index < policy.max_attempts
+                    && attempt_state.can_retry()
+                    && should_retry(&error) =>
+            {
+                let delay = backoff_delay(policy, attempt_index);
+                sink(StreamEvent::Log {
+                    text: format!(
+                        "请求失败（{}），{:.1}s 后重试（{}/{}）",
+                        error,
+                        delay.as_secs_f64(),
+                        attempt_index,
+                        policy.max_attempts,
+                    ),
+                });
+                sleep_with_abort(delay, abort).await?;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    Err(OpenAiAdapterError::new("OpenAI 流式请求重试次数已耗尽"))
 }
 
 #[cfg(test)]
