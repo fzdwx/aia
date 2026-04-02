@@ -8,18 +8,22 @@ export function ScrollToBottomButton({
   onClick: () => void
 }) {
   return (
-    <button
-      type="button"
-      aria-label="Scroll to bottom"
+    <div
       className={
         isAtBottom
-          ? "pointer-events-none absolute right-4 bottom-4 z-20 flex size-10 items-center justify-center rounded-full border border-border/50 bg-background/92 text-muted-foreground opacity-0 shadow-sm transition-opacity duration-200"
-          : "absolute right-4 bottom-4 z-20 flex size-10 items-center justify-center rounded-full border border-border/50 bg-background/92 text-muted-foreground opacity-100 shadow-sm transition-opacity duration-200 hover:bg-muted hover:text-foreground"
+          ? "pointer-events-none flex justify-center py-2 transition-opacity duration-200 opacity-0"
+          : "flex justify-center py-2 transition-opacity duration-200 opacity-100"
       }
-      tabIndex={isAtBottom ? -1 : 0}
-      onClick={onClick}
     >
-      <ArrowDown className="size-4" />
-    </button>
+      <button
+        type="button"
+        aria-label="Scroll to bottom"
+        className="inline-flex items-center gap-1.5 rounded-full border border-border/50 bg-background/92 px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-sm backdrop-blur-sm transition-colors duration-200 hover:bg-muted hover:text-foreground"
+        tabIndex={isAtBottom ? -1 : 0}
+        onClick={onClick}
+      >
+        <ArrowDown className="size-3.5" />
+      </button>
+    </div>
   )
 }

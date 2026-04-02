@@ -17,7 +17,7 @@ describe("chat message scroll helpers", () => {
     })
     const farFromBottom = distanceFromBottom({
       scrollHeight: 1200,
-      scrollTop: 1020,
+      scrollTop: 960,
       clientHeight: 140,
     })
 
@@ -30,7 +30,6 @@ describe("chat message scroll helpers", () => {
     expect(shouldShowHistoryHint(false, 120)).toBe(true)
     expect(shouldShowHistoryHint(false, 260)).toBe(false)
   })
-
   test("triggers older history loading based on viewport height ratio", () => {
     const clientHeight = 400
     // 1.5 * 400 = 600
@@ -38,7 +37,6 @@ describe("chat message scroll helpers", () => {
     expect(shouldTriggerOlderTurnsLoad(400, clientHeight)).toBe(true)
     expect(shouldTriggerOlderTurnsLoad(601, clientHeight)).toBe(false)
   })
-
   test("only pages older turns after an explicit upward scroll in an overflowing list", () => {
     const clientHeight = 400
     // Trigger threshold is 1.5 * 400 = 600

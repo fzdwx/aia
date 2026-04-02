@@ -42,24 +42,48 @@ export function ChatMessages() {
   const contentRef = useRef<HTMLDivElement>(null)
   const autoFollowRef = useRef(true)
   const prevSessionIdRef = useRef<string | null>(null)
-  const prevScrollTopRef = useRef(0)
+  const prevScrollTopRef = useRef(-1)
   const rafPendingRef = useRef(false)
   const scrollAnchorRef = useRef<{
     scrollHeight: number
     scrollTop: number
   } | null>(null)
+  const handleLoadOlderTurnsRef = useRef<() => Promise<void>>(
+    () => Promise.resolve()
+  )
+  const smoothScrollingRef = useRef(false)
 
   const [scrollTop, setScrollTop] = useState(0)
   const [isAtBottom, setIsAtBottom] = useState(true)
 
   const showHistoryHint = shouldShowHistoryHint(historyLoadingMore, scrollTop)
 
-  const scrollToBottom = useCallback(() => {
+  const hasContent = turns.length > 0 || !!streamingTurn
+
+  const scrollToBottomInstant = useCallback(() => {
     const container = containerRef.current
     if (!container) return
     autoFollowRef.current = true
     container.scrollTop = container.scrollHeight
     prevScrollTopRef.current = container.scrollTop
+    setIsAtBottom(true)
+  }, [])
+
+  const scrollToBottomSmooth = useCallback(() => {
+    const container = containerRef.current
+    if (!container) return
+    autoFollowRef.current = true
+    smoothScrollingRef.current = true
+    const prefersReduced = window.matchMedia(
+      "(prefers-reduced-motion: reduce)"
+    ).matches
+    if (prefersReduced) {
+      container.scrollTop = container.scrollHeight
+      prevScrollTopRef.current = container.scrollTop
+      smoothScrollingRef.current = false
+    } else {
+      container.scrollTo({ top: container.scrollHeight, behavior: "smooth" })
+    }
     setIsAtBottom(true)
   }, [])
 
@@ -76,9 +100,17 @@ export function ChatMessages() {
     await loadOlderTurns()
   }, [loadOlderTurns, historyLoadingMore, sessionHydrating, historyHasMore])
 
+  // 保持 ref 同步，scroll listener 通过 ref 调用，不需要重建
+  useEffect(() => {
+    handleLoadOlderTurnsRef.current = handleLoadOlderTurns
+  }, [handleLoadOlderTurns])
+
+  // Scroll event handler
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
+
+    prevScrollTopRef.current = container.scrollTop
 
     const handleScroll = () => {
       const dist = distanceFromBottom({
@@ -88,11 +120,16 @@ export function ChatMessages() {
       })
       const nextIsAtBottom = shouldStickToBottom(dist)
 
-      const userScrolledUp = container.scrollTop < prevScrollTopRef.current
+      const userScrolledUp =
+        prevScrollTopRef.current >= 0
+          ? container.scrollTop < prevScrollTopRef.current
+          : false
+
       if (userScrolledUp) {
         autoFollowRef.current = false
       } else if (nextIsAtBottom) {
         autoFollowRef.current = true
+        smoothScrollingRef.current = false
       }
 
       prevScrollTopRef.current = container.scrollTop
@@ -114,7 +151,7 @@ export function ChatMessages() {
           userScrolledUp,
         })
       ) {
-        void handleLoadOlderTurns()
+        void handleLoadOlderTurnsRef.current()
       }
     }
 
@@ -123,8 +160,9 @@ export function ChatMessages() {
     return () => {
       container.removeEventListener("scroll", handleScroll)
     }
-  }, [activeSessionId, handleLoadOlderTurns])
+  }, [activeSessionId, hasContent])
 
+  // Auto-follow 核心：ResizeObserver 监听内容尺寸变化
   useEffect(() => {
     const content = contentRef.current
     if (!content) return
@@ -134,16 +172,27 @@ export function ChatMessages() {
       if (!container) return
 
       if (autoFollowRef.current) {
-        scrollToBottom()
+        container.scrollTop = container.scrollHeight
+        prevScrollTopRef.current = container.scrollTop
       }
     })
 
     resizeObserver.observe(content)
+    // ResizeObserver 不会在初始 observe 时触发回调，
+    // 但容器重建时（如 empty→有内容）需要立即滚到底部
+    if (autoFollowRef.current) {
+      const container = containerRef.current
+      if (container) {
+        container.scrollTop = container.scrollHeight
+        prevScrollTopRef.current = container.scrollTop
+      }
+    }
     return () => {
       resizeObserver.disconnect()
     }
-  }, [activeSessionId, scrollToBottom])
+  }, [activeSessionId, hasContent])
 
+  // 加载历史消息后恢复滚动位置
   useLayoutEffect(() => {
     const container = containerRef.current
     if (!container) return
@@ -151,43 +200,52 @@ export function ChatMessages() {
     const anchor = scrollAnchorRef.current
     if (anchor !== null) {
       scrollAnchorRef.current = null
-      // 使用 requestAnimationFrame 确保 DOM 完全更新
-      requestAnimationFrame(() => {
+      const restore = () => {
         const currentContainer = containerRef.current
         if (!currentContainer) return
         const added = currentContainer.scrollHeight - anchor.scrollHeight
         if (added > 0) {
           currentContainer.scrollTop = anchor.scrollTop + added
+          prevScrollTopRef.current = currentContainer.scrollTop
         }
+      }
+      requestAnimationFrame(() => {
+        requestAnimationFrame(restore)
       })
     }
   }, [turns.length])
 
+  // 切换 session：强制滚到底部
   useLayoutEffect(() => {
     if (prevSessionIdRef.current === activeSessionId) return
     prevSessionIdRef.current = activeSessionId
     autoFollowRef.current = true
     scrollAnchorRef.current = null
-    scrollToBottom()
-  }, [activeSessionId, scrollToBottom])
+    prevScrollTopRef.current = -1
+    scrollToBottomInstant()
+  }, [activeSessionId, scrollToBottomInstant])
 
+  // 用户发消息后强制滚到底部
+  // streamingTurn.userMessages 在 submitTurn 时立即设置，比 SSE 事件更早
+  const userMessageCount = streamingTurn?.userMessages?.length ?? 0
+  const prevUserMessageCountRef = useRef(0)
   useLayoutEffect(() => {
-    if (!activeSessionId) return
-    if (turns.length === 0 && !streamingTurn) return
-    // 发送新消息时强制滚动到底部
-    autoFollowRef.current = true
-    scrollToBottom()
-  }, [activeSessionId, turns.length, streamingTurn, scrollToBottom])
+    if (userMessageCount > prevUserMessageCountRef.current) {
+      autoFollowRef.current = true
+      scrollToBottomInstant()
+    }
+    prevUserMessageCountRef.current = userMessageCount
+  }, [userMessageCount, scrollToBottomInstant])
 
-  if (turns.length === 0 && !streamingTurn) {
+  if (!hasContent) {
     return <ChatMessagesEmptyState error={error} />
   }
 
   return (
-    <div className="relative min-h-0 flex-1">
+    <div className="flex min-h-0 flex-1 flex-col">
       <div
         ref={containerRef}
-        className="h-full overflow-y-auto [overflow-anchor:none]"
+        className="min-h-0 flex-1 overflow-y-auto [overflow-anchor:none]"
         role="log"
         aria-live="polite"
         aria-relevant="additions text"
@@ -236,7 +294,10 @@ export function ChatMessages() {
           </div>
         ) : null}
       </div>
-      <ScrollToBottomButton isAtBottom={isAtBottom} onClick={scrollToBottom} />
+      <ScrollToBottomButton
+        isAtBottom={isAtBottom}
+        onClick={scrollToBottomSmooth}
+      />
     </div>
   )
 }
