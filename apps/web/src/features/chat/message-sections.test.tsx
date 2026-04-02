@@ -680,4 +680,63 @@ describe("chat message status surfaces", () => {
     expect(html).toContain("Copy response")
     expect(html).toContain("w-full")
   })
+
+  test("shows retry icon button on failed or cancelled turns", () => {
+    const html = renderWithTheme(
+      <MemoizedTurnView
+        turn={{
+          turn_id: "turn-failed-retry",
+          started_at_ms: 100,
+          finished_at_ms: 200,
+          source_entry_ids: [1],
+          user_messages: ["please retry this"],
+          blocks: [
+            {
+              kind: "failure",
+              message: "provider failed before completion",
+            },
+          ],
+          assistant_message: null,
+          thinking: null,
+          tool_invocations: [],
+          usage: null,
+          failure_message: "provider failed before completion",
+          outcome: "failed",
+        }}
+      />
+    )
+
+    expect(html).toContain('aria-label="Retry turn"')
+    expect(html).toContain("failed")
+  })
+
+  test("shows retry icon button on cancelled turns", () => {
+    const html = renderWithTheme(
+      <MemoizedTurnView
+        turn={{
+          turn_id: "turn-cancelled-retry",
+          started_at_ms: 100,
+          finished_at_ms: 200,
+          source_entry_ids: [1],
+          user_messages: ["please retry this"],
+          blocks: [
+            {
+              kind: "cancelled",
+              message: "本轮已取消",
+            },
+          ],
+          assistant_message: null,
+          thinking: null,
+          tool_invocations: [],
+          usage: null,
+          failure_message: "本轮已取消",
+          outcome: "cancelled",
+        }}
+      />
+    )
+
+    expect(html).toContain('aria-label="Retry turn"')
+    expect(html).toContain("cancelled")
+  })
+
 })

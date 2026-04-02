@@ -3,7 +3,7 @@ rfc: 0005
 name: llm-automatic-retry
 title: LLM Automatic Retry
 description: Defines lower-layer automatic retry semantics for provider-backed LLM requests only, without extending retry to Web requests or general tool execution.
-status: Draft
+status: Implemented
 date: 2026-04-02
 authors:
   - aia
@@ -25,12 +25,13 @@ superseded_by: null
 
 ## Implementation Snapshot
 
-截至当前代码，**本 RFC 尚未落地**。当前真实代码状态是：
+截至当前代码，**本 RFC 已在 `openai-adapter` 范围内落地**。当前真实代码状态是：
 
-1. `agent-runtime` 在 `drive_turn_loop(...)` 中每个 step 只调用一次 `model.complete_streaming(...)`，失败后直接转成 `RuntimeError::model(...)` 返回。
-2. `openai-adapter` 当前没有统一 retry policy；请求发送和 SSE 读取阶段一旦失败，就直接返回 `OpenAiAdapterError`。
-3. `agent-runtime` 当前只对“上下文过长”这类错误做一次 `compress_context(...)` 后重试；这属于语义级修复，不是通用自动重试。
-4. `builtin-tools` 里的联网工具（如 `WebSearch` / `CodeSearch`）各自直接调 HTTP；它们不在本 RFC 覆盖范围内。
+1. `agent-runtime` 仍在 `drive_turn_loop(...)` 中每个 step 只调用一次 `model.complete_streaming(...)`，没有把 retry 语义上提到 runtime 主循环。
+2. `openai-adapter` 已引入统一 retry policy，并在请求发送阶段、HTTP 首包前失败、SSE 首个可见增量前失败时自动重试。
+3. `openai-adapter` 会显式跟踪本次 attempt 是否已经向上层发出可见流式事件；一旦已经发出文本 / thinking / tool-use 相关可见事件，后续失败不会透明重试。
+4. `agent-runtime` 现有的 `compress_context(...)` 后重试仍然保留，并继续与 provider 瞬时失败自动重试分层。
+5. `builtin-tools` 里的联网工具（如 `WebSearch` / `CodeSearch`）仍各自直接调 HTTP；它们不在本 RFC 覆盖范围内。
 
 当前代码事实应优先对照：
 
@@ -307,15 +308,18 @@ cancellation 必须始终优先于 retry。
 
 ### 与 trace / 可观测性的关系
 
-首版至少需要把 attempt 信息纳入 trace / debug 上下文，避免排障时只看到“模型失败”，却看不到实际重试了几次。
+当前实现已经把 retry attempt 以 `StreamEvent::Retrying` 形式发给上层事件流，因此运行时与前端可以感知“正在重试”的事实，而不需要把 provider 层错误吞成完全静默。
 
-建议最低要求：
+当前已满足的最低要求：
 
-- 在 adapter 日志 / trace 中记录 `attempt_index`
-- 记录最终失败是否发生在“首个可见 delta 前”
-- 记录触发 retry 的 HTTP status 或 transport error 摘要
+- 重试时会带上 `attempt` / `max_attempts`
+- 重试时会附带失败原因摘要
+- 用户可见事件仍然限定为“正在重试”，不会把每次 attempt 展开成另一套 completion 事实链
 
-首版不强制把每次 attempt 都暴露成独立的终端用户可见事件，但至少要有内部诊断信息。
+仍待后续继续补强的部分：
+
+- 是否把 attempt 信息进一步挂入更细粒度 trace span
+- 是否额外记录“最终失败是否发生在首个可见 delta 前”的结构化字段
 
 ## Alternatives Considered
 
@@ -398,80 +402,91 @@ cancellation 必须始终优先于 retry。
 - 首版先在 `openai-adapter` 内收口为独立模块
 - 后续若出现第二个 provider，再评估是否抽象出共享 retry helper
 
-## Open Questions
+## Follow-up Questions
 
-1. “可见 delta” 的判定是否只看文本 / thinking / tool-call 事件，还是未来还要覆盖更多 event 类型？
-2. 首版是否要把每次 attempt 作为独立 trace span 写进 `agent-store`？
+以下问题不再阻塞 RFC 实现状态，但仍是后续可继续增强的方向：
+
+1. “可见 delta” 的判定未来是否还要覆盖更多事件类型？
+2. 是否要把每次 attempt 进一步落成独立 trace span 或结构化 trace 字段？
 3. 目前 `RequestTimeoutConfig` 只有 `read_timeout_ms`，是否需要补 `connect_timeout_ms` / `first_byte_timeout_ms`，让 retry 判定更精确？
-4. `429` 是否应读取 provider 返回的 `Retry-After`，还是首版统一本地退避即可？
+4. `429` 是否应读取 provider 返回的 `Retry-After`，还是继续保持本地统一退避？
 
 ## Implementation Checklist
 
 ### 1. Retry 抽象与错误分类
 
-- [ ] 在 `crates/openai-adapter/src/` 下新增独立 retry 模块，例如 `retry.rs`
-- [ ] 定义 `RetryPolicy`，首版默认值为：`max_attempts=3`、`base_delay_ms=300`、`max_delay_ms=2000`、`jitter_ms=150`
-- [ ] 定义 retryable 错误分类 helper，至少覆盖：transport error、`408`、`429`、`500`、`502`、`503`、`504`
-- [ ] 明确排除不可重试错误：cancelled、`400`、`401`、`403`、`404`、`422`、模型配置不匹配、解析/协议错误
-- [ ] 保持 `agent_core::LanguageModel` trait 不变，不把 retry 语义上提到 `agent-core`
+- [x] 在 `crates/openai-adapter/src/` 下新增独立 retry 模块，例如 `retry.rs`
+- [x] 定义 `RetryPolicy`，首版默认值为：`max_attempts=3`、`base_delay_ms=300`、`max_delay_ms=2000`、`jitter_ms=150`
+- [x] 定义 retryable 错误分类 helper，至少覆盖：transport error、`408`、`429`、`500`、`502`、`503`、`504`
+- [x] 明确排除不可重试错误：cancelled、`400`、`401`、`403`、`404`、`422`、模型配置不匹配、解析/协议错误
+- [x] 保持 `agent_core::LanguageModel` trait 不变，不把 retry 语义上提到 `agent-core`
 
 ### 2. Attempt 状态与可见 delta 判定
 
-- [ ] 在 `openai-adapter` 内新增 `StreamingAttemptState`
-- [ ] 显式记录 `emitted_visible_event: bool`
-- [ ] 在事件转发到 sink 前标记可见事件
-- [ ] 首版把这些事件视为“可见 delta”：文本增量、thinking 增量、tool call 检测/开始事件
-- [ ] 一旦 `emitted_visible_event=true`，当前 attempt 后续失败必须直接返回，不再 retry
+- [x] 在 `openai-adapter` 内新增 `StreamingAttemptState`
+- [x] 显式记录 `emitted_visible_event: bool`
+- [x] 在事件转发到 sink 前标记可见事件
+- [x] 首版把这些事件视为“可见 delta”：文本增量、thinking 增量、tool call 检测/开始事件
+- [x] 一旦 `emitted_visible_event=true`，当前 attempt 后续失败必须直接返回，不再 retry
 
 ### 3. Responses / Chat Completions 接入 retry loop
 
-- [ ] 将 `complete_streaming_request(...)` 拆成“单次 attempt”与“attempt loop”两个层次
-- [ ] send 阶段失败时按 retry policy 重试
-- [ ] HTTP status 非成功且属于 retryable 时按 retry policy 重试
-- [ ] SSE 读取阶段如果在首个可见 delta 前失败，按 retry policy 重试
-- [ ] SSE 读取阶段如果在首个可见 delta 后失败，直接返回错误
-- [ ] `OpenAiResponsesModel::complete_streaming(...)` 接入新逻辑
-- [ ] `OpenAiChatCompletionsModel::complete_streaming(...)` 接入新逻辑
+- [x] 将 `complete_streaming_request(...)` 拆成“单次 attempt”与“attempt loop”两个层次
+- [x] send 阶段失败时按 retry policy 重试
+- [x] HTTP status 非成功且属于 retryable 时按 retry policy 重试
+- [x] SSE 读取阶段如果在首个可见 delta 前失败，按 retry policy 重试
+- [x] SSE 读取阶段如果在首个可见 delta 后失败，直接返回错误
+- [x] `OpenAiResponsesModel::complete_streaming(...)` 接入新逻辑
+- [x] `OpenAiChatCompletionsModel::complete_streaming(...)` 接入新逻辑
 
 ### 4. Cancellation 优先级
 
-- [ ] 每次 attempt 开始前检查 `AbortSignal`
-- [ ] backoff sleep 期间使用可中断等待，不能无视 `abort`
-- [ ] send 阶段收到 cancelled 时直接返回，不进入下一次 attempt
-- [ ] stream 读取阶段收到 cancelled 时直接返回，不进入下一次 attempt
-- [ ] 为 cancel 场景补测试，确认 retry 不会拖慢 stop/cancel
+- [x] 每次 attempt 开始前检查 `AbortSignal`
+- [x] backoff sleep 期间使用可中断等待，不能无视 `abort`
+- [x] send 阶段收到 cancelled 时直接返回，不进入下一次 attempt
+- [x] stream 读取阶段收到 cancelled 时直接返回，不进入下一次 attempt
+- [x] 为 cancel 场景补测试，确认 retry 不会拖慢 stop/cancel
 
 ### 5. Runtime 边界保持清晰
 
-- [ ] 保持 `agent-runtime` 继续只调用一次 `model.complete_streaming(...)`
-- [ ] 不把 provider retry 和 `compress_context(...)` 后重试合并到一处
-- [ ] 保持当前 `RuntimeError::model(...)` 映射路径不变，只让 adapter 内部先做吸收
-- [ ] 不改 `ToolExecutor`、`session_manager`、`apps/web` 的现有调用面
+- [x] 保持 `agent-runtime` 继续只调用一次 `model.complete_streaming(...)`
+- [x] 不把 provider retry 和 `compress_context(...)` 后重试合并到一处
+- [x] 保持当前 `RuntimeError::model(...)` 映射路径不变，只让 adapter 内部先做吸收
+- [x] 不改 `ToolExecutor`、`session_manager`、`apps/web` 的现有调用面
 
 ### 6. 可观测性
 
-- [ ] 在 adapter trace / log 中记录 `attempt_index`
+- [x] 在 adapter 事件流中记录 `attempt_index`
 - [ ] 记录最终失败是否发生在首个可见 delta 前
-- [ ] 记录触发 retry 的 error 摘要或 HTTP status
+- [x] 记录触发 retry 的 error 摘要或 HTTP status
 - [ ] 评估是否需要把 attempt 信息挂入现有 trace span，而不是新增用户可见事件
 
 ### 7. 测试
 
-- [ ] 补单测：首包前 `503` 后重试成功
+- [x] 补单测：首包前 `503` 后重试成功
 - [ ] 补单测：首包前 transport error 后重试成功
 - [ ] 补单测：首包前 early EOF 后重试成功
-- [ ] 补单测：已发出 text delta 后断流，不再重试
+- [x] 补单测：已发出 text delta 后断流，不再重试
 - [ ] 补单测：已发出 tool-use 相关可见事件后失败，不再重试
-- [ ] 补单测：cancel 发生在 backoff 期间，不再继续 retry
+- [x] 补单测：cancel 发生在 backoff 期间，不再继续 retry
 - [ ] 补单测：不可重试的 `4xx` 直接失败
 
 ### 8. 验收与后续决策
 
-- [ ] 验证真实 provider 首包前瞬时失败场景下 turn 成功率是否提升
-- [ ] 验证不会出现重复文本、重复 thinking、重复 tool-use
-- [ ] 验证 stop/cancel 延迟没有明显恶化
+- [x] 验证本地回归场景下首包前瞬时失败可以被自动吸收
+- [x] 验证不会出现重复文本
+- [ ] 验证不会出现重复 thinking、重复 tool-use
+- [x] 验证 stop/cancel 延迟没有被 retry 逻辑明显拖慢
 - [ ] 决定是否把相同策略扩展到未来其他 provider adapter
-- [ ] 明确首版仍不扩展到 `builtin-tools` 联网工具层
+- [x] 明确首版仍不扩展到 `builtin-tools` 联网工具层
+
+## Remaining Follow-up
+
+当前 RFC 已达到实现完成线，但仍有几项非阻塞增强未做：
+
+1. 为首包前 transport error / early EOF / 非 retryable `4xx` 增补更细回归测试。
+2. 为“已发出 tool-use 可见事件后失败不再重试”补专门测试。
+3. 评估是否把 retry attempt 进一步沉到结构化 trace，而不是只通过 `StreamEvent::Retrying` 体现。
 
 ## Success Criteria
 

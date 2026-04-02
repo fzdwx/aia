@@ -1,6 +1,9 @@
+import { RotateCcw } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import type { TurnLifecycle, TurnUsage } from "@/lib/types"
 
 import { formatDurationMs } from "@/features/chat/tool-timeline-helpers"
+import { useChatStore } from "@/stores/chat-store"
 
 function TurnUsageBadge({ usage }: { usage: TurnUsage }) {
   const cachedSuffix =
@@ -15,7 +18,15 @@ function TurnUsageBadge({ usage }: { usage: TurnUsage }) {
   )
 }
 
-export function TurnMeta({ turn }: { turn: TurnLifecycle }) {
+export function TurnMeta({
+  turn,
+  canRetry = false,
+}: {
+  turn: TurnLifecycle
+  canRetry?: boolean
+}) {
+  const retryTurn = useChatStore((state) => state.retryTurn)
+  const chatState = useChatStore((state) => state.chatState)
   const duration = formatDurationMs(turn.started_at_ms, turn.finished_at_ms)
   const statusLabel =
     turn.outcome === "cancelled"
@@ -26,7 +37,7 @@ export function TurnMeta({ turn }: { turn: TurnLifecycle }) {
           ? "failed"
           : null
 
-  if (!duration && !turn.usage && !statusLabel) return null
+  if (!duration && !turn.usage && !statusLabel && !canRetry) return null
 
   return (
     <div className="text-caption mt-2 flex items-center gap-3 text-muted-foreground/55 opacity-0 transition-opacity duration-150 group-focus-within/turn:opacity-100 group-hover/turn:opacity-100">
@@ -42,6 +53,19 @@ export function TurnMeta({ turn }: { turn: TurnLifecycle }) {
         <span className="pointer-events-none">
           <TurnUsageBadge usage={turn.usage} />
         </span>
+      ) : null}
+      {canRetry ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          aria-label="Retry turn"
+          title="Retry turn"
+          disabled={chatState === "active"}
+          onClick={() => retryTurn(turn.turn_id)}
+        >
+          <RotateCcw className="size-3.5" />
+        </Button>
       ) : null}
     </div>
   )

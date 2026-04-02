@@ -198,6 +198,11 @@ impl SessionManagerLoop {
                     TurnExecutionService::new(&mut self.slots, &self.config, &self.return_tx);
                 let _ = reply.send(turn_execution.submit_turn(&session_id, prompts).await);
             }
+            SessionCommand::RetryTurn { session_id, failed_turn_id, reply } => {
+                let mut turn_execution =
+                    TurnExecutionService::new(&mut self.slots, &self.config, &self.return_tx);
+                let _ = reply.send(turn_execution.retry_turn(&session_id, &failed_turn_id).await);
+            }
             SessionCommand::CancelTurn { session_id, reply } => {
                 let mut query = SessionQueryService::new(&mut self.slots, &self.hydration_errors);
                 let result = query.cancel_turn(&session_id);

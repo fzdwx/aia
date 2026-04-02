@@ -8,6 +8,7 @@ import {
   createSession as apiCreateSession,
   deleteSession as apiDeleteSession,
   submitTurn as apiSubmitTurn,
+  retryTurn as apiRetryTurn,
   sendMessage as apiSendMessage,
   cancelTurn as apiCancelTurn,
   interruptTurn as apiInterruptTurn,
@@ -285,6 +286,7 @@ type ChatStore = {
   lastCompression: ContextCompressionNotice | null
   messageQueue: QueuedMessage[]
   _pendingPrompt: string | null
+  retryTurn: (turnId: string) => void
   initialize: () => void
   handleSseEvent: (event: SseEvent) => void
   submitTurn: (prompt: string) => void
@@ -414,6 +416,56 @@ function scheduleIdle(callback: () => void): IdleHandle {
 }
 
 export const useChatStore = create<ChatStore>((set, get) => {
+  function beginOptimisticTurn(prompts: string[], sessionId: string) {
+    const primaryPrompt = prompts[0] ?? ""
+    set((state) => {
+      const nextStreamingTurn: StreamingTurn = createPendingStreamingTurn(prompts)
+      const snapshot = getSessionSnapshot(sessionId) ?? EMPTY_SESSION_SNAPSHOT
+      const nextState = {
+        ...state,
+        error: null,
+        _pendingPrompt: primaryPrompt,
+        chatState: "active" as const,
+        lastCompression: null,
+        streamingTurn: nextStreamingTurn,
+      }
+      cacheSessionSnapshot(
+        sessionId,
+        {
+          ...snapshotFromState(nextState),
+          latestTurn: snapshot.latestTurn,
+        },
+        state.sessions
+      )
+      return {
+        error: null,
+        _pendingPrompt: primaryPrompt,
+        chatState: "active",
+        lastCompression: null,
+        streamingTurn: nextStreamingTurn,
+      }
+    })
+  }
+
+  function failOptimisticTurn(sessionId: string, message: string) {
+    set((state) => {
+      const nextState = {
+        ...state,
+        error: message,
+        _pendingPrompt: null,
+        streamingTurn: null,
+        chatState: "idle" as const,
+      }
+      cacheSessionSnapshot(sessionId, snapshotFromState(nextState), state.sessions)
+      return {
+        error: message,
+        _pendingPrompt: null,
+        streamingTurn: null,
+        chatState: "idle",
+      }
+    })
+  }
+
   async function hydrateSession(id: string) {
     cancelPendingHistoryHydration()
     const loadId = ++latestSessionLoadId
@@ -627,6 +679,53 @@ export const useChatStore = create<ChatStore>((set, get) => {
     lastCompression: null,
     messageQueue: [],
     _pendingPrompt: null,
+
+    retryTurn: (turnId: string) => {
+      if (get().chatState === "active") return
+      const sessionId = get().activeSessionId
+      if (!sessionId) return
+
+      const turn = get().turns.find((candidate) => candidate.turn_id === turnId)
+      if (!turn || (turn.outcome !== "failed" && turn.outcome !== "cancelled")) {
+        return
+      }
+
+      const latestRetriableTurnId = [...get().turns]
+        .reverse()
+        .find(
+          (candidate) =>
+            candidate.outcome === "failed" || candidate.outcome === "cancelled"
+        )?.turn_id
+      if (latestRetriableTurnId !== turnId) return
+
+      const prompts =
+        turn.user_messages ?? (turn.user_message ? [turn.user_message] : [])
+      if (prompts.length === 0) return
+
+      beginOptimisticTurn(prompts, sessionId)
+      set((state) => {
+        const nextTurns = state.turns.filter((candidate) => candidate.turn_id !== turnId)
+        updateSessionSnapshot(
+          sessionId,
+          (snapshot) => ({
+            ...snapshot,
+            latestTurn: latestTurn(nextTurns),
+          }),
+          state.sessions
+        )
+        return {
+          turns: nextTurns,
+          error: null,
+        }
+      })
+      apiRetryTurn(turnId, sessionId).catch((err: unknown) => {
+        void usePendingQuestionStore.getState().hydrateForSession(sessionId)
+        failOptimisticTurn(
+          sessionId,
+          err instanceof Error ? err.message : "Network error"
+        )
+      })
+    },
 
     initialize: () => {
       apiFetchSessions()
@@ -1112,59 +1211,13 @@ export const useChatStore = create<ChatStore>((set, get) => {
       const sessionId = get().activeSessionId
       if (!sessionId) return
 
-      set((state) => {
-        const nextStreamingTurn: StreamingTurn = {
-          userMessages: [prompt],
-          status: "waiting",
-          blocks: [],
-        }
-        const snapshot = getSessionSnapshot(sessionId) ?? EMPTY_SESSION_SNAPSHOT
-        const nextState = {
-          ...state,
-          error: null,
-          _pendingPrompt: prompt,
-          chatState: "active" as const,
-          lastCompression: null,
-          streamingTurn: nextStreamingTurn,
-        }
-        cacheSessionSnapshot(
-          sessionId,
-          {
-            ...snapshotFromState(nextState),
-            latestTurn: snapshot.latestTurn,
-          },
-          state.sessions
-        )
-        return {
-          error: null,
-          _pendingPrompt: prompt,
-          chatState: "active",
-          lastCompression: null,
-          streamingTurn: nextStreamingTurn,
-        }
-      })
+      beginOptimisticTurn([prompt], sessionId)
       apiSubmitTurn(prompt, sessionId).catch((err: unknown) => {
         void usePendingQuestionStore.getState().hydrateForSession(sessionId)
-        set((state) => {
-          const nextState = {
-            ...state,
-            error: err instanceof Error ? err.message : "Network error",
-            _pendingPrompt: null,
-            streamingTurn: null,
-            chatState: "idle" as const,
-          }
-          cacheSessionSnapshot(
-            sessionId,
-            snapshotFromState(nextState),
-            state.sessions
-          )
-          return {
-            error: err instanceof Error ? err.message : "Network error",
-            _pendingPrompt: null,
-            streamingTurn: null,
-            chatState: "idle",
-          }
-        })
+        failOptimisticTurn(
+          sessionId,
+          err instanceof Error ? err.message : "Network error"
+        )
       })
     },
 

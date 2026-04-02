@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -115,6 +116,99 @@ impl<'a> TurnExecutionService<'a> {
         });
 
         Ok(turn_id)
+    }
+
+    pub(super) async fn retry_turn(
+        &mut self,
+        session_id: &str,
+        failed_turn_id: &str,
+    ) -> Result<String, RuntimeWorkerError> {
+        let prompts = {
+            let slot = self.slots.get_mut(session_id).ok_or_else(|| {
+                RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
+            })?;
+
+            if slot.status() != super::SlotStatus::Idle {
+                return Err(RuntimeWorkerError::bad_request(
+                    "a turn is already running in this session",
+                ));
+            }
+
+            let history = super::read_lock(&slot.history);
+            let turn =
+                history.iter().find(|candidate| candidate.turn_id == failed_turn_id).ok_or_else(
+                    || RuntimeWorkerError::not_found(format!("turn not found: {failed_turn_id}")),
+                )?;
+
+            if turn.outcome != agent_runtime::TurnOutcome::Failed
+                && turn.outcome != agent_runtime::TurnOutcome::Cancelled
+            {
+                return Err(RuntimeWorkerError::bad_request(
+                    "only failed or cancelled turns can be retried",
+                ));
+            }
+
+            let latest_retriable_turn_id = history
+                .iter()
+                .rev()
+                .find(|candidate| {
+                    candidate.outcome == agent_runtime::TurnOutcome::Failed
+                        || candidate.outcome == agent_runtime::TurnOutcome::Cancelled
+                })
+                .map(|candidate| candidate.turn_id.clone());
+
+            if latest_retriable_turn_id.as_deref() != Some(failed_turn_id) {
+                return Err(RuntimeWorkerError::bad_request(
+                    "only the latest failed or cancelled turn can be retried",
+                ));
+            }
+
+            turn.user_messages.clone()
+        };
+
+        self.rollback_failed_turn(session_id, failed_turn_id)?;
+        self.submit_turn(session_id, prompts).await
+    }
+
+    fn rollback_failed_turn(
+        &mut self,
+        session_id: &str,
+        failed_turn_id: &str,
+    ) -> Result<(), RuntimeWorkerError> {
+        let slot = self.slots.get_mut(session_id).ok_or_else(|| {
+            RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
+        })?;
+
+        let target_turn = super::read_lock(&slot.history)
+            .iter()
+            .find(|candidate| candidate.turn_id == failed_turn_id)
+            .cloned()
+            .ok_or_else(|| {
+                RuntimeWorkerError::not_found(format!("turn not found: {failed_turn_id}"))
+            })?;
+
+        let session_path = slot.session_path.clone();
+        let removable_ids = BTreeSet::from_iter(target_turn.source_entry_ids.iter().copied());
+        let (rebuilt, context_stats) = {
+            let runtime = slot
+                .runtime_mut()
+                .ok_or_else(|| RuntimeWorkerError::bad_request("session is not currently idle"))?;
+            runtime.tape_mut().remove_entries_by_id(&removable_ids);
+            runtime.tape().save_jsonl(&session_path).map_err(|error| {
+                RuntimeWorkerError::internal(format!("session save failed: {error}"))
+            })?;
+
+            let rebuilt =
+                crate::runtime_worker::rebuild_session_snapshots_from_tape(runtime.tape());
+            let context_stats = runtime.context_stats();
+            (rebuilt, context_stats)
+        };
+
+        *super::write_lock(&slot.history) = rebuilt.history;
+        *super::write_lock(&slot.current_turn) = rebuilt.current_turn;
+        *super::write_lock(&slot.context_stats) = context_stats;
+
+        Ok(())
     }
 }
 

@@ -455,6 +455,162 @@ describe("chat store submitTurn", () => {
     expect(useChatStore.getState().error).toBe(null)
   })
 
+  test("retryTurn regenerates failed turn without posting a new user message", async () => {
+    let fetchCalls = 0
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString()
+      if (url === "/api/turn/retry") {
+        fetchCalls += 1
+        expect(init?.method).toBe("POST")
+        expect(init?.body).toBe(
+          JSON.stringify({
+            failed_turn_id: "turn-failed",
+            session_id: "session-1",
+          })
+        )
+        return new Response(null, { status: 202 })
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }) as FetchMock
+
+    useChatStore.setState({
+      activeSessionId: "session-1",
+      turns: [
+        {
+          turn_id: "turn-failed",
+          started_at_ms: 1,
+          finished_at_ms: 2,
+          source_entry_ids: [1, 2],
+          user_messages: ["first question", "follow up"],
+          blocks: [{ kind: "failure", message: "provider failed" }],
+          assistant_message: null,
+          thinking: null,
+          tool_invocations: [],
+          usage: null,
+          failure_message: "provider failed",
+          outcome: "failed",
+        },
+      ],
+      streamingTurn: null,
+      chatState: "idle",
+      error: "provider failed",
+    })
+
+    useChatStore.getState().retryTurn("turn-failed")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(fetchCalls).toBe(1)
+    assert.deepEqual(useChatStore.getState().streamingTurn, {
+      userMessages: ["first question", "follow up"],
+      status: "waiting",
+      blocks: [],
+    })
+    expect(useChatStore.getState().turns).toHaveLength(0)
+    expect(useChatStore.getState().chatState).toBe("active")
+    expect(useChatStore.getState().error).toBe(null)
+  })
+
+  test("retryTurn also regenerates cancelled turn", async () => {
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString()
+      if (url === "/api/turn/retry") {
+        expect(init?.body).toBe(
+          JSON.stringify({
+            failed_turn_id: "turn-cancelled",
+            session_id: "session-1",
+          })
+        )
+        return new Response(null, { status: 202 })
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }) as FetchMock
+
+    useChatStore.setState({
+      activeSessionId: "session-1",
+      turns: [
+        {
+          turn_id: "turn-cancelled",
+          started_at_ms: 1,
+          finished_at_ms: 2,
+          source_entry_ids: [1, 2],
+          user_messages: ["redo this"],
+          blocks: [{ kind: "cancelled", message: "本轮已取消" }],
+          assistant_message: null,
+          thinking: null,
+          tool_invocations: [],
+          usage: null,
+          failure_message: "本轮已取消",
+          outcome: "cancelled",
+        },
+      ],
+      streamingTurn: null,
+      chatState: "idle",
+      error: null,
+    })
+
+    useChatStore.getState().retryTurn("turn-cancelled")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    assert.deepEqual(useChatStore.getState().streamingTurn, {
+      userMessages: ["redo this"],
+      status: "waiting",
+      blocks: [],
+    })
+    expect(useChatStore.getState().turns).toHaveLength(0)
+  })
+
+  test("retryTurn ignores non-latest failed turn", async () => {
+    let fetchCalls = 0
+    globalThis.fetch = (async () => {
+      fetchCalls += 1
+      return new Response(null, { status: 202 })
+    }) as FetchMock
+
+    useChatStore.setState({
+      activeSessionId: "session-1",
+      turns: [
+        {
+          turn_id: "turn-old-failed",
+          started_at_ms: 1,
+          finished_at_ms: 2,
+          source_entry_ids: [1],
+          user_messages: ["older failed"],
+          blocks: [{ kind: "failure", message: "older failed" }],
+          assistant_message: null,
+          thinking: null,
+          tool_invocations: [],
+          usage: null,
+          failure_message: "older failed",
+          outcome: "failed",
+        },
+        {
+          turn_id: "turn-new-failed",
+          started_at_ms: 3,
+          finished_at_ms: 4,
+          source_entry_ids: [2],
+          user_messages: ["newer failed"],
+          blocks: [{ kind: "failure", message: "newer failed" }],
+          assistant_message: null,
+          thinking: null,
+          tool_invocations: [],
+          usage: null,
+          failure_message: "newer failed",
+          outcome: "failed",
+        },
+      ],
+      streamingTurn: null,
+      chatState: "idle",
+      error: null,
+    })
+
+    useChatStore.getState().retryTurn("turn-old-failed")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(fetchCalls).toBe(0)
+    expect(useChatStore.getState().streamingTurn).toBe(null)
+    expect(useChatStore.getState().turns).toHaveLength(2)
+  })
+
   test("creates tool block from started event with full arguments", () => {
     useChatStore.setState({
       chatState: "active",

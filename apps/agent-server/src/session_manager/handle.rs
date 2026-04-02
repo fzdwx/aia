@@ -87,6 +87,14 @@ impl SessionManagerHandle {
         self.request(|reply| SessionCommand::SubmitTurn { session_id, prompts, reply }).await
     }
 
+    pub async fn retry_turn(
+        &self,
+        session_id: String,
+        failed_turn_id: String,
+    ) -> Result<String, RuntimeWorkerError> {
+        self.request(|reply| SessionCommand::RetryTurn { session_id, failed_turn_id, reply }).await
+    }
+
     pub async fn cancel_turn(&self, session_id: String) -> Result<bool, RuntimeWorkerError> {
         self.request(|reply| SessionCommand::CancelTurn { session_id, reply }).await
     }

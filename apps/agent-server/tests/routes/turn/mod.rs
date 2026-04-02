@@ -3,7 +3,9 @@ use provider_registry::{ProviderProfile, ProviderRegistry};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
-use super::{CancelTurnRequest, TurnRequest, handlers, handlers::map_broadcast_result};
+use super::{
+    CancelTurnRequest, RetryTurnRequest, TurnRequest, handlers, handlers::map_broadcast_result,
+};
 use crate::routes::test_support::{
     test_state_with_session_manager, test_state_with_session_manager_setup,
 };
@@ -33,6 +35,37 @@ fn cancel_turn_request_deserializes_session_id() {
     }))
     .expect("cancel turn request should deserialize");
 
+    assert_eq!(parsed.session_id.as_deref(), Some("session-1"));
+}
+
+#[test]
+fn turn_request_deserializes_prompt_or_prompts() {
+    let single: TurnRequest = serde_json::from_value(serde_json::json!({
+        "prompt": "retry once",
+        "session_id": "session-1"
+    }))
+    .expect("single prompt request should deserialize");
+    assert_eq!(single.prompt.as_deref(), Some("retry once"));
+    assert!(single.prompts.is_none());
+
+    let multi: TurnRequest = serde_json::from_value(serde_json::json!({
+        "prompts": ["first", "second"],
+        "session_id": "session-1"
+    }))
+    .expect("multi prompt request should deserialize");
+    assert_eq!(multi.prompt, None);
+    assert_eq!(multi.prompts, Some(vec!["first".into(), "second".into()]));
+}
+
+#[test]
+fn retry_turn_request_deserializes_failed_turn_id() {
+    let parsed: RetryTurnRequest = serde_json::from_value(serde_json::json!({
+        "failed_turn_id": "turn-1",
+        "session_id": "session-1"
+    }))
+    .expect("retry turn request should deserialize");
+
+    assert_eq!(parsed.failed_turn_id, "turn-1");
     assert_eq!(parsed.session_id.as_deref(), Some("session-1"));
 }
 
@@ -74,7 +107,11 @@ async fn submit_turn_rejects_session_waiting_for_question_response() {
 
     let response = handlers::submit_turn(
         State(state.clone()),
-        Json(TurnRequest { prompt: "keep going".into(), session_id: Some(session.id) }),
+        Json(TurnRequest {
+            prompt: Some("keep going".into()),
+            prompts: None,
+            session_id: Some(session.id),
+        }),
     )
     .await
     .into_response();
@@ -123,7 +160,38 @@ async fn submit_turn_allows_new_message_after_restart_clears_stale_incomplete_tu
 
     let response = handlers::submit_turn(
         State(state.clone()),
-        Json(TurnRequest { prompt: "keep going".into(), session_id: Some(session_id.into()) }),
+        Json(TurnRequest {
+            prompt: Some("keep going".into()),
+            prompts: None,
+            session_id: Some(session_id.into()),
+        }),
+    )
+    .await
+    .into_response();
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let body = response_body_json(response).await;
+    assert_eq!(body.get("ok"), Some(&serde_json::json!(true)));
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn submit_turn_accepts_prompt_replay_batch() {
+    let (state, root) = test_state_with_session_manager("turn-replay-prompts", sample_registry());
+    let session = state
+        .session_manager
+        .create_session(Some("Session Replay".into()))
+        .await
+        .expect("session should be created");
+
+    let response = handlers::submit_turn(
+        State(state.clone()),
+        Json(TurnRequest {
+            prompt: None,
+            prompts: Some(vec!["first question".into(), "follow up".into()]),
+            session_id: Some(session.id),
+        }),
     )
     .await
     .into_response();

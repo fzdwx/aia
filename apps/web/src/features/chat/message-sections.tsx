@@ -3,6 +3,7 @@ import { memo } from "react"
 import type { StreamingTurn, TurnLifecycle } from "@/lib/types"
 
 import { fromInvocation } from "@/features/chat/tool-timeline-helpers"
+import { useChatStore } from "@/stores/chat-store"
 
 import { MemoizedStreamingToolGroup, MemoizedToolGroup } from "./tool-timeline"
 import {
@@ -20,6 +21,22 @@ import {
 import { TurnMeta } from "./message-sections/turn-meta"
 
 function TurnView({ turn }: { turn: TurnLifecycle }) {
+  const latestRetriableTurnId = useChatStore((state) => {
+    for (let index = state.turns.length - 1; index >= 0; index -= 1) {
+      const candidate = state.turns[index]
+      if (
+        candidate &&
+        (candidate.outcome === "failed" || candidate.outcome === "cancelled")
+      ) {
+        return candidate.turn_id
+      }
+    }
+    return null
+  })
+  const canRetry =
+    latestRetriableTurnId == null
+      ? turn.outcome === "failed" || turn.outcome === "cancelled"
+      : turn.turn_id === latestRetriableTurnId
   const grouped = groupBlocks(turn.blocks)
   const userMessages =
     turn.user_messages ?? (turn.user_message ? [turn.user_message] : [])
@@ -64,7 +81,7 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
             </div>
           )
         })}
-        <TurnMeta turn={turn} />
+        <TurnMeta turn={turn} canRetry={canRetry} />
       </div>
     </div>
   )

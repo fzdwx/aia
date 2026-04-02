@@ -156,13 +156,16 @@ export async function updateSessionSettings(body: {
 }
 
 export async function submitTurn(
-  prompt: string,
+  prompt: string | string[],
   sessionId?: string
 ): Promise<void> {
+  const body = Array.isArray(prompt)
+    ? { prompts: prompt, session_id: sessionId }
+    : { prompt, session_id: sessionId }
   const res = await fetch("/api/turn", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, session_id: sessionId }),
+    body: JSON.stringify(body),
   })
   if (!res.ok) throw new Error(`POST /api/turn failed: ${res.status}`)
 }
@@ -176,6 +179,18 @@ export async function cancelTurn(sessionId?: string): Promise<boolean> {
   if (!res.ok) throw new Error(`POST /api/turn/cancel failed: ${res.status}`)
   const payload = (await res.json()) as { cancelled?: boolean }
   return payload.cancelled === true
+}
+
+export async function retryTurn(
+  failedTurnId: string,
+  sessionId?: string
+): Promise<void> {
+  const res = await fetch("/api/turn/retry", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ failed_turn_id: failedTurnId, session_id: sessionId }),
+  })
+  if (!res.ok) throw new Error(`POST /api/turn/retry failed: ${res.status}`)
 }
 
 // ── Message Queue endpoints ───────────────────────────────────

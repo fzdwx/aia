@@ -247,6 +247,11 @@ pub(crate) enum SessionCommand {
         prompts: Vec<String>,
         reply: oneshot::Sender<Result<String, RuntimeWorkerError>>,
     },
+    RetryTurn {
+        session_id: SessionId,
+        failed_turn_id: String,
+        reply: oneshot::Sender<Result<String, RuntimeWorkerError>>,
+    },
     CancelTurn {
         session_id: SessionId,
         reply: oneshot::Sender<Result<bool, RuntimeWorkerError>>,

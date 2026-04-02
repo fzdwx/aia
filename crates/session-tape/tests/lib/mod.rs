@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     fs,
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
@@ -257,6 +258,21 @@ fn 锚点以追加条目形式保留在磁带中() {
     assert_eq!(tape.entries().len(), 3);
     assert_eq!(tape.entries()[1].kind, "anchor");
     assert_eq!(tape.anchors().len(), 1);
+}
+
+#[test]
+fn 可按_entry_id_删除指定条目() {
+    let mut tape = SessionTape::new();
+    let first = tape.append(Message::new(Role::User, "第一轮"));
+    let second = tape.append(Message::new(Role::Assistant, "回答"));
+    let third = tape.append(Message::new(Role::User, "第二轮"));
+
+    let removed = tape.remove_entries_by_id(&BTreeSet::from([first, second]));
+
+    assert_eq!(removed, 2);
+    assert_eq!(tape.entries().len(), 1);
+    assert_eq!(tape.entries()[0].id, third);
+    assert_eq!(tape.entries()[0].as_message().map(|msg| msg.content), Some("第二轮".into()));
 }
 
 #[test]

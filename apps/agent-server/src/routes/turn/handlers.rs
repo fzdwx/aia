@@ -15,7 +15,7 @@ use tokio_stream::{
 
 use crate::{sse::SsePayload, state::SharedState};
 
-use super::{CancelTurnRequest, TurnRequest};
+use super::{CancelTurnRequest, RetryTurnRequest, TurnRequest};
 use crate::routes::common::{
     prepare_session_for_turn, require_session_id, runtime_worker_error_response,
 };
@@ -52,7 +52,18 @@ pub(crate) async fn submit_turn(
         return runtime_worker_error_response(error);
     }
 
-    match state.session_manager.submit_turn(session_id, vec![body.prompt]).await {
+    let prompts = match (body.prompts, body.prompt) {
+        (Some(prompts), _) if !prompts.is_empty() => prompts,
+        (_, Some(prompt)) => vec![prompt],
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": "prompt or prompts is required" })),
+            );
+        }
+    };
+
+    match state.session_manager.submit_turn(session_id, prompts).await {
         Ok(turn_id) => {
             (StatusCode::ACCEPTED, Json(serde_json::json!({ "ok": true, "turn_id": turn_id })))
         }
@@ -71,6 +82,27 @@ pub(crate) async fn cancel_turn(
 
     match state.session_manager.cancel_turn(session_id).await {
         Ok(cancelled) => (StatusCode::OK, Json(serde_json::json!({ "cancelled": cancelled }))),
+        Err(error) => runtime_worker_error_response(error),
+    }
+}
+
+pub(crate) async fn retry_turn(
+    State(state): State<SharedState>,
+    Json(body): Json<RetryTurnRequest>,
+) -> impl IntoResponse {
+    let session_id = match require_session_id(state.as_ref(), body.session_id).await {
+        Ok(session_id) => session_id,
+        Err(response) => return response,
+    };
+
+    if let Err(error) = prepare_session_for_turn(state.as_ref(), &session_id).await {
+        return runtime_worker_error_response(error);
+    }
+
+    match state.session_manager.retry_turn(session_id, body.failed_turn_id).await {
+        Ok(turn_id) => {
+            (StatusCode::ACCEPTED, Json(serde_json::json!({ "ok": true, "turn_id": turn_id })))
+        }
         Err(error) => runtime_worker_error_response(error),
     }
 }

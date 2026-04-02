@@ -85,8 +85,8 @@
   - 说明：pending question 的共享类型、server 控制面和 Web 承接已存在
   - 但“通用 suspend/resume 原语完全定稿并宣告收口”这件事还没有被提升到 `Implemented`
   - 另外，重启后 orphaned pending question 当前会被 hydrate 路径显式记为 cancelled，而不是恢复成可继续回答的 active pending 状态
-- `RFC 0005 LLM Automatic Retry`：**Draft**
-  - 说明：当前仅完成设计草案；范围明确限定在 provider-backed LLM 调用链路，尚未落地到 `openai-adapter` 的流式请求发送 / 首包前失败重试逻辑
+- `RFC 0005 LLM Automatic Retry`：**Implemented**
+  - 说明：已在 `crates/openai-adapter` 落地 provider-backed LLM 自动重试；仅覆盖首个可见流式增量前的发送 / HTTP / 早期流读取失败，不扩展到 Web 请求层、通用工具执行或 mid-stream 已见输出后的失败
 
 ### 7. Channel 与外部承接
 

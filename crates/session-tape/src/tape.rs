@@ -1,6 +1,4 @@
-use std::{fs, fs::OpenOptions, io::Write, path::Path};
-
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, fs, fs::OpenOptions, io::Write, path::Path};
 
 use agent_core::{ConversationItem, Message, QuestionRequest, QuestionResult};
 use serde_json::Value;
@@ -266,6 +264,16 @@ impl SessionTape {
 
     pub fn entries(&self) -> &[TapeEntry] {
         &self.entries
+    }
+
+    pub fn remove_entries_by_id(&mut self, entry_ids: &BTreeSet<u64>) -> usize {
+        if entry_ids.is_empty() {
+            return 0;
+        }
+
+        let before = self.entries.len();
+        self.entries.retain(|entry| !entry_ids.contains(&entry.id));
+        before.saturating_sub(self.entries.len())
     }
 
     pub fn set_entry_meta(&mut self, entry_id: u64, key: &str, value: Value) {
