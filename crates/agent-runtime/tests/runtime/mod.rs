@@ -353,77 +353,6 @@ impl LanguageModel for BudgetRecordingModel {
     }
 }
 
-struct PreflightCompressionModel {
-    seen_requests: Mutex<Vec<CompletionRequest>>,
-    completion_requests: Mutex<Vec<CompletionRequest>>,
-}
-
-impl PreflightCompressionModel {
-    fn new() -> Self {
-        Self {
-            seen_requests: Mutex::new(Vec::new()),
-            completion_requests: Mutex::new(Vec::new()),
-        }
-    }
-}
-
-#[async_trait]
-impl LanguageModel for PreflightCompressionModel {
-    type Error = CoreError;
-
-    async fn complete_streaming(
-        &self,
-        request: CompletionRequest,
-        _abort: &AbortSignal,
-        _sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
-    ) -> Result<Completion, Self::Error> {
-        mutex_lock(&self.seen_requests).push(request.clone());
-
-        let request_kind = request
-            .trace_context
-            .as_ref()
-            .map(|context| context.request_kind.as_str())
-            .unwrap_or("completion");
-
-        if request_kind == "compression" {
-            return Ok(Completion::text(
-                "## 1. Current Task Objective\n压缩\n\n## 2. Progress So Far\n压缩\n\n## 3. Key Context\n压缩\n\n## 4. Key Findings\n压缩\n\n## 5. Unfinished Items\n压缩\n\n## 6. Recommended Handoff Path\n压缩\n\n## 7. Risks and Warnings\n压缩\n\nFirst step for the next Agent: 压缩"
-                    .to_string(),
-            ));
-        }
-
-        let completion_index = mutex_lock(&self.completion_requests).len();
-        mutex_lock(&self.completion_requests).push(request.clone());
-
-        if completion_index == 0 {
-            return Ok(Completion {
-                segments: vec![CompletionSegment::ToolUse(ToolCall::new("search"))],
-                stop_reason: CompletionStopReason::ToolUse,
-                usage: Some(CompletionUsage {
-                    input_tokens: 300,
-                    output_tokens: 20,
-                    total_tokens: 320,
-                    cached_tokens: 0,
-                }),
-                response_body: None,
-                http_status_code: None,
-            });
-        }
-
-        let saw_summary = request.conversation.iter().any(|item| {
-            item.as_message().is_some_and(|message| {
-                message.role == Role::User && message.content.contains("[context summary]")
-            })
-        });
-
-        if !saw_summary {
-            return Err(CoreError::new("expected preflight compression summary before completion"));
-        }
-
-        Ok(Completion::text("预压缩后继续完成"))
-    }
-}
-
 struct RequestRecordingModel {
     seen_requests: Mutex<Vec<CompletionRequest>>,
 }
@@ -1219,30 +1148,6 @@ fn 运行时不会自动追加最大步数收尾消息() {
     assert!(requests.iter().all(|request| request.conversation.iter().all(|item| {
         item.as_message().is_none_or(|message| !message.content.contains("最大步骤数"))
     })));
-}
-
-#[test]
-fn 运行时会在每次模型调用前预压缩上下文() {
-    let mut identity = ModelIdentity::new("local", "preflight-compress", ModelDisposition::Balanced);
-    identity.limit = Some(agent_core::ModelLimit { context: Some(400), output: Some(80) });
-    let model = PreflightCompressionModel::new();
-    let mut runtime = AgentRuntime::new(model, StubTools, identity).with_context_pressure_threshold(0.5);
-
-    let output = run_turn(
-        &mut runtime,
-        "这是一段会把上下文推高很多很多很多很多很多很多很多很多很多很多很多很多的输入，用来触发预压缩检查",
-    )
-    .expect("应先压缩再继续完成");
-
-    assert_eq!(output.assistant_text, "预压缩后继续完成");
-    assert!(runtime.tape().entries().iter().any(|entry| entry.anchor_name() == Some("context_compression")));
-    let requests = mutex_lock(&runtime.model.completion_requests);
-    assert_eq!(requests.len(), 2);
-    assert!(requests[1].conversation.iter().any(|item| {
-        item.as_message().is_some_and(|message| {
-            message.role == Role::User && message.content.contains("[context summary]")
-        })
-    }));
 }
 
 #[test]
@@ -2193,6 +2098,111 @@ impl LanguageModel for CompressionInspectionModel {
         }
         Ok(Completion::text("正常回答"))
     }
+}
+
+struct StepwiseCompressionModel {
+    seen_requests: Mutex<Vec<CompletionRequest>>,
+}
+
+impl StepwiseCompressionModel {
+    fn new() -> Self {
+        Self { seen_requests: Mutex::new(Vec::new()) }
+    }
+}
+
+#[async_trait]
+impl LanguageModel for StepwiseCompressionModel {
+    type Error = CoreError;
+
+    async fn complete_streaming(
+        &self,
+        request: CompletionRequest,
+        _abort: &AbortSignal,
+        _sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
+    ) -> Result<Completion, Self::Error> {
+        mutex_lock(&self.seen_requests).push(request.clone());
+
+        if request.instructions.as_ref().is_some_and(|i| i.contains("handoff summary")) {
+            return Ok(Completion::text("阶段压缩摘要"));
+        }
+
+        let completion_count = mutex_lock(&self.seen_requests)
+            .iter()
+            .filter(|item| item.instructions.as_ref().is_none_or(|i| !i.contains("handoff summary")))
+            .count();
+
+        if completion_count == 1 {
+            return Ok(Completion {
+                segments: vec![CompletionSegment::ToolUse(ToolCall::new("search"))],
+                stop_reason: CompletionStopReason::ToolUse,
+                usage: Some(CompletionUsage {
+                    input_tokens: 360,
+                    output_tokens: 20,
+                    total_tokens: 380,
+                    cached_tokens: 0,
+                }),
+                response_body: None,
+                http_status_code: None,
+            });
+        }
+
+        Ok(Completion::text("工具后继续完成"))
+    }
+}
+
+#[test]
+fn 高压压缩请求会先裁掉尾部_tool_result() {
+    let mut identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced);
+    identity.limit = Some(agent_core::ModelLimit { context: Some(400), output: Some(80) });
+    let model = StepwiseCompressionModel::new();
+    let mut tape = SessionTape::new();
+    tape.append(Message::new(Role::User, "旧历史用户消息一"));
+    tape.append(Message::new(Role::Assistant, "旧历史助手消息一"));
+    tape.append(Message::new(Role::User, "旧历史用户消息二"));
+    tape.append(Message::new(Role::Assistant, "旧历史助手消息二"));
+    let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape)
+        .with_context_pressure_threshold(0.50);
+
+    let output = run_turn(&mut runtime, "开始").expect("应成功完成");
+
+    assert_eq!(output.assistant_text, "工具后继续完成");
+    let requests = mutex_lock(&runtime.model.seen_requests);
+    let compression_requests = requests
+        .iter()
+        .filter(|request| request.instructions.as_ref().is_some_and(|i| i.contains("handoff summary")))
+        .collect::<Vec<_>>();
+    assert_eq!(compression_requests.len(), 1);
+    assert!(compression_requests[0]
+        .conversation
+        .iter()
+        .all(|item| item.as_tool_result().is_none()));
+    assert!(compression_requests[0]
+        .conversation
+        .iter()
+        .any(|item| item.as_message().is_some_and(|message| message.content.contains("旧历史用户消息一"))));
+
+    let entries = runtime.tape().entries();
+    let anchor_index = entries
+        .iter()
+        .position(|entry| entry.anchor_name() == Some("context_compression"))
+        .expect("应有 context_compression anchor");
+    let handoff_index = entries
+        .iter()
+        .position(|entry| entry.event_name() == Some("handoff"))
+        .expect("应有 handoff event");
+    let tool_call_index = entries
+        .iter()
+        .position(|entry| entry.as_tool_call().is_some())
+        .expect("应有 tool_call");
+    let tool_result_index = entries
+        .iter()
+        .position(|entry| entry.as_tool_result().is_some())
+        .expect("应有 tool_result");
+
+    assert!(anchor_index < tool_call_index);
+    assert_eq!(handoff_index, anchor_index + 1);
+    assert!(handoff_index < tool_call_index);
+    assert!(tool_call_index < tool_result_index);
 }
 
 #[test]

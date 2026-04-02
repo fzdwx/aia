@@ -13,7 +13,11 @@ where
     M: LanguageModel,
     T: ToolExecutor,
 {
-    pub(super) fn should_preflight_compress(&self) -> bool {
+    pub(super) fn should_preflight_compress(&self, turn_id: &str) -> bool {
+        if self.current_turn_has_tool_result_since_usage(turn_id) {
+            return true;
+        }
+
         let Some(context_limit) = self.model_identity.limit.as_ref().and_then(|limit| limit.context)
         else {
             return false;
@@ -27,7 +31,7 @@ where
             return false;
         }
 
-        self.has_new_context_since_last_usage_sample() || self.has_pending_tool_results()
+        self.has_new_context_since_last_usage_sample(turn_id)
     }
 
     pub(super) fn build_completion_request(
@@ -85,31 +89,41 @@ where
     }
 
     fn current_input_tokens(&self) -> Option<u32> {
-        if self.has_anchor_after_last_completed_turn() && !self.has_new_context_since_last_usage_sample() {
+        if self.has_anchor_after_last_completed_turn() {
             return None;
         }
 
         self.last_input_tokens.map(|value| value.min(u32::MAX as u64) as u32)
     }
 
-    fn has_new_context_since_last_usage_sample(&self) -> bool {
-        let Some(last_completed_turn_index) = self.latest_completed_turn_index() else {
-            return !self.tape.entries().is_empty();
-        };
+    fn has_new_context_since_last_usage_sample(&self, turn_id: &str) -> bool {
+        if self.last_usage_turn_id.as_deref() != Some(turn_id) {
+            return false;
+        }
 
-        self.tape
-            .entries()
-            .iter()
-            .skip(last_completed_turn_index.saturating_add(1))
-            .any(|entry| {
-                entry.as_message().is_some()
+        let lower_bound = self.last_usage_entry_id.unwrap_or(0);
+        self.tape.entries().iter().any(|entry| {
+            let is_current_turn_entry =
+                entry.meta.get("run_id").and_then(|value| value.as_str()) == Some(turn_id);
+            entry.id > lower_bound
+                && is_current_turn_entry
+                && (entry.as_message().is_some()
                     || entry.as_tool_call().is_some()
-                    || entry.as_tool_result().is_some()
-            })
+                    || entry.as_tool_result().is_some())
+        })
     }
 
-    fn has_pending_tool_results(&self) -> bool {
-        self.tape.default_view().entries.iter().any(|entry| entry.as_tool_result().is_some())
+    fn current_turn_has_tool_result_since_usage(&self, turn_id: &str) -> bool {
+        if self.last_usage_turn_id.as_deref() != Some(turn_id) {
+            return false;
+        }
+
+        let lower_bound = self.last_usage_entry_id.unwrap_or(0);
+        self.tape.entries().iter().any(|entry| {
+            entry.id > lower_bound
+                && entry.meta.get("run_id").and_then(|value| value.as_str()) == Some(turn_id)
+                && entry.as_tool_result().is_some()
+        })
     }
 
     fn has_anchor_after_last_completed_turn(&self) -> bool {

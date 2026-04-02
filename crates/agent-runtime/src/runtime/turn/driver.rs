@@ -77,6 +77,9 @@ where
                 Ok(completion) => {
                     self.last_input_tokens =
                         completion.usage.as_ref().map(|usage| usage.input_tokens as u64);
+                    self.last_usage_turn_id = Some(turn_id.clone());
+                    self.last_usage_step_index = Some(llm_step_index);
+                    self.last_usage_entry_id = self.tape.entries().last().map(|entry| entry.id);
                     completion
                 }
                 Err(error) => {
@@ -276,12 +279,34 @@ where
         turn_id: &str,
         llm_step_index: &mut u32,
     ) -> Result<(), RuntimeError> {
-        if !self.should_preflight_compress() {
+        let should_compress = self.should_preflight_compress(turn_id)
+            || self.should_preflight_compress_after_tool_result(turn_id);
+        if !should_compress {
             return Ok(());
         }
 
         self.compress_context(Some(turn_id), *llm_step_index).await?;
         *llm_step_index = llm_step_index.saturating_add(1);
         Ok(())
+    }
+
+    fn should_preflight_compress_after_tool_result(&self, turn_id: &str) -> bool {
+        let Some(context_limit) = self.model_identity.limit.as_ref().and_then(|limit| limit.context)
+        else {
+            return false;
+        };
+        let Some(last_input_tokens) = self.last_input_tokens else {
+            return false;
+        };
+        if (last_input_tokens as f64 / context_limit as f64) < self.context_pressure_threshold {
+            return false;
+        }
+
+        let lower_bound = self.last_usage_entry_id.unwrap_or(0);
+        self.tape.entries().iter().any(|entry| {
+            entry.id > lower_bound
+                && entry.meta.get("run_id").and_then(|value| value.as_str()) == Some(turn_id)
+                && entry.as_tool_result().is_some()
+        })
     }
 }

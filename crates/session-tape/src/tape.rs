@@ -170,6 +170,42 @@ impl SessionTape {
         Handoff { anchor, event_id }
     }
 
+    pub fn handoff_after_entry(
+        &mut self,
+        after_entry_id: u64,
+        name: impl Into<String>,
+        state: Value,
+    ) -> Result<Handoff, SessionTapeError> {
+        let insert_index = self
+            .entries
+            .iter()
+            .position(|entry| entry.id == after_entry_id)
+            .map(|index| index + 1)
+            .ok_or_else(|| SessionTapeError::new(format!("未找到插入锚点位置：{after_entry_id}")))?;
+
+        let name = name.into();
+        let anchor_state = state;
+        let anchor_id = self.next_id;
+        self.next_id += 1;
+        let mut anchor_entry = TapeEntry::anchor(&name, Some(anchor_state.clone()));
+        anchor_entry.id = anchor_id;
+        let event_id = self.next_id;
+        self.next_id += 1;
+        let mut event_entry = TapeEntry::event(
+            "handoff",
+            Some(serde_json::json!({"anchor_entry_id": anchor_id})),
+        );
+        event_entry.id = event_id;
+
+        self.entries.insert(insert_index, anchor_entry);
+        self.entries.insert(insert_index + 1, event_entry);
+
+        Ok(Handoff {
+            anchor: Anchor { entry_id: anchor_id, name, state: anchor_state },
+            event_id,
+        })
+    }
+
     pub fn latest_anchor(&self) -> Option<Anchor> {
         self.entries.iter().rev().find_map(anchor_from_entry)
     }
@@ -190,7 +226,16 @@ impl SessionTape {
 
     pub fn default_view(&self) -> SessionView {
         let latest_anchor = self.latest_anchor();
-        self.assemble_view(latest_anchor.as_ref())
+        let Some(anchor) = latest_anchor.as_ref() else {
+            return self.assemble_view(None);
+        };
+
+        let lower_bound = anchor
+            .state
+            .get("compressed_until_entry_id")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(anchor.entry_id);
+        self.assemble_view_with_lower_bound(Some(anchor), lower_bound)
     }
 
     pub fn default_messages(&self) -> Vec<Message> {
@@ -203,6 +248,15 @@ impl SessionTape {
             .filter(|entry| entry.id > entry_id)
             .filter_map(project_conversation_item)
             .collect()
+    }
+
+    fn assemble_view_with_lower_bound(&self, anchor: Option<&Anchor>, lower_bound: u64) -> SessionView {
+        let entries =
+            self.entries.iter().filter(|entry| entry.id > lower_bound).cloned().collect::<Vec<_>>();
+        let messages = entries.iter().filter_map(project_message).collect::<Vec<_>>();
+        let conversation = entries.iter().filter_map(project_conversation_item).collect::<Vec<_>>();
+
+        SessionView { origin_anchor: anchor.cloned(), entries, messages, conversation }
     }
 
     pub fn tape_name(&self) -> &str {

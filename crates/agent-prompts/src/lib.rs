@@ -33,7 +33,7 @@ const CONTEXT_CONTRACT_TEMPLATE: &str = include_str!("../prompts/context-contrac
 pub const AGENT_HANDOFF_THRESHOLD: f64 = 0.80;
 
 /// Threshold at which the runtime auto-compresses context.
-pub const AUTO_COMPRESSION_THRESHOLD: f64 = 0.95;
+pub const AUTO_COMPRESSION_THRESHOLD: f64 = 0.90;
 
 pub fn aia_agents_prompt_template() -> &'static str {
     AIA_AGENTS_TEMPLATE.trim()

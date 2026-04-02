@@ -51,6 +51,9 @@ pub struct AgentRuntime<M, T> {
     interaction_capabilities: SessionInteractionCapabilities,
     runtime_tool_host: Option<Arc<dyn RuntimeToolHost>>,
     last_input_tokens: Option<u64>,
+    last_usage_turn_id: Option<String>,
+    last_usage_step_index: Option<u32>,
+    last_usage_entry_id: Option<u64>,
     hooks: RuntimeHooks,
     agent_started: bool,
 }
@@ -96,6 +99,9 @@ where
             interaction_capabilities: SessionInteractionCapabilities::interactive(),
             runtime_tool_host: None,
             last_input_tokens,
+            last_usage_turn_id: None,
+            last_usage_step_index: None,
+            last_usage_entry_id: None,
             hooks: RuntimeHooks::default(),
             agent_started: false,
         }
@@ -260,6 +266,48 @@ where
             serde_json::Value::String(source.to_string()),
         );
         self.persist_tape_entries_from(previous_len)?;
+        Ok(handoff)
+    }
+
+    pub(super) fn record_handoff_at(
+        &mut self,
+        after_entry_id: u64,
+        name: impl Into<String>,
+        state: serde_json::Value,
+        source: &str,
+    ) -> Result<Handoff, RuntimeError> {
+        let handoff = self
+            .tape
+            .handoff_after_entry(after_entry_id, name, state)
+            .map_err(RuntimeError::session)?;
+        self.tape.set_entry_meta(
+            handoff.anchor.entry_id,
+            "source",
+            serde_json::Value::String(source.to_string()),
+        );
+        self.tape.set_entry_meta(
+            handoff.event_id,
+            "source",
+            serde_json::Value::String(source.to_string()),
+        );
+        if let Some(listener) = self.tape_entry_listener.as_ref() {
+            listener(
+                self.tape
+                    .entries()
+                    .iter()
+                    .find(|entry| entry.id == handoff.anchor.entry_id)
+                    .ok_or_else(|| RuntimeError::session("插入 anchor 后未找到记录"))?,
+            )
+            .map_err(RuntimeError::session)?;
+            listener(
+                self.tape
+                    .entries()
+                    .iter()
+                    .find(|entry| entry.id == handoff.event_id)
+                    .ok_or_else(|| RuntimeError::session("插入 handoff 后未找到记录"))?,
+            )
+            .map_err(RuntimeError::session)?;
+        }
         Ok(handoff)
     }
 
