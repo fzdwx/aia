@@ -1,4 +1,6 @@
-use agent_core::{CompletionRequest, ConversationItem, LanguageModel, ToolDefinition, ToolExecutor};
+use agent_core::{
+    CompletionRequest, ConversationItem, LanguageModel, ToolDefinition, ToolExecutor,
+};
 
 use crate::ContextStats;
 
@@ -13,21 +15,22 @@ where
     M: LanguageModel,
     T: ToolExecutor,
 {
-    pub(super) fn should_preflight_compress(&self, turn_id: &str) -> bool {
-        if self.current_turn_has_tool_result_since_usage(turn_id) {
-            return true;
-        }
-
-        let Some(context_limit) = self.model_identity.limit.as_ref().and_then(|limit| limit.context)
+    pub(super) fn exceeds_context_pressure_threshold(&self, input_tokens: u64) -> bool {
+        let Some(context_limit) =
+            self.model_identity.limit.as_ref().and_then(|limit| limit.context)
         else {
             return false;
         };
+
+        (input_tokens as f64 / context_limit as f64) >= self.context_pressure_threshold
+    }
+
+    pub(super) fn should_preflight_compress(&self, turn_id: &str) -> bool {
         let Some(last_input_tokens) = self.current_input_tokens() else {
             return false;
         };
 
-        let pressure_ratio = last_input_tokens as f64 / context_limit as f64;
-        if pressure_ratio < self.context_pressure_threshold {
+        if !self.exceeds_context_pressure_threshold(last_input_tokens as u64) {
             return false;
         }
 
@@ -113,7 +116,7 @@ where
         })
     }
 
-    fn current_turn_has_tool_result_since_usage(&self, turn_id: &str) -> bool {
+    pub(super) fn current_turn_has_tool_result_since_usage(&self, turn_id: &str) -> bool {
         if self.last_usage_turn_id.as_deref() != Some(turn_id) {
             return false;
         }

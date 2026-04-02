@@ -55,8 +55,7 @@ where
                 );
             }
 
-            self.maybe_auto_compress_before_completion(&turn_id, &mut llm_step_index)
-                .await?;
+            self.maybe_auto_compress_before_completion(&turn_id, &mut llm_step_index).await?;
 
             let request = self.prepare_request_with_hooks(
                 &turn_id,
@@ -242,13 +241,11 @@ where
             let entry_id =
                 self.append_tape_entry(TapeEntry::message(&user_message).with_run_id(&turn_id))?;
             user_entry_ids.push(entry_id);
-            self.publish_event(RuntimeEvent::UserMessage {
-                content: user_message.content.clone(),
-            });
+            self.publish_event(RuntimeEvent::UserMessage { content: user_message.content.clone() });
         }
 
         let buffers = TurnBuffers::with_user_entries(user_entry_ids);
-        
+
         // 使用所有消息作为预览
         let preview: String = user_inputs.join("\n");
         self.notify_turn_start(&turn_id, &preview);
@@ -291,22 +288,13 @@ where
     }
 
     fn should_preflight_compress_after_tool_result(&self, turn_id: &str) -> bool {
-        let Some(context_limit) = self.model_identity.limit.as_ref().and_then(|limit| limit.context)
-        else {
-            return false;
-        };
         let Some(last_input_tokens) = self.last_input_tokens else {
             return false;
         };
-        if (last_input_tokens as f64 / context_limit as f64) < self.context_pressure_threshold {
+        if !self.exceeds_context_pressure_threshold(last_input_tokens) {
             return false;
         }
 
-        let lower_bound = self.last_usage_entry_id.unwrap_or(0);
-        self.tape.entries().iter().any(|entry| {
-            entry.id > lower_bound
-                && entry.meta.get("run_id").and_then(|value| value.as_str()) == Some(turn_id)
-                && entry.as_tool_result().is_some()
-        })
+        self.current_turn_has_tool_result_since_usage(turn_id)
     }
 }

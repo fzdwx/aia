@@ -1265,11 +1265,15 @@ fn 大写_shell_在并行路径里也会实时发出输出增量() {
 
     let handle = std::thread::spawn(move || {
         let control = TurnControl::new(AbortSignal::new());
-        run_async(runtime.handle_turn_streaming(vec!["执行 Shell".to_string()], control, &mut |event| {
-            if matches!(event, agent_core::StreamEvent::ToolOutputDelta { .. }) {
-                let _ = delta_observed_tx.send(());
-            }
-        }))
+        run_async(runtime.handle_turn_streaming(
+            vec!["执行 Shell".to_string()],
+            control,
+            &mut |event| {
+                if matches!(event, agent_core::StreamEvent::ToolOutputDelta { .. }) {
+                    let _ = delta_observed_tx.send(());
+                }
+            },
+        ))
     });
 
     output_emitted_rx.recv().expect("工具应先发出输出增量");
@@ -1298,11 +1302,15 @@ fn 并行_shell_会在各自完成时单独发出完成事件() {
 
     let handle = std::thread::spawn(move || {
         let control = TurnControl::new(AbortSignal::new());
-        run_async(runtime.handle_turn_streaming(vec!["并行执行 Shell".to_string()], control, &mut |event| {
-            if let agent_core::StreamEvent::ToolCallCompleted { content, .. } = event {
-                let _ = completed_tx.send(content);
-            }
-        }))
+        run_async(runtime.handle_turn_streaming(
+            vec!["并行执行 Shell".to_string()],
+            control,
+            &mut |event| {
+                if let agent_core::StreamEvent::ToolCallCompleted { content, .. } = event {
+                    let _ = completed_tx.send(content);
+                }
+            },
+        ))
     });
 
     fast_finished_rx.recv().expect("快任务应先执行完成");
@@ -2102,11 +2110,16 @@ impl LanguageModel for CompressionInspectionModel {
 
 struct StepwiseCompressionModel {
     seen_requests: Mutex<Vec<CompletionRequest>>,
+    first_input_tokens: u64,
 }
 
 impl StepwiseCompressionModel {
     fn new() -> Self {
-        Self { seen_requests: Mutex::new(Vec::new()) }
+        Self::with_input_tokens(360)
+    }
+
+    fn with_input_tokens(first_input_tokens: u64) -> Self {
+        Self { seen_requests: Mutex::new(Vec::new()), first_input_tokens }
     }
 }
 
@@ -2128,7 +2141,9 @@ impl LanguageModel for StepwiseCompressionModel {
 
         let completion_count = mutex_lock(&self.seen_requests)
             .iter()
-            .filter(|item| item.instructions.as_ref().is_none_or(|i| !i.contains("handoff summary")))
+            .filter(|item| {
+                item.instructions.as_ref().is_none_or(|i| !i.contains("handoff summary"))
+            })
             .count();
 
         if completion_count == 1 {
@@ -2136,9 +2151,9 @@ impl LanguageModel for StepwiseCompressionModel {
                 segments: vec![CompletionSegment::ToolUse(ToolCall::new("search"))],
                 stop_reason: CompletionStopReason::ToolUse,
                 usage: Some(CompletionUsage {
-                    input_tokens: 360,
+                    input_tokens: self.first_input_tokens,
                     output_tokens: 20,
-                    total_tokens: 380,
+                    total_tokens: self.first_input_tokens + 20,
                     cached_tokens: 0,
                 }),
                 response_body: None,
@@ -2169,17 +2184,17 @@ fn 高压压缩请求会先裁掉尾部_tool_result() {
     let requests = mutex_lock(&runtime.model.seen_requests);
     let compression_requests = requests
         .iter()
-        .filter(|request| request.instructions.as_ref().is_some_and(|i| i.contains("handoff summary")))
+        .filter(|request| {
+            request.instructions.as_ref().is_some_and(|i| i.contains("handoff summary"))
+        })
         .collect::<Vec<_>>();
     assert_eq!(compression_requests.len(), 1);
-    assert!(compression_requests[0]
-        .conversation
-        .iter()
-        .all(|item| item.as_tool_result().is_none()));
-    assert!(compression_requests[0]
-        .conversation
-        .iter()
-        .any(|item| item.as_message().is_some_and(|message| message.content.contains("旧历史用户消息一"))));
+    assert!(
+        compression_requests[0].conversation.iter().all(|item| item.as_tool_result().is_none())
+    );
+    assert!(compression_requests[0].conversation.iter().any(|item| {
+        item.as_message().is_some_and(|message| message.content.contains("旧历史用户消息一"))
+    }));
 
     let entries = runtime.tape().entries();
     let anchor_index = entries
@@ -2190,10 +2205,8 @@ fn 高压压缩请求会先裁掉尾部_tool_result() {
         .iter()
         .position(|entry| entry.event_name() == Some("handoff"))
         .expect("应有 handoff event");
-    let tool_call_index = entries
-        .iter()
-        .position(|entry| entry.as_tool_call().is_some())
-        .expect("应有 tool_call");
+    let tool_call_index =
+        entries.iter().position(|entry| entry.as_tool_call().is_some()).expect("应有 tool_call");
     let tool_result_index = entries
         .iter()
         .position(|entry| entry.as_tool_result().is_some())
@@ -2203,6 +2216,114 @@ fn 高压压缩请求会先裁掉尾部_tool_result() {
     assert_eq!(handoff_index, anchor_index + 1);
     assert!(handoff_index < tool_call_index);
     assert!(tool_call_index < tool_result_index);
+}
+
+#[test]
+fn 缺少_usage_样本时工具结果不会单独触发压缩() {
+    let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced)
+        .with_limit(Some(agent_core::ModelLimit { context: Some(4_000), output: Some(512) }));
+    let model = ContinueAfterToolModel::new();
+    let mut tape = SessionTape::new();
+    tape.append(Message::new(Role::User, "旧历史用户消息一"));
+    tape.append(Message::new(Role::Assistant, "旧历史助手消息一"));
+    tape.append(Message::new(Role::User, "旧历史用户消息二"));
+    tape.append(Message::new(Role::Assistant, "旧历史助手消息二"));
+
+    let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape)
+        .with_context_pressure_threshold(0.80);
+
+    let output = run_turn(&mut runtime, "开始").expect("应继续完成");
+
+    assert_eq!(output.assistant_text, "已根据工具结果继续回答");
+    let requests = mutex_lock(&runtime.model.seen_requests);
+    assert_eq!(requests.len(), 2);
+    assert!(requests.iter().all(|request| {
+        request.instructions.as_ref().is_none_or(|text| !text.contains("handoff summary"))
+    }));
+    assert!(runtime.tape().anchors().iter().all(|anchor| anchor.name != "context_compression"));
+}
+
+#[test]
+fn 低上下文压力时工具结果不会单独触发压缩() {
+    let mut identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced);
+    identity.limit = Some(agent_core::ModelLimit { context: Some(400), output: Some(80) });
+    let model = StepwiseCompressionModel::with_input_tokens(180);
+    let mut tape = SessionTape::new();
+    tape.append(Message::new(Role::User, "旧历史用户消息一"));
+    tape.append(Message::new(Role::Assistant, "旧历史助手消息一"));
+    tape.append(Message::new(Role::User, "旧历史用户消息二"));
+    tape.append(Message::new(Role::Assistant, "旧历史助手消息二"));
+
+    let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape)
+        .with_context_pressure_threshold(0.50);
+
+    let output = run_turn(&mut runtime, "开始").expect("应继续完成");
+
+    assert_eq!(output.assistant_text, "工具后继续完成");
+    let requests = mutex_lock(&runtime.model.seen_requests);
+    let compression_requests = requests
+        .iter()
+        .filter(|request| {
+            request.instructions.as_ref().is_some_and(|text| text.contains("handoff summary"))
+        })
+        .collect::<Vec<_>>();
+    assert!(compression_requests.is_empty());
+    assert!(runtime.tape().anchors().iter().all(|anchor| anchor.name != "context_compression"));
+}
+
+#[test]
+fn 工具结果路径在压力恰好达到阈值时仍会触发压缩() {
+    let mut identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced);
+    identity.limit = Some(agent_core::ModelLimit { context: Some(400), output: Some(80) });
+    let model = StepwiseCompressionModel::with_input_tokens(360);
+    let mut tape = SessionTape::new();
+    tape.append(Message::new(Role::User, "旧历史用户消息一"));
+    tape.append(Message::new(Role::Assistant, "旧历史助手消息一"));
+    tape.append(Message::new(Role::User, "旧历史用户消息二"));
+    tape.append(Message::new(Role::Assistant, "旧历史助手消息二"));
+
+    let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape)
+        .with_context_pressure_threshold(0.90);
+
+    let output = run_turn(&mut runtime, "开始").expect("应成功完成");
+
+    assert_eq!(output.assistant_text, "工具后继续完成");
+    let requests = mutex_lock(&runtime.model.seen_requests);
+    let compression_requests = requests
+        .iter()
+        .filter(|request| {
+            request.instructions.as_ref().is_some_and(|text| text.contains("handoff summary"))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(compression_requests.len(), 1);
+    assert!(runtime.tape().anchors().iter().any(|anchor| anchor.name == "context_compression"));
+}
+
+#[test]
+fn 缺少_context_limit_时工具结果不会单独触发压缩() {
+    let identity = ModelIdentity::new("openai", "gpt-4.1", ModelDisposition::Balanced);
+    let model = StepwiseCompressionModel::new();
+    let mut tape = SessionTape::new();
+    tape.append(Message::new(Role::User, "旧历史用户消息一"));
+    tape.append(Message::new(Role::Assistant, "旧历史助手消息一"));
+    tape.append(Message::new(Role::User, "旧历史用户消息二"));
+    tape.append(Message::new(Role::Assistant, "旧历史助手消息二"));
+
+    let mut runtime = AgentRuntime::with_tape(model, StubTools, identity, tape)
+        .with_context_pressure_threshold(0.20);
+
+    let output = run_turn(&mut runtime, "开始").expect("应继续完成");
+
+    assert_eq!(output.assistant_text, "工具后继续完成");
+    let requests = mutex_lock(&runtime.model.seen_requests);
+    let compression_requests = requests
+        .iter()
+        .filter(|request| {
+            request.instructions.as_ref().is_some_and(|text| text.contains("handoff summary"))
+        })
+        .collect::<Vec<_>>();
+    assert!(compression_requests.is_empty());
+    assert!(runtime.tape().anchors().iter().all(|anchor| anchor.name != "context_compression"));
 }
 
 #[test]
