@@ -28,8 +28,6 @@ export function StatusIndicator({
       <Shimmer
         as="span"
         className="[--color-muted-foreground:var(--color-foreground)]"
-        duration={1}
-        spread={3}
       >
         {STATUS_LABELS[status]}
       </Shimmer>

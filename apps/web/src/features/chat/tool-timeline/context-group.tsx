@@ -145,7 +145,6 @@ export function ContextToolGroup({
     <div data-component="tool-group" data-variant="context">
       {isRunning ? (
         <div data-component="context-tool-group-trigger">
-          <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-amber-500/70" />
           <ToolStatusTitle
             active
             activeText={toolTimelineCopy.groupStatus.running}
