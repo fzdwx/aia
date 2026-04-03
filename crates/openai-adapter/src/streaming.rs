@@ -92,8 +92,12 @@ impl StreamingTranscript {
         }
     }
 
-    pub(crate) fn into_response_body(self) -> Option<String> {
+    pub(crate) fn response_body(&self) -> Option<String> {
         Some(self.response_events.join("\n"))
+    }
+
+    pub(crate) fn into_response_body(self) -> Option<String> {
+        self.response_body()
     }
 }
 
@@ -223,10 +227,19 @@ where
             }
         }
     })
-    .await?;
+    .await
+    .map_err(|error| {
+        if error.response_body().is_some() {
+            error
+        } else {
+            error.with_response_body(state.transcript_mut().response_body())
+        }
+    })?;
 
     if !saw_done && !state.saw_terminal_event() {
-        return Err(OpenAiAdapterError::new("OpenAI 流式响应在完成前提前结束").with_retryable(true));
+        return Err(OpenAiAdapterError::new("OpenAI 流式响应在完成前提前结束")
+            .with_retryable(true)
+            .with_response_body(state.transcript_mut().response_body()));
     }
 
     sink(StreamEvent::Done);

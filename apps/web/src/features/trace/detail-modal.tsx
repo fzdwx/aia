@@ -980,6 +980,23 @@ type PayloadTab = {
   meta?: string
 }
 
+function responseTabLabel(trace: TraceRecord) {
+  if (!trace.response_body) return "Response"
+  return trace.status === "failed" ? "Partial Response" : "Response"
+}
+
+function responseTabBadge(trace: TraceRecord) {
+  if (!trace.response_body) return "summary"
+  return trace.status === "failed" ? "partial" : "raw"
+}
+
+function responseTabMeta(trace: TraceRecord) {
+  if (!trace.response_body) return "response_summary"
+  return trace.status === "failed"
+    ? `${trace.response_body.length} chars · partial transcript`
+    : `${trace.response_body.length} chars`
+}
+
 function resolveMessagePayload(trace: TraceRecord) {
   const request = asRecord(trace.provider_request)
   if (!request) return []
@@ -1006,11 +1023,11 @@ function buildPayloadTabs(trace: TraceRecord): PayloadTab[] {
   const responseTab: PayloadTab = responseBody
     ? {
         key: "response",
-        label: "Response",
+        label: responseTabLabel(trace),
         value: responseBody,
         kind: "text",
-        badge: "raw",
-        meta: `${responseBody.length} chars`,
+        badge: responseTabBadge(trace),
+        meta: responseTabMeta(trace),
       }
     : {
         key: "response",
@@ -1048,12 +1065,13 @@ function buildPayloadTabs(trace: TraceRecord): PayloadTab[] {
       key: "raw",
       label: "Raw",
       value: {
+        error: trace.error,
         request_summary: trace.request_summary,
         response_summary: trace.response_summary,
         response_body: trace.response_body,
       },
       kind: "json",
-      meta: "summary bundle",
+      meta: "trace bundle",
     },
   ]
 }
@@ -1278,7 +1296,7 @@ function ResultSection({ trace }: { trace: TraceRecord }) {
               <>
                 <Separator className="my-3 opacity-40" />
                 <p className="workspace-section-label mb-2 text-destructive/75">
-                  Upstream response body
+                  Partial upstream transcript
                 </p>
                 <TextBlock
                   value={trace.response_body}
@@ -1325,8 +1343,14 @@ function RawPayloadsCard({ trace }: { trace: TraceRecord }) {
         {trace.response_body ? (
           <Collapsible className="rounded-lg border border-border/50 bg-muted/15 px-3 py-2">
             <CollapsibleTrigger className="text-title flex w-full items-center justify-between gap-3 text-left font-medium text-foreground">
-              <span>Response body</span>
-              <span className="text-meta text-muted-foreground">Raw text</span>
+              <span>
+                {trace.status === "failed"
+                  ? "Partial response transcript"
+                  : "Response body"}
+              </span>
+              <span className="text-meta text-muted-foreground">
+                {trace.status === "failed" ? "Captured before failure" : "Raw text"}
+              </span>
             </CollapsibleTrigger>
             <CollapsibleContent className="pt-3">
               <TextBlock
@@ -1336,6 +1360,7 @@ function RawPayloadsCard({ trace }: { trace: TraceRecord }) {
             </CollapsibleContent>
           </Collapsible>
         ) : null}
+        {trace.error ? <RawJsonSection title="Error summary" value={{ error: trace.error }} /> : null}
         <RawJsonSection title="Request summary" value={trace.request_summary} />
         <RawJsonSection
           title="Response summary"

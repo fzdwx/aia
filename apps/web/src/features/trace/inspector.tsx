@@ -232,6 +232,48 @@ function RawJson({ title, value }: { title: string; value: unknown }) {
   )
 }
 
+function RetrySummaryList({ trace }: { trace: TraceRecord | null }) {
+  const retryEvents = (trace?.events ?? []).filter(
+    (event) => event.name === "response.retrying"
+  )
+
+  if (retryEvents.length === 0) {
+    return <p className="text-caption text-muted-foreground">No retry attempts.</p>
+  }
+
+  return (
+    <div className="space-y-2">
+      {retryEvents.map((event, index) => {
+        const attributes = asRecord(event.attributes)
+        const attempt = attributes?.attempt
+        const maxAttempts = attributes?.max_attempts
+        const reason = asString(attributes?.reason)
+        const label =
+          typeof attempt === "number" && typeof maxAttempts === "number"
+            ? `Attempt ${attempt + 1} / ${maxAttempts}`
+            : `Retry ${index + 1}`
+
+        return (
+          <div
+            key={`${event.name}-${event.at_ms}-${index}`}
+            className="rounded-lg border border-border/30 bg-background px-3 py-2.5"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-ui font-medium text-foreground">{label}</span>
+              <span className="text-meta text-muted-foreground">
+                {formatDateTime(event.at_ms)}
+              </span>
+            </div>
+            <p className="text-caption mt-1 text-muted-foreground">
+              {reason ?? "Retry triggered"}
+            </p>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function EventTimeline({
   events,
   emptyLabel,
@@ -496,9 +538,23 @@ export function LlmInspector({
                   : "-",
             },
             { label: "stop reason", value: node.trace.stop_reason ?? "-" },
+            {
+              label: "retries",
+              value: String(
+                (trace?.events ?? []).filter(
+                  (event) => event.name === "response.retrying"
+                ).length
+              ),
+            },
           ]}
         />
       </Section>
+
+      {trace ? (
+        <Section title="Retry attempts">
+          <RetrySummaryList trace={trace} />
+        </Section>
+      ) : null}
 
       {trace ? (
         <Section title="Trace fields">

@@ -693,6 +693,10 @@ fn responses_发出文本增量后断流不会自动重试() {
 
     handle.join().expect("服务线程退出");
     assert!(!error.is_cancelled());
+    assert!(
+        error.response_body().is_some_and(|body| body.contains(r#""delta":"partial""#)),
+        "断流失败时应保留已捕获的部分 SSE transcript"
+    );
     assert!(matches!(
         deltas.as_slice(),
         [StreamEvent::TextDelta { text }] if text == "partial"
@@ -1346,6 +1350,10 @@ fn responses_流式_error_事件会让请求失败而不是返回空完成() {
 
     handle.join().expect("服务线程退出");
     assert!(error.to_string().contains("upstream failed"));
+    assert!(
+        error.response_body().is_some_and(|body| body.contains(r#""type":"error""#)),
+        "流内错误时应保留已捕获的 provider transcript"
+    );
 }
 
 #[test]

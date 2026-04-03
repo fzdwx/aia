@@ -1,94 +1,13 @@
-use std::sync::LazyLock;
-
 use axum::{Json, http::StatusCode, response::IntoResponse};
 use similar::{ChangeTag, TextDiff};
-use syntect::{
-    easy::HighlightLines,
-    highlighting::{Color, FontStyle, Style, Theme, ThemeSet},
-    parsing::{SyntaxReference, SyntaxSet},
-};
 
+use super::highlighting::{DiffTheme, highlight_document_lines, highlight_line};
 use super::{DiffHunk, DiffLine, DiffRequest, DiffResponse, SplitCell, SplitPair};
 
-static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
-
-static GITHUB_DARK: LazyLock<Theme> = LazyLock::new(|| {
-    let bytes = include_bytes!("../../../themes/github-dark.tmTheme");
-    let cursor = std::io::Cursor::new(bytes);
-    ThemeSet::load_from_reader(&mut std::io::BufReader::new(cursor))
-        .expect("failed to load github-dark theme")
-});
-
-static GITHUB_LIGHT: LazyLock<Theme> = LazyLock::new(|| {
-    let bytes = include_bytes!("../../../themes/github-light.tmTheme");
-    let cursor = std::io::Cursor::new(bytes);
-    ThemeSet::load_from_reader(&mut std::io::BufReader::new(cursor))
-        .expect("failed to load github-light theme")
-});
-
-fn resolve_theme(name: Option<&str>) -> &'static Theme {
+fn resolve_theme(name: Option<&str>) -> DiffTheme {
     match name {
-        Some("light") => &GITHUB_LIGHT,
-        _ => &GITHUB_DARK,
-    }
-}
-
-fn resolve_syntax(file_name: &str) -> &'static SyntaxReference {
-    let ss = &*SYNTAX_SET;
-    ss.find_syntax_for_file(file_name).ok().flatten().unwrap_or_else(|| ss.find_syntax_plain_text())
-}
-
-fn highlight_line(line: &str, syntax: &SyntaxReference, theme: &Theme) -> String {
-    let ss = &*SYNTAX_SET;
-    let mut h = HighlightLines::new(syntax, theme);
-    let line_with_newline = format!("{}\n", line);
-    match h.highlight_line(&line_with_newline, ss) {
-        Ok(regions) => styled_regions_to_html(&regions),
-        Err(_) => {
-            let mut out = String::new();
-            html_escape_into(&mut out, line);
-            out
-        }
-    }
-}
-
-fn styled_regions_to_html(regions: &[(Style, &str)]) -> String {
-    let mut out = String::with_capacity(regions.len() * 40);
-    for (style, text) in regions {
-        let color = style.foreground;
-        let css = format_style_css(color, style.font_style);
-        out.push_str("<span style=\"");
-        out.push_str(&css);
-        out.push_str("\">");
-        html_escape_into(&mut out, text);
-        out.push_str("</span>");
-    }
-    out
-}
-
-fn format_style_css(color: Color, font_style: FontStyle) -> String {
-    let mut css = format!("color:#{:02x}{:02x}{:02x}", color.r, color.g, color.b);
-    if font_style.contains(FontStyle::BOLD) {
-        css.push_str(";font-weight:bold");
-    }
-    if font_style.contains(FontStyle::ITALIC) {
-        css.push_str(";font-style:italic");
-    }
-    if font_style.contains(FontStyle::UNDERLINE) {
-        css.push_str(";text-decoration:underline");
-    }
-    css
-}
-
-fn html_escape_into(buf: &mut String, text: &str) {
-    for ch in text.chars() {
-        match ch {
-            '&' => buf.push_str("&amp;"),
-            '<' => buf.push_str("&lt;"),
-            '>' => buf.push_str("&gt;"),
-            '"' => buf.push_str("&quot;"),
-            _ => buf.push(ch),
-        }
+        Some("light") => DiffTheme::Light,
+        _ => DiffTheme::Dark,
     }
 }
 
@@ -150,19 +69,22 @@ fn build_split_pairs(lines: &[DiffLine]) -> Vec<SplitPair> {
 fn compute_all_add(
     file_name: &str,
     content: &str,
-    theme: &Theme,
+    theme: DiffTheme,
     want_split: bool,
 ) -> DiffResponse {
-    let syntax = resolve_syntax(file_name);
     let raw_lines: Vec<&str> = content.lines().collect();
+    let highlighted_lines = highlight_document_lines(content, file_name, theme);
     let count = raw_lines.len() as u32;
 
     let lines: Vec<DiffLine> = raw_lines
         .iter()
+        .zip(highlighted_lines)
         .enumerate()
-        .map(|(i, text)| {
-            let html = highlight_line(text, syntax, theme);
-            DiffLine { kind: "add", old_ln: None, new_ln: Some(i as u32 + 1), html }
+        .map(|(i, (_text, html))| DiffLine {
+            kind: "add",
+            old_ln: None,
+            new_ln: Some(i as u32 + 1),
+            html,
         })
         .collect();
 
@@ -198,7 +120,7 @@ fn compute_contents_diff(
     file_name: &str,
     old_content: &str,
     new_content: &str,
-    theme: &Theme,
+    theme: DiffTheme,
     want_split: bool,
 ) -> DiffResponse {
     // Fast path: old_content is empty → all lines are additions, skip diff
@@ -206,10 +128,11 @@ fn compute_contents_diff(
         return compute_all_add(file_name, new_content, theme, want_split);
     }
 
-    let syntax = resolve_syntax(file_name);
     let diff = TextDiff::configure()
         .algorithm(similar::Algorithm::Patience)
         .diff_lines(old_content, new_content);
+    let old_highlighted = highlight_document_lines(old_content, file_name, theme);
+    let new_highlighted = highlight_document_lines(new_content, file_name, theme);
 
     let mut hunks = Vec::new();
     let mut total_added: u32 = 0;
@@ -227,12 +150,21 @@ fn compute_contents_diff(
 
         for op in &group {
             for change in diff.iter_changes(op) {
-                let text = change.value();
-                let display_text = text.strip_suffix('\n').unwrap_or(text);
-                let html = highlight_line(display_text, syntax, theme);
-
                 match change.tag() {
                     ChangeTag::Equal => {
+                        let html = change
+                            .new_index()
+                            .and_then(|index| new_highlighted.get(index).cloned())
+                            .or_else(|| {
+                                change
+                                    .old_index()
+                                    .and_then(|index| old_highlighted.get(index).cloned())
+                            })
+                            .unwrap_or_else(|| {
+                                let text = change.value();
+                                let display_text = text.strip_suffix('\n').unwrap_or(text);
+                                highlight_line(display_text, file_name, theme)
+                            });
                         lines.push(DiffLine {
                             kind: "ctx",
                             old_ln: change.old_index().map(|i| i as u32 + 1),
@@ -241,6 +173,14 @@ fn compute_contents_diff(
                         });
                     }
                     ChangeTag::Delete => {
+                        let html = change
+                            .old_index()
+                            .and_then(|index| old_highlighted.get(index).cloned())
+                            .unwrap_or_else(|| {
+                                let text = change.value();
+                                let display_text = text.strip_suffix('\n').unwrap_or(text);
+                                highlight_line(display_text, file_name, theme)
+                            });
                         total_removed += 1;
                         lines.push(DiffLine {
                             kind: "del",
@@ -250,6 +190,14 @@ fn compute_contents_diff(
                         });
                     }
                     ChangeTag::Insert => {
+                        let html = change
+                            .new_index()
+                            .and_then(|index| new_highlighted.get(index).cloned())
+                            .unwrap_or_else(|| {
+                                let text = change.value();
+                                let display_text = text.strip_suffix('\n').unwrap_or(text);
+                                highlight_line(display_text, file_name, theme)
+                            });
                         total_added += 1;
                         lines.push(DiffLine {
                             kind: "add",
@@ -343,7 +291,7 @@ struct RawHunk {
     lines: Vec<RawLine>,
 }
 
-fn compute_patch_diff(patch: &str, theme: &Theme) -> DiffResponse {
+fn compute_patch_diff(patch: &str, theme: DiffTheme) -> DiffResponse {
     // First pass: parse patch into raw hunks
     let raw_hunks = parse_patch_into_raw_hunks(patch);
 
@@ -354,14 +302,14 @@ fn compute_patch_diff(patch: &str, theme: &Theme) -> DiffResponse {
     for raw_hunk in raw_hunks {
         // Dedup identical del/add pairs into ctx
         let processed = dedup_identical_changes(raw_hunk.lines);
+        let highlighted_lines =
+            highlight_processed_patch_lines(&processed, &raw_hunk.file_name, theme);
 
-        let syntax = resolve_syntax(&raw_hunk.file_name);
         let mut lines = Vec::new();
         let mut old_ln = raw_hunk.old_start;
         let mut new_ln = raw_hunk.new_start;
 
-        for raw in &processed {
-            let html = highlight_line(&raw.content, syntax, theme);
+        for (raw, html) in processed.iter().zip(highlighted_lines.into_iter()) {
             match raw.kind {
                 "ctx" => {
                     lines.push(DiffLine {
@@ -403,6 +351,75 @@ fn compute_patch_diff(patch: &str, theme: &Theme) -> DiffResponse {
     }
 
     DiffResponse { hunks, added: total_added, removed: total_removed }
+}
+
+fn highlight_processed_patch_lines(
+    lines: &[RawLine],
+    file_name: &str,
+    theme: DiffTheme,
+) -> Vec<String> {
+    let old_document = lines
+        .iter()
+        .filter(|line| line.kind != "add")
+        .map(|line| line.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let new_document = lines
+        .iter()
+        .filter(|line| line.kind != "del")
+        .map(|line| line.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let old_highlighted = highlight_document_lines(&old_document, file_name, theme);
+    let new_highlighted = highlight_document_lines(&new_document, file_name, theme);
+
+    let old_count = lines.iter().filter(|line| line.kind != "add").count();
+    let new_count = lines.iter().filter(|line| line.kind != "del").count();
+
+    if old_highlighted.len() != old_count || new_highlighted.len() != new_count {
+        return lines.iter().map(|line| highlight_line(&line.content, file_name, theme)).collect();
+    }
+
+    let mut highlighted = Vec::with_capacity(lines.len());
+    let mut old_index = 0usize;
+    let mut new_index = 0usize;
+
+    for line in lines {
+        match line.kind {
+            "ctx" => {
+                let html = new_highlighted
+                    .get(new_index)
+                    .cloned()
+                    .or_else(|| old_highlighted.get(old_index).cloned())
+                    .unwrap_or_else(|| highlight_line(&line.content, file_name, theme));
+                highlighted.push(html);
+                old_index += 1;
+                new_index += 1;
+            }
+            "del" => {
+                highlighted.push(
+                    old_highlighted
+                        .get(old_index)
+                        .cloned()
+                        .unwrap_or_else(|| highlight_line(&line.content, file_name, theme)),
+                );
+                old_index += 1;
+            }
+            "add" => {
+                highlighted.push(
+                    new_highlighted
+                        .get(new_index)
+                        .cloned()
+                        .unwrap_or_else(|| highlight_line(&line.content, file_name, theme)),
+                );
+                new_index += 1;
+            }
+            _ => highlighted.push(highlight_line(&line.content, file_name, theme)),
+        }
+    }
+
+    highlighted
 }
 
 fn parse_patch_into_raw_hunks(patch: &str) -> Vec<RawHunk> {
@@ -522,3 +539,7 @@ pub(crate) async fn compute_diff(Json(body): Json<DiffRequest>) -> impl IntoResp
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../../tests/routes/diff/handlers/mod.rs"]
+mod tests;

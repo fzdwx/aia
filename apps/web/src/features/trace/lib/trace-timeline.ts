@@ -170,6 +170,16 @@ export function summarizeEvent(event: TraceEvent) {
     case "response.first_text_delta":
     case "response.first_reasoning_delta":
       return asString(attributes?.preview) ?? null
+    case "response.retrying": {
+      const attempt = attributes?.attempt
+      const maxAttempts = attributes?.max_attempts
+      const reason = asString(attributes?.reason)
+      const prefix =
+        typeof attempt === "number" && typeof maxAttempts === "number"
+          ? `attempt ${attempt + 1}/${maxAttempts}`
+          : "retrying"
+      return reason ? `${prefix} · ${reason}` : prefix
+    }
     case "response.tool_call_detected":
     case "response.tool_call_started":
       return asString(attributes?.tool_name) ?? null

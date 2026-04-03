@@ -375,7 +375,6 @@ pub(super) struct TurnWorker {
 }
 
 impl TurnWorker {
-
     pub(super) async fn run(mut self) -> RuntimeReturn {
         let mut current_status = CurrentStatusInner::Waiting;
         let status_broadcast = self.context.broadcast_tx.clone();
