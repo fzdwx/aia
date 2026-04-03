@@ -9,6 +9,11 @@ use serde_json::{Value, json};
 
 use crate::OpenAiAdapterError;
 
+fn body_hints_retry(body: &str) -> bool {
+    let lower = body.to_ascii_lowercase();
+    lower.contains("please retry") || lower.contains("concurrency limit")
+}
+
 pub(crate) fn validate_request_model(
     expected_model: &str,
     request: &CompletionRequest,
@@ -35,15 +40,17 @@ pub(crate) fn request_failure(
     OpenAiAdapterError::new(format!("请求失败：POST {endpoint_url} -> {status} {body}"))
         .with_status_code(Some(status.as_u16()))
         .with_response_body(Some(body.to_string()))
-        .with_retryable(matches!(
-            status,
-            StatusCode::REQUEST_TIMEOUT
-                | StatusCode::TOO_MANY_REQUESTS
-                | StatusCode::INTERNAL_SERVER_ERROR
-                | StatusCode::BAD_GATEWAY
-                | StatusCode::SERVICE_UNAVAILABLE
-                | StatusCode::GATEWAY_TIMEOUT
-        ))
+        .with_retryable(
+            matches!(
+                status,
+                StatusCode::REQUEST_TIMEOUT
+                    | StatusCode::TOO_MANY_REQUESTS
+                    | StatusCode::INTERNAL_SERVER_ERROR
+                    | StatusCode::BAD_GATEWAY
+                    | StatusCode::SERVICE_UNAVAILABLE
+                    | StatusCode::GATEWAY_TIMEOUT
+            ) || body_hints_retry(body),
+        )
 }
 
 pub(crate) fn apply_user_agent(
