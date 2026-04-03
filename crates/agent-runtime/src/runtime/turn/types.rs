@@ -26,10 +26,7 @@ impl TurnBuffers {
     }
 
     pub(super) fn with_user_entries(user_entry_ids: Vec<u64>) -> Self {
-        Self {
-            source_entry_ids: user_entry_ids,
-            ..Self::empty()
-        }
+        Self { source_entry_ids: user_entry_ids, ..Self::empty() }
     }
 
     pub(super) fn thinking(&self) -> Option<String> {

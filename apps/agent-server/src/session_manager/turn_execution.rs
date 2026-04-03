@@ -45,77 +45,7 @@ impl<'a> TurnExecutionService<'a> {
         if prompts.is_empty() {
             return Err(RuntimeWorkerError::bad_request("no prompts provided"));
         }
-
-        let slot = self.slots.get_mut(session_id).ok_or_else(|| {
-            RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
-        })?;
-
-        // 清除队列处理标志（以防万一）
-        slot.queue_processing = false;
-
-        let (runtime, subscriber, running_turn) = slot.begin_turn()?;
-        *write_lock(&slot.context_stats) = runtime.context_stats();
-        let turn_control = running_turn.control.clone();
-
-        let activity_record = self
-            .config
-            .store
-            .touch_session_last_active_async(session_id.to_string())
-            .await
-            .map_err(|error| {
-                RuntimeWorkerError::internal(format!("session activity update failed: {error}"))
-            })?
-            .ok_or_else(|| {
-                RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
-            })?;
-
-        let turn_id = next_server_turn_id();
-        let current_turn = CurrentTurnSnapshot {
-            turn_id: turn_id.clone(),
-            started_at_ms: now_timestamp_ms(),
-            user_messages: prompts.clone(),
-            status: TurnStatus::Waiting,
-            blocks: Vec::new(),
-        };
-        *write_lock(&slot.current_turn) = Some(current_turn.clone());
-
-        let session_id_owned = session_id.to_string();
-        let worker = TurnWorker::new(
-            runtime,
-            subscriber,
-            prompts,
-            turn_control,
-            TurnWorkerContext {
-                broadcast_tx: self.config.broadcast_tx.clone(),
-                current_turn_snapshot: slot.current_turn.clone(),
-                history_snapshot: slot.history.clone(),
-                context_stats_snapshot: slot.context_stats.clone(),
-                trace_recorder: ToolTraceRecorder::new(self.config.store.clone()),
-                registry: self.config.registry.clone(),
-                sessions_dir: self.config.sessions_dir.clone(),
-                session_id: session_id_owned.clone(),
-                turn_id: turn_id.clone(),
-            },
-        );
-        let return_tx = self.return_tx.clone();
-
-        let _ = self.config.broadcast_tx.send(SsePayload::CurrentTurnStarted {
-            session_id: session_id_owned.clone(),
-            current_turn,
-        });
-        let _ = self.config.broadcast_tx.send(session_updated_payload(activity_record));
-        let _ = self.config.broadcast_tx.send(SsePayload::Status {
-            session_id: session_id_owned,
-            turn_id: turn_id.clone(),
-            status: TurnStatus::Waiting,
-        });
-
-        tokio::spawn(async move {
-            let runtime_return = worker.run().await;
-            let _ = return_tx.send(runtime_return).await;
-        });
-
-        Ok(turn_id)
+        self.submit_turn_inner(session_id, prompts, Vec::new(), false).await
     }
 
     pub(super) async fn retry_turn(
@@ -167,14 +97,28 @@ impl<'a> TurnExecutionService<'a> {
         };
 
         self.cleanup_failed_turn_tail(session_id, failed_turn_id)?;
-        self.continue_turn(session_id, user_messages).await
+
+        // cleanup 后 rebuild 会把旧 turn 的 entries 视为 "进行中"（current_turn），
+        // 读取其 blocks 作为继续 turn 的初始状态
+        let inherited_blocks = {
+            let slot = self.slots.get(session_id).ok_or_else(|| {
+                RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
+            })?;
+            super::read_lock(&slot.current_turn)
+                .as_ref()
+                .map(|snapshot| snapshot.blocks.clone())
+                .unwrap_or_default()
+        };
+
+        self.submit_turn_inner(session_id, user_messages, inherited_blocks, true).await
     }
 
-    /// 从当前 tape 状态继续执行，不追加用户消息
-    async fn continue_turn(
+    async fn submit_turn_inner(
         &mut self,
         session_id: &str,
-        user_messages: Vec<String>,
+        prompts: Vec<String>,
+        initial_blocks: Vec<crate::runtime_worker::CurrentTurnBlock>,
+        continue_mode: bool,
     ) -> Result<String, RuntimeWorkerError> {
         let slot = self.slots.get_mut(session_id).ok_or_else(|| {
             RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
@@ -202,19 +146,19 @@ impl<'a> TurnExecutionService<'a> {
         let current_turn = CurrentTurnSnapshot {
             turn_id: turn_id.clone(),
             started_at_ms: now_timestamp_ms(),
-            user_messages: user_messages.clone(),
+            user_messages: prompts.clone(),
             status: TurnStatus::Waiting,
-            blocks: Vec::new(),
+            blocks: initial_blocks,
         };
         *write_lock(&slot.current_turn) = Some(current_turn.clone());
 
         let session_id_owned = session_id.to_string();
-        let worker = TurnWorker::new_continue(
+        let worker = TurnWorker {
             runtime,
             subscriber,
-            user_messages,
+            prompts,
             turn_control,
-            TurnWorkerContext {
+            context: TurnWorkerContext {
                 broadcast_tx: self.config.broadcast_tx.clone(),
                 current_turn_snapshot: slot.current_turn.clone(),
                 history_snapshot: slot.history.clone(),
@@ -225,7 +169,8 @@ impl<'a> TurnExecutionService<'a> {
                 session_id: session_id_owned.clone(),
                 turn_id: turn_id.clone(),
             },
-        );
+            continue_mode,
+        };
         let return_tx = self.return_tx.clone();
 
         let _ = self.config.broadcast_tx.send(SsePayload::CurrentTurnStarted {
@@ -248,7 +193,7 @@ impl<'a> TurnExecutionService<'a> {
     }
 
     /// 清理失败 turn 的尾部：移除 turn_failed 事件、孤立的 tool_call（无配对 tool_result）、
-    /// 以及最后一个完整 tool_result 之后的所有 trailing entries（partial thinking/assistant text）。
+    /// 以及最后一个完整 tool_call/tool_result 对之后的 trailing thinking/message entries。
     fn cleanup_failed_turn_tail(
         &mut self,
         session_id: &str,
@@ -267,25 +212,21 @@ impl<'a> TurnExecutionService<'a> {
             })?;
 
         let session_path = slot.session_path.clone();
-        let source_ids: BTreeSet<u64> =
-            target_turn.source_entry_ids.iter().copied().collect();
+        let source_ids: BTreeSet<u64> = target_turn.source_entry_ids.iter().copied().collect();
 
         let (rebuilt, context_stats) = {
             let runtime = slot
                 .runtime_mut()
                 .ok_or_else(|| RuntimeWorkerError::bad_request("session is not currently idle"))?;
 
-            // 收集该 turn 的 tool_call invocation_id → entry_id，
-            // 以及 tool_result invocation_id 集合
-            let mut tool_call_ids: Vec<(String, u64)> = Vec::new();
-            let mut tool_result_invocation_ids: BTreeSet<String> = BTreeSet::new();
+            let mut tool_call_invocations: Vec<(String, u64)> = Vec::new();
+            let mut tool_result_invocations: BTreeSet<String> = BTreeSet::new();
             let mut removable = BTreeSet::new();
 
             for entry in runtime.tape().entries() {
                 if !source_ids.contains(&entry.id) {
                     continue;
                 }
-
                 // turn_failed / turn_completed 事件始终移除
                 if entry.kind == "event" {
                     if let Some(name) = entry.event_name() {
@@ -295,37 +236,39 @@ impl<'a> TurnExecutionService<'a> {
                     }
                     continue;
                 }
-
                 if let Some(call) = entry.as_tool_call() {
-                    tool_call_ids.push((call.invocation_id.clone(), entry.id));
+                    tool_call_invocations.push((call.invocation_id.clone(), entry.id));
                 }
                 if let Some(result) = entry.as_tool_result() {
-                    tool_result_invocation_ids.insert(result.invocation_id.clone());
+                    tool_result_invocations.insert(result.invocation_id.clone());
                 }
             }
 
             // 孤立的 tool_call（没有配对 tool_result）
-            let orphaned_call_ids: BTreeSet<u64> = tool_call_ids
-                .iter()
-                .filter(|(invocation_id, _)| !tool_result_invocation_ids.contains(invocation_id))
-                .map(|(_, entry_id)| *entry_id)
-                .collect();
-            removable.extend(&orphaned_call_ids);
+            for (invocation_id, entry_id) in &tool_call_invocations {
+                if !tool_result_invocations.contains(invocation_id) {
+                    removable.insert(*entry_id);
+                }
+            }
 
-            // 从 turn 尾部移除 trailing entries：
-            // 从后往前扫描 source_entry_ids，移除直到碰到一个我们要保留的 entry
-            // （即不在 removable 中、且不是 thinking/message 类型紧跟在孤立 tool_call 之后的）
-            // 策略：找到最后一个 tool_result 的 entry_id，该 id 之后、属于该 turn 的
-            // thinking/message entries 全部移除（它们是失败 LLM call flush 出来的残留）
-            let last_tool_result_id = runtime
+            // 找到最后一个已完成的 tool_result 或 user message 的 entry_id 作为截止点，
+            // 之后属于该 turn 的 thinking/message entries 都是失败 LLM call 的残留
+            let cutoff = runtime
                 .tape()
                 .entries()
                 .iter()
                 .rev()
-                .find(|entry| source_ids.contains(&entry.id) && entry.kind == "tool_result")
+                .find(|entry| {
+                    source_ids.contains(&entry.id)
+                        && (entry.kind == "tool_result"
+                            || (entry.kind == "message"
+                                && entry
+                                    .as_message()
+                                    .is_some_and(|msg| msg.role == agent_core::Role::User)))
+                })
                 .map(|entry| entry.id);
 
-            if let Some(cutoff) = last_tool_result_id {
+            if let Some(cutoff) = cutoff {
                 for entry in runtime.tape().entries() {
                     if !source_ids.contains(&entry.id) || entry.id <= cutoff {
                         continue;
@@ -432,25 +375,6 @@ pub(super) struct TurnWorker {
 }
 
 impl TurnWorker {
-    pub(super) fn new(
-        runtime: AgentRuntime<ServerModel, ToolRegistry>,
-        subscriber: RuntimeSubscriberId,
-        prompts: Vec<String>,
-        turn_control: agent_runtime::TurnControl,
-        context: TurnWorkerContext,
-    ) -> Self {
-        Self { runtime, subscriber, prompts, turn_control, context, continue_mode: false }
-    }
-
-    pub(super) fn new_continue(
-        runtime: AgentRuntime<ServerModel, ToolRegistry>,
-        subscriber: RuntimeSubscriberId,
-        user_messages: Vec<String>,
-        turn_control: agent_runtime::TurnControl,
-        context: TurnWorkerContext,
-    ) -> Self {
-        Self { runtime, subscriber, prompts: user_messages, turn_control, context, continue_mode: true }
-    }
 
     pub(super) async fn run(mut self) -> RuntimeReturn {
         let mut current_status = CurrentStatusInner::Waiting;
