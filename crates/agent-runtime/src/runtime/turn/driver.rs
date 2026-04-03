@@ -262,6 +262,50 @@ where
         .await
     }
 
+    /// 从当前 tape 状态继续执行，不追加用户消息。
+    ///
+    /// 用于 retry 场景：保留失败 turn 中已完成的中间结果，
+    /// 直接从断点继续调用 LLM。
+    pub async fn handle_continue_streaming(
+        &mut self,
+        user_messages: Vec<String>,
+        control: TurnControl,
+        on_delta: impl FnMut(StreamEvent) + Send,
+    ) -> Result<TurnOutput, RuntimeError> {
+        let turn_id = next_turn_id();
+        let started_at_ms = now_timestamp_ms();
+        let abort_signal = control.abort_signal();
+
+        self.ensure_agent_started()?;
+
+        let mut llm_step_index = 0_u32;
+
+        if abort_signal.is_aborted() {
+            return Err(RuntimeError::cancelled());
+        }
+
+        self.maybe_auto_compress_current_context(&turn_id, &mut llm_step_index).await;
+
+        if abort_signal.is_aborted() {
+            return Err(RuntimeError::cancelled());
+        }
+
+        let buffers = TurnBuffers::empty();
+
+        self.notify_turn_start(&turn_id, "(continue)");
+
+        self.drive_turn_loop(
+            turn_id,
+            started_at_ms,
+            user_messages,
+            control,
+            buffers,
+            llm_step_index,
+            on_delta,
+        )
+        .await
+    }
+
     async fn maybe_auto_compress_current_context(&mut self, turn_id: &str, step_index: &mut u32) {
         if let Some(ratio) = self.context_pressure_ratio()
             && ratio >= self.context_pressure_threshold

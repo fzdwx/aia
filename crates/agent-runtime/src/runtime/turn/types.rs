@@ -13,15 +13,22 @@ pub(super) struct TurnBuffers {
 }
 
 impl TurnBuffers {
-    pub(super) fn with_user_entries(user_entry_ids: Vec<u64>) -> Self {
+    pub(super) fn empty() -> Self {
         Self {
-            source_entry_ids: user_entry_ids,
+            source_entry_ids: Vec::new(),
             aggregated_thinking: String::new(),
             streamed_thinking: String::new(),
             tool_invocations: Vec::new(),
             blocks: Vec::new(),
             last_assistant_text: None,
             streamed_assistant_text: String::new(),
+        }
+    }
+
+    pub(super) fn with_user_entries(user_entry_ids: Vec<u64>) -> Self {
+        Self {
+            source_entry_ids: user_entry_ids,
+            ..Self::empty()
         }
     }
 

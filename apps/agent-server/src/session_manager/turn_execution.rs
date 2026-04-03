@@ -123,7 +123,7 @@ impl<'a> TurnExecutionService<'a> {
         session_id: &str,
         failed_turn_id: &str,
     ) -> Result<String, RuntimeWorkerError> {
-        let prompts = {
+        let user_messages = {
             let slot = self.slots.get_mut(session_id).ok_or_else(|| {
                 RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
             })?;
@@ -166,11 +166,90 @@ impl<'a> TurnExecutionService<'a> {
             turn.user_messages.clone()
         };
 
-        self.rollback_failed_turn(session_id, failed_turn_id)?;
-        self.submit_turn(session_id, prompts).await
+        self.cleanup_failed_turn_tail(session_id, failed_turn_id)?;
+        self.continue_turn(session_id, user_messages).await
     }
 
-    fn rollback_failed_turn(
+    /// 从当前 tape 状态继续执行，不追加用户消息
+    async fn continue_turn(
+        &mut self,
+        session_id: &str,
+        user_messages: Vec<String>,
+    ) -> Result<String, RuntimeWorkerError> {
+        let slot = self.slots.get_mut(session_id).ok_or_else(|| {
+            RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
+        })?;
+
+        slot.queue_processing = false;
+
+        let (runtime, subscriber, running_turn) = slot.begin_turn()?;
+        *write_lock(&slot.context_stats) = runtime.context_stats();
+        let turn_control = running_turn.control.clone();
+
+        let activity_record = self
+            .config
+            .store
+            .touch_session_last_active_async(session_id.to_string())
+            .await
+            .map_err(|error| {
+                RuntimeWorkerError::internal(format!("session activity update failed: {error}"))
+            })?
+            .ok_or_else(|| {
+                RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
+            })?;
+
+        let turn_id = next_server_turn_id();
+        let current_turn = CurrentTurnSnapshot {
+            turn_id: turn_id.clone(),
+            started_at_ms: now_timestamp_ms(),
+            user_messages: user_messages.clone(),
+            status: TurnStatus::Waiting,
+            blocks: Vec::new(),
+        };
+        *write_lock(&slot.current_turn) = Some(current_turn.clone());
+
+        let session_id_owned = session_id.to_string();
+        let worker = TurnWorker::new_continue(
+            runtime,
+            subscriber,
+            user_messages,
+            turn_control,
+            TurnWorkerContext {
+                broadcast_tx: self.config.broadcast_tx.clone(),
+                current_turn_snapshot: slot.current_turn.clone(),
+                history_snapshot: slot.history.clone(),
+                context_stats_snapshot: slot.context_stats.clone(),
+                trace_recorder: ToolTraceRecorder::new(self.config.store.clone()),
+                registry: self.config.registry.clone(),
+                sessions_dir: self.config.sessions_dir.clone(),
+                session_id: session_id_owned.clone(),
+                turn_id: turn_id.clone(),
+            },
+        );
+        let return_tx = self.return_tx.clone();
+
+        let _ = self.config.broadcast_tx.send(SsePayload::CurrentTurnStarted {
+            session_id: session_id_owned.clone(),
+            current_turn,
+        });
+        let _ = self.config.broadcast_tx.send(session_updated_payload(activity_record));
+        let _ = self.config.broadcast_tx.send(SsePayload::Status {
+            session_id: session_id_owned,
+            turn_id: turn_id.clone(),
+            status: TurnStatus::Waiting,
+        });
+
+        tokio::spawn(async move {
+            let runtime_return = worker.run().await;
+            let _ = return_tx.send(runtime_return).await;
+        });
+
+        Ok(turn_id)
+    }
+
+    /// 清理失败 turn 的尾部：移除 turn_failed 事件、孤立的 tool_call（无配对 tool_result）、
+    /// 以及最后一个完整 tool_result 之后的所有 trailing entries（partial thinking/assistant text）。
+    fn cleanup_failed_turn_tail(
         &mut self,
         session_id: &str,
         failed_turn_id: &str,
@@ -188,12 +267,79 @@ impl<'a> TurnExecutionService<'a> {
             })?;
 
         let session_path = slot.session_path.clone();
-        let removable_ids = BTreeSet::from_iter(target_turn.source_entry_ids.iter().copied());
+        let source_ids: BTreeSet<u64> =
+            target_turn.source_entry_ids.iter().copied().collect();
+
         let (rebuilt, context_stats) = {
             let runtime = slot
                 .runtime_mut()
                 .ok_or_else(|| RuntimeWorkerError::bad_request("session is not currently idle"))?;
-            runtime.tape_mut().remove_entries_by_id(&removable_ids);
+
+            // 收集该 turn 的 tool_call invocation_id → entry_id，
+            // 以及 tool_result invocation_id 集合
+            let mut tool_call_ids: Vec<(String, u64)> = Vec::new();
+            let mut tool_result_invocation_ids: BTreeSet<String> = BTreeSet::new();
+            let mut removable = BTreeSet::new();
+
+            for entry in runtime.tape().entries() {
+                if !source_ids.contains(&entry.id) {
+                    continue;
+                }
+
+                // turn_failed / turn_completed 事件始终移除
+                if entry.kind == "event" {
+                    if let Some(name) = entry.event_name() {
+                        if name == "turn_failed" || name == "turn_completed" {
+                            removable.insert(entry.id);
+                        }
+                    }
+                    continue;
+                }
+
+                if let Some(call) = entry.as_tool_call() {
+                    tool_call_ids.push((call.invocation_id.clone(), entry.id));
+                }
+                if let Some(result) = entry.as_tool_result() {
+                    tool_result_invocation_ids.insert(result.invocation_id.clone());
+                }
+            }
+
+            // 孤立的 tool_call（没有配对 tool_result）
+            let orphaned_call_ids: BTreeSet<u64> = tool_call_ids
+                .iter()
+                .filter(|(invocation_id, _)| !tool_result_invocation_ids.contains(invocation_id))
+                .map(|(_, entry_id)| *entry_id)
+                .collect();
+            removable.extend(&orphaned_call_ids);
+
+            // 从 turn 尾部移除 trailing entries：
+            // 从后往前扫描 source_entry_ids，移除直到碰到一个我们要保留的 entry
+            // （即不在 removable 中、且不是 thinking/message 类型紧跟在孤立 tool_call 之后的）
+            // 策略：找到最后一个 tool_result 的 entry_id，该 id 之后、属于该 turn 的
+            // thinking/message entries 全部移除（它们是失败 LLM call flush 出来的残留）
+            let last_tool_result_id = runtime
+                .tape()
+                .entries()
+                .iter()
+                .rev()
+                .find(|entry| source_ids.contains(&entry.id) && entry.kind == "tool_result")
+                .map(|entry| entry.id);
+
+            if let Some(cutoff) = last_tool_result_id {
+                for entry in runtime.tape().entries() {
+                    if !source_ids.contains(&entry.id) || entry.id <= cutoff {
+                        continue;
+                    }
+                    if matches!(entry.kind.as_str(), "thinking" | "message") {
+                        removable.insert(entry.id);
+                    }
+                }
+            }
+
+            if !removable.is_empty() {
+                runtime.tape_mut().remove_entries_by_id(&removable);
+            }
+
             runtime.tape().save_jsonl(&session_path).map_err(|error| {
                 RuntimeWorkerError::internal(format!("session save failed: {error}"))
             })?;
@@ -282,6 +428,7 @@ pub(super) struct TurnWorker {
     prompts: Vec<String>,
     turn_control: agent_runtime::TurnControl,
     context: TurnWorkerContext,
+    continue_mode: bool,
 }
 
 impl TurnWorker {
@@ -292,7 +439,17 @@ impl TurnWorker {
         turn_control: agent_runtime::TurnControl,
         context: TurnWorkerContext,
     ) -> Self {
-        Self { runtime, subscriber, prompts, turn_control, context }
+        Self { runtime, subscriber, prompts, turn_control, context, continue_mode: false }
+    }
+
+    pub(super) fn new_continue(
+        runtime: AgentRuntime<ServerModel, ToolRegistry>,
+        subscriber: RuntimeSubscriberId,
+        user_messages: Vec<String>,
+        turn_control: agent_runtime::TurnControl,
+        context: TurnWorkerContext,
+    ) -> Self {
+        Self { runtime, subscriber, prompts: user_messages, turn_control, context, continue_mode: true }
     }
 
     pub(super) async fn run(mut self) -> RuntimeReturn {
@@ -304,19 +461,34 @@ impl TurnWorker {
 
         let prompts = std::mem::take(&mut self.prompts);
         let turn_control = self.turn_control.clone();
-        let result = self
-            .runtime
-            .handle_turn_streaming(prompts, turn_control, |event| {
-                Self::handle_stream_event(
-                    &event,
-                    &mut current_status,
-                    &status_broadcast,
-                    &stream_session_id,
-                    &stream_turn_id,
-                    &stream_snapshot,
-                );
-            })
-            .await;
+        let continue_mode = self.continue_mode;
+        let result = if continue_mode {
+            self.runtime
+                .handle_continue_streaming(prompts, turn_control, |event| {
+                    Self::handle_stream_event(
+                        &event,
+                        &mut current_status,
+                        &status_broadcast,
+                        &stream_session_id,
+                        &stream_turn_id,
+                        &stream_snapshot,
+                    );
+                })
+                .await
+        } else {
+            self.runtime
+                .handle_turn_streaming(prompts, turn_control, |event| {
+                    Self::handle_stream_event(
+                        &event,
+                        &mut current_status,
+                        &status_broadcast,
+                        &stream_session_id,
+                        &stream_turn_id,
+                        &stream_snapshot,
+                    );
+                })
+                .await
+        };
         *write_lock(&self.context.context_stats_snapshot) = self.runtime.context_stats();
 
         match result {
