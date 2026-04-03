@@ -155,6 +155,16 @@ impl StreamingState for ResponsesStreamingState {
                     });
                 }
             }
+            Some("response.reasoning_summary_part.added") => {
+                if !self.thinking_buf.is_empty() {
+                    self.thinking_buf.push_str("\n\n");
+                    sink(StreamEvent::ThinkingDelta { text: "\n\n".to_string() });
+                }
+            }
+            Some(
+                "response.reasoning_summary_part.done"
+                | "response.reasoning_summary_text.added",
+            ) => {}
             Some(
                 kind @ ("response.reasoning_summary.delta"
                 | "response.reasoning_summary.done"
