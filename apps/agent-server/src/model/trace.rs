@@ -225,6 +225,17 @@ impl TraceEventCollector {
                     }),
                 });
             }
+            StreamEvent::Retrying { attempt, max_attempts, reason } => {
+                self.events.push(LlmTraceEvent {
+                    name: "response.retrying".to_string(),
+                    at_ms,
+                    attributes: json!({
+                        "attempt": attempt,
+                        "max_attempts": max_attempts,
+                        "reason": reason,
+                    }),
+                });
+            }
             StreamEvent::Done => {
                 self.events.push(LlmTraceEvent {
                     name: "response.stream_done".to_string(),
@@ -235,7 +246,6 @@ impl TraceEventCollector {
             StreamEvent::ToolCallStarted { .. }
             | StreamEvent::ToolOutputDelta { .. }
             | StreamEvent::ToolCallCompleted { .. }
-            | StreamEvent::Retrying { .. }
             | StreamEvent::Log { .. } => {}
         }
     }

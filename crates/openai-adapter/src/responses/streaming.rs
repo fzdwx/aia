@@ -162,8 +162,7 @@ impl StreamingState for ResponsesStreamingState {
                 }
             }
             Some(
-                "response.reasoning_summary_part.done"
-                | "response.reasoning_summary_text.added",
+                "response.reasoning_summary_part.done" | "response.reasoning_summary_text.added",
             ) => {}
             Some(
                 kind @ ("response.reasoning_summary.delta"

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::state::SharedState;
 
 mod handlers;
+mod highlighting;
 
 #[derive(Deserialize)]
 #[serde(tag = "mode")]
