@@ -415,6 +415,66 @@ function buildThemeTokenScript(): string {
   return `
     const root = document.getElementById('aia-widget-root');
     const descriptionNode = document.getElementById('aia-widget-description');
+    let lastRenderedHtml = root ? root.innerHTML : '';
+
+    const trimIncompleteScripts = (value) => {
+      if (typeof value !== 'string' || value.length === 0) {
+        return '';
+      }
+
+      const openIndex = value.lastIndexOf('<script');
+      if (openIndex < 0) {
+        return value;
+      }
+
+      const closeIndex = value.indexOf('</script>', openIndex);
+      return closeIndex < 0 ? value.slice(0, openIndex) : value;
+    };
+
+    const runWidgetCleanup = () => {
+      if (typeof window.__AIA_WIDGET_CLEANUP__ !== 'function') {
+        return;
+      }
+
+      try {
+        window.__AIA_WIDGET_CLEANUP__();
+      } catch (error) {
+        const message = error && typeof error.message === 'string'
+          ? error.message
+          : 'Widget cleanup failed';
+        parent.postMessage({ type: 'aia-widget-error', message }, '*');
+      }
+
+      window.__AIA_WIDGET_CLEANUP__ = undefined;
+    };
+
+    const replayScripts = () => {
+      if (!root) {
+        return;
+      }
+
+      const scripts = Array.from(root.querySelectorAll('script'));
+      for (const currentScript of scripts) {
+        const nextScript = document.createElement('script');
+        for (const attribute of Array.from(currentScript.attributes)) {
+          nextScript.setAttribute(attribute.name, attribute.value);
+        }
+        nextScript.textContent = currentScript.textContent;
+        currentScript.replaceWith(nextScript);
+      }
+
+      document.dispatchEvent(new Event('DOMContentLoaded'));
+      window.dispatchEvent(new Event('load'));
+    };
+
+    const scheduleHeightSync = () => {
+      requestAnimationFrame(postHeight);
+      requestAnimationFrame(() => requestAnimationFrame(postHeight));
+      setTimeout(postHeight, 0);
+      setTimeout(postHeight, 32);
+      setTimeout(postHeight, 96);
+      setTimeout(postHeight, 192);
+    };
 
     const syncContentPayload = (payload) => {
       if (!payload || payload.type !== 'aia-widget-render') {
@@ -431,11 +491,16 @@ function buildThemeTokenScript(): string {
       }
 
       if (root && typeof payload.html === 'string') {
-        root.innerHTML = payload.html;
+        const nextHtml = trimIncompleteScripts(payload.html);
+        if (nextHtml !== lastRenderedHtml) {
+          runWidgetCleanup();
+          root.innerHTML = nextHtml;
+          lastRenderedHtml = nextHtml;
+          replayScripts();
+        }
       }
 
-      requestAnimationFrame(postHeight);
-      setTimeout(postHeight, 0);
+      scheduleHeightSync();
     };
 
     const applyThemePayload = (payload) => {
@@ -494,9 +559,19 @@ function buildSandboxDocument({
   <div id="aia-widget-root">${html}</div>
   <script>
     const postHeight = () => {
+      const rootRectHeight = root
+        ? Math.ceil(root.getBoundingClientRect().height)
+        : 0;
+      const rootScrollHeight = root ? root.scrollHeight : 0;
+      const rootOffsetHeight = root ? root.offsetHeight : 0;
       const nextHeight = Math.max(
+        rootRectHeight,
+        rootScrollHeight,
+        rootOffsetHeight,
         document.documentElement.scrollHeight,
+        document.documentElement.offsetHeight,
         document.body.scrollHeight,
+        document.body.offsetHeight,
         1
       );
       parent.postMessage({ type: 'aia-widget-height', height: nextHeight }, '*');
@@ -541,9 +616,22 @@ function buildSandboxDocument({
     const observer = new ResizeObserver(postHeight);
     observer.observe(document.documentElement);
     observer.observe(document.body);
+    if (root) {
+      observer.observe(root);
+    }
+    const mutationObserver = new MutationObserver(() => {
+      scheduleHeightSync();
+    });
+    if (root) {
+      mutationObserver.observe(root, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        characterData: true,
+      });
+    }
     window.addEventListener('load', postHeight);
-    requestAnimationFrame(postHeight);
-    setTimeout(postHeight, 0);
+    scheduleHeightSync();
   </script>
 </body>
 </html>`
