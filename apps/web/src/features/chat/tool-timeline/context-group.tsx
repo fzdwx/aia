@@ -24,6 +24,7 @@ function ContextToolTriggerRow({ item }: { item: ToolRowItem }) {
   const renderedTitle = toolRendererRegistry.renderTitle({
     toolName: item.toolName,
     arguments: item.arguments,
+    rawArguments: item.rawArguments,
     details: item.details,
     outputContent: item.outputContent,
     succeeded: item.succeeded,
@@ -31,6 +32,7 @@ function ContextToolTriggerRow({ item }: { item: ToolRowItem }) {
   const renderedSubtitle = toolRendererRegistry.renderSubtitle({
     toolName: item.toolName,
     arguments: item.arguments,
+    rawArguments: item.rawArguments,
     details: item.details,
     outputContent: item.outputContent,
     succeeded: item.succeeded,

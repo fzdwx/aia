@@ -257,6 +257,10 @@ pub(super) fn apply_stream_event_to_feishu_card_state(
             state.status = ChannelTurnStatus::Generating;
         }
         agent_core::StreamEvent::ToolCallDetected { invocation_id, tool_name, .. }
+        | agent_core::StreamEvent::ToolCallArgumentsDelta { invocation_id, tool_name, .. }
+        | agent_core::StreamEvent::ToolCallReady {
+            call: agent_core::ToolCall { invocation_id, tool_name, .. },
+        }
         | agent_core::StreamEvent::ToolCallStarted { invocation_id, tool_name, .. } => {
             let tool = find_or_insert_tool_state(state, invocation_id, tool_name);
             tool.status = FeishuStreamingToolStatus::Running;

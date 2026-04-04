@@ -1,13 +1,9 @@
-import { useEffect, useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import { normalizeToolArguments } from "@/lib/tool-display"
 
 import type { ToolRenderer } from "../types"
-import {
-  getArrayValue,
-  getStringValue,
-  truncateInline,
-} from "../helpers"
+import { getArrayValue, getStringValue, truncateInline } from "../helpers"
 import {
   ExpandableOutput,
   ToolDetailSection,
@@ -338,6 +334,7 @@ const WIDGET_IFRAME_SVG_CSS = `
 function getStreamingWidgetHtml(data: {
   outputContent: string
   outputSegments?: { stream: "stdout" | "stderr"; text: string }[]
+  rawArguments?: string
 }) {
   const stdout = (data.outputSegments ?? [])
     .filter((segment) => segment.stream === "stdout")
@@ -348,7 +345,61 @@ function getStreamingWidgetHtml(data: {
   if (stdout.length > 0) return stdout
 
   const output = data.outputContent.trim()
-  return output.length > 0 ? output : ""
+  if (output.length > 0) return output
+
+  const rawArguments = data.rawArguments ?? ""
+  const htmlKeyIndex = rawArguments.indexOf('"html"')
+  if (htmlKeyIndex < 0) {
+    return ""
+  }
+  const firstQuoteIndex = rawArguments.indexOf('"', htmlKeyIndex + 6)
+  if (firstQuoteIndex < 0) {
+    return ""
+  }
+
+  let cursor = firstQuoteIndex + 1
+  let escaped = false
+  let extracted = ""
+  while (cursor < rawArguments.length) {
+    const current = rawArguments[cursor]
+    if (escaped) {
+      switch (current) {
+        case "n":
+          extracted += "\n"
+          break
+        case "r":
+          extracted += "\r"
+          break
+        case "t":
+          extracted += "\t"
+          break
+        case '"':
+        case "\\":
+        case "/":
+          extracted += current
+          break
+        default:
+          extracted += current
+          break
+      }
+      escaped = false
+      cursor += 1
+      continue
+    }
+
+    if (current === "\\") {
+      escaped = true
+      cursor += 1
+      continue
+    }
+    if (current === '"') {
+      break
+    }
+    extracted += current
+    cursor += 1
+  }
+
+  return extracted.trim()
 }
 
 function escapeHtml(value: string): string {
@@ -362,98 +413,69 @@ function escapeHtml(value: string): string {
 
 function buildThemeTokenScript(): string {
   return `
-    const THEME_ATTRS = [
-      'style',
-      'class',
-      'data-theme'
-    ];
+    const root = document.getElementById('aia-widget-root');
+    const descriptionNode = document.getElementById('aia-widget-description');
 
-    const THEME_KEYS = [
-      '--font-sans',
-      '--font-serif',
-      '--font-mono',
-      '--radius',
-      '--background',
-      '--foreground',
-      '--card',
-      '--card-foreground',
-      '--popover',
-      '--popover-foreground',
-      '--primary',
-      '--primary-foreground',
-      '--secondary',
-      '--secondary-foreground',
-      '--muted',
-      '--muted-foreground',
-      '--accent',
-      '--accent-foreground',
-      '--destructive',
-      '--destructive-foreground',
-      '--border',
-      '--input',
-      '--ring'
-    ];
+    const syncContentPayload = (payload) => {
+      if (!payload || payload.type !== 'aia-widget-render') {
+        return;
+      }
 
-    const RAMP_VALUES = {
-      purple: { lightFill: '#EEEDFE', lightStroke: '#534AB7', lightText: '#3C3489', darkFill: '#3C3489', darkStroke: '#AFA9EC', darkText: '#CECBF6' },
-      teal: { lightFill: '#E1F5EE', lightStroke: '#0F6E56', lightText: '#085041', darkFill: '#085041', darkStroke: '#5DCAA5', darkText: '#9FE1CB' },
-      coral: { lightFill: '#FAECE7', lightStroke: '#993C1D', lightText: '#712B13', darkFill: '#712B13', darkStroke: '#F0997B', darkText: '#F5C4B3' },
-      pink: { lightFill: '#FBEAF0', lightStroke: '#993556', lightText: '#72243E', darkFill: '#72243E', darkStroke: '#ED93B1', darkText: '#F4C0D1' },
-      gray: { lightFill: '#F1EFE8', lightStroke: '#5F5E5A', lightText: '#444441', darkFill: '#444441', darkStroke: '#B4B2A9', darkText: '#D3D1C7' },
-      blue: { lightFill: '#E6F1FB', lightStroke: '#185FA5', lightText: '#0C447C', darkFill: '#0C447C', darkStroke: '#85B7EB', darkText: '#B5D4F4' },
-      green: { lightFill: '#EAF3DE', lightStroke: '#3B6D11', lightText: '#27500A', darkFill: '#27500A', darkStroke: '#97C459', darkText: '#C0DD97' },
-      amber: { lightFill: '#FAEEDA', lightStroke: '#854F0B', lightText: '#633806', darkFill: '#633806', darkStroke: '#EF9F27', darkText: '#FAC775' },
-      red: { lightFill: '#FCEBEB', lightStroke: '#A32D2D', lightText: '#791F1F', darkFill: '#791F1F', darkStroke: '#F09595', darkText: '#F7C1C1' },
+      if (typeof payload.title === 'string' && payload.title.length > 0) {
+        document.title = payload.title;
+      }
+
+      if (descriptionNode) {
+        descriptionNode.textContent =
+          typeof payload.description === 'string' ? payload.description : '';
+      }
+
+      if (root && typeof payload.html === 'string') {
+        root.innerHTML = payload.html;
+      }
+
+      requestAnimationFrame(postHeight);
+      setTimeout(postHeight, 0);
     };
 
-    const hostRoot = parent.document.documentElement;
+    const applyThemePayload = (payload) => {
+      if (!payload || payload.type !== 'aia-widget-theme') {
+        return;
+      }
 
-    const applyHostTheme = () => {
-      const computed = parent.getComputedStyle(hostRoot);
-      for (const key of THEME_KEYS) {
-        const value = computed.getPropertyValue(key);
-        if (value) {
-          document.documentElement.style.setProperty(key, value.trim());
+      const root = document.documentElement;
+      const tokens = payload.tokens && typeof payload.tokens === 'object'
+        ? payload.tokens
+        : {};
+
+      for (const [key, value] of Object.entries(tokens)) {
+        if (typeof value === 'string' && value.length > 0) {
+          root.style.setProperty(key, value);
         }
       }
 
-      const colorScheme = hostRoot.classList.contains('light') ? 'light' : 'dark';
-      document.documentElement.style.colorScheme = colorScheme;
-      document.documentElement.classList.toggle('light', colorScheme === 'light');
-      document.documentElement.classList.toggle('dark', colorScheme === 'dark');
-
-      const isLight = colorScheme === 'light';
-      for (const [name, ramp] of Object.entries(RAMP_VALUES)) {
-        document.documentElement.style.setProperty(
-          '--ramp-' + name + '-fill',
-          isLight ? ramp.lightFill : ramp.darkFill
-        );
-        document.documentElement.style.setProperty(
-          '--ramp-' + name + '-stroke',
-          isLight ? ramp.lightStroke : ramp.darkStroke
-        );
-        document.documentElement.style.setProperty(
-          '--ramp-' + name + '-text',
-          isLight ? ramp.lightText : ramp.darkText
-        );
-      }
+      const colorScheme = payload.colorScheme === 'light' ? 'light' : 'dark';
+      root.style.colorScheme = colorScheme;
+      root.classList.toggle('light', colorScheme === 'light');
+      root.classList.toggle('dark', colorScheme === 'dark');
+      postHeight();
     };
 
-    applyHostTheme();
-
-    const hostObserver = new MutationObserver(() => {
-      applyHostTheme();
-      postHeight();
+    window.addEventListener('message', (event) => {
+      if (event.source !== parent) return;
+      syncContentPayload(event.data);
+      applyThemePayload(event.data);
     });
 
-    hostObserver.observe(hostRoot, {
-      attributes: true,
-      attributeFilter: THEME_ATTRS,
-    });
+    parent.postMessage({ type: 'aia-widget-ready' }, '*');
   `
 }
 
-function buildSandboxDocument({ title, description, html }: WidgetSandboxProps): string {
+function buildSandboxDocument({
+  title,
+  description,
+  html,
+}: WidgetSandboxProps): string {
   const safeTitle = escapeHtml(title)
   const safeDescription = description ? escapeHtml(description) : ""
   return `<!doctype html>
@@ -468,8 +490,8 @@ function buildSandboxDocument({ title, description, html }: WidgetSandboxProps):
   </style>
 </head>
 <body>
-  ${safeDescription ? `<div class="sr-only">${safeDescription}</div>` : ""}
-  ${html}
+  <div id="aia-widget-description" class="sr-only">${safeDescription}</div>
+  <div id="aia-widget-root">${html}</div>
   <script>
     const postHeight = () => {
       const nextHeight = Math.max(
@@ -529,24 +551,195 @@ function buildSandboxDocument({ title, description, html }: WidgetSandboxProps):
 
 function WidgetSandbox({ title, description, html }: WidgetSandboxProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
-  const srcDoc = useMemo(
-    () => buildSandboxDocument({ title, description, html }),
-    [description, html, title]
+  const lastHeightRef = useRef<number | null>(null)
+  const latestRenderPayloadRef = useRef({
+    type: "aia-widget-render",
+    title,
+    description,
+    html,
+  })
+  const [frameHeight, setFrameHeight] = useState<number | undefined>(undefined)
+  const initialSrcDocRef = useRef<string>(
+    buildSandboxDocument({ title, description, html })
   )
+  const srcDoc = initialSrcDocRef.current
 
   useEffect(() => {
+    const THEME_KEYS = [
+      "--font-sans",
+      "--font-serif",
+      "--font-mono",
+      "--radius",
+      "--background",
+      "--foreground",
+      "--card",
+      "--card-foreground",
+      "--popover",
+      "--popover-foreground",
+      "--primary",
+      "--primary-foreground",
+      "--secondary",
+      "--secondary-foreground",
+      "--muted",
+      "--muted-foreground",
+      "--accent",
+      "--accent-foreground",
+      "--destructive",
+      "--destructive-foreground",
+      "--border",
+      "--input",
+      "--ring",
+    ] as const
+
+    const RAMP_VALUES = {
+      purple: {
+        lightFill: "#EEEDFE",
+        lightStroke: "#534AB7",
+        lightText: "#3C3489",
+        darkFill: "#3C3489",
+        darkStroke: "#AFA9EC",
+        darkText: "#CECBF6",
+      },
+      teal: {
+        lightFill: "#E1F5EE",
+        lightStroke: "#0F6E56",
+        lightText: "#085041",
+        darkFill: "#085041",
+        darkStroke: "#5DCAA5",
+        darkText: "#9FE1CB",
+      },
+      coral: {
+        lightFill: "#FAECE7",
+        lightStroke: "#993C1D",
+        lightText: "#712B13",
+        darkFill: "#712B13",
+        darkStroke: "#F0997B",
+        darkText: "#F5C4B3",
+      },
+      pink: {
+        lightFill: "#FBEAF0",
+        lightStroke: "#993556",
+        lightText: "#72243E",
+        darkFill: "#72243E",
+        darkStroke: "#ED93B1",
+        darkText: "#F4C0D1",
+      },
+      gray: {
+        lightFill: "#F1EFE8",
+        lightStroke: "#5F5E5A",
+        lightText: "#444441",
+        darkFill: "#444441",
+        darkStroke: "#B4B2A9",
+        darkText: "#D3D1C7",
+      },
+      blue: {
+        lightFill: "#E6F1FB",
+        lightStroke: "#185FA5",
+        lightText: "#0C447C",
+        darkFill: "#0C447C",
+        darkStroke: "#85B7EB",
+        darkText: "#B5D4F4",
+      },
+      green: {
+        lightFill: "#EAF3DE",
+        lightStroke: "#3B6D11",
+        lightText: "#27500A",
+        darkFill: "#27500A",
+        darkStroke: "#97C459",
+        darkText: "#C0DD97",
+      },
+      amber: {
+        lightFill: "#FAEEDA",
+        lightStroke: "#854F0B",
+        lightText: "#633806",
+        darkFill: "#633806",
+        darkStroke: "#EF9F27",
+        darkText: "#FAC775",
+      },
+      red: {
+        lightFill: "#FCEBEB",
+        lightStroke: "#A32D2D",
+        lightText: "#791F1F",
+        darkFill: "#791F1F",
+        darkStroke: "#F09595",
+        darkText: "#F7C1C1",
+      },
+    } as const
+
+    function sendThemeToFrame() {
+      const frame = iframeRef.current
+      const target = frame?.contentWindow
+      if (!target) return
+
+      const hostRoot = document.documentElement
+      const computed = window.getComputedStyle(hostRoot)
+      const colorScheme = hostRoot.classList.contains("light")
+        ? "light"
+        : "dark"
+      const isLight = colorScheme === "light"
+
+      const tokens: Record<string, string> = {}
+      for (const key of THEME_KEYS) {
+        const value = computed.getPropertyValue(key).trim()
+        if (value) {
+          tokens[key] = value
+        }
+      }
+
+      for (const [name, ramp] of Object.entries(RAMP_VALUES)) {
+        tokens[`--ramp-${name}-fill`] = isLight ? ramp.lightFill : ramp.darkFill
+        tokens[`--ramp-${name}-stroke`] = isLight
+          ? ramp.lightStroke
+          : ramp.darkStroke
+        tokens[`--ramp-${name}-text`] = isLight ? ramp.lightText : ramp.darkText
+      }
+
+      target.postMessage(
+        {
+          type: "aia-widget-theme",
+          colorScheme,
+          tokens,
+        },
+        "*"
+      )
+    }
+
     function handleMessage(event: MessageEvent) {
       const frame = iframeRef.current
       if (!frame || event.source !== frame.contentWindow) return
 
-      const payload = event.data as
-        | { type?: string; height?: number; text?: string; url?: string; message?: string }
-        | null
+      const payload = event.data as {
+        type?: string
+        height?: number
+        text?: string
+        url?: string
+        message?: string
+      } | null
       if (!payload || typeof payload !== "object") return
 
+      if (payload.type === "aia-widget-ready") {
+        frame.contentWindow?.postMessage(latestRenderPayloadRef.current, "*")
+        sendThemeToFrame()
+        return
+      }
+
       if (payload.type === "aia-widget-height") {
-        const nextHeight = Math.max(120, Math.min(1600, payload.height ?? 0))
+        const reportedHeight = Math.ceil(payload.height ?? 0)
+        if (!Number.isFinite(reportedHeight) || reportedHeight <= 0) {
+          return
+        }
+
+        const nextHeight = Math.max(1, reportedHeight)
+        if (
+          lastHeightRef.current != null &&
+          Math.abs(nextHeight - lastHeightRef.current) < 1
+        ) {
+          return
+        }
+
+        lastHeightRef.current = nextHeight
         frame.style.height = `${nextHeight}px`
+        setFrameHeight(nextHeight)
         return
       }
 
@@ -579,9 +772,41 @@ function WidgetSandbox({ title, description, html }: WidgetSandboxProps) {
       }
     }
 
+    const hostRoot = document.documentElement
+    const themeObserver = new MutationObserver(() => {
+      sendThemeToFrame()
+    })
+
     window.addEventListener("message", handleMessage)
-    return () => window.removeEventListener("message", handleMessage)
+    themeObserver.observe(hostRoot, {
+      attributes: true,
+      attributeFilter: ["class", "style", "data-theme"],
+    })
+
+    const frame = iframeRef.current
+    frame?.addEventListener("load", sendThemeToFrame)
+    sendThemeToFrame()
+
+    return () => {
+      window.removeEventListener("message", handleMessage)
+      themeObserver.disconnect()
+      frame?.removeEventListener("load", sendThemeToFrame)
+    }
   }, [])
+
+  useEffect(() => {
+    latestRenderPayloadRef.current = {
+      type: "aia-widget-render",
+      title,
+      description,
+      html,
+    }
+
+    const target = iframeRef.current?.contentWindow
+    if (target) {
+      target.postMessage(latestRenderPayloadRef.current, "*")
+    }
+  }, [description, html, title])
 
   return (
     <iframe
@@ -590,7 +815,7 @@ function WidgetSandbox({ title, description, html }: WidgetSandboxProps) {
       srcDoc={srcDoc}
       sandbox="allow-scripts allow-popups"
       className="w-full overflow-hidden rounded-[calc(var(--radius)*1.25)] border border-border/50 bg-transparent"
-      style={{ height: 160, overflow: "hidden" }}
+      style={{ height: frameHeight, minHeight: 1, overflow: "hidden" }}
     />
   )
 }
@@ -612,7 +837,9 @@ function createWidgetSummary(data: {
   }
 }
 
-function createWidgetReadmeSummary(data: { arguments: Record<string, unknown> }) {
+function createWidgetReadmeSummary(data: {
+  arguments: Record<string, unknown>
+}) {
   const modules = getArrayValue(data.arguments, "modules").flatMap((module) =>
     typeof module === "string" ? [module] : []
   )
@@ -632,8 +859,10 @@ export function createWidgetReadmeRenderer(): ToolRenderer {
       return createWidgetReadmeSummary({ arguments: args })
     },
     renderSubtitle(data) {
-      const modules = getArrayValue(normalizeToolArguments(data.arguments), "modules")
-        .flatMap((module) => (typeof module === "string" ? [module] : []))
+      const modules = getArrayValue(
+        normalizeToolArguments(data.arguments),
+        "modules"
+      ).flatMap((module) => (typeof module === "string" ? [module] : []))
       return modules.length > 0 ? `${modules.length} module(s)` : "overview"
     },
     renderMeta() {
@@ -656,7 +885,8 @@ export function createWidgetRendererRenderer(): ToolRenderer {
     detailsPanelMode: "renderer-only-flat",
     renderTitle(data) {
       const args = normalizeToolArguments(data.arguments)
-      return createWidgetSummary({ arguments: args, details: data.details }).title
+      return createWidgetSummary({ arguments: args, details: data.details })
+        .title
     },
     renderSubtitle(data) {
       const args = normalizeToolArguments(data.arguments)
@@ -670,7 +900,9 @@ export function createWidgetRendererRenderer(): ToolRenderer {
       const args = normalizeToolArguments(data.arguments)
       const details = data.details ?? undefined
       const title =
-        getStringValue(details, "title") ?? getStringValue(args, "title") ?? "Widget"
+        getStringValue(details, "title") ??
+        getStringValue(args, "title") ??
+        "Widget"
       const description =
         getStringValue(details, "description") ??
         getStringValue(args, "description") ??
@@ -678,15 +910,22 @@ export function createWidgetRendererRenderer(): ToolRenderer {
       const liveHtml = getStreamingWidgetHtml({
         outputContent: data.outputContent,
         outputSegments: data.outputSegments,
+        rawArguments: data.rawArguments,
       })
       const html = data.isRunning
         ? liveHtml || getStringValue(args, "html") || ""
-        : getStringValue(details, "html") || liveHtml || getStringValue(args, "html") || ""
+        : getStringValue(details, "html") ||
+          liveHtml ||
+          getStringValue(args, "html") ||
+          ""
 
       if (!html.trim()) {
         return (
           <ToolDetailSection title="Content">
-            <ExpandableOutput value={data.outputContent} failed={!data.succeeded} />
+            <ExpandableOutput
+              value={data.outputContent}
+              failed={!data.succeeded}
+            />
           </ToolDetailSection>
         )
       }
@@ -694,7 +933,11 @@ export function createWidgetRendererRenderer(): ToolRenderer {
       return (
         <div className="space-y-3">
           <ToolDetailSurface className="tool-timeline-detail-surface-flat tool-timeline-detail-surface-borderless">
-            <WidgetSandbox title={title} description={description} html={html} />
+            <WidgetSandbox
+              title={title}
+              description={description}
+              html={html}
+            />
           </ToolDetailSurface>
           <ToolInfoSection title="Content" defaultOpen={false}>
             <ExpandableOutput value={html} failed={false} />

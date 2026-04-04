@@ -13,6 +13,8 @@ pub(crate) struct StreamingToolCallAccumulator {
     emitted_detection: bool,
     /// 已通过 ToolCallDetected 事件发送过的参数 key 集合
     emitted_arg_keys: BTreeSet<String>,
+    emitted_ready: bool,
+    emitted_arguments_len: usize,
 }
 
 impl StreamingToolCallAccumulator {
@@ -32,6 +34,10 @@ impl StreamingToolCallAccumulator {
         self.invocation_id.clone().unwrap_or_else(fallback)
     }
 
+    pub(crate) fn invocation_id(&self) -> Option<String> {
+        self.invocation_id.clone()
+    }
+
     pub(crate) fn tool_name(&self) -> Option<&str> {
         self.tool_name.as_deref()
     }
@@ -42,6 +48,15 @@ impl StreamingToolCallAccumulator {
 
     pub(crate) fn raw_arguments(&self) -> &str {
         self.arguments.as_str()
+    }
+
+    pub(crate) fn take_unemitted_arguments_delta(&mut self) -> Option<String> {
+        if self.arguments.len() <= self.emitted_arguments_len {
+            return None;
+        }
+        let delta = self.arguments[self.emitted_arguments_len..].to_string();
+        self.emitted_arguments_len = self.arguments.len();
+        Some(delta)
     }
 
     pub(crate) fn detection_emitted(&self) -> bool {
@@ -72,10 +87,20 @@ impl StreamingToolCallAccumulator {
         self.arguments.clear();
         self.emitted_detection = false;
         self.emitted_arg_keys.clear();
+        self.emitted_ready = false;
+        self.emitted_arguments_len = 0;
     }
 
     pub(crate) fn is_empty(&self) -> bool {
         self.tool_name.is_none() && self.arguments.is_empty() && self.invocation_id.is_none()
+    }
+
+    pub(crate) fn ready_emitted(&self) -> bool {
+        self.emitted_ready
+    }
+
+    pub(crate) fn mark_ready_emitted(&mut self) {
+        self.emitted_ready = true;
     }
 }
 

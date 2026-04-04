@@ -195,6 +195,20 @@ fn render_stream_event(
             }
             println!("[tool:detected] {tool_name} #{invocation_id} {arguments}");
         }
+        StreamEvent::ToolCallArgumentsDelta { invocation_id, tool_name, arguments_delta } => {
+            if *streamed_text {
+                println!();
+                *streamed_text = false;
+            }
+            println!("[tool:args] {} #{} {}", tool_name, invocation_id, arguments_delta);
+        }
+        StreamEvent::ToolCallReady { call } => {
+            if *streamed_text {
+                println!();
+                *streamed_text = false;
+            }
+            println!("[tool:ready] {} #{} {}", call.tool_name, call.invocation_id, call.arguments);
+        }
         StreamEvent::ToolCallStarted { invocation_id, tool_name, arguments, .. } => {
             if *streamed_text {
                 println!();

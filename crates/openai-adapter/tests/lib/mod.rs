@@ -1246,20 +1246,107 @@ fn responses_流式工具调用支持_call_id_字段() {
                 arguments: first_arguments,
                 detected_at_ms: first_detected_at_ms,
             },
+            StreamEvent::ToolCallArgumentsDelta {
+                invocation_id: delta_invocation_id,
+                tool_name: delta_tool_name,
+                arguments_delta,
+            },
             StreamEvent::ToolCallDetected {
                 invocation_id: second_invocation_id,
                 tool_name: second_tool_name,
                 arguments: second_arguments,
                 detected_at_ms: second_detected_at_ms,
             },
+            StreamEvent::ToolCallReady { call },
             StreamEvent::Done,
         ] if first_invocation_id == "call_from_call_id"
             && first_tool_name == "search_code"
             && *first_detected_at_ms > 0
+            && delta_invocation_id == "call_from_call_id"
+            && delta_tool_name == "search_code"
+            && arguments_delta == "{\"query\":\"agent-runtime\"}"
             && second_invocation_id == "call_from_call_id"
             && second_tool_name == "search_code"
             && second_arguments == &json!({"query":"agent-runtime"})
             && *second_detected_at_ms > 0
+            && call.invocation_id == "call_from_call_id"
+            && call.tool_name == "search_code"
+            && call.arguments == json!({"query":"agent-runtime"})
+    ));
+}
+
+#[test]
+fn responses_参数先于_output_item_added_到达时也会补发参数流() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("监听成功");
+    let address = listener.local_addr().expect("读取地址成功");
+
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("接受连接成功");
+        let mut buffer = [0_u8; 4096];
+        let _ = stream.read(&mut buffer).expect("读取请求成功");
+
+        let sse_body = [
+            r#"data: {"type":"response.function_call_arguments.delta","delta":"{\"query\":\"agent-runtime\"}"}"#,
+            r#"data: {"type":"response.output_item.added","item":{"type":"function_call","id":"call_early_args_1","name":"search_code"}}"#,
+            r#"data: {"type":"response.function_call_arguments.done"}"#,
+            r#"data: [DONE]"#,
+        ]
+        .join("\n\n");
+
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n{sse_body}\n\n"
+        );
+        stream.write_all(response.as_bytes()).expect("写回响应成功");
+    });
+
+    let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
+        format!("http://{address}"),
+        "test-key",
+        "gpt-4.1-mini",
+    ))
+    .expect("模型创建成功");
+
+    let mut deltas = Vec::new();
+    let completion =
+        run_async(model.complete_streaming(sample_request(), &AbortSignal::new(), &mut |event| {
+            deltas.push(event);
+        }))
+        .expect("流式调用成功");
+
+    handle.join().expect("服务线程退出");
+    assert!(completion.segments.iter().any(|segment| matches!(
+        segment,
+        CompletionSegment::ToolUse(ToolCall { tool_name, invocation_id, arguments, .. })
+            if tool_name == "search_code"
+                && invocation_id == "call_early_args_1"
+                && arguments == &json!({"query":"agent-runtime"})
+    )));
+    assert!(matches!(
+        deltas.as_slice(),
+        [
+            StreamEvent::ToolCallDetected {
+                invocation_id: detected_invocation_id,
+                tool_name: detected_tool_name,
+                arguments: detected_arguments,
+                detected_at_ms,
+            },
+            StreamEvent::ToolCallArgumentsDelta {
+                invocation_id: delta_invocation_id,
+                tool_name: delta_tool_name,
+                arguments_delta,
+            },
+            StreamEvent::ToolCallReady { call },
+            StreamEvent::Done,
+        ] if detected_invocation_id == "call_early_args_1"
+            && detected_tool_name == "search_code"
+            && detected_arguments == &json!({"query":"agent-runtime"})
+            && *detected_at_ms > 0
+            && delta_invocation_id == "call_early_args_1"
+            && delta_tool_name == "search_code"
+            && arguments_delta == "{\"query\":\"agent-runtime\"}"
+            && call.invocation_id == "call_early_args_1"
+            && call.tool_name == "search_code"
+            && call.arguments == json!({"query":"agent-runtime"})
     ));
 }
 
@@ -1789,37 +1876,43 @@ fn 聊天补全流式调用可逐段收到文本与工具() {
         CompletionSegment::ToolUse(ToolCall { tool_name, invocation_id, .. })
             if tool_name == "search_code" && invocation_id == "call_1"
     )));
+    assert!(
+        matches!(deltas.first(), Some(StreamEvent::ThinkingDelta { text }) if text == "先分析")
+    );
+    assert!(matches!(deltas.get(1), Some(StreamEvent::TextDelta { text }) if text == "答"));
+    assert!(matches!(deltas.get(2), Some(StreamEvent::TextDelta { text }) if text == "案"));
+    assert!(deltas.iter().any(|event| matches!(
+        event,
+        StreamEvent::ToolCallDetected {
+            invocation_id,
+            tool_name,
+            arguments,
+            ..
+        } if invocation_id == "call_1"
+            && tool_name == "search_code"
+            && arguments == &json!({"query": "agent-runtime"})
+    )));
+    let arguments_deltas = deltas
+        .iter()
+        .filter_map(|event| match event {
+            StreamEvent::ToolCallArgumentsDelta { invocation_id, tool_name, arguments_delta }
+                if invocation_id == "call_1" && tool_name == "search_code" =>
+            {
+                Some(arguments_delta.as_str())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(arguments_deltas.len() >= 2);
+    assert_eq!(arguments_deltas.concat(), "{\"query\":\"agent-runtime\"}");
     assert!(matches!(
-        deltas.as_slice(),
-        [
-            StreamEvent::ThinkingDelta { text },
-            StreamEvent::TextDelta { text: first_text },
-            StreamEvent::TextDelta { text: second_text },
-            StreamEvent::ToolCallDetected {
-                invocation_id: first_invocation_id,
-                tool_name: first_tool_name,
-                arguments: first_arguments,
-                detected_at_ms: first_detected_at_ms,
-            },
-            StreamEvent::ToolCallDetected {
-                invocation_id: second_invocation_id,
-                tool_name: second_tool_name,
-                arguments: second_arguments,
-                detected_at_ms: second_detected_at_ms,
-            },
-            StreamEvent::Done,
-        ] if text == "先分析"
-            && first_text == "答"
-            && second_text == "案"
-            && first_invocation_id == "call_1"
-            && first_tool_name == "search_code"
-            && first_arguments == &Value::default()
-            && *first_detected_at_ms > 0
-            && second_invocation_id == "call_1"
-            && second_tool_name == "search_code"
-            && second_arguments == &json!({"query": "agent-runtime"})
-            && *second_detected_at_ms > 0
+        deltas.iter().find(|event| matches!(event, StreamEvent::ToolCallReady { .. })),
+        Some(StreamEvent::ToolCallReady { call })
+            if call.invocation_id == "call_1"
+                && call.tool_name == "search_code"
+                && call.arguments == json!({"query": "agent-runtime"})
     ));
+    assert!(matches!(deltas.last(), Some(StreamEvent::Done)));
 }
 
 #[test]
@@ -1912,28 +2005,122 @@ fn 聊天补全流式工具调用重复发送名称时只检测一次() {
     // 第一次 detection：name 到达时发，arguments 尚未完整
     // 第二次 detection：参数补完后新 key 解析出来时发
     assert!(matches!(
+        deltas.first(),
+        Some(StreamEvent::ToolCallDetected {
+            invocation_id,
+            tool_name,
+            arguments,
+            ..
+        }) if invocation_id == "call_1"
+            && tool_name == "search_code"
+            && arguments == &Value::default()
+    ));
+    let arguments_deltas = deltas
+        .iter()
+        .filter_map(|event| match event {
+            StreamEvent::ToolCallArgumentsDelta { invocation_id, tool_name, arguments_delta }
+                if invocation_id == "call_1" && tool_name == "search_code" =>
+            {
+                Some(arguments_delta.as_str())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(arguments_deltas.len() >= 2);
+    assert_eq!(arguments_deltas.concat(), "{\"query\":\"agent-runtime\"}");
+    assert!(deltas.iter().any(|event| matches!(
+        event,
+        StreamEvent::ToolCallDetected {
+            invocation_id,
+            tool_name,
+            arguments,
+            ..
+        } if invocation_id == "call_1"
+            && tool_name == "search_code"
+            && arguments == &json!({"query": "agent-runtime"})
+    )));
+    assert!(matches!(
+        deltas.iter().find(|event| matches!(event, StreamEvent::ToolCallReady { .. })),
+        Some(StreamEvent::ToolCallReady { call })
+            if call.invocation_id == "call_1"
+                && call.tool_name == "search_code"
+                && call.arguments == json!({"query": "agent-runtime"})
+    ));
+    assert!(matches!(deltas.last(), Some(StreamEvent::Done)));
+}
+
+#[test]
+fn 聊天补全流式工具调用在真实_id_晚到前不会提前_ready() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("监听成功");
+    let address = listener.local_addr().expect("读取地址成功");
+
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("接受连接成功");
+        let mut buffer = [0_u8; 4096];
+        let _ = stream.read(&mut buffer).expect("读取请求成功");
+
+        let sse_body = [
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"search_code","arguments":"{\"query\":\"agent-runtime\"}"}}]}}]}"#,
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_late_1"}]},"finish_reason":"tool_calls"}]}"#,
+            r#"data: [DONE]"#,
+        ]
+        .join("\n\n");
+
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n{sse_body}\n\n"
+        );
+        stream.write_all(response.as_bytes()).expect("写回响应成功");
+    });
+
+    let model = OpenAiChatCompletionsModel::new(OpenAiChatCompletionsConfig::new(
+        format!("http://{address}"),
+        "test-key",
+        "minum-security-llm",
+    ))
+    .expect("模型创建成功");
+
+    let mut request = sample_request();
+    request.model.name = "minum-security-llm".into();
+    let mut deltas = Vec::new();
+    let completion =
+        run_async(
+            model.complete_streaming(request, &AbortSignal::new(), &mut |event| deltas.push(event)),
+        )
+        .expect("流式调用成功");
+
+    handle.join().expect("服务线程退出");
+    assert!(completion.segments.iter().any(|segment| matches!(
+        segment,
+        CompletionSegment::ToolUse(ToolCall { tool_name, invocation_id, arguments, .. })
+            if tool_name == "search_code"
+                && invocation_id == "call_late_1"
+                && arguments == &json!({"query":"agent-runtime"})
+    )));
+    assert!(matches!(
         deltas.as_slice(),
         [
             StreamEvent::ToolCallDetected {
-                invocation_id: first_invocation_id,
-                tool_name: first_tool_name,
-                arguments: first_arguments,
-                detected_at_ms: first_detected_at_ms,
+                invocation_id: detected_invocation_id,
+                tool_name: detected_tool_name,
+                arguments: detected_arguments,
+                detected_at_ms,
             },
-            StreamEvent::ToolCallDetected {
-                invocation_id: second_invocation_id,
-                tool_name: second_tool_name,
-                arguments: second_arguments,
-                detected_at_ms: second_detected_at_ms,
+            StreamEvent::ToolCallArgumentsDelta {
+                invocation_id: delta_invocation_id,
+                tool_name: delta_tool_name,
+                arguments_delta,
             },
+            StreamEvent::ToolCallReady { call },
             StreamEvent::Done,
-        ] if first_invocation_id == "call_1"
-            && first_tool_name == "search_code"
-            && first_arguments == &Value::default()
-            && *first_detected_at_ms > 0
-            && second_invocation_id == "call_1"
-            && second_tool_name == "search_code"
-            && second_arguments == &json!({"query": "agent-runtime"})
-            && *second_detected_at_ms > 0
+        ] if detected_invocation_id == "call_late_1"
+            && detected_tool_name == "search_code"
+            && detected_arguments == &json!({"query":"agent-runtime"})
+            && *detected_at_ms > 0
+            && delta_invocation_id == "call_late_1"
+            && delta_tool_name == "search_code"
+            && arguments_delta == "{\"query\":\"agent-runtime\"}"
+            && call.invocation_id == "call_late_1"
+            && call.tool_name == "search_code"
+            && call.arguments == json!({"query":"agent-runtime"})
     ));
 }

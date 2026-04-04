@@ -65,46 +65,124 @@ where
             )?;
             let llm_trace_context = request.trace_context.clone();
             llm_step_index = llm_step_index.saturating_add(1);
-            let completion = match self
-                .model
-                .complete_streaming(request, &abort_signal, &mut |event| {
-                    buffers.record_stream_event(&event);
-                    on_delta(event);
-                })
-                .await
-            {
-                Ok(completion) => {
-                    self.last_input_tokens =
-                        completion.usage.as_ref().map(|usage| usage.input_tokens as u64);
-                    self.last_usage_turn_id = Some(turn_id.clone());
-                    self.last_usage_step_index = Some(llm_step_index);
-                    self.last_usage_entry_id = self.tape.entries().last().map(|entry| entry.id);
-                    completion
+            let (model_event_tx, mut model_event_rx) =
+                tokio::sync::mpsc::unbounded_channel::<StreamEvent>();
+            let mut streamed_ready_tool_calls = std::collections::BTreeSet::new();
+            let model = self.model.clone();
+            let mut model_stream_sink = |event| {
+                let _ = model_event_tx.send(event);
+            };
+            let mut completion_future =
+                Box::pin(model.complete_streaming(request, &abort_signal, &mut model_stream_sink));
+            let mut completion_result = None;
+
+            loop {
+                tokio::select! {
+                    result = &mut completion_future, if completion_result.is_none() => {
+                        completion_result = Some(result);
+                    }
+                    maybe_event = model_event_rx.recv() => {
+                        let Some(event) = maybe_event else {
+                            if completion_result.is_some() {
+                                break;
+                            }
+                            continue;
+                        };
+
+                        let ready_call = match &event {
+                            StreamEvent::ToolCallReady { call } => Some(call.clone()),
+                            _ => None,
+                        };
+                        buffers.record_stream_event(&event);
+                        on_delta(event);
+
+                        if let Some(call) = ready_call
+                            && streamed_ready_tool_calls.insert(call.invocation_id.clone())
+                        {
+                            self.execute_stream_ready_tool_call(
+                                &turn_id,
+                                llm_trace_context.as_ref(),
+                                &call,
+                                &mut buffers,
+                                &abort_signal,
+                                &mut on_delta,
+                            )
+                            .await?;
+                        }
+                    }
                 }
-                Err(error) => {
-                    if M::is_cancelled_error(&error) {
-                        self.flush_streamed_partial_segments(&turn_id, &mut buffers)?;
+
+                if completion_result.is_some() {
+                    while let Ok(event) = model_event_rx.try_recv() {
+                        let ready_call = match &event {
+                            StreamEvent::ToolCallReady { call } => Some(call.clone()),
+                            _ => None,
+                        };
+                        buffers.record_stream_event(&event);
+                        on_delta(event);
+
+                        if let Some(call) = ready_call
+                            && streamed_ready_tool_calls.insert(call.invocation_id.clone())
+                        {
+                            self.execute_stream_ready_tool_call(
+                                &turn_id,
+                                llm_trace_context.as_ref(),
+                                &call,
+                                &mut buffers,
+                                &abort_signal,
+                                &mut on_delta,
+                            )
+                            .await?;
+                        }
+                    }
+                    break;
+                }
+            }
+
+            let completion = match completion_result {
+                Some(result) => match result {
+                    Ok(completion) => {
+                        self.last_input_tokens =
+                            completion.usage.as_ref().map(|usage| usage.input_tokens as u64);
+                        self.last_usage_turn_id = Some(turn_id.clone());
+                        self.last_usage_step_index = Some(llm_step_index);
+                        self.last_usage_entry_id = self.tape.entries().last().map(|entry| entry.id);
+                        completion
+                    }
+                    Err(error) => {
+                        if M::is_cancelled_error(&error) {
+                            self.flush_streamed_partial_segments(&turn_id, &mut buffers)?;
+                            return self.fail_turn(
+                                &turn_id,
+                                started_at_ms,
+                                &user_messages,
+                                &mut buffers,
+                                RuntimeError::cancelled(),
+                            );
+                        }
+                        if !already_compressed && is_context_length_error(&error.to_string()) {
+                            already_compressed = true;
+                            if self.compress_context(Some(&turn_id), llm_step_index).await.is_ok() {
+                                llm_step_index = llm_step_index.saturating_add(1);
+                                continue;
+                            }
+                        }
                         return self.fail_turn(
                             &turn_id,
                             started_at_ms,
                             &user_messages,
                             &mut buffers,
-                            RuntimeError::cancelled(),
+                            RuntimeError::model(error),
                         );
                     }
-                    if !already_compressed && is_context_length_error(&error.to_string()) {
-                        already_compressed = true;
-                        if self.compress_context(Some(&turn_id), llm_step_index).await.is_ok() {
-                            llm_step_index = llm_step_index.saturating_add(1);
-                            continue;
-                        }
-                    }
+                },
+                None => {
                     return self.fail_turn(
                         &turn_id,
                         started_at_ms,
                         &user_messages,
                         &mut buffers,
-                        RuntimeError::model(error),
+                        RuntimeError::session("model completion future ended without result"),
                     );
                 }
             };
@@ -143,6 +221,7 @@ where
                     &completion,
                     &mut buffers,
                     &abort_signal,
+                    &streamed_ready_tool_calls,
                     &mut on_delta,
                 )
                 .await

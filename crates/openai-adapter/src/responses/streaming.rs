@@ -47,6 +47,20 @@ pub(super) struct ResponsesStreamingState {
 }
 
 impl ResponsesStreamingState {
+    fn emit_tool_arguments_delta(&mut self, sink: &mut (dyn FnMut(StreamEvent) + Send)) {
+        let Some(invocation_id) = self.current_tool.invocation_id() else {
+            return;
+        };
+        let Some(arguments_delta) = self.current_tool.take_unemitted_arguments_delta() else {
+            return;
+        };
+        sink(StreamEvent::ToolCallArgumentsDelta {
+            invocation_id,
+            tool_name: self.current_tool.tool_name().unwrap_or_default().to_string(),
+            arguments_delta,
+        });
+    }
+
     fn reconcile_done_text(
         current: &mut String,
         done_text: String,
@@ -116,6 +130,15 @@ impl ResponsesStreamingState {
             });
             self.current_tool.mark_detection_emitted();
         }
+        let arguments = parse_tool_arguments(self.current_tool.raw_arguments()).unwrap_or_default();
+        let mut ready_call = ToolCall::new(tool_name.clone())
+            .with_invocation_id(id.clone())
+            .with_arguments_value(arguments);
+        if let Some(response_id) = self.response_id.clone() {
+            ready_call = ready_call.with_response_id(response_id);
+        }
+        sink(StreamEvent::ToolCallReady { call: ready_call });
+        self.current_tool.mark_ready_emitted();
         self.tool_calls.push((id, tool_name, self.current_tool.raw_arguments().to_string()));
         self.current_tool.clear();
     }
@@ -186,6 +209,7 @@ impl StreamingState for ResponsesStreamingState {
             Some("response.function_call_arguments.delta") => {
                 let delta = event["delta"].as_str().unwrap_or("");
                 self.current_tool.push_arguments_delta(delta);
+                self.emit_tool_arguments_delta(sink);
                 // 每次收到 arguments delta 后检查是否有新的完整参数 key 解析出来
                 if self.current_tool.detection_emitted()
                     && self.current_tool.check_new_parsed_keys()
@@ -207,7 +231,11 @@ impl StreamingState for ResponsesStreamingState {
             Some("response.output_item.added") => {
                 let item = &event["item"];
                 if item["type"].as_str() == Some("function_call") {
-                    self.current_tool.clear();
+                    if self.current_tool.invocation_id().is_some()
+                        || self.current_tool.tool_name().is_some()
+                    {
+                        self.finish_current_tool_call(sink);
+                    }
                     if let Some(invocation_id) =
                         item["id"].as_str().or_else(|| item["call_id"].as_str())
                     {
@@ -228,6 +256,7 @@ impl StreamingState for ResponsesStreamingState {
                         });
                         self.current_tool.mark_detection_emitted();
                         self.current_tool.check_new_parsed_keys();
+                        self.emit_tool_arguments_delta(sink);
                     }
                 }
             }

@@ -11,6 +11,7 @@ export type ToolRowItem = {
   id: string
   toolName: string
   arguments: Record<string, unknown>
+  rawArguments?: string
   detectedAtMs?: number
   startedAtMs?: number
   finishedAtMs?: number
@@ -122,6 +123,7 @@ export function fromStreamingTool(tool: StreamingToolOutput): ToolRowItem {
     id: tool.invocationId,
     toolName: tool.toolName,
     arguments: tool.arguments,
+    rawArguments: tool.rawArguments,
     detectedAtMs: tool.detectedAtMs,
     startedAtMs: tool.startedAtMs,
     finishedAtMs: tool.finishedAtMs,
@@ -177,6 +179,7 @@ export function coalesceStreamingToolOutputs(
       invocationId: existing.invocationId,
       toolName: hasText(existing.toolName) ? existing.toolName : tool.toolName,
       arguments: { ...existing.arguments, ...tool.arguments },
+      rawArguments: tool.rawArguments ?? existing.rawArguments,
       detectedAtMs: pickToolTimestamp(existing.detectedAtMs, tool.detectedAtMs),
       startedAtMs: existing.startedAtMs ?? tool.startedAtMs,
       finishedAtMs: existing.finishedAtMs ?? tool.finishedAtMs,

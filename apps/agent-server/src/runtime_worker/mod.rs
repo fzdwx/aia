@@ -3,6 +3,7 @@ mod snapshots;
 #[path = "../../tests/runtime_worker/mod.rs"]
 mod tests;
 
+use agent_core::ToolOutputStream;
 use agent_runtime::TurnControl;
 use axum::http::StatusCode;
 use provider_registry::{ModelConfig, ProviderKind};
@@ -14,14 +15,24 @@ use crate::sse::TurnStatus;
 pub(crate) use snapshots::rebuild_session_snapshots_from_tape;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CurrentToolOutputSegment {
+    pub stream: ToolOutputStream,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct CurrentToolOutput {
     pub invocation_id: String,
     pub tool_name: String,
     pub arguments: serde_json::Value,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub raw_arguments: String,
     pub detected_at_ms: u64,
     pub started_at_ms: Option<u64>,
     pub finished_at_ms: Option<u64>,
     pub output: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_segments: Option<Vec<CurrentToolOutputSegment>>,
     pub completed: bool,
     pub result_content: Option<String>,
     pub result_details: Option<serde_json::Value>,
@@ -140,6 +151,7 @@ pub(crate) fn live_tool_block(
     tool_name: String,
     arguments: Value,
     output: String,
+    output_segments: Option<Vec<CurrentToolOutputSegment>>,
     timestamp_ms: u64,
     started: bool,
 ) -> CurrentTurnBlock {
@@ -148,10 +160,12 @@ pub(crate) fn live_tool_block(
             invocation_id,
             tool_name,
             arguments,
+            raw_arguments: String::new(),
             detected_at_ms: timestamp_ms,
             started_at_ms: started.then_some(timestamp_ms),
             finished_at_ms: None,
             output,
+            output_segments,
             completed: false,
             result_content: None,
             result_details: None,
@@ -211,10 +225,13 @@ pub(crate) fn turn_block_to_current(block: agent_runtime::TurnBlock) -> Option<C
                     invocation_id: invocation.call.invocation_id,
                     tool_name: invocation.call.tool_name,
                     arguments: normalize_object_value(&invocation.call.arguments),
+                    raw_arguments: serde_json::to_string(&invocation.call.arguments)
+                        .unwrap_or_else(|_| "{}".to_string()),
                     detected_at_ms: invocation.started_at_ms,
                     started_at_ms: Some(invocation.started_at_ms),
                     finished_at_ms: Some(invocation.finished_at_ms),
                     output: String::new(),
+                    output_segments: None,
                     completed: true,
                     result_content,
                     result_details,

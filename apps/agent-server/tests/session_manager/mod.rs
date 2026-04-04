@@ -457,6 +457,121 @@ fn tool_call_started_overrides_placeholder_timestamp_created_by_output_delta() {
 }
 
 #[test]
+fn tool_output_delta_preserves_stream_segments_in_current_turn_snapshot() {
+    let snapshot = Arc::new(RwLock::new(Some(CurrentTurnSnapshot {
+        turn_id: "turn-widget-1".into(),
+        started_at_ms: 100,
+        user_messages: vec!["渲染 widget".into()],
+        status: TurnStatus::Working,
+        blocks: Vec::new(),
+    })));
+
+    update_current_turn_from_stream(
+        &snapshot,
+        &StreamEvent::ToolCallStarted {
+            invocation_id: "call-widget-1".into(),
+            tool_name: "WidgetRenderer".into(),
+            arguments: serde_json::json!({
+                "title": "流式 widget",
+                "description": "保留 stdout/stderr 分段",
+            }),
+            started_at_ms: 220,
+        },
+    );
+    update_current_turn_from_stream(
+        &snapshot,
+        &StreamEvent::ToolOutputDelta {
+            invocation_id: "call-widget-1".into(),
+            stream: agent_core::ToolOutputStream::Stdout,
+            text: "<div class=\"card\">live</div>".into(),
+        },
+    );
+    update_current_turn_from_stream(
+        &snapshot,
+        &StreamEvent::ToolOutputDelta {
+            invocation_id: "call-widget-1".into(),
+            stream: agent_core::ToolOutputStream::Stderr,
+            text: "warn: noisy".into(),
+        },
+    );
+
+    let current = read_lock(&snapshot);
+    let current = current.as_ref().expect("current turn snapshot should exist");
+    assert_eq!(current.blocks.len(), 1);
+
+    let crate::runtime_worker::CurrentTurnBlock::Tool { tool } = &current.blocks[0] else {
+        panic!("expected tool block");
+    };
+
+    assert_eq!(tool.tool_name, "WidgetRenderer");
+    assert_eq!(tool.output, "<div class=\"card\">live</div>warn: noisy");
+    assert_eq!(
+        tool.output_segments,
+        Some(vec![
+            crate::runtime_worker::CurrentToolOutputSegment {
+                stream: agent_core::ToolOutputStream::Stdout,
+                text: "<div class=\"card\">live</div>".into(),
+            },
+            crate::runtime_worker::CurrentToolOutputSegment {
+                stream: agent_core::ToolOutputStream::Stderr,
+                text: "warn: noisy".into(),
+            },
+        ])
+    );
+}
+
+#[test]
+fn tool_call_arguments_delta_preserves_raw_argument_stream_in_current_turn_snapshot() {
+    let snapshot = Arc::new(RwLock::new(Some(CurrentTurnSnapshot {
+        turn_id: "turn-widget-args-1".into(),
+        started_at_ms: 100,
+        user_messages: vec!["渲染 widget".into()],
+        status: TurnStatus::Working,
+        blocks: Vec::new(),
+    })));
+
+    update_current_turn_from_stream(
+        &snapshot,
+        &StreamEvent::ToolCallDetected {
+            invocation_id: "call-widget-args-1".into(),
+            tool_name: "WidgetRenderer".into(),
+            arguments: serde_json::json!({
+                "title": "流式 widget",
+                "description": "参数流",
+            }),
+            detected_at_ms: 200,
+        },
+    );
+    update_current_turn_from_stream(
+        &snapshot,
+        &StreamEvent::ToolCallArgumentsDelta {
+            invocation_id: "call-widget-args-1".into(),
+            tool_name: "WidgetRenderer".into(),
+            arguments_delta: "{\"title\":\"流式 widget\",\"description\":\"参数流\",\"html\":\"<div class=\\\"card\\\">li".into(),
+        },
+    );
+
+    let current = read_lock(&snapshot);
+    let current = current.as_ref().expect("current turn snapshot should exist");
+    let crate::runtime_worker::CurrentTurnBlock::Tool { tool } = &current.blocks[0] else {
+        panic!("expected tool block");
+    };
+
+    assert_eq!(tool.tool_name, "WidgetRenderer");
+    assert_eq!(
+        tool.arguments,
+        serde_json::json!({
+            "title": "流式 widget",
+            "description": "参数流",
+        })
+    );
+    assert_eq!(
+        tool.raw_arguments,
+        "{\"title\":\"流式 widget\",\"description\":\"参数流\",\"html\":\"<div class=\\\"card\\\">li"
+    );
+}
+
+#[test]
 fn session_slot_finish_turn_restores_idle_state_and_clears_pending_binding() {
     let mut slot = build_idle_slot("slot-finish-turn");
     let (runtime, subscriber, _running_turn) =

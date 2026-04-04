@@ -9,7 +9,7 @@ use std::{
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use crate::{CoreError, QuestionRequest, QuestionResult};
+use crate::{CoreError, QuestionRequest, QuestionResult, ToolCall};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -110,6 +110,14 @@ pub enum StreamEvent {
         tool_name: String,
         arguments: serde_json::Value,
         detected_at_ms: u64,
+    },
+    ToolCallArgumentsDelta {
+        invocation_id: String,
+        tool_name: String,
+        arguments_delta: String,
+    },
+    ToolCallReady {
+        call: ToolCall,
     },
     ToolCallStarted {
         invocation_id: String,

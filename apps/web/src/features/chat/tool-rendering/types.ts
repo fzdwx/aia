@@ -4,6 +4,7 @@ import type { ReactNode } from "react"
 export type ToolRenderData = {
   toolName: string
   arguments: Record<string, unknown>
+  rawArguments?: string
   details?: Record<string, unknown>
   outputContent: string
   outputSegments?: ToolOutputSegment[]

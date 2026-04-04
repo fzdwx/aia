@@ -9,6 +9,7 @@ pub(super) struct TurnBuffers {
     pub(super) tool_invocations: Vec<ToolInvocationLifecycle>,
     pub(super) blocks: Vec<TurnBlock>,
     pub(super) last_assistant_text: Option<String>,
+    pub(super) last_assistant_entry_id: Option<u64>,
     pub(super) streamed_assistant_text: String,
 }
 
@@ -21,6 +22,7 @@ impl TurnBuffers {
             tool_invocations: Vec::new(),
             blocks: Vec::new(),
             last_assistant_text: None,
+            last_assistant_entry_id: None,
             streamed_assistant_text: String::new(),
         }
     }
@@ -46,6 +48,8 @@ impl TurnBuffers {
                 self.streamed_assistant_text.push_str(text);
             }
             StreamEvent::ToolCallDetected { .. }
+            | StreamEvent::ToolCallArgumentsDelta { .. }
+            | StreamEvent::ToolCallReady { .. }
             | StreamEvent::ToolCallStarted { .. }
             | StreamEvent::ToolOutputDelta { .. }
             | StreamEvent::ToolCallCompleted { .. }

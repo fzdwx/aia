@@ -26,6 +26,43 @@ pub(super) struct ChatCompletionsStreamingState {
 }
 
 impl ChatCompletionsStreamingState {
+    fn emit_tool_arguments_delta(
+        state: &mut crate::StreamingToolCallAccumulator,
+        sink: &mut (dyn FnMut(StreamEvent) + Send),
+    ) {
+        let Some(invocation_id) = state.invocation_id() else {
+            return;
+        };
+        let Some(arguments_delta) = state.take_unemitted_arguments_delta() else {
+            return;
+        };
+        sink(StreamEvent::ToolCallArgumentsDelta {
+            invocation_id,
+            tool_name: state.tool_name().unwrap_or_default().to_string(),
+            arguments_delta,
+        });
+    }
+
+    fn emit_tool_detection(
+        state: &mut crate::StreamingToolCallAccumulator,
+        sink: &mut (dyn FnMut(StreamEvent) + Send),
+    ) {
+        let Some(invocation_id) = state.invocation_id() else {
+            return;
+        };
+        let Some(tool_name) = state.tool_name().map(ToString::to_string) else {
+            return;
+        };
+        sink(StreamEvent::ToolCallDetected {
+            invocation_id,
+            tool_name,
+            arguments: state.parsed_arguments(),
+            detected_at_ms: now_timestamp_ms(),
+        });
+        state.mark_detection_emitted();
+        state.check_new_parsed_keys();
+    }
+
     fn apply_tool_delta(&mut self, tool_delta: &Value, sink: &mut (dyn FnMut(StreamEvent) + Send)) {
         let index = tool_delta
             .get("index")
@@ -35,45 +72,60 @@ impl ChatCompletionsStreamingState {
         if let Some(id) = tool_delta.get("id").and_then(|value| value.as_str()) {
             state.set_invocation_id(id.to_string());
         }
+        if let Some(name) = tool_delta
+            .get("function")
+            .and_then(|value| value.get("name"))
+            .and_then(|value| value.as_str())
+        {
+            state.set_tool_name(name.to_string());
+        }
+        if !state.detection_emitted() {
+            Self::emit_tool_detection(state, sink);
+        }
         if let Some(arguments_delta) = tool_delta
             .get("function")
             .and_then(|value| value.get("arguments"))
             .and_then(|value| value.as_str())
         {
             state.push_arguments_delta(arguments_delta);
-            // 每次收到 arguments delta 后检查是否有新的完整参数 key 解析出来
+            Self::emit_tool_arguments_delta(state, sink);
             if state.detection_emitted() && state.check_new_parsed_keys() {
-                let invocation_id =
-                    state.invocation_id_or(|| format!("openai-chat-stream-call-{}", index + 1));
-                if let Some(tool_name) = state.tool_name().map(ToString::to_string) {
-                    sink(StreamEvent::ToolCallDetected {
-                        invocation_id,
-                        tool_name,
-                        arguments: state.parsed_arguments(),
-                        detected_at_ms: now_timestamp_ms(),
-                    });
-                }
+                Self::emit_tool_detection(state, sink);
+            }
+            if !state.ready_emitted()
+                && let Some(invocation_id) = state.invocation_id()
+                && let Some(tool_name) = state.tool_name().map(ToString::to_string)
+                && let Ok(arguments) = parse_tool_arguments(state.raw_arguments())
+            {
+                sink(StreamEvent::ToolCallReady {
+                    call: ToolCall::new(tool_name)
+                        .with_invocation_id(invocation_id)
+                        .with_arguments_value(arguments),
+                });
+                state.mark_ready_emitted();
             }
         }
-        if let Some(name) = tool_delta
-            .get("function")
-            .and_then(|value| value.get("name"))
-            .and_then(|value| value.as_str())
-        {
-            if !state.detection_emitted() {
-                let invocation_id =
-                    state.invocation_id_or(|| format!("openai-chat-stream-call-{}", index + 1));
-                sink(StreamEvent::ToolCallDetected {
-                    invocation_id,
-                    tool_name: name.to_string(),
-                    arguments: state.parsed_arguments(),
-                    detected_at_ms: now_timestamp_ms(),
-                });
-                state.mark_detection_emitted();
-                // 首次 detection 时也记录已有的 parsed keys
-                state.check_new_parsed_keys();
+        Self::emit_tool_arguments_delta(state, sink);
+    }
+
+    fn emit_ready_tool_calls(&mut self, sink: &mut (dyn FnMut(StreamEvent) + Send)) {
+        for state in self.tool_calls.values_mut() {
+            if state.ready_emitted() {
+                continue;
             }
-            state.set_tool_name(name.to_string());
+            let Some(invocation_id) = state.invocation_id() else {
+                continue;
+            };
+            let Some(name) = state.tool_name().map(ToString::to_string) else {
+                continue;
+            };
+            let arguments = parse_tool_arguments(state.raw_arguments()).unwrap_or_default();
+            sink(StreamEvent::ToolCallReady {
+                call: ToolCall::new(name)
+                    .with_invocation_id(invocation_id)
+                    .with_arguments_value(arguments),
+            });
+            state.mark_ready_emitted();
         }
     }
 }
@@ -142,6 +194,10 @@ impl StreamingState for ChatCompletionsStreamingState {
             for tool_delta in tool_deltas {
                 self.apply_tool_delta(tool_delta, sink);
             }
+        }
+
+        if matches!(self.finish_reason.as_deref(), Some("tool_calls") | Some("function_call")) {
+            self.emit_ready_tool_calls(sink);
         }
 
         Ok(())

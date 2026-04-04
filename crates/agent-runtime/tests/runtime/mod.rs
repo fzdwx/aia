@@ -586,6 +586,10 @@ struct StreamingShellTimingTools {
     release_finish: Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
 }
 
+struct ReadyStreamingTools {
+    output_emitted: mpsc::Sender<()>,
+}
+
 #[async_trait]
 impl ToolExecutor for StreamingShellTimingTools {
     type Error = CoreError;
@@ -609,6 +613,90 @@ impl ToolExecutor for StreamingShellTimingTools {
             mutex_lock(&self.release_finish).take().expect("释放通道应只被消费一次");
         release_finish.await.expect("测试应在收到增量后放行工具结束");
         Ok(ToolResult::from_call(call, "片段"))
+    }
+}
+
+#[async_trait]
+impl ToolExecutor for ReadyStreamingTools {
+    type Error = CoreError;
+
+    fn definitions(&self) -> Vec<ToolDefinition> {
+        vec![ToolDefinition::new("search", "搜索代码")]
+    }
+
+    async fn call(
+        &self,
+        call: &ToolCall,
+        output: &mut (dyn FnMut(ToolOutputDelta) + Send),
+        _context: &ToolExecutionContext,
+    ) -> Result<ToolResult, Self::Error> {
+        output(ToolOutputDelta {
+            stream: agent_core::ToolOutputStream::Stdout,
+            text: "ready-fragment".into(),
+        });
+        let _ = self.output_emitted.send(());
+        Ok(ToolResult::from_call(call, "ready-fragment"))
+    }
+}
+
+struct ReadyToolStreamingModel {
+    seen_requests: Mutex<Vec<CompletionRequest>>,
+    release_completion: Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
+}
+
+impl ReadyToolStreamingModel {
+    fn new(release_completion: tokio::sync::oneshot::Receiver<()>) -> Self {
+        Self {
+            seen_requests: Mutex::new(Vec::new()),
+            release_completion: Mutex::new(Some(release_completion)),
+        }
+    }
+}
+
+#[async_trait]
+impl LanguageModel for ReadyToolStreamingModel {
+    type Error = CoreError;
+
+    async fn complete_streaming(
+        &self,
+        request: CompletionRequest,
+        _abort: &AbortSignal,
+        sink: &mut (dyn FnMut(agent_core::StreamEvent) + Send),
+    ) -> Result<Completion, Self::Error> {
+        mutex_lock(&self.seen_requests).push(request.clone());
+
+        let saw_tool_result = request.conversation.iter().any(|item| {
+            item.as_tool_result().is_some_and(|result| result.content == "ready-fragment")
+        });
+
+        if saw_tool_result {
+            return Ok(Completion::text("工具已在流中执行完成"));
+        }
+
+        let call = ToolCall::new("search")
+            .with_invocation_id("ready-call-1")
+            .with_argument("query", "streaming");
+
+        sink(agent_core::StreamEvent::ToolCallDetected {
+            invocation_id: "ready-call-1".into(),
+            tool_name: "search".into(),
+            arguments: json!({ "query": "streaming" }),
+            detected_at_ms: 1,
+        });
+        sink(agent_core::StreamEvent::ToolCallReady { call: call.clone() });
+
+        let release_completion =
+            mutex_lock(&self.release_completion).take().expect("完成放行通道应只被消费一次");
+        release_completion.await.expect("测试应在观察到工具输出后放行模型完成");
+        sink(agent_core::StreamEvent::Done);
+
+        Ok(Completion {
+            segments: vec![CompletionSegment::ToolUse(call)],
+            stop_reason: CompletionStopReason::ToolUse,
+            usage: None,
+            response_body: None,
+            http_status_code: None,
+        })
     }
 }
 
@@ -1284,6 +1372,46 @@ fn 大写_shell_在并行路径里也会实时发出输出增量() {
 
     let output = handle.join().expect("线程应成功结束").expect("应成功完成");
     assert_eq!(output.assistant_text, "Shell 已完成");
+}
+
+#[test]
+fn 模型流内_tool_call_ready_会在_done_前启动工具执行() {
+    let identity = ModelIdentity::new("local", "stream-ready", ModelDisposition::Balanced);
+    let (tool_output_tx, tool_output_rx) = mpsc::channel();
+    let (release_completion_tx, release_completion_rx) = tokio::sync::oneshot::channel();
+    let model = ReadyToolStreamingModel::new(release_completion_rx);
+    let tools = ReadyStreamingTools { output_emitted: tool_output_tx };
+    let mut runtime = AgentRuntime::new(model, tools, identity);
+    let (tool_started_tx, tool_started_rx) = mpsc::channel();
+    let (done_tx, done_rx) = mpsc::channel();
+
+    let handle = std::thread::spawn(move || {
+        let control = TurnControl::new(AbortSignal::new());
+        run_async(runtime.handle_turn_streaming(
+            vec!["开始流式工具调用".to_string()],
+            control,
+            &mut |event| match event {
+                agent_core::StreamEvent::ToolCallStarted { invocation_id, .. } => {
+                    let _ = tool_started_tx.send(invocation_id);
+                }
+                agent_core::StreamEvent::Done => {
+                    let _ = done_tx.send(());
+                }
+                _ => {}
+            },
+        ))
+    });
+
+    tool_output_rx.recv().expect("工具应在模型完成前先输出增量");
+    let started_invocation =
+        tool_started_rx.recv_timeout(Duration::from_secs(1)).expect("工具应在 Done 前已开始执行");
+    assert_eq!(started_invocation, "ready-call-1");
+    assert!(done_rx.recv_timeout(Duration::from_millis(100)).is_err(), "模型完成前不应先收到 Done");
+
+    release_completion_tx.send(()).expect("应在观察到工具已启动后再放行模型完成");
+
+    let output = handle.join().expect("线程应成功结束").expect("应成功完成");
+    assert_eq!(output.assistant_text, "工具已在流中执行完成");
 }
 
 #[test]

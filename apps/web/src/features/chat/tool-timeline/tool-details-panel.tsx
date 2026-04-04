@@ -46,6 +46,7 @@ export function renderToolDetailsPanel(item: ToolRowItem) {
   const renderData = {
     toolName: item.toolName,
     arguments: item.arguments,
+    rawArguments: item.rawArguments,
     details: item.details,
     outputContent: item.outputContent,
     outputSegments: item.outputSegments,

@@ -360,12 +360,18 @@ describe("tool renderer registry", () => {
     expect(html).toContain("aia-widget-send-prompt")
     expect(html).toContain("aia-widget-open-link")
     expect(html).toContain("aia-widget-error")
-    expect(html).toContain("MutationObserver")
+    expect(html).toContain("aia-widget-ready")
+    expect(html).toContain("aia-widget-theme")
+    expect(html).toContain("aia-widget-render")
+    expect(html).toContain("aia-widget-root")
+    expect(html).toContain("aia-widget-description")
+    expect(html).not.toContain("parent.document")
     expect(html).toContain("--foreground")
     expect(html).toContain("svg .t")
     expect(html).toContain("svg .box")
     expect(html).toContain("c-blue")
     expect(html).toContain("--ramp-blue-fill")
+    expect(html).not.toContain("Math.min(1600")
   })
 
   test("renders running widget renderer from streamed html output", () => {
@@ -377,7 +383,9 @@ describe("tool renderer registry", () => {
         html: '<div class="card">stale</div>',
       },
       outputContent: '<div class="card">live</div>',
-      outputSegments: [{ stream: "stdout", text: '<div class="card">live</div>' }],
+      outputSegments: [
+        { stream: "stdout", text: '<div class="card">live</div>' },
+      ],
       succeeded: true,
       isRunning: true,
     })
@@ -386,6 +394,25 @@ describe("tool renderer registry", () => {
     expect(html).toContain("iframe")
     expect(html).toContain("live")
     expect(html).not.toContain("stale")
+  })
+
+  test("renders running widget renderer from streamed raw arguments", () => {
+    const details = toolRendererRegistry.renderDetails({
+      toolName: "WidgetRenderer",
+      arguments: {
+        title: "流式 widget",
+        description: "会优先显示参数流 html。",
+      },
+      rawArguments:
+        '{"title":"流式 widget","description":"会优先显示参数流 html。","html":"<div class=\\"card\\">li',
+      outputContent: "",
+      succeeded: true,
+      isRunning: true,
+    })
+
+    const html = renderWithTheme(details)
+    expect(html).toContain("iframe")
+    expect(html).toContain("li")
   })
 
   test("renders websearch tool title and meta from query and options", () => {
@@ -723,7 +750,8 @@ describe("tool renderer registry", () => {
     const details = toolRendererRegistry.renderDetails({
       toolName: "Shell",
       arguments: {
-        command: "./node_modules/.bin/vp test --run src/features/chat/tool-rendering/index.test.tsx",
+        command:
+          "./node_modules/.bin/vp test --run src/features/chat/tool-rendering/index.test.tsx",
       },
       outputContent:
         "\u001b[1m\u001b[7m\u001b[34m RUN \u001b[39m\u001b[27m\u001b[22m\n\u001b[32m✓\u001b[39m tests passed",

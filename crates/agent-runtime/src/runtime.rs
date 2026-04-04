@@ -32,7 +32,7 @@ type TapeEntryListener =
 
 pub struct AgentRuntime<M, T> {
     session_id: Option<String>,
-    model: M,
+    model: Arc<M>,
     tools: Arc<T>,
     tape: SessionTape,
     model_identity: ModelIdentity,
@@ -80,7 +80,7 @@ where
 
         Self {
             session_id: None,
-            model,
+            model: Arc::new(model),
             tools: Arc::new(tools),
             tape,
             model_identity,
@@ -238,7 +238,7 @@ where
     }
 
     pub fn replace_model(&mut self, model: M, identity: ModelIdentity) {
-        self.model = model;
+        self.model = Arc::new(model);
         self.model_identity = identity;
     }
 

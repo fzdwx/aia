@@ -46,6 +46,8 @@ pub(crate) fn is_visible_stream_event(event: &StreamEvent) -> bool {
         StreamEvent::ThinkingDelta { .. }
             | StreamEvent::TextDelta { .. }
             | StreamEvent::ToolCallDetected { .. }
+            | StreamEvent::ToolCallArgumentsDelta { .. }
+            | StreamEvent::ToolCallReady { .. }
             | StreamEvent::ToolCallStarted { .. }
     )
 }

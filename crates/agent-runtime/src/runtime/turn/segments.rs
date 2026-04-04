@@ -6,7 +6,7 @@ use agent_core::{
 use futures::stream::{FuturesUnordered, StreamExt};
 use session_tape::TapeEntry;
 
-use crate::{RuntimeEvent, TurnBlock};
+use crate::{RuntimeEvent, ToolInvocationLifecycle, TurnBlock};
 
 use super::super::{
     AgentRuntime, RuntimeError,
@@ -72,6 +72,7 @@ where
         completion: &Completion,
         buffers: &mut TurnBuffers,
         abort_signal: &AbortSignal,
+        already_executed_tool_calls: &std::collections::BTreeSet<String>,
         on_delta: &mut (dyn FnMut(StreamEvent) + Send),
     ) -> Result<CompletionProcessingResult, RuntimeError> {
         self.flush_streamed_partial_segments(turn_id, buffers)?;
@@ -114,10 +115,15 @@ where
                     buffers.source_entry_ids.push(entry_id);
                     self.publish_event(RuntimeEvent::AssistantMessage { content: text.clone() });
                     buffers.last_assistant_text = Some(text.clone());
+                    buffers.last_assistant_entry_id = Some(entry_id);
                     buffers.blocks.push(TurnBlock::Assistant { content: text.clone() });
                     assistant_entry_id = Some(entry_id);
                 }
                 CompletionSegment::ToolUse(call) => {
+                    if already_executed_tool_calls.contains(&call.invocation_id) {
+                        saw_tool_calls = true;
+                        continue;
+                    }
                     if buffers.tool_invocations.len() + parallel_calls.len()
                         >= self.max_tool_calls_per_turn
                     {
@@ -140,33 +146,19 @@ where
                             override_result,
                         ));
                     } else {
-                        let mut context = ExecuteToolCallContext::new(
-                            turn_id,
-                            llm_trace_context,
-                            assistant_entry_id,
-                            tool_call_entry_id,
-                            call,
-                            &mut buffers.source_entry_ids,
-                            abort_signal.clone(),
-                        );
-                        let invocation = match override_result {
-                            Some(result) => {
-                                let started_at_ms = now_timestamp_ms();
-                                on_delta(context.started_event(started_at_ms));
-                                self.commit_prepared_tool_call(
-                                    &mut context,
-                                    super::super::tool_calls::PreparedToolCallOutcome::Completed {
-                                        started_at_ms,
-                                        tool_trace_context: llm_trace_context
-                                            .map(|trace| build_tool_trace_context(trace, call)),
-                                        result,
-                                        failed: abort_signal.is_aborted(),
-                                    },
-                                    on_delta,
-                                )?
-                            }
-                            None => self.execute_tool_call(context, on_delta).await?,
-                        };
+                        let invocation = self
+                            .execute_serial_tool_call(
+                                turn_id,
+                                llm_trace_context,
+                                assistant_entry_id,
+                                tool_call_entry_id,
+                                call,
+                                override_result,
+                                &mut buffers.source_entry_ids,
+                                abort_signal,
+                                on_delta,
+                            )
+                            .await?;
                         buffers.blocks.push(TurnBlock::ToolInvocation {
                             invocation: Box::new(invocation.clone()),
                         });
@@ -366,6 +358,87 @@ where
         Ok(CompletionProcessingResult::Continue { saw_tool_calls })
     }
 
+    pub(super) async fn execute_stream_ready_tool_call(
+        &mut self,
+        turn_id: &str,
+        llm_trace_context: Option<&LlmTraceRequestContext>,
+        call: &ToolCall,
+        buffers: &mut TurnBuffers,
+        abort_signal: &AbortSignal,
+        on_delta: &mut (dyn FnMut(StreamEvent) + Send),
+    ) -> Result<ToolInvocationLifecycle, RuntimeError> {
+        if buffers.tool_invocations.len() >= self.max_tool_calls_per_turn {
+            return Err(RuntimeError::tool_call_limit(self.max_tool_calls_per_turn));
+        }
+        if abort_signal.is_aborted() {
+            return Err(RuntimeError::cancelled());
+        }
+
+        self.flush_streamed_partial_segments(turn_id, buffers)?;
+        let assistant_entry_id = buffers.last_assistant_entry_id;
+        let override_result = self.resolve_tool_call_override(turn_id, call)?;
+        let tool_call_entry_id =
+            self.append_tape_entry(TapeEntry::tool_call(call).with_run_id(turn_id))?;
+        buffers.source_entry_ids.push(tool_call_entry_id);
+        let invocation = self
+            .execute_serial_tool_call(
+                turn_id,
+                llm_trace_context,
+                assistant_entry_id,
+                tool_call_entry_id,
+                call,
+                override_result,
+                &mut buffers.source_entry_ids,
+                abort_signal,
+                on_delta,
+            )
+            .await?;
+        buffers.blocks.push(TurnBlock::ToolInvocation { invocation: Box::new(invocation.clone()) });
+        buffers.tool_invocations.push(invocation.clone());
+        Ok(invocation)
+    }
+
+    async fn execute_serial_tool_call(
+        &mut self,
+        turn_id: &str,
+        llm_trace_context: Option<&LlmTraceRequestContext>,
+        assistant_entry_id: Option<u64>,
+        tool_call_entry_id: u64,
+        call: &ToolCall,
+        override_result: Option<agent_core::ToolResult>,
+        source_entry_ids: &mut Vec<u64>,
+        abort_signal: &AbortSignal,
+        on_delta: &mut (dyn FnMut(StreamEvent) + Send),
+    ) -> Result<ToolInvocationLifecycle, RuntimeError> {
+        let mut context = ExecuteToolCallContext::new(
+            turn_id,
+            llm_trace_context,
+            assistant_entry_id,
+            tool_call_entry_id,
+            call,
+            source_entry_ids,
+            abort_signal.clone(),
+        );
+        match override_result {
+            Some(result) => {
+                let started_at_ms = now_timestamp_ms();
+                on_delta(context.started_event(started_at_ms));
+                self.commit_prepared_tool_call(
+                    &mut context,
+                    super::super::tool_calls::PreparedToolCallOutcome::Completed {
+                        started_at_ms,
+                        tool_trace_context: llm_trace_context
+                            .map(|trace| build_tool_trace_context(trace, call)),
+                        result,
+                        failed: abort_signal.is_aborted(),
+                    },
+                    on_delta,
+                )
+            }
+            None => self.execute_tool_call(context, on_delta).await,
+        }
+    }
+
     pub(super) fn flush_streamed_partial_segments(
         &mut self,
         turn_id: &str,
@@ -388,6 +461,7 @@ where
             buffers.source_entry_ids.push(entry_id);
             self.publish_event(RuntimeEvent::AssistantMessage { content: assistant_text.clone() });
             buffers.last_assistant_text = Some(assistant_text.clone());
+            buffers.last_assistant_entry_id = Some(entry_id);
             buffers.blocks.push(TurnBlock::Assistant { content: assistant_text });
         }
 

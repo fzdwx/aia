@@ -225,6 +225,28 @@ impl TraceEventCollector {
                     }),
                 });
             }
+            StreamEvent::ToolCallArgumentsDelta { invocation_id, tool_name, arguments_delta } => {
+                self.events.push(LlmTraceEvent {
+                    name: "response.tool_call_arguments_delta".to_string(),
+                    at_ms,
+                    attributes: json!({
+                        "invocation_id": invocation_id,
+                        "tool_name": tool_name,
+                        "arguments_delta_preview": preview_text(arguments_delta),
+                    }),
+                });
+            }
+            StreamEvent::ToolCallReady { call } => {
+                self.events.push(LlmTraceEvent {
+                    name: "response.tool_call_ready".to_string(),
+                    at_ms,
+                    attributes: json!({
+                        "invocation_id": call.invocation_id,
+                        "tool_name": call.tool_name,
+                        "arguments": call.arguments,
+                    }),
+                });
+            }
             StreamEvent::Retrying { attempt, max_attempts, reason } => {
                 self.events.push(LlmTraceEvent {
                     name: "response.retrying".to_string(),

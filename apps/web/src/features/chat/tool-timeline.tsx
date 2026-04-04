@@ -39,6 +39,7 @@ function ToolTrigger({
   const renderData = {
     toolName: item.toolName,
     arguments: item.arguments,
+    rawArguments: item.rawArguments,
     details: item.details,
     outputContent: item.outputContent,
     outputSegments: item.outputSegments,
@@ -108,6 +109,7 @@ function ToolRow({
   const renderData = {
     toolName: item.toolName,
     arguments: item.arguments,
+    rawArguments: item.rawArguments,
     details: item.details,
     outputContent: item.outputContent,
     outputSegments: item.outputSegments,

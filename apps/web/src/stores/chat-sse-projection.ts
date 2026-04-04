@@ -10,6 +10,29 @@ import type {
 
 type StreamEventData = Extract<SseEvent, { type: "stream" }>["data"]
 
+function tryParseRawToolArguments(
+  rawArguments: string
+): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(rawArguments) as unknown
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null
+    }
+    return normalizeToolArguments(parsed as Record<string, unknown>)
+  } catch {
+    return null
+  }
+}
+
+function isPlaceholderToolMetadata(
+  tool: Extract<StreamingBlock, { type: "tool" }>["tool"]
+): boolean {
+  return (
+    tool.toolName.trim().length === 0 &&
+    Object.keys(tool.arguments).length === 0
+  )
+}
+
 function findToolBlockIndex(
   blocks: StreamingBlock[],
   invocationId: string
@@ -42,18 +65,22 @@ export function currentTurnToStreamingTurn(
               invocationId: block.tool.invocation_id,
               toolName: block.tool.tool_name,
               arguments: normalizeToolArguments(block.tool.arguments),
+              rawArguments: block.tool.raw_arguments ?? undefined,
               detectedAtMs: block.tool.detected_at_ms,
               startedAtMs: block.tool.started_at_ms ?? undefined,
               finishedAtMs: block.tool.finished_at_ms ?? undefined,
               output: block.tool.output,
-              // 已完成的工具不需要 segments，只保留 output 字符串
-              outputSegments: undefined,
+              outputSegments: block.tool.output_segments ?? undefined,
               completed: block.tool.completed,
               resultContent: block.tool.result_content ?? undefined,
               resultDetails: block.tool.result_details ?? undefined,
               failed: block.tool.failed ?? undefined,
             },
           } as const
+        default:
+          throw new Error(
+            `unsupported current turn block kind: ${JSON.stringify(block)}`
+          )
       }
     }),
   }
@@ -120,12 +147,19 @@ export function applyStreamEventToBlocks(
         ...block.tool.arguments,
         ...normalizeToolArguments(data.arguments),
       }
+      const shouldRepairPlaceholder = isPlaceholderToolMetadata(block.tool)
       nextBlocks[existingIndex] = {
         ...block,
         tool: {
           ...block.tool,
           toolName: data.tool_name || block.tool.toolName,
           arguments: mergedArguments,
+          rawArguments:
+            block.tool.rawArguments ??
+            JSON.stringify(normalizeToolArguments(data.arguments ?? {})),
+          detectedAtMs: shouldRepairPlaceholder
+            ? data.detected_at_ms
+            : block.tool.detectedAtMs,
         },
       }
     } else {
@@ -135,7 +169,47 @@ export function applyStreamEventToBlocks(
           invocationId: data.invocation_id,
           toolName: data.tool_name,
           arguments: normalizeToolArguments(data.arguments),
+          rawArguments: JSON.stringify(
+            normalizeToolArguments(data.arguments ?? {})
+          ),
           detectedAtMs: data.detected_at_ms,
+          output: "",
+          completed: false,
+        },
+      })
+    }
+    return nextBlocks
+  }
+
+  if (data.kind === "tool_call_arguments_delta") {
+    const existingIndex = findToolBlockIndex(nextBlocks, data.invocation_id)
+    if (existingIndex >= 0) {
+      const block = nextBlocks[existingIndex] as Extract<
+        StreamingBlock,
+        { type: "tool" }
+      >
+      const rawArguments =
+        (block.tool.rawArguments ?? "") + data.arguments_delta
+      const parsedArguments = tryParseRawToolArguments(rawArguments)
+      nextBlocks[existingIndex] = {
+        ...block,
+        tool: {
+          ...block.tool,
+          toolName: data.tool_name || block.tool.toolName,
+          arguments: parsedArguments ?? block.tool.arguments,
+          rawArguments,
+        },
+      }
+    } else {
+      const rawArguments = data.arguments_delta
+      nextBlocks.push({
+        type: "tool",
+        tool: {
+          invocationId: data.invocation_id,
+          toolName: data.tool_name,
+          arguments: tryParseRawToolArguments(rawArguments) ?? {},
+          rawArguments,
+          detectedAtMs: Date.now(),
           output: "",
           completed: false,
         },
@@ -155,13 +229,23 @@ export function applyStreamEventToBlocks(
         ...block.tool.arguments,
         ...normalizeToolArguments(data.arguments),
       }
+      const shouldRepairPlaceholder = isPlaceholderToolMetadata(block.tool)
       nextBlocks[existingIndex] = {
         ...block,
         tool: {
           ...block.tool,
           toolName: data.tool_name || block.tool.toolName,
           arguments: mergedArguments,
-          startedAtMs: block.tool.startedAtMs ?? data.started_at_ms,
+          rawArguments:
+            block.tool.rawArguments ??
+            JSON.stringify(normalizeToolArguments(data.arguments ?? {})),
+          detectedAtMs: shouldRepairPlaceholder
+            ? data.started_at_ms
+            : block.tool.detectedAtMs,
+          startedAtMs:
+            shouldRepairPlaceholder || block.tool.startedAtMs == null
+              ? data.started_at_ms
+              : block.tool.startedAtMs,
         },
       }
     } else {
@@ -172,6 +256,9 @@ export function applyStreamEventToBlocks(
           invocationId: data.invocation_id,
           toolName: data.tool_name,
           arguments: normalizeToolArguments(data.arguments),
+          rawArguments: JSON.stringify(
+            normalizeToolArguments(data.arguments ?? {})
+          ),
           detectedAtMs: startedAtMs,
           startedAtMs,
           output: "",

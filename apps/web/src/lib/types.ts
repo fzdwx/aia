@@ -10,6 +10,12 @@ export type StreamEvent =
       detected_at_ms: number
     }
   | {
+      kind: "tool_call_arguments_delta"
+      invocation_id: string
+      tool_name: string
+      arguments_delta: string
+    }
+  | {
       kind: "tool_call_started"
       invocation_id: string
       tool_name: string
@@ -234,10 +240,12 @@ export type CurrentToolOutput = {
   invocation_id: string
   tool_name: string
   arguments: Record<string, unknown>
+  raw_arguments?: string
   detected_at_ms: number
   started_at_ms: number | null
   finished_at_ms: number | null
   output: string
+  output_segments?: ToolOutputSegment[]
   completed: boolean
   result_content: string | null
   result_details: Record<string, unknown> | null
@@ -272,6 +280,7 @@ export type StreamingToolOutput = {
   invocationId: string
   toolName: string
   arguments: Record<string, unknown>
+  rawArguments?: string
   detectedAtMs: number
   startedAtMs?: number
   finishedAtMs?: number

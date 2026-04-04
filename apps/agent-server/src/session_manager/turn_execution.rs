@@ -519,6 +519,8 @@ impl TurnWorker {
             StreamEvent::ThinkingDelta { .. } => CurrentStatusInner::Thinking,
             StreamEvent::TextDelta { .. } => CurrentStatusInner::Generating,
             StreamEvent::ToolCallDetected { .. } => current_status.clone(),
+            StreamEvent::ToolCallArgumentsDelta { .. } => current_status.clone(),
+            StreamEvent::ToolCallReady { .. } => current_status.clone(),
             StreamEvent::ToolCallStarted { .. } => CurrentStatusInner::Working,
             StreamEvent::ToolOutputDelta { .. } => CurrentStatusInner::Working,
             StreamEvent::Retrying { .. } => CurrentStatusInner::Retrying,
