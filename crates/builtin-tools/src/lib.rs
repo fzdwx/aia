@@ -10,6 +10,7 @@ mod shell;
 mod tape;
 mod walk;
 mod websearch;
+mod widget;
 mod write;
 
 pub use apply_patch::ApplyPatchTool;
@@ -22,6 +23,7 @@ pub use read::ReadTool;
 pub use shell::ShellTool;
 pub use tape::{TapeHandoffTool, TapeInfoTool};
 pub use websearch::WebSearchTool;
+pub use widget::{WidgetReadmeTool, WidgetRendererTool};
 pub use write::WriteTool;
 
 pub fn should_skip_directory_name(name: &str) -> bool {
@@ -42,6 +44,8 @@ pub fn build_tool_registry() -> ToolRegistry {
     registry.register(Box::new(QuestionTool));
     registry.register(Box::new(TapeInfoTool));
     registry.register(Box::new(TapeHandoffTool));
+    registry.register(Box::new(WidgetReadmeTool));
+    registry.register(Box::new(WidgetRendererTool));
     registry.register(Box::new(CodeSearchTool));
     registry.register(Box::new(WebSearchTool));
     registry

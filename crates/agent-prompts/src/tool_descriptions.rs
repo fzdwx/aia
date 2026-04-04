@@ -18,6 +18,8 @@ markdown_tool_description!(websearch_tool_description, "../prompts/tool/websearc
 markdown_tool_description!(question_tool_description, "../prompts/tool/question.md");
 markdown_tool_description!(tape_info_tool_description, "../prompts/tool/tape_info.md");
 markdown_tool_description!(tape_handoff_tool_description, "../prompts/tool/tape_handoff.md");
+markdown_tool_description!(widget_readme_tool_description, "../prompts/tool/widget_readme.md");
+markdown_tool_description!(widget_renderer_tool_description, "../prompts/tool/widget_renderer.md");
 
 #[cfg(test)]
 #[path = "../tests/tool_descriptions/mod.rs"]

@@ -57,7 +57,7 @@ web-check:
 dev: web-install
 	#!/usr/bin/env bash
 	set -e
-	cargo run --release -p agent-server &
+	cargo run --release --bin agent-server &
 	SERVER_PID=$!
 	cd apps/web && pnpm run dev &
 	WEB_PID=$!

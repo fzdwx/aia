@@ -718,6 +718,35 @@ describe("tool timeline", () => {
     expect(html).not.toContain('data-slot="tool-row-details"')
   })
 
+  test("renders running widget renderer inline from streamed html", () => {
+    const html = renderWithTheme(
+      <StreamingToolGroup
+        toolOutputs={[
+          {
+            invocationId: "streaming-widget-1",
+            toolName: "WidgetRenderer",
+            arguments: {
+              title: "流式 widget",
+              description: "边生成边预览",
+            },
+            detectedAtMs: Date.now() - 500,
+            startedAtMs: Date.now() - 400,
+            output: '<div class="card">live widget</div>',
+            outputSegments: [
+              { stream: "stdout", text: '<div class="card">live widget</div>' },
+            ],
+            completed: false,
+          },
+        ]}
+      />
+    )
+
+    expect(html).toContain("WidgetRenderer")
+    expect(html).toContain('data-slot="tool-row-inline-details"')
+    expect(html).toContain("iframe")
+    expect(html).toContain("live widget")
+  })
+
   test("renders TapeHandoff details without generic or summary headings", () => {
     const html = renderWithTheme(
       <>

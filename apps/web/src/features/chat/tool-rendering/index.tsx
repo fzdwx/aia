@@ -24,6 +24,10 @@ import {
   createTapeHandoffRenderer,
   createTapeInfoRenderer,
 } from "./renderers/runtime-tools"
+import {
+  createWidgetReadmeRenderer,
+  createWidgetRendererRenderer,
+} from "./renderers/widget"
 
 export const toolRendererRegistry = createToolRendererRegistry(
   createDefaultToolRenderer(),
@@ -40,5 +44,7 @@ export const toolRendererRegistry = createToolRendererRegistry(
     createQuestionRenderer(),
     createTapeInfoRenderer(),
     createTapeHandoffRenderer(),
+    createWidgetReadmeRenderer(),
+    createWidgetRendererRenderer(),
   ]
 )

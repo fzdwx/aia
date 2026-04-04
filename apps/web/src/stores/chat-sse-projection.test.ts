@@ -40,4 +40,45 @@ describe("chat sse projection", () => {
       { stream: "stderr", text: "warning: noisy\n" },
     ])
   })
+
+  test("accumulates widget renderer output for live preview", () => {
+    const blocks = applyStreamEventToBlocks(
+      [
+        {
+          type: "tool",
+          tool: {
+            invocationId: "widget-1",
+            toolName: "WidgetRenderer",
+            arguments: {
+              title: "流式 widget",
+              description: "live preview",
+            },
+            detectedAtMs: 1,
+            startedAtMs: 1,
+            output: "",
+            completed: false,
+          },
+        },
+      ],
+      {
+        kind: "tool_output_delta",
+        invocation_id: "widget-1",
+        stream: "stdout",
+        text: '<div class="card">live</div>',
+        session_id: "session-1",
+        turn_id: "turn-1",
+      }
+    )
+
+    const block = blocks[0]
+    expect(block?.type).toBe("tool")
+    if (!block || block.type !== "tool") {
+      throw new Error("expected first block to stay a tool block")
+    }
+
+    expect(block.tool.output).toBe('<div class="card">live</div>')
+    expect(block.tool.outputSegments).toEqual([
+      { stream: "stdout", text: '<div class="card">live</div>' },
+    ])
+  })
 })

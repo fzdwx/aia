@@ -5,6 +5,7 @@ import { toolTimelineCopy } from "../../tool-timeline-copy"
 
 import type { ToolRenderer } from "../types"
 import { getStringValue, truncateInline } from "../helpers"
+import { stripAnsiSequences } from "./shell-output"
 import { ShellOutputBody } from "./shell-output-body"
 
 function buildShellOutput(data: {
@@ -13,11 +14,15 @@ function buildShellOutput(data: {
   outputSegments?: ToolOutputSegment[]
 }): string | null {
   if (data.outputContent.trim().length > 0) {
-    return data.outputContent
+    return stripAnsiSequences(data.outputContent)
   }
 
   if ((data.outputSegments?.length ?? 0) > 0) {
-    return data.outputSegments?.map((segment) => segment.text).join("") ?? null
+    return (
+      data.outputSegments
+        ?.map((segment) => stripAnsiSequences(segment.text))
+        .join("") ?? null
+    )
   }
 
   const stdout = getStringValue(data.details, "stdout")
@@ -26,7 +31,7 @@ function buildShellOutput(data: {
     (value): value is string => typeof value === "string" && value.length > 0
   )
 
-  return parts.length > 0 ? parts.join("\n") : null
+  return parts.length > 0 ? stripAnsiSequences(parts.join("\n")) : null
 }
 
 function firstShellLine(data: {

@@ -42,6 +42,8 @@
 
 :root {
   --radius: 0.75rem;
+  --tool-expanded-max-height: 15rem;
+  --tool-expanded-content-max-height: calc(var(--tool-expanded-max-height) - 1.5rem);
   color-scheme: dark;
   --background-base: oklch(0.145 0.0018 255);
   --background-weak: oklch(0.168 0.0018 255);
@@ -854,6 +856,7 @@ body {
   }
 
   [data-slot="tool-row-details"] {
+    padding-top: 0.125rem;
     padding-left: 0.5rem;
   }
 
@@ -874,6 +877,15 @@ body {
   .tool-timeline-detail-surface-flat {
     border-left: 0;
     padding-left: 0;
+  }
+
+  .tool-timeline-detail-surface-borderless {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    max-height: none;
+    overflow: visible;
   }
 
   .tool-timeline-patch-list {
@@ -913,6 +925,11 @@ body {
   }
 
   .tool-timeline-patch-item:first-child .tool-timeline-patch-summary {
+    border-top-left-radius: 0.875rem;
+    border-top-right-radius: 0.875rem;
+  }
+
+  .tool-timeline-patch-item:first-child[open] .tool-timeline-patch-summary {
     border-top-left-radius: 0.875rem;
     border-top-right-radius: 0.875rem;
   }
@@ -990,15 +1007,21 @@ body {
   .tool-timeline-patch-body {
     border: 1px solid color-mix(in oklch, var(--border) 58%, transparent);
     border-top: 0;
-    border-bottom-left-radius: 0.875rem;
-    border-bottom-right-radius: 0.875rem;
+    border-radius: 0;
     background: transparent;
     overflow: hidden;
   }
 
-  .tool-timeline-patch-body > .tool-timeline-pierre-root {
+  .tool-timeline-patch-body .tool-timeline-pierre-root {
     border: 0;
-    border-radius: inherit;
+    border-radius: 0;
+  }
+
+  .tool-timeline-patch-diff-container,
+  .tool-timeline-patch-diff-placeholder,
+  .tool-timeline-patch-body .tool-timeline-pierre-virtualizer,
+  .tool-timeline-patch-body .tool-timeline-pierre-virtualizer-content {
+    border-radius: 0;
   }
 
   .tool-timeline-patch-item[open] .tool-timeline-patch-summary {
@@ -1062,31 +1085,9 @@ body {
     .tool-timeline-detail-body,
   .tool-timeline-info-section[data-tool-detail-tone="output"]
     .tool-timeline-info-content,
-  .tool-timeline-detail-section[data-tool-detail-tone="failure"]
-    .tool-timeline-detail-body,
-  .tool-timeline-info-section[data-tool-detail-tone="failure"]
-    .tool-timeline-info-content,
-  .tool-timeline-detail-section[data-tool-detail-tone="patch"]
-    .tool-timeline-detail-body,
-  .tool-timeline-info-section[data-tool-detail-tone="patch"]
-    .tool-timeline-info-content,
   .tool-timeline-json-pre {
-    border: 1px solid transparent;
-    border-radius: 0.75rem;
-    padding: 0.625rem 0.75rem;
-  }
-
-  .tool-timeline-detail-section[data-tool-detail-tone="output"]
-    .tool-timeline-detail-body,
-  .tool-timeline-info-section[data-tool-detail-tone="output"]
-    .tool-timeline-info-content,
-  .tool-timeline-json-pre {
-    border-color: color-mix(in oklch, var(--border) 42%, transparent);
-    background: color-mix(
-      in oklch,
-      var(--workspace-surface-soft) 82%,
-      transparent
-    );
+    border-color: color-mix(in oklch, var(--border) 58%, transparent);
+    background: transparent;
   }
 
   .tool-timeline-shell-detail {
@@ -1095,10 +1096,11 @@ body {
 
   .tool-timeline-shell-detail.tool-timeline-detail-section
     .tool-timeline-shell-body.tool-timeline-detail-body {
-    border-color: color-mix(in oklch, var(--border) 58%, transparent);
+    border-color: transparent;
     background: transparent;
-    padding: 0.75rem 0.875rem;
-    max-height: 15rem;
+    padding: 0;
+    max-height: none;
+    overflow: visible;
   }
 
   .tool-timeline-shell-pre {
@@ -1108,7 +1110,7 @@ body {
     padding: 0;
     border: 0;
     border-radius: 0;
-    max-height: calc(15rem - 1.5rem);
+    max-height: var(--tool-expanded-content-max-height);
     overflow: auto;
     overscroll-behavior: contain;
     -ms-overflow-style: none;
@@ -1117,6 +1119,32 @@ body {
     line-height: 1.6;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+  }
+
+  .tool-timeline-detail-body::-webkit-scrollbar,
+  .tool-timeline-info-content::-webkit-scrollbar,
+  .tool-timeline-json-pre::-webkit-scrollbar,
+  .tool-timeline-output-pre::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
+    appearance: none;
+  }
+
+  .tool-timeline-detail-body::-webkit-scrollbar-track,
+  .tool-timeline-detail-body::-webkit-scrollbar-thumb,
+  .tool-timeline-detail-body::-webkit-scrollbar-corner,
+  .tool-timeline-info-content::-webkit-scrollbar-track,
+  .tool-timeline-info-content::-webkit-scrollbar-thumb,
+  .tool-timeline-info-content::-webkit-scrollbar-corner,
+  .tool-timeline-json-pre::-webkit-scrollbar-track,
+  .tool-timeline-json-pre::-webkit-scrollbar-thumb,
+  .tool-timeline-json-pre::-webkit-scrollbar-corner,
+  .tool-timeline-output-pre::-webkit-scrollbar-track,
+  .tool-timeline-output-pre::-webkit-scrollbar-thumb,
+  .tool-timeline-output-pre::-webkit-scrollbar-corner {
+    background: transparent;
+    border: 0;
   }
 
   .tool-timeline-shell-command {
@@ -1156,23 +1184,15 @@ body {
   .tool-timeline-info-section[data-tool-detail-tone="failure"]
     .tool-timeline-info-content {
     border-color: color-mix(in oklch, var(--destructive) 34%, var(--border));
-    background: color-mix(in oklch, var(--destructive) 8%, transparent);
+    background: transparent;
   }
 
   .tool-timeline-detail-section[data-tool-detail-tone="patch"]
     .tool-timeline-detail-body,
   .tool-timeline-info-section[data-tool-detail-tone="patch"]
     .tool-timeline-info-content {
-    border-color: color-mix(
-      in oklch,
-      var(--inline-code-foreground) 22%,
-      var(--border)
-    );
-    background: color-mix(
-      in oklch,
-      var(--inline-code-surface) 18%,
-      var(--workspace-surface-soft)
-    );
+    border-color: color-mix(in oklch, var(--border) 58%, transparent);
+    background: transparent;
   }
 
   .tool-timeline-detail-list {
@@ -1197,8 +1217,8 @@ body {
 
   .tool-timeline-detail-list-value {
     overflow-wrap: anywhere;
-    font-size: var(--font-size-caption);
-    line-height: 1.5;
+    font-size: 0.9rem;
+    line-height: 1.6;
     color: color-mix(in oklch, var(--text-strong) 88%, transparent);
   }
 
@@ -1216,9 +1236,11 @@ body {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     font-family: var(--font-mono);
-    font-size: var(--font-size-ui-xs);
+    font-size: 0.9rem;
     line-height: 1.6;
     color: color-mix(in oklch, var(--text-strong) 86%, transparent);
+    scrollbar-width: none;
+    -ms-overflow-style: none;
   }
 
   .tool-timeline-output-pre[data-failed="true"] {
@@ -1245,6 +1267,18 @@ body {
     overscroll-behavior: contain;
   }
 
+  .tool-timeline-detail-surface .tool-timeline-pierre-virtualizer {
+    max-height: var(--tool-expanded-content-max-height);
+  }
+
+  .tool-timeline-detail-surface .tool-timeline-pierre-root {
+    max-height: var(--tool-expanded-content-max-height);
+  }
+
+  .tool-timeline-patch-body .tool-timeline-pierre-virtualizer {
+    max-height: var(--tool-expanded-max-height);
+  }
+
   .tool-timeline-pierre-virtualizer-content {
     min-width: 100%;
   }
@@ -1253,8 +1287,8 @@ body {
 
   .sd-table {
     font-family: var(--font-mono);
-    font-size: var(--font-size-meta);
-    line-height: 20px;
+    font-size: 0.9rem;
+    line-height: 1.6;
     tab-size: 2;
   }
 
@@ -1368,7 +1402,8 @@ body {
     padding: 12px 16px;
     color: var(--text-weak);
     font-family: var(--font-mono);
-    font-size: var(--font-size-meta);
+    font-size: 0.9rem;
+    line-height: 1.6;
   }
 
   .sd-status[data-state="error"] {

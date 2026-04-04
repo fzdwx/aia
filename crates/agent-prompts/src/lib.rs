@@ -1,6 +1,7 @@
 mod system_prompt;
 mod title_generator;
 pub mod tool_descriptions;
+pub mod widget_guidelines;
 
 pub use system_prompt::{SystemPromptBlock, SystemPromptConfig, build_system_prompt};
 pub use title_generator::{

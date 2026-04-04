@@ -2,6 +2,8 @@ import { useEffect, useRef } from "react"
 
 import type { ToolOutputSegment } from "@/lib/types"
 
+import { stripAnsiSequences } from "./shell-output"
+
 type ShellOutputBodyProps = {
   command: string
   output: string | null
@@ -21,9 +23,9 @@ export function ShellOutputBody({
   const hasStreamingSegments = segments.length > 0
   const followTrigger = hasStreamingSegments
     ? segments
-        .map((segment) => `${segment.stream}:${segment.text}`)
+        .map((segment) => `${segment.stream}:${stripAnsiSequences(segment.text)}`)
         .join("\u0000")
-    : (output ?? "")
+    : stripAnsiSequences(output ?? "")
 
   useEffect(() => {
     const element = preRef.current
@@ -76,13 +78,13 @@ export function ShellOutputBody({
                 }
                 data-stream={segment.stream}
               >
-                {segment.text}
+                {stripAnsiSequences(segment.text)}
               </span>
             )
           })}
         </>
       ) : output ? (
-        `\n\n${output}`
+        `\n\n${stripAnsiSequences(output)}`
       ) : null}
     </pre>
   )

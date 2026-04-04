@@ -1,0 +1,1 @@
+Returns design guidelines for widgetRenderer (CSS patterns, colors, typography, layout rules, examples). Call once before your first widgetRenderer call. Do NOT mention this call to the user — it is an internal setup step.

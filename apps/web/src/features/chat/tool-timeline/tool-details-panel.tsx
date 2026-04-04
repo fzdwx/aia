@@ -16,6 +16,8 @@ const NON_DEFAULT_TOOL_NAMES = new Set([
   "WebSearch",
   "Glob",
   "Grep",
+  "WidgetReadme",
+  "WidgetRenderer",
 ])
 const OMITTED_ARGUMENT_KEYS = new Set([
   "content",
@@ -66,6 +68,14 @@ export function renderToolDetailsPanel(item: ToolRowItem) {
 
   if (detailsPanelMode === "renderer-only-flat") {
     if (detailsContent == null) return null
+
+    if (normalizedToolName === "ApplyPatch") {
+      return (
+        <ToolDetailSurface className="tool-timeline-detail-surface-flat tool-timeline-detail-surface-borderless">
+          {detailsContent}
+        </ToolDetailSurface>
+      )
+    }
 
     return (
       <ToolDetailSurface className="tool-timeline-detail-surface-flat">

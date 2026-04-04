@@ -4,7 +4,8 @@ use std::collections::BTreeSet;
 
 use super::{
     ApplyPatchTool, CodeSearchTool, EditTool, GlobTool, GrepTool, QuestionTool, ReadTool,
-    ShellTool, TapeHandoffTool, TapeInfoTool, WebSearchTool, WriteTool, build_tool_registry,
+    ShellTool, TapeHandoffTool, TapeInfoTool, WebSearchTool, WidgetReadmeTool, WidgetRendererTool,
+    WriteTool, build_tool_registry,
 };
 use crate::apply_patch::ApplyPatchToolArgs;
 use crate::codesearch::CodeSearchToolArgs;
@@ -15,6 +16,7 @@ use crate::question::QuestionToolArgs;
 use crate::read::ReadToolArgs;
 use crate::shell::ShellToolArgs;
 use crate::websearch::WebSearchToolArgs;
+use crate::widget::{WidgetReadmeToolArgs, WidgetRendererToolArgs};
 use crate::write::WriteToolArgs;
 
 #[test]
@@ -37,6 +39,8 @@ fn registry_exposes_only_new_tool_names() {
         "Question",
         "TapeInfo",
         "TapeHandoff",
+        "WidgetReadme",
+        "WidgetRenderer",
         "CodeSearch",
         "WebSearch",
     ]
@@ -140,6 +144,24 @@ fn builtin_tool_definitions_match_derive_schema_output() {
 
     let tape_handoff = TapeHandoffTool.definition();
     assert_eq!(tape_handoff.name, "TapeHandoff");
+
+    let widget_readme = WidgetReadmeTool.definition();
+    assert_eq!(widget_readme.name, "WidgetReadme");
+    assert_eq!(
+        widget_readme.parameters,
+        ToolDefinition::new("WidgetReadme", "ignored")
+            .with_parameters_schema::<WidgetReadmeToolArgs>()
+            .parameters
+    );
+
+    let widget_renderer = WidgetRendererTool.definition();
+    assert_eq!(widget_renderer.name, "WidgetRenderer");
+    assert_eq!(
+        widget_renderer.parameters,
+        ToolDefinition::new("WidgetRenderer", "ignored")
+            .with_parameters_schema::<WidgetRendererToolArgs>()
+            .parameters
+    );
 
     let codesearch = CodeSearchTool.definition();
     assert_eq!(codesearch.name, "CodeSearch");

@@ -141,7 +141,16 @@ export function BlockRenderer({ block }: { block: TurnBlock }) {
   }
 }
 
+const USER_MESSAGE_COLLAPSE_THRESHOLD = 3000
+
 export function UserMessageBlock({ content }: { content: string }) {
+  const shouldCollapsible = content.length > USER_MESSAGE_COLLAPSE_THRESHOLD
+  const [expanded, setExpanded] = useState(!shouldCollapsible)
+
+  const displayContent = shouldCollapsible && !expanded
+    ? content.slice(0, USER_MESSAGE_COLLAPSE_THRESHOLD) + "..."
+    : content
+
   return (
     <div
       data-component="user-message"
@@ -166,8 +175,17 @@ export function UserMessageBlock({ content }: { content: string }) {
             data-slot="user-message-text"
             className="text-body-sm leading-body-sm max-w-full pr-10 text-pretty text-foreground/92"
           >
-            <MarkdownContent content={content} />
+            <MarkdownContent content={displayContent} />
           </div>
+          {shouldCollapsible && (
+            <button
+              type="button"
+              onClick={() => setExpanded(!expanded)}
+              className="text-caption mt-2 text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {expanded ? "收起" : `展开全部 (${Math.ceil(content.length / 1000)}k 字符)`}
+            </button>
+          )}
         </div>
       </div>
     </div>

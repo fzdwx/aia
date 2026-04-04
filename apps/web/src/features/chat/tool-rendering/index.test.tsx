@@ -318,6 +318,76 @@ describe("tool renderer registry", () => {
     expect(html).toContain("Practical examples and syntax for useState.")
   })
 
+  test("renders widget renderer title from structured details", () => {
+    const title = toolRendererRegistry.renderTitle({
+      toolName: "WidgetRenderer",
+      arguments: {
+        title: "粒子黑洞",
+        description: "一个可交互的粒子黑洞 widget。",
+        html: '<div class="card">demo</div>',
+      },
+      details: {
+        title: "粒子黑洞",
+        description: "一个可交互的粒子黑洞 widget。",
+      },
+      outputContent: "Rendered widget: 粒子黑洞",
+      succeeded: true,
+    })
+
+    expect(title).toBe("粒子黑洞")
+  })
+
+  test("renders widget renderer details as sandbox iframe", () => {
+    const details = toolRendererRegistry.renderDetails({
+      toolName: "WidgetRenderer",
+      arguments: {
+        title: "粒子黑洞",
+        description: "一个可交互的粒子黑洞 widget。",
+        html: '<div class="card">demo</div>',
+      },
+      details: {
+        title: "粒子黑洞",
+        description: "一个可交互的粒子黑洞 widget。",
+        html: '<div class="card">demo</div>',
+      },
+      outputContent: "Rendered widget: 粒子黑洞",
+      succeeded: true,
+    })
+
+    const html = renderWithTheme(details)
+    expect(html).toContain("iframe")
+    expect(html).toContain("srcDoc=")
+    expect(html).toContain("aia-widget-send-prompt")
+    expect(html).toContain("aia-widget-open-link")
+    expect(html).toContain("aia-widget-error")
+    expect(html).toContain("MutationObserver")
+    expect(html).toContain("--foreground")
+    expect(html).toContain("svg .t")
+    expect(html).toContain("svg .box")
+    expect(html).toContain("c-blue")
+    expect(html).toContain("--ramp-blue-fill")
+  })
+
+  test("renders running widget renderer from streamed html output", () => {
+    const details = toolRendererRegistry.renderDetails({
+      toolName: "WidgetRenderer",
+      arguments: {
+        title: "流式 widget",
+        description: "会优先显示流式 html。",
+        html: '<div class="card">stale</div>',
+      },
+      outputContent: '<div class="card">live</div>',
+      outputSegments: [{ stream: "stdout", text: '<div class="card">live</div>' }],
+      succeeded: true,
+      isRunning: true,
+    })
+
+    const html = renderWithTheme(details)
+    expect(html).toContain("iframe")
+    expect(html).toContain("live")
+    expect(html).not.toContain("stale")
+  })
+
   test("renders websearch tool title and meta from query and options", () => {
     const title = toolRendererRegistry.renderTitle({
       toolName: "WebSearch",
@@ -638,6 +708,32 @@ describe("tool renderer registry", () => {
     expect(html).toContain("warning: unused import")
     expect(html).not.toContain("Result")
     expect(html).not.toContain("Failure")
+  })
+
+  test("strips ansi escape sequences from shell subtitle and details", () => {
+    const subtitle = toolRendererRegistry.renderSubtitle({
+      toolName: "Shell",
+      arguments: {},
+      outputContent: "\u001b[32mPASS\u001b[39m\nsecond line",
+      succeeded: true,
+    })
+
+    expect(subtitle).toBe("PASS")
+
+    const details = toolRendererRegistry.renderDetails({
+      toolName: "Shell",
+      arguments: {
+        command: "./node_modules/.bin/vp test --run src/features/chat/tool-rendering/index.test.tsx",
+      },
+      outputContent:
+        "\u001b[1m\u001b[7m\u001b[34m RUN \u001b[39m\u001b[27m\u001b[22m\n\u001b[32m✓\u001b[39m tests passed",
+      succeeded: true,
+    })
+
+    const html = renderWithTheme(details)
+    expect(html).toContain("RUN")
+    expect(html).toContain("tests passed")
+    expect(html).not.toContain("\u001b[")
   })
 
   test("renders apply_patch title from first patch operation", () => {

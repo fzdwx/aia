@@ -12,6 +12,10 @@ function isQuestionTool(item: ToolRowItem): boolean {
   return normalizeToolName(item.toolName).toLowerCase() === "question"
 }
 
+function isWidgetReadmeTool(item: ToolRowItem): boolean {
+  return normalizeToolName(item.toolName).toLowerCase() === "widgetreadme"
+}
+
 function hasText(value: string | undefined | null): value is string {
   return typeof value === "string" && value.trim().length > 0
 }
@@ -102,6 +106,7 @@ export function hasQuestionResolution(item: ToolRowItem): boolean {
 }
 
 export function shouldRenderToolItem(item: ToolRowItem): boolean {
+  if (isWidgetReadmeTool(item)) return false
   if (!isQuestionTool(item)) return true
   if (!item.succeeded) return true
   if (isIgnoredQuestion(item)) return true
@@ -146,7 +151,8 @@ export function getFallbackSubtitle(item: ToolRowItem): string | null {
 }
 
 export function shouldInlineToolDetails(item: ToolRowItem) {
-  return INLINE_DETAIL_TOOLS.has(normalizeToolName(item.toolName))
+  const toolName = normalizeToolName(item.toolName)
+  return toolName === "WidgetRenderer" || INLINE_DETAIL_TOOLS.has(toolName)
 }
 
 export function shouldShowToolRowCaret() {
