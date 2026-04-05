@@ -4,12 +4,7 @@ import { normalizeToolArguments } from "@/lib/tool-display"
 
 import type { ToolRenderer } from "../types"
 import { getArrayValue, getStringValue, truncateInline } from "../helpers"
-import {
-  ExpandableOutput,
-  ToolDetailSection,
-  ToolDetailSurface,
-  ToolInfoSection,
-} from "../ui"
+import { ExpandableOutput, ToolDetailSection } from "../ui"
 
 type WidgetSandboxProps = {
   title: string
@@ -1048,7 +1043,7 @@ function WidgetSandbox({
       title={title}
       srcDoc={srcDoc}
       sandbox="allow-scripts allow-popups"
-      className="w-full overflow-hidden rounded-[calc(var(--radius)*1.25)] border border-border/50 bg-transparent"
+      className="w-full overflow-hidden rounded-[calc(var(--radius)*1.25)] bg-transparent"
       style={{ height: frameHeight, minHeight: 1, overflow: "hidden" }}
     />
   )
@@ -1166,19 +1161,12 @@ export function createWidgetRendererRenderer(): ToolRenderer {
       }
 
       return (
-        <div className="space-y-3">
-          <ToolDetailSurface className="tool-timeline-detail-surface-flat tool-timeline-detail-surface-borderless">
-            <WidgetSandbox
-              title={title}
-              description={description}
-              html={html}
-              isStreaming={data.isRunning}
-            />
-          </ToolDetailSurface>
-          <ToolInfoSection title="Content" defaultOpen={false}>
-            <ExpandableOutput value={html} failed={false} />
-          </ToolInfoSection>
-        </div>
+        <WidgetSandbox
+          title={title}
+          description={description}
+          html={html}
+          isStreaming={data.isRunning}
+        />
       )
     },
   }

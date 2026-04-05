@@ -379,6 +379,8 @@ describe("tool renderer registry", () => {
     expect(html).toContain("c-blue")
     expect(html).toContain("--ramp-blue-fill")
     expect(html).not.toContain("Math.min(1600")
+    expect(html).not.toContain('tool-timeline-detail-title">Content')
+    expect(html).not.toContain("border border-border/50")
   })
 
   test("renders running widget renderer from streamed html output", () => {
