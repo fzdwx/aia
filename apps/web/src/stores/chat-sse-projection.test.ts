@@ -83,6 +83,7 @@ describe("chat sse projection", () => {
     expect(block.tool.outputSegments).toEqual([
       { stream: "stdout", text: '<div class="card">live</div>' },
     ])
+    expect(block.tool.previewHtml).toBe('<div class="card">live</div>')
   })
 
   test("accumulates raw tool arguments for widget parameter streaming", () => {
@@ -127,6 +128,7 @@ describe("chat sse projection", () => {
       title: "流式 widget",
       description: "参数流",
     })
+    expect(block.tool.previewHtml).toBe('<div class="card">li')
   })
 
   test("hydrates current turn widget output segments for live preview", () => {
@@ -262,6 +264,7 @@ describe("chat sse projection", () => {
     expect(block.tool.outputSegments).toEqual([
       { stream: "stdout", text: '<div class="card">live</div>' },
     ])
+    expect(block.tool.previewHtml).toBe('<div class="card">live</div>')
   })
 
   test("hydrates current turn raw widget arguments for parameter streaming", () => {
@@ -304,5 +307,6 @@ describe("chat sse projection", () => {
     expect(block.tool.rawArguments).toBe(
       '{"title":"流式 widget","description":"恢复参数流","html":"<div class=\\"card\\">li'
     )
+    expect(block.tool.previewHtml).toBe('<div class="card">li')
   })
 })

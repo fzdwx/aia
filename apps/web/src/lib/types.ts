@@ -281,6 +281,7 @@ export type StreamingToolOutput = {
   toolName: string
   arguments: Record<string, unknown>
   rawArguments?: string
+  previewHtml?: string
   detectedAtMs: number
   startedAtMs?: number
   finishedAtMs?: number

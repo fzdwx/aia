@@ -47,6 +47,7 @@ export function renderToolDetailsPanel(item: ToolRowItem) {
     toolName: item.toolName,
     arguments: item.arguments,
     rawArguments: item.rawArguments,
+    previewHtml: item.previewHtml,
     details: item.details,
     outputContent: item.outputContent,
     outputSegments: item.outputSegments,

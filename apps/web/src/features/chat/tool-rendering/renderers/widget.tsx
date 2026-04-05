@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import { normalizeToolArguments } from "@/lib/tool-display"
 
@@ -15,6 +15,7 @@ type WidgetSandboxProps = {
   title: string
   description: string | null
   html: string
+  isStreaming: boolean
 }
 
 const WIDGET_IFRAME_BASE_CSS = `
@@ -332,10 +333,18 @@ const WIDGET_IFRAME_SVG_CSS = `
 `
 
 function getStreamingWidgetHtml(data: {
+  previewHtml?: string
   outputContent: string
   outputSegments?: { stream: "stdout" | "stderr"; text: string }[]
   rawArguments?: string
 }) {
+  if (
+    typeof data.previewHtml === "string" &&
+    data.previewHtml.trim().length > 0
+  ) {
+    return data.previewHtml.trim()
+  }
+
   const stdout = (data.outputSegments ?? [])
     .filter((segment) => segment.stream === "stdout")
     .map((segment) => segment.text)
@@ -416,6 +425,8 @@ function buildThemeTokenScript(): string {
     const root = document.getElementById('aia-widget-root');
     const descriptionNode = document.getElementById('aia-widget-description');
     let lastRenderedHtml = root ? root.innerHTML : '';
+    const DANGEROUS_TAGS = /<(iframe|object|embed|meta|link|base|form)[\\s>][\\s\\S]*?<\\/\\1>/gi;
+    const DANGEROUS_VOID = /<(iframe|object|embed|meta|link|base)\\b[^>]*\\/?>/gi;
 
     const trimIncompleteScripts = (value) => {
       if (typeof value !== 'string' || value.length === 0) {
@@ -427,9 +438,30 @@ function buildThemeTokenScript(): string {
         return value;
       }
 
-      const closeIndex = value.indexOf('</script>', openIndex);
+      const closeIndex = value.indexOf('<\\/script>', openIndex);
       return closeIndex < 0 ? value.slice(0, openIndex) : value;
     };
+
+    const stripDangerousUrls = (value) => value.replace(
+      /\\s+(href|src|action)\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>"']*))/gi,
+      (match, _attr, dq, sq, uq) => {
+        const url = (dq ?? sq ?? uq ?? '').trim();
+        return /^\\s*(javascript|data)\\s*:/i.test(url) ? '' : match;
+      }
+    );
+
+    const sanitizeForStreaming = (value) => stripDangerousUrls(
+      trimIncompleteScripts(value)
+        .replace(DANGEROUS_TAGS, '')
+        .replace(DANGEROUS_VOID, '')
+        .replace(/\\s+on[a-z]+\\s*=\\s*(?:"[^"]*"|'[^']*'|[^\\s>"']*)/gi, '')
+        .replace(/<script[\\s\\S]*?<\\/script>/gi, '')
+        .replace(/<script\\b[^>]*\\/?>/gi, '')
+    );
+
+    const sanitizeForFinalize = (value) => trimIncompleteScripts(value)
+      .replace(DANGEROUS_TAGS, '')
+      .replace(DANGEROUS_VOID, '');
 
     const runWidgetCleanup = () => {
       if (typeof window.__AIA_WIDGET_CLEANUP__ !== 'function') {
@@ -448,36 +480,112 @@ function buildThemeTokenScript(): string {
       window.__AIA_WIDGET_CLEANUP__ = undefined;
     };
 
-    const replayScripts = () => {
+    const applyStreamingHtml = (html) => {
       if (!root) {
         return;
       }
 
-      const scripts = Array.from(root.querySelectorAll('script'));
-      for (const currentScript of scripts) {
-        const nextScript = document.createElement('script');
-        for (const attribute of Array.from(currentScript.attributes)) {
-          nextScript.setAttribute(attribute.name, attribute.value);
-        }
-        nextScript.textContent = currentScript.textContent;
-        currentScript.replaceWith(nextScript);
+      const visualHtml = sanitizeForStreaming(html);
+      if (visualHtml !== lastRenderedHtml) {
+        root.innerHTML = visualHtml;
+        lastRenderedHtml = visualHtml;
       }
-
-      document.dispatchEvent(new Event('DOMContentLoaded'));
-      window.dispatchEvent(new Event('load'));
     };
 
+    const applyFinalHtml = (html) => {
+      if (!root) {
+        return;
+      }
+
+      const tmp = document.createElement('div');
+      tmp.innerHTML = sanitizeForFinalize(html);
+      const scripts = Array.from(tmp.querySelectorAll('script')).map((script) => ({
+        src: script.getAttribute('src') || '',
+        text: script.textContent || '',
+        attrs: Array.from(script.attributes)
+          .filter((attribute) => attribute.name !== 'src' && attribute.name !== 'onload')
+          .map((attribute) => ({ name: attribute.name, value: attribute.value })),
+      }));
+      for (const script of Array.from(tmp.querySelectorAll('script'))) {
+        script.remove();
+      }
+
+      const visualHtml = tmp.innerHTML;
+      runWidgetCleanup();
+      if (visualHtml !== lastRenderedHtml) {
+        root.innerHTML = visualHtml;
+        lastRenderedHtml = visualHtml;
+      }
+
+      const externalScripts = scripts.filter((script) => script.src.length > 0);
+      const inlineScripts = scripts.filter(
+        (script) => script.src.length === 0 && script.text.length > 0
+      );
+
+      const appendInlineScripts = () => {
+        for (const script of inlineScripts) {
+          const nextScript = document.createElement('script');
+          for (const attribute of script.attrs) {
+            nextScript.setAttribute(attribute.name, attribute.value);
+          }
+          nextScript.textContent = script.text;
+          root.appendChild(nextScript);
+        }
+        scheduleHeightSync();
+      };
+
+      if (externalScripts.length === 0) {
+        appendInlineScripts();
+        return;
+      }
+
+      let pending = externalScripts.length;
+      const onExternalSettled = () => {
+        pending -= 1;
+        if (pending <= 0) {
+          appendInlineScripts();
+        }
+      };
+
+      for (const script of externalScripts) {
+        const nextScript = document.createElement('script');
+        nextScript.src = script.src;
+        nextScript.onload = onExternalSettled;
+        nextScript.onerror = onExternalSettled;
+        for (const attribute of script.attrs) {
+          nextScript.setAttribute(attribute.name, attribute.value);
+        }
+        root.appendChild(nextScript);
+      }
+    };
+
+    let heightSyncRaf = 0;
+    let heightSyncTimeout = 0;
     const scheduleHeightSync = () => {
-      requestAnimationFrame(postHeight);
-      requestAnimationFrame(() => requestAnimationFrame(postHeight));
-      setTimeout(postHeight, 0);
-      setTimeout(postHeight, 32);
-      setTimeout(postHeight, 96);
-      setTimeout(postHeight, 192);
+      if (heightSyncRaf) {
+        return;
+      }
+
+      heightSyncRaf = requestAnimationFrame(() => {
+        heightSyncRaf = 0;
+        postHeight();
+
+        if (heightSyncTimeout) {
+          clearTimeout(heightSyncTimeout);
+        }
+        heightSyncTimeout = window.setTimeout(() => {
+          heightSyncTimeout = 0;
+          postHeight();
+        }, 96);
+      });
     };
 
     const syncContentPayload = (payload) => {
-      if (!payload || payload.type !== 'aia-widget-render') {
+      if (
+        !payload ||
+        (payload.type !== 'aia-widget-update' &&
+          payload.type !== 'aia-widget-finalize')
+      ) {
         return;
       }
 
@@ -491,12 +599,10 @@ function buildThemeTokenScript(): string {
       }
 
       if (root && typeof payload.html === 'string') {
-        const nextHtml = trimIncompleteScripts(payload.html);
-        if (nextHtml !== lastRenderedHtml) {
-          runWidgetCleanup();
-          root.innerHTML = nextHtml;
-          lastRenderedHtml = nextHtml;
-          replayScripts();
+        if (payload.type === 'aia-widget-update') {
+          applyStreamingHtml(payload.html);
+        } else {
+          applyFinalHtml(payload.html);
         }
       }
 
@@ -539,7 +645,6 @@ function buildThemeTokenScript(): string {
 function buildSandboxDocument({
   title,
   description,
-  html,
 }: WidgetSandboxProps): string {
   const safeTitle = escapeHtml(title)
   const safeDescription = description ? escapeHtml(description) : ""
@@ -556,7 +661,7 @@ function buildSandboxDocument({
 </head>
 <body>
   <div id="aia-widget-description" class="sr-only">${safeDescription}</div>
-  <div id="aia-widget-root">${html}</div>
+  <div id="aia-widget-root"></div>
   <script>
     const postHeight = () => {
       const rootRectHeight = root
@@ -626,8 +731,6 @@ function buildSandboxDocument({
       mutationObserver.observe(root, {
         childList: true,
         subtree: true,
-        attributes: true,
-        characterData: true,
       });
     }
     window.addEventListener('load', postHeight);
@@ -637,20 +740,58 @@ function buildSandboxDocument({
 </html>`
 }
 
-function WidgetSandbox({ title, description, html }: WidgetSandboxProps) {
+// eslint-disable-next-line react-refresh/only-export-components
+function WidgetSandbox({
+  title,
+  description,
+  html,
+  isStreaming,
+}: WidgetSandboxProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
   const lastHeightRef = useRef<number | null>(null)
+  const frameReadyRef = useRef(false)
+  const pendingRenderTimeoutRef = useRef<number | null>(null)
   const latestRenderPayloadRef = useRef({
-    type: "aia-widget-render",
+    type: isStreaming ? "aia-widget-update" : "aia-widget-finalize",
     title,
     description,
     html,
   })
   const [frameHeight, setFrameHeight] = useState<number | undefined>(undefined)
   const initialSrcDocRef = useRef<string>(
-    buildSandboxDocument({ title, description, html })
+    buildSandboxDocument({ title, description, html: "" })
   )
   const srcDoc = initialSrcDocRef.current
+
+  const flushRenderPayload = useCallback(
+    (options?: { immediate?: boolean }) => {
+      const target = iframeRef.current?.contentWindow
+      if (!target || !frameReadyRef.current) {
+        return
+      }
+
+      if (pendingRenderTimeoutRef.current != null) {
+        window.clearTimeout(pendingRenderTimeoutRef.current)
+        pendingRenderTimeoutRef.current = null
+      }
+
+      const send = () => {
+        pendingRenderTimeoutRef.current = null
+        target.postMessage(latestRenderPayloadRef.current, "*")
+      }
+
+      if (
+        options?.immediate ||
+        latestRenderPayloadRef.current.type === "aia-widget-finalize"
+      ) {
+        send()
+        return
+      }
+
+      pendingRenderTimeoutRef.current = window.setTimeout(send, 48)
+    },
+    []
+  )
 
   useEffect(() => {
     const THEME_KEYS = [
@@ -806,7 +947,8 @@ function WidgetSandbox({ title, description, html }: WidgetSandboxProps) {
       if (!payload || typeof payload !== "object") return
 
       if (payload.type === "aia-widget-ready") {
-        frame.contentWindow?.postMessage(latestRenderPayloadRef.current, "*")
+        frameReadyRef.current = true
+        flushRenderPayload({ immediate: true })
         sendThemeToFrame()
         return
       }
@@ -872,29 +1014,33 @@ function WidgetSandbox({ title, description, html }: WidgetSandboxProps) {
     })
 
     const frame = iframeRef.current
+    frameReadyRef.current = false
     frame?.addEventListener("load", sendThemeToFrame)
     sendThemeToFrame()
 
     return () => {
+      if (pendingRenderTimeoutRef.current != null) {
+        window.clearTimeout(pendingRenderTimeoutRef.current)
+      }
       window.removeEventListener("message", handleMessage)
       themeObserver.disconnect()
       frame?.removeEventListener("load", sendThemeToFrame)
     }
-  }, [])
+  }, [flushRenderPayload])
 
   useEffect(() => {
     latestRenderPayloadRef.current = {
-      type: "aia-widget-render",
+      type: isStreaming ? "aia-widget-update" : "aia-widget-finalize",
       title,
       description,
       html,
     }
 
     const target = iframeRef.current?.contentWindow
-    if (target) {
-      target.postMessage(latestRenderPayloadRef.current, "*")
+    if (target && frameReadyRef.current) {
+      flushRenderPayload({ immediate: !isStreaming })
     }
-  }, [description, html, title])
+  }, [description, flushRenderPayload, html, isStreaming, title])
 
   return (
     <iframe
@@ -996,6 +1142,7 @@ export function createWidgetRendererRenderer(): ToolRenderer {
         getStringValue(args, "description") ??
         null
       const liveHtml = getStreamingWidgetHtml({
+        previewHtml: data.previewHtml,
         outputContent: data.outputContent,
         outputSegments: data.outputSegments,
         rawArguments: data.rawArguments,
@@ -1003,8 +1150,8 @@ export function createWidgetRendererRenderer(): ToolRenderer {
       const html = data.isRunning
         ? liveHtml || getStringValue(args, "html") || ""
         : getStringValue(details, "html") ||
-          liveHtml ||
           getStringValue(args, "html") ||
+          liveHtml ||
           ""
 
       if (!html.trim()) {
@@ -1025,6 +1172,7 @@ export function createWidgetRendererRenderer(): ToolRenderer {
               title={title}
               description={description}
               html={html}
+              isStreaming={data.isRunning}
             />
           </ToolDetailSurface>
           <ToolInfoSection title="Content" defaultOpen={false}>

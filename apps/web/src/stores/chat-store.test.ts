@@ -457,7 +457,10 @@ describe("chat store submitTurn", () => {
 
   test("retryTurn regenerates failed turn without posting a new user message", async () => {
     let fetchCalls = 0
-    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit
+    ) => {
       const url = typeof input === "string" ? input : input.toString()
       if (url === "/api/turn/retry") {
         fetchCalls += 1
@@ -511,7 +514,10 @@ describe("chat store submitTurn", () => {
   })
 
   test("retryTurn also regenerates cancelled turn", async () => {
-    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit
+    ) => {
       const url = typeof input === "string" ? input : input.toString()
       if (url === "/api/turn/retry") {
         expect(init?.body).toBe(
@@ -1244,7 +1250,6 @@ describe("chat store submitTurn", () => {
 
     const switchPromise = useChatStore.getState().switchSession("session-2")
 
-    const duringHydration = useChatStore.getState()
     assert.equal(
       __getSessionSnapshotForTests("session-1")?.latestTurn?.turn_id,
       "turn-1-latest"

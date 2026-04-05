@@ -744,7 +744,7 @@ describe("tool timeline", () => {
     expect(html).toContain("WidgetRenderer")
     expect(html).toContain('data-slot="tool-row-inline-details"')
     expect(html).toContain("iframe")
-    expect(html).toContain("live widget")
+    expect(html).toContain("aia-widget-update")
   })
 
   test("renders TapeHandoff details without generic or summary headings", () => {

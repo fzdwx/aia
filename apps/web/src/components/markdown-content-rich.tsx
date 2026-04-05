@@ -10,9 +10,13 @@ import { cjk } from "@streamdown/cjk"
 import { createCodePlugin } from "@streamdown/code"
 import { math } from "@streamdown/math"
 import { mermaid } from "@streamdown/mermaid"
-import { parseMarkdownIntoBlocks, Streamdown } from "streamdown"
+import { Streamdown } from "streamdown"
 import type { IconMap } from "streamdown"
 
+import {
+  computeStreamingMarkdownBlocks,
+  type StreamingMarkdownBlockCache,
+} from "@/components/markdown-streaming-blocks"
 import { cn } from "@/lib/utils"
 
 const OVERSIZE_STREAMING_MARKDOWN_THRESHOLD = 16_000
@@ -72,44 +76,6 @@ const markdownComponents = {
   hr: withClasses("hr", "my-4 border-border/40"),
   inlineCode: withClasses("code", "inline-code"),
 } as const
-
-type StreamingMarkdownBlockCache = {
-  content: string
-  blocks: string[]
-}
-
-export function computeStreamingMarkdownBlocks(
-  content: string,
-  previous: StreamingMarkdownBlockCache | null
-): StreamingMarkdownBlockCache {
-  if (!previous || previous.blocks.length === 0) {
-    return {
-      content,
-      blocks: parseMarkdownIntoBlocks(content),
-    }
-  }
-
-  if (!content.startsWith(previous.content)) {
-    return {
-      content,
-      blocks: parseMarkdownIntoBlocks(content),
-    }
-  }
-
-  const suffix = content.slice(previous.content.length)
-  if (suffix.length === 0) {
-    return previous
-  }
-
-  const stableBlocks = previous.blocks.slice(0, -1)
-  const previousTail = previous.blocks[previous.blocks.length - 1] ?? ""
-  const reparsedTail = parseMarkdownIntoBlocks(previousTail + suffix)
-
-  return {
-    content,
-    blocks: [...stableBlocks, ...reparsedTail],
-  }
-}
 
 function StreamingMarkdownRenderer({
   content,

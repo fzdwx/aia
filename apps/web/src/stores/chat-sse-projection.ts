@@ -10,6 +10,106 @@ import type {
 
 type StreamEventData = Extract<SseEvent, { type: "stream" }>["data"]
 
+function isWidgetRendererToolName(toolName: string): boolean {
+  return toolName === "WidgetRenderer" || toolName === "widgetRenderer"
+}
+
+function extractWidgetHtmlFromRawArguments(rawArguments: string): string {
+  const htmlKeyIndex = rawArguments.indexOf('"html"')
+  if (htmlKeyIndex < 0) {
+    return ""
+  }
+  const firstQuoteIndex = rawArguments.indexOf('"', htmlKeyIndex + 6)
+  if (firstQuoteIndex < 0) {
+    return ""
+  }
+
+  let cursor = firstQuoteIndex + 1
+  let escaped = false
+  let extracted = ""
+  while (cursor < rawArguments.length) {
+    const current = rawArguments[cursor]
+    if (escaped) {
+      switch (current) {
+        case "n":
+          extracted += "\n"
+          break
+        case "r":
+          extracted += "\r"
+          break
+        case "t":
+          extracted += "\t"
+          break
+        case '"':
+        case "\\":
+        case "/":
+          extracted += current
+          break
+        default:
+          extracted += current
+          break
+      }
+      escaped = false
+      cursor += 1
+      continue
+    }
+
+    if (current === "\\") {
+      escaped = true
+      cursor += 1
+      continue
+    }
+    if (current === '"') {
+      break
+    }
+    extracted += current
+    cursor += 1
+  }
+
+  return extracted.trim()
+}
+
+function deriveWidgetPreviewHtml(tool: {
+  toolName: string
+  output: string
+  outputSegments?: ToolOutputSegment[]
+  rawArguments?: string
+}): string | undefined {
+  if (!isWidgetRendererToolName(tool.toolName)) {
+    return undefined
+  }
+
+  const stdout = (tool.outputSegments ?? [])
+    .filter((segment) => segment.stream === "stdout")
+    .map((segment) => segment.text)
+    .join("")
+    .trim()
+  if (stdout.length > 0) {
+    return stdout
+  }
+
+  const output = tool.output.trim()
+  if (output.length > 0) {
+    return output
+  }
+
+  const rawArguments = tool.rawArguments ?? ""
+  const html = extractWidgetHtmlFromRawArguments(rawArguments)
+  return html.length > 0 ? html : undefined
+}
+
+function withWidgetPreview<
+  T extends {
+    toolName: string
+    output: string
+    outputSegments?: ToolOutputSegment[]
+    rawArguments?: string
+  },
+>(tool: T): T & { previewHtml?: string } {
+  const previewHtml = deriveWidgetPreviewHtml(tool)
+  return previewHtml == null ? tool : { ...tool, previewHtml }
+}
+
 function tryParseRawToolArguments(
   rawArguments: string
 ): Record<string, unknown> | null {
@@ -62,19 +162,21 @@ export function currentTurnToStreamingTurn(
           return {
             type: "tool",
             tool: {
-              invocationId: block.tool.invocation_id,
-              toolName: block.tool.tool_name,
-              arguments: normalizeToolArguments(block.tool.arguments),
-              rawArguments: block.tool.raw_arguments ?? undefined,
-              detectedAtMs: block.tool.detected_at_ms,
-              startedAtMs: block.tool.started_at_ms ?? undefined,
-              finishedAtMs: block.tool.finished_at_ms ?? undefined,
-              output: block.tool.output,
-              outputSegments: block.tool.output_segments ?? undefined,
-              completed: block.tool.completed,
-              resultContent: block.tool.result_content ?? undefined,
-              resultDetails: block.tool.result_details ?? undefined,
-              failed: block.tool.failed ?? undefined,
+              ...withWidgetPreview({
+                invocationId: block.tool.invocation_id,
+                toolName: block.tool.tool_name,
+                arguments: normalizeToolArguments(block.tool.arguments),
+                rawArguments: block.tool.raw_arguments ?? undefined,
+                detectedAtMs: block.tool.detected_at_ms,
+                startedAtMs: block.tool.started_at_ms ?? undefined,
+                finishedAtMs: block.tool.finished_at_ms ?? undefined,
+                output: block.tool.output,
+                outputSegments: block.tool.output_segments ?? undefined,
+                completed: block.tool.completed,
+                resultContent: block.tool.result_content ?? undefined,
+                resultDetails: block.tool.result_details ?? undefined,
+                failed: block.tool.failed ?? undefined,
+              }),
             },
           } as const
         default:
@@ -151,30 +253,34 @@ export function applyStreamEventToBlocks(
       nextBlocks[existingIndex] = {
         ...block,
         tool: {
-          ...block.tool,
-          toolName: data.tool_name || block.tool.toolName,
-          arguments: mergedArguments,
-          rawArguments:
-            block.tool.rawArguments ??
-            JSON.stringify(normalizeToolArguments(data.arguments ?? {})),
-          detectedAtMs: shouldRepairPlaceholder
-            ? data.detected_at_ms
-            : block.tool.detectedAtMs,
+          ...withWidgetPreview({
+            ...block.tool,
+            toolName: data.tool_name || block.tool.toolName,
+            arguments: mergedArguments,
+            rawArguments:
+              block.tool.rawArguments ??
+              JSON.stringify(normalizeToolArguments(data.arguments ?? {})),
+            detectedAtMs: shouldRepairPlaceholder
+              ? data.detected_at_ms
+              : block.tool.detectedAtMs,
+          }),
         },
       }
     } else {
       nextBlocks.push({
         type: "tool",
         tool: {
-          invocationId: data.invocation_id,
-          toolName: data.tool_name,
-          arguments: normalizeToolArguments(data.arguments),
-          rawArguments: JSON.stringify(
-            normalizeToolArguments(data.arguments ?? {})
-          ),
-          detectedAtMs: data.detected_at_ms,
-          output: "",
-          completed: false,
+          ...withWidgetPreview({
+            invocationId: data.invocation_id,
+            toolName: data.tool_name,
+            arguments: normalizeToolArguments(data.arguments),
+            rawArguments: JSON.stringify(
+              normalizeToolArguments(data.arguments ?? {})
+            ),
+            detectedAtMs: data.detected_at_ms,
+            output: "",
+            completed: false,
+          }),
         },
       })
     }
@@ -194,10 +300,12 @@ export function applyStreamEventToBlocks(
       nextBlocks[existingIndex] = {
         ...block,
         tool: {
-          ...block.tool,
-          toolName: data.tool_name || block.tool.toolName,
-          arguments: parsedArguments ?? block.tool.arguments,
-          rawArguments,
+          ...withWidgetPreview({
+            ...block.tool,
+            toolName: data.tool_name || block.tool.toolName,
+            arguments: parsedArguments ?? block.tool.arguments,
+            rawArguments,
+          }),
         },
       }
     } else {
@@ -205,13 +313,15 @@ export function applyStreamEventToBlocks(
       nextBlocks.push({
         type: "tool",
         tool: {
-          invocationId: data.invocation_id,
-          toolName: data.tool_name,
-          arguments: tryParseRawToolArguments(rawArguments) ?? {},
-          rawArguments,
-          detectedAtMs: Date.now(),
-          output: "",
-          completed: false,
+          ...withWidgetPreview({
+            invocationId: data.invocation_id,
+            toolName: data.tool_name,
+            arguments: tryParseRawToolArguments(rawArguments) ?? {},
+            rawArguments,
+            detectedAtMs: Date.now(),
+            output: "",
+            completed: false,
+          }),
         },
       })
     }
@@ -233,19 +343,21 @@ export function applyStreamEventToBlocks(
       nextBlocks[existingIndex] = {
         ...block,
         tool: {
-          ...block.tool,
-          toolName: data.tool_name || block.tool.toolName,
-          arguments: mergedArguments,
-          rawArguments:
-            block.tool.rawArguments ??
-            JSON.stringify(normalizeToolArguments(data.arguments ?? {})),
-          detectedAtMs: shouldRepairPlaceholder
-            ? data.started_at_ms
-            : block.tool.detectedAtMs,
-          startedAtMs:
-            shouldRepairPlaceholder || block.tool.startedAtMs == null
+          ...withWidgetPreview({
+            ...block.tool,
+            toolName: data.tool_name || block.tool.toolName,
+            arguments: mergedArguments,
+            rawArguments:
+              block.tool.rawArguments ??
+              JSON.stringify(normalizeToolArguments(data.arguments ?? {})),
+            detectedAtMs: shouldRepairPlaceholder
               ? data.started_at_ms
-              : block.tool.startedAtMs,
+              : block.tool.detectedAtMs,
+            startedAtMs:
+              shouldRepairPlaceholder || block.tool.startedAtMs == null
+                ? data.started_at_ms
+                : block.tool.startedAtMs,
+          }),
         },
       }
     } else {
@@ -253,16 +365,18 @@ export function applyStreamEventToBlocks(
       nextBlocks.push({
         type: "tool",
         tool: {
-          invocationId: data.invocation_id,
-          toolName: data.tool_name,
-          arguments: normalizeToolArguments(data.arguments),
-          rawArguments: JSON.stringify(
-            normalizeToolArguments(data.arguments ?? {})
-          ),
-          detectedAtMs: startedAtMs,
-          startedAtMs,
-          output: "",
-          completed: false,
+          ...withWidgetPreview({
+            invocationId: data.invocation_id,
+            toolName: data.tool_name,
+            arguments: normalizeToolArguments(data.arguments),
+            rawArguments: JSON.stringify(
+              normalizeToolArguments(data.arguments ?? {})
+            ),
+            detectedAtMs: startedAtMs,
+            startedAtMs,
+            output: "",
+            completed: false,
+          }),
         },
       })
     }
@@ -301,9 +415,11 @@ export function applyStreamEventToBlocks(
       nextBlocks[existingIndex] = {
         ...block,
         tool: {
-          ...block.tool,
-          output: block.tool.output + data.text,
-          outputSegments,
+          ...withWidgetPreview({
+            ...block.tool,
+            output: block.tool.output + data.text,
+            outputSegments,
+          }),
         },
       }
     } else {
@@ -311,14 +427,16 @@ export function applyStreamEventToBlocks(
       nextBlocks.push({
         type: "tool",
         tool: {
-          invocationId: data.invocation_id,
-          toolName: "",
-          arguments: {},
-          detectedAtMs: startedAtMs,
-          startedAtMs,
-          output: data.text,
-          outputSegments: [{ stream: data.stream, text: data.text }],
-          completed: false,
+          ...withWidgetPreview({
+            invocationId: data.invocation_id,
+            toolName: "",
+            arguments: {},
+            detectedAtMs: startedAtMs,
+            startedAtMs,
+            output: data.text,
+            outputSegments: [{ stream: data.stream, text: data.text }],
+            completed: false,
+          }),
         },
       })
     }
@@ -335,19 +453,21 @@ export function applyStreamEventToBlocks(
       nextBlocks[existingIndex] = {
         ...block,
         tool: {
-          ...block.tool,
-          startedAtMs:
-            block.tool.startedAtMs ??
-            (block.tool.detectedAtMs > 0
-              ? block.tool.detectedAtMs
-              : data.finished_at_ms),
-          finishedAtMs: data.finished_at_ms,
-          completed: true,
-          resultContent: data.content,
-          resultDetails: data.details,
-          failed: data.failed,
-          // 工具完成后清理 segments，只保留 output 字符串，释放内存
-          outputSegments: undefined,
+          ...withWidgetPreview({
+            ...block.tool,
+            startedAtMs:
+              block.tool.startedAtMs ??
+              (block.tool.detectedAtMs > 0
+                ? block.tool.detectedAtMs
+                : data.finished_at_ms),
+            finishedAtMs: data.finished_at_ms,
+            completed: true,
+            resultContent: data.content,
+            resultDetails: data.details,
+            failed: data.failed,
+            // 工具完成后清理 segments，只保留 output 字符串，释放内存
+            outputSegments: undefined,
+          }),
         },
       }
     }

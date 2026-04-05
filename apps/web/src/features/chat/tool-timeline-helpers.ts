@@ -12,6 +12,7 @@ export type ToolRowItem = {
   toolName: string
   arguments: Record<string, unknown>
   rawArguments?: string
+  previewHtml?: string
   detectedAtMs?: number
   startedAtMs?: number
   finishedAtMs?: number
@@ -97,6 +98,7 @@ export function fromInvocation(inv: ToolInvocationLifecycle): ToolRowItem {
       toolName: call.tool_name,
       detectedAtMs: inv.started_at_ms,
       arguments: call.arguments,
+      previewHtml: undefined,
       startedAtMs: inv.started_at_ms,
       finishedAtMs: inv.finished_at_ms,
       succeeded: true,
@@ -110,6 +112,7 @@ export function fromInvocation(inv: ToolInvocationLifecycle): ToolRowItem {
     toolName: call.tool_name,
     detectedAtMs: inv.started_at_ms,
     arguments: call.arguments,
+    previewHtml: undefined,
     startedAtMs: inv.started_at_ms,
     finishedAtMs: inv.finished_at_ms,
     succeeded: false,
@@ -124,6 +127,7 @@ export function fromStreamingTool(tool: StreamingToolOutput): ToolRowItem {
     toolName: tool.toolName,
     arguments: tool.arguments,
     rawArguments: tool.rawArguments,
+    previewHtml: tool.previewHtml,
     detectedAtMs: tool.detectedAtMs,
     startedAtMs: tool.startedAtMs,
     finishedAtMs: tool.finishedAtMs,
@@ -180,6 +184,7 @@ export function coalesceStreamingToolOutputs(
       toolName: hasText(existing.toolName) ? existing.toolName : tool.toolName,
       arguments: { ...existing.arguments, ...tool.arguments },
       rawArguments: tool.rawArguments ?? existing.rawArguments,
+      previewHtml: tool.previewHtml ?? existing.previewHtml,
       detectedAtMs: pickToolTimestamp(existing.detectedAtMs, tool.detectedAtMs),
       startedAtMs: existing.startedAtMs ?? tool.startedAtMs,
       finishedAtMs: existing.finishedAtMs ?? tool.finishedAtMs,

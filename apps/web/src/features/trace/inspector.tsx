@@ -8,7 +8,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
-import { asRecord } from "@/lib/trace-inspection"
+import { asRecord, asString } from "@/lib/trace-inspection"
 import type { TraceRecord } from "@/lib/types"
 import {
   formatTraceDuration,
@@ -238,7 +238,9 @@ function RetrySummaryList({ trace }: { trace: TraceRecord | null }) {
   )
 
   if (retryEvents.length === 0) {
-    return <p className="text-caption text-muted-foreground">No retry attempts.</p>
+    return (
+      <p className="text-caption text-muted-foreground">No retry attempts.</p>
+    )
   }
 
   return (
@@ -259,7 +261,9 @@ function RetrySummaryList({ trace }: { trace: TraceRecord | null }) {
             className="rounded-lg border border-border/30 bg-background px-3 py-2.5"
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-ui font-medium text-foreground">{label}</span>
+              <span className="text-ui font-medium text-foreground">
+                {label}
+              </span>
               <span className="text-meta text-muted-foreground">
                 {formatDateTime(event.at_ms)}
               </span>

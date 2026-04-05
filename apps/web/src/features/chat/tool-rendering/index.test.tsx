@@ -362,9 +362,16 @@ describe("tool renderer registry", () => {
     expect(html).toContain("aia-widget-error")
     expect(html).toContain("aia-widget-ready")
     expect(html).toContain("aia-widget-theme")
-    expect(html).toContain("aia-widget-render")
+    expect(html).toContain("aia-widget-update")
+    expect(html).toContain("aia-widget-finalize")
     expect(html).toContain("aia-widget-root")
     expect(html).toContain("aia-widget-description")
+    expect(html).toContain("trimIncompleteScripts")
+    expect(html).toContain("applyFinalHtml")
+    expect(html).toContain("sanitizeForStreaming")
+    expect(html).toContain("scheduleHeightSync")
+    expect(html).toContain("observer.observe(root)")
+    expect(html).toContain("MutationObserver")
     expect(html).not.toContain("parent.document")
     expect(html).toContain("--foreground")
     expect(html).toContain("svg .t")
@@ -392,8 +399,8 @@ describe("tool renderer registry", () => {
 
     const html = renderWithTheme(details)
     expect(html).toContain("iframe")
-    expect(html).toContain("live")
-    expect(html).not.toContain("stale")
+    expect(html).toContain("aia-widget-update")
+    expect(html).toContain("sanitizeForStreaming")
   })
 
   test("renders running widget renderer from streamed raw arguments", () => {

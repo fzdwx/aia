@@ -1,10 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, test } from "vite-plus/test"
 
-import {
-  computeStreamingMarkdownBlocks,
-  MarkdownRenderer,
-} from "@/components/markdown-content-rich"
+import { computeStreamingMarkdownBlocks } from "@/components/markdown-streaming-blocks"
+import { MarkdownRenderer } from "@/components/markdown-content-rich"
 
 describe("MarkdownRenderer", () => {
   test("renders basic markdown structure", () => {

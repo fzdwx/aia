@@ -27,13 +27,37 @@ pub(crate) struct WidgetReadmeToolArgs {
 #[serde(deny_unknown_fields)]
 pub(crate) struct WidgetRendererToolArgs {
     #[tool_schema(description = "Short title for the widget.")]
-    title: String,
+    title: Option<String>,
     #[tool_schema(description = "One-sentence explanation of what the widget demonstrates.")]
     description: String,
     #[tool_schema(
         description = "Self-contained HTML or SVG fragment to render in the widget sandbox."
     )]
     html: String,
+}
+
+fn resolve_widget_title(title: Option<String>, description: &str) -> String {
+    if let Some(title) = title
+        && !title.trim().is_empty()
+    {
+        return title.trim().to_string();
+    }
+
+    let description = description.trim();
+    if description.is_empty() {
+        return "Widget".to_string();
+    }
+
+    description
+        .split(['。', '.', '!', '?', '\n'])
+        .find_map(|segment| {
+            let normalized = segment.trim();
+            (!normalized.is_empty()).then_some(normalized)
+        })
+        .unwrap_or(description)
+        .chars()
+        .take(48)
+        .collect()
 }
 
 fn normalize_widget_modules(raw_modules: Option<Vec<String>>) -> Result<Vec<String>, CoreError> {
@@ -138,13 +162,10 @@ impl Tool for WidgetRendererTool {
     ) -> Result<ToolResult, CoreError> {
         let args: WidgetRendererToolArgs = tool_call.parse_arguments()?;
 
-        let title = args.title.trim();
         let description = args.description.trim();
         let html = args.html.trim();
+        let title = resolve_widget_title(args.title, description);
 
-        if title.is_empty() {
-            return Err(CoreError::new("widget title must not be empty"));
-        }
         if description.is_empty() {
             return Err(CoreError::new("widget description must not be empty"));
         }
