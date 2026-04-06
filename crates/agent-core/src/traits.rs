@@ -63,6 +63,10 @@ pub trait Tool: Send + Sync {
         false
     }
 
+    fn requires_question_capability(&self) -> bool {
+        false
+    }
+
     /// Declares whether this tool depends on runtime-provided context rather
     /// than only on its explicit arguments.
     ///

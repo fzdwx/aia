@@ -265,7 +265,9 @@ impl TraceEventCollector {
                     attributes: Value::Null,
                 });
             }
-            StreamEvent::ToolCallStarted { .. }
+            StreamEvent::WidgetHostCommand { .. }
+            | StreamEvent::WidgetClientEvent { .. }
+            | StreamEvent::ToolCallStarted { .. }
             | StreamEvent::ToolOutputDelta { .. }
             | StreamEvent::ToolCallCompleted { .. }
             | StreamEvent::Log { .. } => {}

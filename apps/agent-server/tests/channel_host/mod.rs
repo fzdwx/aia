@@ -43,6 +43,7 @@ fn map_stream_payload_to_channel_runtime_event() {
         session_id: "s1".into(),
         turn_id: "turn-1".into(),
         event: StreamEvent::TextDelta { text: "增量".into() },
+        widget: None,
     };
 
     let mapped = map_sse_payload(payload);

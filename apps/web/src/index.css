@@ -43,7 +43,9 @@
 :root {
   --radius: 0.75rem;
   --tool-expanded-max-height: 15rem;
-  --tool-expanded-content-max-height: calc(var(--tool-expanded-max-height) - 1.5rem);
+  --tool-expanded-content-max-height: calc(
+    var(--tool-expanded-max-height) - 1.5rem
+  );
   color-scheme: dark;
   --background-base: oklch(0.145 0.0018 255);
   --background-weak: oklch(0.168 0.0018 255);

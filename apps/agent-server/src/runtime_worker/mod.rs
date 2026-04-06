@@ -3,7 +3,7 @@ mod snapshots;
 #[path = "../../tests/runtime_worker/mod.rs"]
 mod tests;
 
-use agent_core::ToolOutputStream;
+use agent_core::{ToolOutputStream, UiWidget, UiWidgetDocument, UiWidgetPhase};
 use agent_runtime::TurnControl;
 use axum::http::StatusCode;
 use provider_registry::{ModelConfig, ProviderKind};
@@ -27,6 +27,8 @@ pub struct CurrentToolOutput {
     pub arguments: serde_json::Value,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub raw_arguments: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub widget: Option<UiWidget>,
     pub detected_at_ms: u64,
     pub started_at_ms: Option<u64>,
     pub finished_at_ms: Option<u64>,
@@ -161,6 +163,7 @@ pub(crate) fn live_tool_block(
             tool_name,
             arguments,
             raw_arguments: String::new(),
+            widget: None,
             detected_at_ms: timestamp_ms,
             started_at_ms: started.then_some(timestamp_ms),
             finished_at_ms: None,
@@ -220,27 +223,120 @@ pub(crate) fn turn_block_to_current(block: agent_runtime::TurnBlock) -> Option<C
                 }
             };
 
-            Some(CurrentTurnBlock::Tool {
-                tool: CurrentToolOutput {
-                    invocation_id: invocation.call.invocation_id,
-                    tool_name: invocation.call.tool_name,
-                    arguments: normalize_object_value(&invocation.call.arguments),
-                    raw_arguments: serde_json::to_string(&invocation.call.arguments)
-                        .unwrap_or_else(|_| "{}".to_string()),
-                    detected_at_ms: invocation.started_at_ms,
-                    started_at_ms: Some(invocation.started_at_ms),
-                    finished_at_ms: Some(invocation.finished_at_ms),
-                    output: String::new(),
-                    output_segments: None,
-                    completed: true,
-                    result_content,
-                    result_details,
-                    failed,
-                },
-            })
+            let mut tool = CurrentToolOutput {
+                invocation_id: invocation.call.invocation_id,
+                tool_name: invocation.call.tool_name,
+                arguments: normalize_object_value(&invocation.call.arguments),
+                raw_arguments: serde_json::to_string(&invocation.call.arguments)
+                    .unwrap_or_else(|_| "{}".to_string()),
+                widget: None,
+                detected_at_ms: invocation.started_at_ms,
+                started_at_ms: Some(invocation.started_at_ms),
+                finished_at_ms: Some(invocation.finished_at_ms),
+                output: String::new(),
+                output_segments: None,
+                completed: true,
+                result_content,
+                result_details,
+                failed,
+            };
+            sync_widget_projection(&mut tool);
+            Some(CurrentTurnBlock::Tool { tool })
         }
         agent_runtime::TurnBlock::Failure { .. } | agent_runtime::TurnBlock::Cancelled { .. } => {
             None
         }
     }
+}
+
+fn is_widget_renderer_tool_name(tool_name: &str) -> bool {
+    tool_name == "WidgetRenderer" || tool_name == "widgetRenderer"
+}
+
+fn string_field(value: &Value, key: &str) -> Option<String> {
+    value.get(key).and_then(Value::as_str).map(ToString::to_string)
+}
+
+fn extract_widget_html_from_raw_arguments(raw_arguments: &str) -> Option<String> {
+    let html_key_index = raw_arguments.find("\"html\"")?;
+    let first_quote_index = raw_arguments[html_key_index + 6..].find('"')? + html_key_index + 6;
+
+    let mut cursor = first_quote_index + 1;
+    let mut escaped = false;
+    let mut extracted = String::new();
+    while cursor < raw_arguments.len() {
+        let current = raw_arguments[cursor..].chars().next()?;
+        if escaped {
+            match current {
+                'n' => extracted.push('\n'),
+                'r' => extracted.push('\r'),
+                't' => extracted.push('\t'),
+                '"' | '\\' | '/' => extracted.push(current),
+                _ => extracted.push(current),
+            }
+            escaped = false;
+            cursor += current.len_utf8();
+            continue;
+        }
+
+        if current == '\\' {
+            escaped = true;
+            cursor += current.len_utf8();
+            continue;
+        }
+        if current == '"' {
+            break;
+        }
+        extracted.push(current);
+        cursor += current.len_utf8();
+    }
+
+    let trimmed = extracted.trim();
+    (!trimmed.is_empty()).then_some(trimmed.to_string())
+}
+
+fn derive_widget_document(tool: &CurrentToolOutput) -> Option<UiWidgetDocument> {
+    if !is_widget_renderer_tool_name(&tool.tool_name) {
+        return None;
+    }
+
+    let details = tool.result_details.as_ref();
+    let title = details
+        .and_then(|value| string_field(value, "title"))
+        .or_else(|| string_field(&tool.arguments, "title"))
+        .unwrap_or_else(|| "Widget".to_string());
+    let description = details
+        .and_then(|value| string_field(value, "description"))
+        .or_else(|| string_field(&tool.arguments, "description"))
+        .unwrap_or_default();
+    let html = details
+        .and_then(|value| string_field(value, "html"))
+        .or_else(|| {
+            tool.output_segments.as_ref().map(|segments| {
+                segments
+                    .iter()
+                    .filter(|segment| segment.stream == ToolOutputStream::Stdout)
+                    .map(|segment| segment.text.as_str())
+                    .collect::<String>()
+            })
+        })
+        .filter(|html| !html.trim().is_empty())
+        .or_else(|| {
+            let trimmed = tool.output.trim();
+            (!trimmed.is_empty()).then_some(trimmed.to_string())
+        })
+        .or_else(|| extract_widget_html_from_raw_arguments(&tool.raw_arguments))?;
+    let content_type = details
+        .and_then(|value| string_field(value, "content_type"))
+        .unwrap_or_else(|| "text/html".to_string());
+
+    Some(UiWidgetDocument { title, description, html, content_type })
+}
+
+pub(crate) fn sync_widget_projection(tool: &mut CurrentToolOutput) {
+    tool.widget = derive_widget_document(tool).map(|document| UiWidget {
+        instance_id: tool.invocation_id.clone(),
+        phase: if tool.completed { UiWidgetPhase::Final } else { UiWidgetPhase::Preview },
+        document,
+    });
 }

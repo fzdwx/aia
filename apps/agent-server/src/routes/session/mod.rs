@@ -6,7 +6,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::state::SharedState;
-use agent_core::{QuestionRequest, QuestionResult, ReasoningEffort};
+use agent_core::{QuestionRequest, QuestionResult, ReasoningEffort, WidgetClientEvent};
 use agent_runtime::ContextStats;
 use session_tape::SessionProviderBinding;
 
@@ -77,6 +77,14 @@ pub(crate) struct ResolvePendingQuestionRequest {
     pub result: QuestionResult,
 }
 
+#[derive(Deserialize)]
+pub(crate) struct WidgetClientEventRequest {
+    pub session_id: Option<String>,
+    pub turn_id: Option<String>,
+    pub invocation_id: String,
+    pub event: WidgetClientEvent,
+}
+
 impl SessionSettingsResponse {
     pub fn from_binding(binding: SessionProviderBinding) -> Self {
         match binding {
@@ -127,4 +135,5 @@ pub(crate) fn router() -> Router<SharedState> {
         .route("/api/session/queue", get(handlers::get_queue))
         .route("/api/session/queue/{message_id}", delete(handlers::delete_queued_message))
         .route("/api/session/interrupt", post(handlers::interrupt_turn))
+        .route("/api/session/widget-event", post(handlers::report_widget_client_event))
 }

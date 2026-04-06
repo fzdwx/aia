@@ -19,7 +19,8 @@ use std::sync::{Arc, RwLock};
 
 use agent_core::{
     ModelIdentity, PromptCacheConfig, PromptCacheRetention as RuntimePromptCacheRetention,
-    QuestionRequest, QuestionResult, QuestionResultStatus, ReasoningEffort,
+    QuestionRequest, QuestionResult, QuestionResultStatus, ReasoningEffort, StreamEvent,
+    WidgetClientEvent,
 };
 use agent_runtime::AgentRuntime;
 use agent_store::{
@@ -294,6 +295,20 @@ impl SessionManagerLoop {
             }
             SessionCommand::InterruptTurn { session_id, reply } => {
                 let _ = reply.send(self.handle_interrupt_turn(&session_id));
+            }
+            SessionCommand::ReportWidgetClientEvent {
+                session_id,
+                turn_id,
+                invocation_id,
+                event,
+                reply,
+            } => {
+                let _ = reply.send(self.report_widget_client_event(
+                    &session_id,
+                    turn_id,
+                    invocation_id,
+                    event,
+                ));
             }
             SessionCommand::SubmitQueuedMessages { session_id, messages, reply } => {
                 let mut turn_execution =
@@ -891,6 +906,50 @@ impl SessionManagerLoop {
             .send(SsePayload::TurnInterrupted { session_id: session_id.to_string(), turn_id });
 
         Ok(true)
+    }
+
+    fn report_widget_client_event(
+        &mut self,
+        session_id: &str,
+        turn_id: Option<String>,
+        invocation_id: String,
+        event: WidgetClientEvent,
+    ) -> Result<(), RuntimeWorkerError> {
+        let slot = self.slots.get(session_id).ok_or_else(|| {
+            RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
+        })?;
+
+        let resolved_turn_id = match turn_id {
+            Some(turn_id) if !turn_id.trim().is_empty() => turn_id,
+            _ => read_lock(&slot.current_turn)
+                .as_ref()
+                .map(|turn| turn.turn_id.clone())
+                .ok_or_else(|| {
+                    RuntimeWorkerError::bad_request(
+                        "turn_id is required when session has no active current turn",
+                    )
+                })?,
+        };
+
+        let widget = read_lock(&slot.current_turn).as_ref().and_then(|current| {
+            current.blocks.iter().rev().find_map(|block| match block {
+                crate::runtime_worker::CurrentTurnBlock::Tool { tool }
+                    if tool.invocation_id == invocation_id =>
+                {
+                    tool.widget.clone()
+                }
+                _ => None,
+            })
+        });
+
+        let _ = self.config.broadcast_tx.send(SsePayload::Stream {
+            session_id: session_id.to_string(),
+            turn_id: resolved_turn_id,
+            event: StreamEvent::WidgetClientEvent { invocation_id, event },
+            widget,
+        });
+
+        Ok(())
     }
 }
 

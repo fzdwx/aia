@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
 use agent_core::{
-    CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
+    CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta,
+    ToolOutputStream, ToolResult,
 };
 use agent_core_macros::ToolArgsSchema as DeriveToolArgsSchema;
 use agent_prompts::tool_descriptions::grep_tool_description;
@@ -53,7 +54,7 @@ impl Tool for GrepTool {
     async fn call(
         &self,
         call: &ToolCall,
-        _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
+        output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
     ) -> Result<ToolResult, CoreError> {
         let args: GrepToolArgs = call.parse_arguments()?;
@@ -79,7 +80,7 @@ impl Tool for GrepTool {
             })));
         }
 
-        match run_grep_search(pattern.clone(), base, glob_filter, limit, abort).await? {
+        match run_grep_search(pattern.clone(), base, glob_filter, limit, abort, output).await? {
             GrepSearchOutcome::Completed(result) => Ok(ToolResult::from_call(call, result.content)
                 .with_details(serde_json::json!({
                     "pattern": pattern,
@@ -107,6 +108,7 @@ async fn run_grep_search(
     glob_filter: Option<String>,
     limit: usize,
     abort: agent_core::AbortSignal,
+    output: &mut (dyn FnMut(ToolOutputDelta) + Send),
 ) -> Result<GrepSearchOutcome, CoreError> {
     let matcher = grep_regex::RegexMatcher::new(&pattern)
         .map_err(|e| CoreError::new(format!("invalid regex pattern: {e}")))?;
@@ -118,6 +120,7 @@ async fn run_grep_search(
         .map(|glob| glob.compile_matcher());
 
     let mut matched_files: Vec<String> = Vec::new();
+    let mut emitted = 0usize;
     let mut searcher = grep_searcher::Searcher::new();
 
     let candidates = match collect_candidate_files(&base, &abort, |relative, path| {
@@ -146,7 +149,17 @@ async fn run_grep_search(
         });
         let _ = searcher.search_slice(&matcher, &haystack, sink);
         if found {
-            matched_files.push(path.display().to_string());
+            let rendered = path.display().to_string();
+            if emitted < limit {
+                let mut text = String::new();
+                if emitted > 0 {
+                    text.push('\n');
+                }
+                text.push_str(&rendered);
+                output(ToolOutputDelta { stream: ToolOutputStream::Stdout, text });
+                emitted += 1;
+            }
+            matched_files.push(rendered);
         }
     }
 

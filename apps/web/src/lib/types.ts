@@ -1,3 +1,8 @@
+import type {
+  WidgetClientEvent as WidgetBridgeClientEvent,
+  WidgetHostCommand as WidgetBridgeHostCommand,
+} from "./widget-protocol"
+
 // Mirrors Rust StreamEvent (agent-core) — discriminated union on `kind`
 export type StreamEvent =
   | { kind: "thinking_delta"; text: string }
@@ -8,12 +13,14 @@ export type StreamEvent =
       tool_name: string
       arguments: Record<string, unknown> | null
       detected_at_ms: number
+      widget?: StreamingUiWidget
     }
   | {
       kind: "tool_call_arguments_delta"
       invocation_id: string
       tool_name: string
       arguments_delta: string
+      widget?: StreamingUiWidget
     }
   | {
       kind: "tool_call_started"
@@ -21,12 +28,26 @@ export type StreamEvent =
       tool_name: string
       arguments: Record<string, unknown> | null
       started_at_ms: number
+      widget?: StreamingUiWidget
     }
   | {
       kind: "tool_output_delta"
       invocation_id: string
       stream: "stdout" | "stderr"
       text: string
+      widget?: StreamingUiWidget
+    }
+  | {
+      kind: "widget_host_command"
+      invocation_id: string
+      command: WidgetBridgeHostCommand
+      widget?: StreamingUiWidget
+    }
+  | {
+      kind: "widget_client_event"
+      invocation_id: string
+      event: WidgetBridgeClientEvent
+      widget?: StreamingUiWidget
     }
   | { kind: "log"; text: string }
   | {
@@ -37,6 +58,7 @@ export type StreamEvent =
       details?: Record<string, unknown>
       failed: boolean
       finished_at_ms: number
+      widget?: StreamingUiWidget
     }
   | { kind: "done" }
 
@@ -236,11 +258,36 @@ export type TurnStatus =
   | "finishing"
   | "cancelled"
 
+export type WidgetPhase = "preview" | "final"
+
+export type CurrentUiWidget = {
+  instance_id: string
+  phase: WidgetPhase
+  document: {
+    title: string
+    description: string
+    html: string
+    content_type: string
+  }
+}
+
+export type StreamingUiWidget = {
+  instanceId: string
+  phase: WidgetPhase
+  document: {
+    title: string
+    description: string
+    html: string
+    contentType: string
+  }
+}
+
 export type CurrentToolOutput = {
   invocation_id: string
   tool_name: string
   arguments: Record<string, unknown>
   raw_arguments?: string
+  widget?: CurrentUiWidget
   detected_at_ms: number
   started_at_ms: number | null
   finished_at_ms: number | null
@@ -281,6 +328,7 @@ export type StreamingToolOutput = {
   toolName: string
   arguments: Record<string, unknown>
   rawArguments?: string
+  widget?: StreamingUiWidget
   previewHtml?: string
   detectedAtMs: number
   startedAtMs?: number

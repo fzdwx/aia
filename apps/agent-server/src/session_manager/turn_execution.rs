@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use agent_core::{StreamEvent, ToolRegistry};
+use agent_core::{StreamEvent, ToolRegistry, WidgetHostCommand};
 use agent_runtime::{AgentRuntime, ContextStats, RuntimeEvent, RuntimeSubscriberId, TurnLifecycle};
 use agent_store::SessionRecord;
 use tokio::sync::{broadcast, mpsc};
@@ -15,7 +15,7 @@ use crate::{
 
 use super::{
     CurrentStatusInner, RuntimeReturn, SessionAutoRenameService, SessionId, SessionManagerConfig,
-    SessionSlot, ToolTraceRecorder, next_server_turn_id, now_timestamp_ms,
+    SessionSlot, ToolTraceRecorder, next_server_turn_id, now_timestamp_ms, read_lock,
     update_current_turn_from_stream, update_current_turn_status, write_lock,
 };
 
@@ -515,6 +515,22 @@ impl TurnWorker {
         stream_turn_id: &str,
         stream_snapshot: &Arc<RwLock<Option<CurrentTurnSnapshot>>>,
     ) {
+        fn widget_from_snapshot(
+            snapshot: &Arc<RwLock<Option<CurrentTurnSnapshot>>>,
+            invocation_id: &str,
+        ) -> Option<agent_core::UiWidget> {
+            let guard = read_lock(snapshot);
+            let current = guard.as_ref()?;
+            current.blocks.iter().rev().find_map(|block| match block {
+                crate::runtime_worker::CurrentTurnBlock::Tool { tool }
+                    if tool.invocation_id == invocation_id =>
+                {
+                    tool.widget.clone()
+                }
+                _ => None,
+            })
+        }
+
         let new_status = match event {
             StreamEvent::ThinkingDelta { .. } => CurrentStatusInner::Thinking,
             StreamEvent::TextDelta { .. } => CurrentStatusInner::Generating,
@@ -523,6 +539,8 @@ impl TurnWorker {
             StreamEvent::ToolCallReady { .. } => current_status.clone(),
             StreamEvent::ToolCallStarted { .. } => CurrentStatusInner::Working,
             StreamEvent::ToolOutputDelta { .. } => CurrentStatusInner::Working,
+            StreamEvent::WidgetHostCommand { .. } => current_status.clone(),
+            StreamEvent::WidgetClientEvent { .. } => current_status.clone(),
             StreamEvent::Retrying { .. } => CurrentStatusInner::Retrying,
             StreamEvent::Done => CurrentStatusInner::Finishing,
             _ => current_status.clone(),
@@ -539,10 +557,45 @@ impl TurnWorker {
         }
 
         update_current_turn_from_stream(stream_snapshot, event);
+        let widget = match event {
+            StreamEvent::ToolCallDetected { invocation_id, .. }
+            | StreamEvent::ToolCallArgumentsDelta { invocation_id, .. }
+            | StreamEvent::ToolCallReady { call: agent_core::ToolCall { invocation_id, .. } }
+            | StreamEvent::ToolCallStarted { invocation_id, .. }
+            | StreamEvent::ToolOutputDelta { invocation_id, .. }
+            | StreamEvent::ToolCallCompleted { invocation_id, .. } => {
+                widget_from_snapshot(stream_snapshot, invocation_id)
+            }
+            _ => None,
+        };
         let _ = status_broadcast.send(SsePayload::Stream {
             session_id: stream_session_id.to_string(),
             turn_id: stream_turn_id.to_string(),
             event: event.clone(),
+            widget,
         });
+
+        if let Some((invocation_id, widget)) = match event {
+            StreamEvent::ToolCallDetected { invocation_id, .. }
+            | StreamEvent::ToolCallArgumentsDelta { invocation_id, .. }
+            | StreamEvent::ToolCallReady { call: agent_core::ToolCall { invocation_id, .. } }
+            | StreamEvent::ToolCallStarted { invocation_id, .. }
+            | StreamEvent::ToolOutputDelta { invocation_id, .. }
+            | StreamEvent::ToolCallCompleted { invocation_id, .. } => {
+                widget_from_snapshot(stream_snapshot, invocation_id)
+                    .map(|widget| (invocation_id.clone(), widget))
+            }
+            _ => None,
+        } {
+            let _ = status_broadcast.send(SsePayload::Stream {
+                session_id: stream_session_id.to_string(),
+                turn_id: stream_turn_id.to_string(),
+                event: StreamEvent::WidgetHostCommand {
+                    invocation_id,
+                    command: WidgetHostCommand::Render { widget: widget.clone() },
+                },
+                widget: Some(widget),
+            });
+        }
     }
 }

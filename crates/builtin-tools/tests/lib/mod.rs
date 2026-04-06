@@ -1,4 +1,4 @@
-use agent_core::{Tool, ToolDefinition, ToolExecutor};
+use agent_core::{SessionInteractionCapabilities, Tool, ToolDefinition, ToolExecutor};
 use agent_prompts::tool_descriptions::shell_tool_description;
 use std::collections::BTreeSet;
 
@@ -197,4 +197,23 @@ fn builtin_tool_definitions_match_derive_schema_output() {
     .expect("websearch args should deserialize");
     assert_eq!(parsed.num_results, 5);
     assert_eq!(parsed.context_max_characters, Some(8000));
+}
+
+#[test]
+fn widget_tools_remain_available_without_question_capability() {
+    let registry = build_tool_registry();
+    let capabilities = SessionInteractionCapabilities {
+        supports_interactive_components: true,
+        supports_question_tool: false,
+    };
+
+    let names = registry
+        .definitions_for_capabilities(&capabilities)
+        .into_iter()
+        .map(|definition| definition.name)
+        .collect::<BTreeSet<_>>();
+
+    assert!(names.contains("WidgetReadme"));
+    assert!(names.contains("WidgetRenderer"));
+    assert!(!names.contains("Question"));
 }

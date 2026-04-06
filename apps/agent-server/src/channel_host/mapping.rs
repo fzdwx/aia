@@ -18,7 +18,7 @@ pub(super) fn map_sse_payload(payload: SsePayload) -> Option<ChannelRuntimeEvent
             turn_id,
             status: map_turn_status(status),
         }),
-        SsePayload::Stream { session_id, turn_id, event } => {
+        SsePayload::Stream { session_id, turn_id, event, .. } => {
             Some(ChannelRuntimeEvent::Stream { session_id, turn_id, event })
         }
         SsePayload::TurnCompleted { session_id, turn_id, turn } => {

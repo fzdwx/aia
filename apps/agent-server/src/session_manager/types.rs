@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-use agent_core::{QuestionRequest, QuestionResult, RequestTimeoutConfig, ToolRegistry};
+use agent_core::{
+    QuestionRequest, QuestionResult, RequestTimeoutConfig, ToolRegistry, WidgetClientEvent,
+};
 use agent_runtime::{AgentRuntime, ContextStats, RuntimeHooks, RuntimeSubscriberId, TurnLifecycle};
 use agent_store::{AiaStore, SessionRecord};
 use provider_registry::ProviderRegistry;
@@ -339,6 +341,13 @@ pub(crate) enum SessionCommand {
     InterruptTurn {
         session_id: SessionId,
         reply: oneshot::Sender<Result<bool, RuntimeWorkerError>>,
+    },
+    ReportWidgetClientEvent {
+        session_id: SessionId,
+        turn_id: Option<String>,
+        invocation_id: String,
+        event: WidgetClientEvent,
+        reply: oneshot::Sender<Result<(), RuntimeWorkerError>>,
     },
     /// 处理队列中的消息（内部命令，由 handle_runtime_return 触发）
     SubmitQueuedMessages {

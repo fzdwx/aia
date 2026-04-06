@@ -738,5 +738,4 @@ describe("chat message status surfaces", () => {
     expect(html).toContain('aria-label="Retry turn"')
     expect(html).toContain("cancelled")
   })
-
 })

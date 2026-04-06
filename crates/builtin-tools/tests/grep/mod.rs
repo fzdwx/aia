@@ -7,7 +7,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use agent_core::{AbortSignal, Tool, ToolCall, ToolExecutionContext};
+use agent_core::{
+    AbortSignal, Tool, ToolCall, ToolExecutionContext, ToolOutputDelta, ToolOutputStream,
+};
 
 use super::GrepTool;
 
@@ -130,6 +132,33 @@ async fn grep_tool_skips_binary_files_and_reports_truncation() -> Result<(), Box
     assert_eq!(details["returned"], 1);
     assert_eq!(details["limit"], 1);
     assert_eq!(details["truncated"], true);
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn grep_tool_emits_incremental_output_deltas() -> Result<(), Box<dyn Error>> {
+    let dir = TestDir::new()?;
+    fs::write(dir.path().join("match-a.txt"), "needle\n")?;
+    fs::write(dir.path().join("match-b.txt"), "needle again\n")?;
+
+    let tool = GrepTool;
+    let call = ToolCall::new("grep").with_arguments_value(serde_json::json!({
+        "pattern": "needle"
+    }));
+    let mut deltas: Vec<ToolOutputDelta> = Vec::new();
+    let result = tool
+        .call(&call, &mut |delta| deltas.push(delta), &test_context(dir.path()))
+        .await
+        .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
+
+    let stdout = deltas
+        .iter()
+        .filter(|delta| matches!(delta.stream, ToolOutputStream::Stdout))
+        .map(|delta| delta.text.as_str())
+        .collect::<String>();
+
+    assert!(!stdout.is_empty());
+    assert_eq!(stdout.trim_end(), result.content.trim_end());
     Ok(())
 }
 

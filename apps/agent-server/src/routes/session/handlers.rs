@@ -13,7 +13,7 @@ use agent_core::ReasoningEffort;
 use super::{
     AutoCompressRequest, CreateSessionRequest, HandoffRequest, PendingQuestionResponse,
     ResolvePendingQuestionRequest, SendMessageRequest, SessionInfoResponse, SessionQuery,
-    SessionSettingsResponse, UpdateSessionSettingsRequest,
+    SessionSettingsResponse, UpdateSessionSettingsRequest, WidgetClientEventRequest,
 };
 use crate::routes::common::{
     JsonResponse, json_response, require_session_id, resolve_session_id,
@@ -354,6 +354,32 @@ pub(crate) async fn delete_queued_message(
             StatusCode::OK,
             serde_json::json!({ "deleted": true, "message_id": message_id }),
         ),
+        Err(error) => runtime_worker_error_response(error),
+    }
+}
+
+pub(crate) async fn report_widget_client_event(
+    State(state): State<SharedState>,
+    Json(body): Json<WidgetClientEventRequest>,
+) -> impl IntoResponse {
+    let session_id = match require_session_id(state.as_ref(), body.session_id).await {
+        Ok(session_id) => session_id,
+        Err(response) => return response,
+    };
+
+    if body.invocation_id.trim().is_empty() {
+        return json_response(
+            StatusCode::BAD_REQUEST,
+            serde_json::json!({ "error": "invocation_id is required" }),
+        );
+    }
+
+    match state
+        .session_manager
+        .report_widget_client_event(session_id, body.turn_id, body.invocation_id, body.event)
+        .await
+    {
+        Ok(()) => json_response(StatusCode::OK, serde_json::json!({ "ok": true })),
         Err(error) => runtime_worker_error_response(error),
     }
 }

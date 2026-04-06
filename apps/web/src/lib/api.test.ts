@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from "vite-plus/test"
 
-import { connectEvents } from "./api"
+import { connectEvents, sendWidgetClientEvent } from "./api"
 
 type Listener = (event: MessageEvent) => void
 
@@ -33,6 +33,36 @@ class MockEventSource {
 afterEach(() => {
   vi.unstubAllGlobals()
   MockEventSource.instance = null
+})
+
+test("sendWidgetClientEvent posts structured widget event payload", async () => {
+  const fetchMock = vi.fn(async () => ({
+    ok: true,
+    status: 200,
+  }))
+  vi.stubGlobal("fetch", fetchMock)
+
+  await sendWidgetClientEvent({
+    session_id: "session-1",
+    turn_id: "turn-1",
+    invocation_id: "widget-1",
+    event: {
+      type: "scripts_ready",
+    },
+  })
+
+  expect(fetchMock).toHaveBeenCalledWith("/api/session/widget-event", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_id: "session-1",
+      turn_id: "turn-1",
+      invocation_id: "widget-1",
+      event: {
+        type: "scripts_ready",
+      },
+    }),
+  })
 })
 
 test("connectEvents maps default SSE message error envelopes to chat error events", () => {

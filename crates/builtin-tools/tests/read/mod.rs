@@ -6,7 +6,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use agent_core::{AbortSignal, Tool, ToolCall, ToolExecutionContext};
+use agent_core::{
+    AbortSignal, Tool, ToolCall, ToolExecutionContext, ToolOutputDelta, ToolOutputStream,
+};
 
 use super::ReadTool;
 
@@ -74,6 +76,35 @@ async fn read_tool_reads_large_file_window_with_line_numbers() -> Result<(), Box
     assert_eq!(details["total_lines"], 2500);
     assert_eq!(details["file_path"], path.display().to_string());
     assert_eq!(details["is_image"], false);
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn read_tool_emits_incremental_output_deltas() -> Result<(), Box<dyn Error>> {
+    let dir = TestDir::new()?;
+    let path = dir.path().join("stream.txt");
+    fs::write(&path, "alpha\nbeta\ngamma\n")?;
+
+    let tool = ReadTool;
+    let call = ToolCall::new("read").with_arguments_value(serde_json::json!({
+        "file_path": "stream.txt",
+        "offset": 0,
+        "limit": 3
+    }));
+    let mut deltas: Vec<ToolOutputDelta> = Vec::new();
+    let result = tool
+        .call(&call, &mut |delta| deltas.push(delta), &test_context(dir.path()))
+        .await
+        .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
+
+    let stdout = deltas
+        .iter()
+        .filter(|delta| matches!(delta.stream, ToolOutputStream::Stdout))
+        .map(|delta| delta.text.as_str())
+        .collect::<String>();
+
+    assert!(!stdout.is_empty());
+    assert_eq!(stdout, result.content);
     Ok(())
 }
 

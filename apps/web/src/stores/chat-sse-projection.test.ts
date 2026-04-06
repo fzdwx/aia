@@ -68,6 +68,16 @@ describe("chat sse projection", () => {
         invocation_id: "widget-1",
         stream: "stdout",
         text: '<div class="card">live</div>',
+        widget: {
+          instanceId: "widget-1",
+          phase: "preview",
+          document: {
+            title: "流式 widget",
+            description: "live preview",
+            html: '<div class="card">live</div>',
+            contentType: "text/html",
+          },
+        },
         session_id: "session-1",
         turn_id: "turn-1",
       }
@@ -84,6 +94,16 @@ describe("chat sse projection", () => {
       { stream: "stdout", text: '<div class="card">live</div>' },
     ])
     expect(block.tool.previewHtml).toBe('<div class="card">live</div>')
+    expect(block.tool.widget).toEqual({
+      instanceId: "widget-1",
+      phase: "preview",
+      document: {
+        title: "流式 widget",
+        description: "live preview",
+        html: '<div class="card">live</div>',
+        contentType: "text/html",
+      },
+    })
   })
 
   test("accumulates raw tool arguments for widget parameter streaming", () => {
@@ -129,6 +149,73 @@ describe("chat sse projection", () => {
       description: "参数流",
     })
     expect(block.tool.previewHtml).toBe('<div class="card">li')
+    expect(block.tool.widget).toEqual({
+      instanceId: "widget-args-1",
+      phase: "preview",
+      document: {
+        title: "流式 widget",
+        description: "参数流",
+        html: '<div class="card">li',
+        contentType: "text/html",
+      },
+    })
+  })
+
+  test("applies widget host command render payload to existing tool block", () => {
+    const blocks = applyStreamEventToBlocks(
+      [
+        {
+          type: "tool",
+          tool: {
+            invocationId: "widget-host-1",
+            toolName: "WidgetRenderer",
+            arguments: {
+              title: "旧 widget",
+            },
+            detectedAtMs: 1,
+            output: "",
+            completed: false,
+          },
+        },
+      ],
+      {
+        kind: "widget_host_command",
+        invocation_id: "widget-host-1",
+        command: {
+          type: "render",
+          widget: {
+            instance_id: "widget-host-1",
+            phase: "preview",
+            document: {
+              title: "共享 widget",
+              description: "来自后端 host command",
+              html: '<div class="card">shared</div>',
+              content_type: "text/html",
+            },
+          },
+        },
+        session_id: "session-1",
+        turn_id: "turn-1",
+      }
+    )
+
+    const block = blocks[0]
+    expect(block?.type).toBe("tool")
+    if (!block || block.type !== "tool") {
+      throw new Error("expected first block to stay a tool block")
+    }
+
+    expect(block.tool.previewHtml).toBe('<div class="card">shared</div>')
+    expect(block.tool.widget).toEqual({
+      instanceId: "widget-host-1",
+      phase: "preview",
+      document: {
+        title: "共享 widget",
+        description: "来自后端 host command",
+        html: '<div class="card">shared</div>',
+        contentType: "text/html",
+      },
+    })
   })
 
   test("hydrates current turn widget output segments for live preview", () => {
@@ -282,6 +369,16 @@ describe("chat sse projection", () => {
               title: "流式 widget",
               description: "恢复参数流",
             },
+            widget: {
+              instance_id: "widget-raw-1",
+              phase: "preview",
+              document: {
+                title: "流式 widget",
+                description: "恢复参数流",
+                html: '<div class="card">li',
+                content_type: "text/html",
+              },
+            },
             raw_arguments:
               '{"title":"流式 widget","description":"恢复参数流","html":"<div class=\\"card\\">li',
             detected_at_ms: 1,
@@ -307,6 +404,16 @@ describe("chat sse projection", () => {
     expect(block.tool.rawArguments).toBe(
       '{"title":"流式 widget","description":"恢复参数流","html":"<div class=\\"card\\">li'
     )
+    expect(block.tool.widget).toEqual({
+      instanceId: "widget-raw-1",
+      phase: "preview",
+      document: {
+        title: "流式 widget",
+        description: "恢复参数流",
+        html: '<div class="card">li',
+        contentType: "text/html",
+      },
+    })
     expect(block.tool.previewHtml).toBe('<div class="card">li')
   })
 })

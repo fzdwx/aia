@@ -119,6 +119,10 @@ impl Tool for QuestionTool {
         true
     }
 
+    fn requires_question_capability(&self) -> bool {
+        true
+    }
+
     fn requires_runtime_context(&self) -> bool {
         true
     }

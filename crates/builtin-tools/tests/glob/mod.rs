@@ -7,7 +7,9 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use agent_core::{AbortSignal, Tool, ToolCall, ToolExecutionContext};
+use agent_core::{
+    AbortSignal, Tool, ToolCall, ToolExecutionContext, ToolOutputDelta, ToolOutputStream,
+};
 
 use super::GlobTool;
 
@@ -128,6 +130,33 @@ async fn glob_tool_reports_truncation_when_limit_is_smaller_than_matches()
     assert_eq!(details["returned"], 2);
     assert_eq!(details["limit"], 2);
     assert_eq!(details["truncated"], true);
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn glob_tool_emits_incremental_output_deltas() -> Result<(), Box<dyn Error>> {
+    let dir = TestDir::new()?;
+    fs::write(dir.path().join("file-a.rs"), "fn a() {}\n")?;
+    fs::write(dir.path().join("file-b.rs"), "fn b() {}\n")?;
+
+    let tool = GlobTool;
+    let call = ToolCall::new("glob").with_arguments_value(serde_json::json!({
+        "pattern": "**/*.rs"
+    }));
+    let mut deltas: Vec<ToolOutputDelta> = Vec::new();
+    let result = tool
+        .call(&call, &mut |delta| deltas.push(delta), &test_context(dir.path()))
+        .await
+        .map_err(|error| -> Box<dyn Error> { Box::new(error) })?;
+
+    let stdout = deltas
+        .iter()
+        .filter(|delta| matches!(delta.stream, ToolOutputStream::Stdout))
+        .map(|delta| delta.text.as_str())
+        .collect::<String>();
+
+    assert!(!stdout.is_empty());
+    assert_eq!(stdout.trim_end(), result.content.trim_end());
     Ok(())
 }
 

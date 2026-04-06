@@ -1349,7 +1349,9 @@ function RawPayloadsCard({ trace }: { trace: TraceRecord }) {
                   : "Response body"}
               </span>
               <span className="text-meta text-muted-foreground">
-                {trace.status === "failed" ? "Captured before failure" : "Raw text"}
+                {trace.status === "failed"
+                  ? "Captured before failure"
+                  : "Raw text"}
               </span>
             </CollapsibleTrigger>
             <CollapsibleContent className="pt-3">
@@ -1360,7 +1362,12 @@ function RawPayloadsCard({ trace }: { trace: TraceRecord }) {
             </CollapsibleContent>
           </Collapsible>
         ) : null}
-        {trace.error ? <RawJsonSection title="Error summary" value={{ error: trace.error }} /> : null}
+        {trace.error ? (
+          <RawJsonSection
+            title="Error summary"
+            value={{ error: trace.error }}
+          />
+        ) : null}
         <RawJsonSection title="Request summary" value={trace.request_summary} />
         <RawJsonSection
           title="Response summary"

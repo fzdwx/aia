@@ -9,6 +9,7 @@ import { formatSearchInvocation } from "./search-invocation"
 
 export type ToolRowItem = {
   id: string
+  invocationId?: string
   toolName: string
   arguments: Record<string, unknown>
   rawArguments?: string
@@ -95,6 +96,7 @@ export function fromInvocation(inv: ToolInvocationLifecycle): ToolRowItem {
   if (outcome.status === "succeeded") {
     return {
       id: call.invocation_id,
+      invocationId: call.invocation_id,
       toolName: call.tool_name,
       detectedAtMs: inv.started_at_ms,
       arguments: call.arguments,
@@ -109,6 +111,7 @@ export function fromInvocation(inv: ToolInvocationLifecycle): ToolRowItem {
   }
   return {
     id: call.invocation_id,
+    invocationId: call.invocation_id,
     toolName: call.tool_name,
     detectedAtMs: inv.started_at_ms,
     arguments: call.arguments,
@@ -124,6 +127,7 @@ export function fromInvocation(inv: ToolInvocationLifecycle): ToolRowItem {
 export function fromStreamingTool(tool: StreamingToolOutput): ToolRowItem {
   return {
     id: tool.invocationId,
+    invocationId: tool.invocationId,
     toolName: tool.toolName,
     arguments: tool.arguments,
     rawArguments: tool.rawArguments,

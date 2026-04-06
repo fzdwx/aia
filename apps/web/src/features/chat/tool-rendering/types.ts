@@ -2,6 +2,7 @@ import type { ToolOutputSegment } from "@/lib/types"
 import type { ReactNode } from "react"
 
 export type ToolRenderData = {
+  invocationId?: string
   toolName: string
   arguments: Record<string, unknown>
   rawArguments?: string

@@ -419,7 +419,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
   function beginOptimisticTurn(prompts: string[], sessionId: string) {
     const primaryPrompt = prompts[0] ?? ""
     set((state) => {
-      const nextStreamingTurn: StreamingTurn = createPendingStreamingTurn(prompts)
+      const nextStreamingTurn: StreamingTurn =
+        createPendingStreamingTurn(prompts)
       const snapshot = getSessionSnapshot(sessionId) ?? EMPTY_SESSION_SNAPSHOT
       const nextState = {
         ...state,
@@ -456,7 +457,11 @@ export const useChatStore = create<ChatStore>((set, get) => {
         streamingTurn: null,
         chatState: "idle" as const,
       }
-      cacheSessionSnapshot(sessionId, snapshotFromState(nextState), state.sessions)
+      cacheSessionSnapshot(
+        sessionId,
+        snapshotFromState(nextState),
+        state.sessions
+      )
       return {
         error: message,
         _pendingPrompt: null,
@@ -686,7 +691,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
       if (!sessionId) return
 
       const turn = get().turns.find((candidate) => candidate.turn_id === turnId)
-      if (!turn || (turn.outcome !== "failed" && turn.outcome !== "cancelled")) {
+      if (
+        !turn ||
+        (turn.outcome !== "failed" && turn.outcome !== "cancelled")
+      ) {
         return
       }
 
@@ -704,7 +712,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
       beginOptimisticTurn(prompts, sessionId)
       set((state) => {
-        const nextTurns = state.turns.filter((candidate) => candidate.turn_id !== turnId)
+        const nextTurns = state.turns.filter(
+          (candidate) => candidate.turn_id !== turnId
+        )
         updateSessionSnapshot(
           sessionId,
           (snapshot) => ({

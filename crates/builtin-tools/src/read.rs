@@ -1,7 +1,8 @@
 use std::{io::ErrorKind, path::Path};
 
 use agent_core::{
-    CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
+    CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta,
+    ToolOutputStream, ToolResult,
 };
 use agent_core_macros::ToolArgsSchema as DeriveToolArgsSchema;
 use agent_prompts::tool_descriptions::read_tool_description;
@@ -36,7 +37,7 @@ impl Tool for ReadTool {
     async fn call(
         &self,
         call: &ToolCall,
-        _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
+        output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
     ) -> Result<ToolResult, CoreError> {
         let args: ReadToolArgs = call.parse_arguments()?;
@@ -73,14 +74,22 @@ impl Tool for ReadTool {
 
         let total_lines = content.lines().count();
 
-        let selected: String = content
+        let selected_lines = content
             .lines()
             .enumerate()
             .skip(offset)
             .take(limit)
             .map(|(i, line)| format!("{:>6}\t{}", i + 1, line))
-            .collect::<Vec<_>>()
-            .join("\n");
+            .collect::<Vec<_>>();
+        for (index, line) in selected_lines.iter().enumerate() {
+            let mut text = String::new();
+            if index > 0 {
+                text.push('\n');
+            }
+            text.push_str(line);
+            output(ToolOutputDelta { stream: ToolOutputStream::Stdout, text });
+        }
+        let selected = selected_lines.join("\n");
 
         let lines_read = selected.lines().count();
 

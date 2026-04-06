@@ -1,17 +1,29 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import { normalizeToolArguments } from "@/lib/tool-display"
+import {
+  createWidgetRenderPayloads,
+  createWidgetThemePayloads,
+  normalizeWidgetClientEvent,
+  type UiWidget,
+} from "@/lib/widget-protocol"
 
 import type { ToolRenderer } from "../types"
 import { getArrayValue, getStringValue, truncateInline } from "../helpers"
 import { ExpandableOutput, ToolDetailSection } from "../ui"
 
 type WidgetSandboxProps = {
+  invocationId?: string
   title: string
   description: string | null
   html: string
   isStreaming: boolean
 }
+
+type WidgetSandboxDocumentProps = Pick<
+  WidgetSandboxProps,
+  "title" | "description"
+>
 
 const WIDGET_IFRAME_BASE_CSS = `
   :root {
@@ -469,6 +481,7 @@ function buildThemeTokenScript(): string {
         const message = error && typeof error.message === 'string'
           ? error.message
           : 'Widget cleanup failed';
+        parent.postMessage({ type: 'error', message }, '*');
         parent.postMessage({ type: 'aia-widget-error', message }, '*');
       }
 
@@ -527,6 +540,7 @@ function buildThemeTokenScript(): string {
           root.appendChild(nextScript);
         }
         scheduleHeightSync();
+        parent.postMessage({ type: 'scripts_ready' }, '*');
       };
 
       if (externalScripts.length === 0) {
@@ -556,6 +570,7 @@ function buildThemeTokenScript(): string {
 
     let heightSyncRaf = 0;
     let heightSyncTimeout = 0;
+    let lastAppliedPayloadKey = '';
     const scheduleHeightSync = () => {
       if (heightSyncRaf) {
         return;
@@ -579,25 +594,47 @@ function buildThemeTokenScript(): string {
       if (
         !payload ||
         (payload.type !== 'aia-widget-update' &&
-          payload.type !== 'aia-widget-finalize')
+          payload.type !== 'aia-widget-finalize' &&
+          payload.type !== 'render')
       ) {
         return;
       }
 
-      if (typeof payload.title === 'string' && payload.title.length > 0) {
-        document.title = payload.title;
+      const messageType = payload.type === 'render'
+        ? payload.widget && payload.widget.phase === 'final'
+          ? 'aia-widget-finalize'
+          : 'aia-widget-update'
+        : payload.type;
+      const title = payload.type === 'render'
+        ? payload.widget?.document?.title
+        : payload.title;
+      const description = payload.type === 'render'
+        ? payload.widget?.document?.description
+        : payload.description;
+      const html = payload.type === 'render'
+        ? payload.widget?.document?.html
+        : payload.html;
+      const payloadKey = JSON.stringify({ messageType, title, description, html });
+
+      if (payloadKey === lastAppliedPayloadKey) {
+        return;
+      }
+      lastAppliedPayloadKey = payloadKey;
+
+      if (typeof title === 'string' && title.length > 0) {
+        document.title = title;
       }
 
       if (descriptionNode) {
         descriptionNode.textContent =
-          typeof payload.description === 'string' ? payload.description : '';
+          typeof description === 'string' ? description : '';
       }
 
-      if (root && typeof payload.html === 'string') {
-        if (payload.type === 'aia-widget-update') {
-          applyStreamingHtml(payload.html);
+      if (root && typeof html === 'string') {
+        if (messageType === 'aia-widget-update') {
+          applyStreamingHtml(html);
         } else {
-          applyFinalHtml(payload.html);
+          applyFinalHtml(html);
         }
       }
 
@@ -605,7 +642,10 @@ function buildThemeTokenScript(): string {
     };
 
     const applyThemePayload = (payload) => {
-      if (!payload || payload.type !== 'aia-widget-theme') {
+      if (
+        !payload ||
+        (payload.type !== 'aia-widget-theme' && payload.type !== 'theme_tokens')
+      ) {
         return;
       }
 
@@ -620,7 +660,8 @@ function buildThemeTokenScript(): string {
         }
       }
 
-      const colorScheme = payload.colorScheme === 'light' ? 'light' : 'dark';
+      const colorScheme =
+        (payload.colorScheme ?? payload.color_scheme) === 'light' ? 'light' : 'dark';
       root.style.colorScheme = colorScheme;
       root.classList.toggle('light', colorScheme === 'light');
       root.classList.toggle('dark', colorScheme === 'dark');
@@ -633,6 +674,7 @@ function buildThemeTokenScript(): string {
       applyThemePayload(event.data);
     });
 
+    parent.postMessage({ type: 'ready' }, '*');
     parent.postMessage({ type: 'aia-widget-ready' }, '*');
   `
 }
@@ -640,7 +682,7 @@ function buildThemeTokenScript(): string {
 function buildSandboxDocument({
   title,
   description,
-}: WidgetSandboxProps): string {
+}: WidgetSandboxDocumentProps): string {
   const safeTitle = escapeHtml(title)
   const safeDescription = description ? escapeHtml(description) : ""
   return `<!doctype html>
@@ -674,14 +716,17 @@ function buildSandboxDocument({
         document.body.offsetHeight,
         1
       );
+      parent.postMessage({ type: 'resize', height: nextHeight, first: false }, '*');
       parent.postMessage({ type: 'aia-widget-height', height: nextHeight }, '*');
     };
 
     window.sendPrompt = (text) => {
+      parent.postMessage({ type: 'send_prompt', text }, '*');
       parent.postMessage({ type: 'aia-widget-send-prompt', text }, '*');
     };
 
     window.openLink = (url) => {
+      parent.postMessage({ type: 'open_link', href: url }, '*');
       parent.postMessage({ type: 'aia-widget-open-link', url }, '*');
     };
 
@@ -698,6 +743,10 @@ function buildSandboxDocument({
 
     window.addEventListener('error', (event) => {
       parent.postMessage({
+        type: 'error',
+        message: event.message || 'Widget runtime error'
+      }, '*');
+      parent.postMessage({
         type: 'aia-widget-error',
         message: event.message || 'Widget runtime error'
       }, '*');
@@ -705,12 +754,13 @@ function buildSandboxDocument({
 
     window.addEventListener('unhandledrejection', (event) => {
       const reason = event.reason;
-      const message = typeof reason === 'string'
-        ? reason
-        : reason && typeof reason.message === 'string'
-          ? reason.message
-          : 'Widget promise rejection';
-      parent.postMessage({ type: 'aia-widget-error', message }, '*');
+        const message = typeof reason === 'string'
+          ? reason
+          : reason && typeof reason.message === 'string'
+            ? reason.message
+            : 'Widget promise rejection';
+        parent.postMessage({ type: 'error', message }, '*');
+        parent.postMessage({ type: 'aia-widget-error', message }, '*');
     });
 
     const observer = new ResizeObserver(postHeight);
@@ -735,8 +785,28 @@ function buildSandboxDocument({
 </html>`
 }
 
+function buildWidgetPayload({
+  invocationId,
+  title,
+  description,
+  html,
+  isStreaming,
+}: WidgetSandboxProps): UiWidget {
+  return {
+    instance_id: invocationId ?? "widget-live-preview",
+    phase: isStreaming ? "preview" : "final",
+    document: {
+      title,
+      description: description ?? "",
+      html,
+      content_type: "text/html",
+    },
+  }
+}
+
 // eslint-disable-next-line react-refresh/only-export-components
 function WidgetSandbox({
+  invocationId,
   title,
   description,
   html,
@@ -746,15 +816,14 @@ function WidgetSandbox({
   const lastHeightRef = useRef<number | null>(null)
   const frameReadyRef = useRef(false)
   const pendingRenderTimeoutRef = useRef<number | null>(null)
-  const latestRenderPayloadRef = useRef({
-    type: isStreaming ? "aia-widget-update" : "aia-widget-finalize",
-    title,
-    description,
-    html,
-  })
+  const latestRenderPayloadRef = useRef(
+    createWidgetRenderPayloads(
+      buildWidgetPayload({ title, description, html, isStreaming })
+    )
+  )
   const [frameHeight, setFrameHeight] = useState<number | undefined>(undefined)
   const initialSrcDocRef = useRef<string>(
-    buildSandboxDocument({ title, description, html: "" })
+    buildSandboxDocument({ title, description })
   )
   const srcDoc = initialSrcDocRef.current
 
@@ -772,12 +841,13 @@ function WidgetSandbox({
 
       const send = () => {
         pendingRenderTimeoutRef.current = null
-        target.postMessage(latestRenderPayloadRef.current, "*")
+        target.postMessage(latestRenderPayloadRef.current.shared, "*")
+        target.postMessage(latestRenderPayloadRef.current.legacy, "*")
       }
 
       if (
         options?.immediate ||
-        latestRenderPayloadRef.current.type === "aia-widget-finalize"
+        latestRenderPayloadRef.current.legacy.type === "aia-widget-finalize"
       ) {
         send()
         return
@@ -918,38 +988,55 @@ function WidgetSandbox({
         tokens[`--ramp-${name}-text`] = isLight ? ramp.lightText : ramp.darkText
       }
 
-      target.postMessage(
-        {
-          type: "aia-widget-theme",
-          colorScheme,
-          tokens,
-        },
-        "*"
-      )
+      const themePayloads = createWidgetThemePayloads({
+        colorScheme,
+        tokens,
+      })
+      target.postMessage(themePayloads.legacy, "*")
+      target.postMessage(themePayloads.shared, "*")
     }
 
     function handleMessage(event: MessageEvent) {
       const frame = iframeRef.current
       if (!frame || event.source !== frame.contentWindow) return
 
-      const payload = event.data as {
-        type?: string
-        height?: number
-        text?: string
-        url?: string
-        message?: string
-      } | null
-      if (!payload || typeof payload !== "object") return
+      const payload = normalizeWidgetClientEvent(event.data)
+      if (!payload) return
 
-      if (payload.type === "aia-widget-ready") {
+      if (isStreaming && invocationId) {
+        void Promise.all([
+          import("@/lib/api"),
+          import("@/stores/chat-store"),
+        ]).then(([{ sendWidgetClientEvent }, { useChatStore }]) => {
+          const sessionId = useChatStore.getState().activeSessionId
+          if (!sessionId) {
+            return
+          }
+
+          void sendWidgetClientEvent({
+            session_id: sessionId,
+            invocation_id: invocationId,
+            event: payload,
+          }).catch((error) => {
+            console.warn("Widget client event report failed:", error)
+          })
+        })
+      }
+
+      if (payload.type === "ready") {
         frameReadyRef.current = true
         flushRenderPayload({ immediate: true })
         sendThemeToFrame()
         return
       }
 
-      if (payload.type === "aia-widget-height") {
-        const reportedHeight = Math.ceil(payload.height ?? 0)
+      if (payload.type === "scripts_ready") {
+        sendThemeToFrame()
+        return
+      }
+
+      if (payload.type === "resize") {
+        const reportedHeight = Math.ceil(payload.height)
         if (!Number.isFinite(reportedHeight) || reportedHeight <= 0) {
           return
         }
@@ -968,32 +1055,21 @@ function WidgetSandbox({
         return
       }
 
-      if (
-        payload.type === "aia-widget-send-prompt" &&
-        typeof payload.text === "string" &&
-        payload.text.trim().length > 0
-      ) {
+      if (payload.type === "send_prompt" && payload.text.trim().length > 0) {
         void import("@/stores/chat-store").then(({ useChatStore }) => {
-          void useChatStore.getState().sendMessage(payload.text!.trim())
+          void useChatStore.getState().sendMessage(payload.text.trim())
         })
         return
       }
 
-      if (
-        payload.type === "aia-widget-open-link" &&
-        typeof payload.url === "string" &&
-        payload.url.trim().length > 0
-      ) {
-        window.open(payload.url, "_blank", "noopener,noreferrer")
+      if (payload.type === "open_link" && payload.href.trim().length > 0) {
+        window.open(payload.href, "_blank", "noopener,noreferrer")
         return
       }
 
-      if (
-        payload.type === "aia-widget-error" &&
-        typeof payload.message === "string" &&
-        payload.message.trim().length > 0
-      ) {
+      if (payload.type === "error" && payload.message.trim().length > 0) {
         console.warn("Widget sandbox error:", payload.message)
+        return
       }
     }
 
@@ -1021,15 +1097,12 @@ function WidgetSandbox({
       themeObserver.disconnect()
       frame?.removeEventListener("load", sendThemeToFrame)
     }
-  }, [flushRenderPayload])
+  }, [flushRenderPayload, invocationId, isStreaming])
 
   useEffect(() => {
-    latestRenderPayloadRef.current = {
-      type: isStreaming ? "aia-widget-update" : "aia-widget-finalize",
-      title,
-      description,
-      html,
-    }
+    latestRenderPayloadRef.current = createWidgetRenderPayloads(
+      buildWidgetPayload({ title, description, html, isStreaming })
+    )
 
     const target = iframeRef.current?.contentWindow
     if (target && frameReadyRef.current) {
@@ -1162,10 +1235,11 @@ export function createWidgetRendererRenderer(): ToolRenderer {
 
       return (
         <WidgetSandbox
+          invocationId={data.invocationId}
           title={title}
           description={description}
           html={html}
-          isStreaming={data.isRunning}
+          isStreaming={Boolean(data.isRunning)}
         />
       )
     },

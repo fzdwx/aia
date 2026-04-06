@@ -101,9 +101,9 @@ async fn drain_session_events(
     loop {
         match events.recv().await {
             Ok(payload) => match payload {
-                SsePayload::Stream { session_id: current, turn_id: current_turn_id, event }
-                    if current == session_id && current_turn_id == turn_id =>
-                {
+                SsePayload::Stream {
+                    session_id: current, turn_id: current_turn_id, event, ..
+                } if current == session_id && current_turn_id == turn_id => {
                     render_stream_event(&event, &mut streamed_text)?;
                 }
                 SsePayload::Status { session_id: current, turn_id: current_turn_id, status }
@@ -245,6 +245,7 @@ fn render_stream_event(
             }
             println!("[log] {text}");
         }
+        StreamEvent::WidgetHostCommand { .. } | StreamEvent::WidgetClientEvent { .. } => {}
         StreamEvent::Done => {}
     }
 

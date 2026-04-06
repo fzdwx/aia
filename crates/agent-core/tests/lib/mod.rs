@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     path::PathBuf,
     time::{Duration, UNIX_EPOCH},
 };
@@ -305,6 +306,127 @@ fn question_result_保持稳定序列化形状() {
             .expect("question result should deserialize"),
         result
     );
+}
+
+#[test]
+fn widget_phase_保持稳定序列化形状() {
+    let preview =
+        serde_json::to_value(UiWidgetPhase::Preview).expect("widget phase should serialize");
+    let final_phase =
+        serde_json::to_value(UiWidgetPhase::Final).expect("widget phase should serialize");
+
+    assert_eq!(preview, serde_json::json!("preview"));
+    assert_eq!(final_phase, serde_json::json!("final"));
+}
+
+#[test]
+fn widget_host_command_保持稳定序列化形状() {
+    let mut tokens = BTreeMap::new();
+    tokens.insert("foreground".to_string(), "oklch(0.98 0 0)".to_string());
+
+    let widget = UiWidget {
+        instance_id: "widget-1".into(),
+        phase: UiWidgetPhase::Preview,
+        document: UiWidgetDocument {
+            title: "Particle Sandbox".into(),
+            description: "Streams a live particle simulation.".into(),
+            html: "<div class=\"card\">preview</div>".into(),
+            content_type: "text/html".into(),
+        },
+    };
+
+    let render = serde_json::to_value(WidgetHostCommand::Render { widget: widget.clone() })
+        .expect("widget host command should serialize");
+    let theme = serde_json::to_value(WidgetHostCommand::ThemeTokens { tokens })
+        .expect("widget host command should serialize");
+
+    assert_eq!(
+        render,
+        serde_json::json!({
+            "type": "render",
+            "widget": {
+                "instance_id": "widget-1",
+                "phase": "preview",
+                "document": {
+                    "title": "Particle Sandbox",
+                    "description": "Streams a live particle simulation.",
+                    "html": "<div class=\"card\">preview</div>",
+                    "content_type": "text/html"
+                }
+            }
+        })
+    );
+    assert_eq!(
+        theme,
+        serde_json::json!({
+            "type": "theme_tokens",
+            "tokens": {
+                "foreground": "oklch(0.98 0 0)"
+            }
+        })
+    );
+}
+
+#[test]
+fn widget_client_event_保持稳定序列化形状() {
+    let captured = serde_json::to_value(WidgetClientEvent::Captured {
+        html: Some("<div>final</div>".into()),
+        styles: Some("body{color:red}".into()),
+        canvases: vec![WidgetCanvasSnapshot {
+            key: "chart-1".into(),
+            data_url: "data:image/png;base64,abc".into(),
+        }],
+        body_width: 640,
+        body_height: 480,
+    })
+    .expect("widget client event should serialize");
+
+    assert_eq!(
+        captured,
+        serde_json::json!({
+            "type": "captured",
+            "html": "<div>final</div>",
+            "styles": "body{color:red}",
+            "canvases": [
+                {
+                    "key": "chart-1",
+                    "data_url": "data:image/png;base64,abc"
+                }
+            ],
+            "body_width": 640,
+            "body_height": 480
+        })
+    );
+}
+
+#[test]
+fn stream_event_支持_widget_host_与_client_事件序列化() {
+    let host = serde_json::to_value(StreamEvent::WidgetHostCommand {
+        invocation_id: "call-widget-1".into(),
+        command: WidgetHostCommand::Render {
+            widget: UiWidget {
+                instance_id: "widget-1".into(),
+                phase: UiWidgetPhase::Preview,
+                document: UiWidgetDocument {
+                    title: "Particle Sandbox".into(),
+                    description: "Streams a live particle simulation.".into(),
+                    html: "<div class=\"card\">preview</div>".into(),
+                    content_type: "text/html".into(),
+                },
+            },
+        },
+    })
+    .expect("widget host stream event should serialize");
+    let client = serde_json::to_value(StreamEvent::WidgetClientEvent {
+        invocation_id: "call-widget-1".into(),
+        event: WidgetClientEvent::ScriptsReady,
+    })
+    .expect("widget client stream event should serialize");
+
+    assert_eq!(host["kind"], serde_json::json!("widget_host_command"));
+    assert_eq!(host["command"]["type"], serde_json::json!("render"));
+    assert_eq!(client["kind"], serde_json::json!("widget_client_event"));
+    assert_eq!(client["event"]["type"], serde_json::json!("scripts_ready"));
 }
 
 #[test]

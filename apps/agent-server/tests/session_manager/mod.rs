@@ -518,6 +518,19 @@ fn tool_output_delta_preserves_stream_segments_in_current_turn_snapshot() {
             },
         ])
     );
+    assert_eq!(
+        tool.widget,
+        Some(agent_core::UiWidget {
+            instance_id: "call-widget-1".into(),
+            phase: agent_core::UiWidgetPhase::Preview,
+            document: agent_core::UiWidgetDocument {
+                title: "流式 widget".into(),
+                description: "保留 stdout/stderr 分段".into(),
+                html: "<div class=\"card\">live</div>".into(),
+                content_type: "text/html".into(),
+            },
+        })
+    );
 }
 
 #[test]
@@ -568,6 +581,19 @@ fn tool_call_arguments_delta_preserves_raw_argument_stream_in_current_turn_snaps
     assert_eq!(
         tool.raw_arguments,
         "{\"title\":\"流式 widget\",\"description\":\"参数流\",\"html\":\"<div class=\\\"card\\\">li"
+    );
+    assert_eq!(
+        tool.widget,
+        Some(agent_core::UiWidget {
+            instance_id: "call-widget-args-1".into(),
+            phase: agent_core::UiWidgetPhase::Preview,
+            document: agent_core::UiWidgetDocument {
+                title: "流式 widget".into(),
+                description: "参数流".into(),
+                html: "<div class=\"card\">li".into(),
+                content_type: "text/html".into(),
+            },
+        })
     );
 }
 

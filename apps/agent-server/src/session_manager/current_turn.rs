@@ -10,7 +10,7 @@ use crate::{
     model::ServerModel,
     runtime_worker::{
         CurrentToolOutput, CurrentToolOutputSegment, CurrentTurnBlock, CurrentTurnSnapshot,
-        find_tool_output_mut, live_tool_block, normalize_object_value,
+        find_tool_output_mut, live_tool_block, normalize_object_value, sync_widget_projection,
     },
     sse::TurnStatus,
 };
@@ -124,6 +124,7 @@ pub(crate) fn update_current_turn_from_stream(
                     tool.raw_arguments =
                         serde_json::to_string(arguments).unwrap_or_else(|_| "{}".to_string());
                 }
+                sync_widget_projection(tool);
             } else {
                 let mut block = live_tool_block(
                     invocation_id.clone(),
@@ -137,6 +138,7 @@ pub(crate) fn update_current_turn_from_stream(
                 if let CurrentTurnBlock::Tool { tool } = &mut block {
                     tool.raw_arguments =
                         serde_json::to_string(arguments).unwrap_or_else(|_| "{}".to_string());
+                    sync_widget_projection(tool);
                 }
                 current.blocks.push(block);
             }
@@ -148,6 +150,7 @@ pub(crate) fn update_current_turn_from_stream(
                 }
                 tool.raw_arguments.push_str(arguments_delta);
                 sync_tool_arguments_from_raw(tool);
+                sync_widget_projection(tool);
             } else {
                 let mut block = live_tool_block(
                     invocation_id.clone(),
@@ -161,6 +164,7 @@ pub(crate) fn update_current_turn_from_stream(
                 if let CurrentTurnBlock::Tool { tool } = &mut block {
                     tool.raw_arguments = arguments_delta.clone();
                     sync_tool_arguments_from_raw(tool);
+                    sync_widget_projection(tool);
                 }
                 current.blocks.push(block);
             }
@@ -173,6 +177,7 @@ pub(crate) fn update_current_turn_from_stream(
                     tool.raw_arguments =
                         serde_json::to_string(&call.arguments).unwrap_or_else(|_| "{}".to_string());
                 }
+                sync_widget_projection(tool);
             } else {
                 let mut block = live_tool_block(
                     call.invocation_id.clone(),
@@ -186,6 +191,7 @@ pub(crate) fn update_current_turn_from_stream(
                 if let CurrentTurnBlock::Tool { tool } = &mut block {
                     tool.raw_arguments =
                         serde_json::to_string(&call.arguments).unwrap_or_else(|_| "{}".to_string());
+                    sync_widget_projection(tool);
                 }
                 current.blocks.push(block);
             }
@@ -203,6 +209,7 @@ pub(crate) fn update_current_turn_from_stream(
                         .map(|existing| existing.min(*started_at_ms))
                         .unwrap_or(*started_at_ms),
                 );
+                sync_widget_projection(tool);
             } else {
                 let mut block = live_tool_block(
                     invocation_id.clone(),
@@ -216,6 +223,7 @@ pub(crate) fn update_current_turn_from_stream(
                 if let CurrentTurnBlock::Tool { tool } = &mut block {
                     tool.raw_arguments =
                         serde_json::to_string(arguments).unwrap_or_else(|_| "{}".to_string());
+                    sync_widget_projection(tool);
                 }
                 current.blocks.push(block);
             }
@@ -223,8 +231,9 @@ pub(crate) fn update_current_turn_from_stream(
         StreamEvent::ToolOutputDelta { invocation_id, stream, text } => {
             if let Some(tool) = find_tool_output_mut(&mut current.blocks, invocation_id) {
                 append_tool_output_segment(tool, stream.clone(), text);
+                sync_widget_projection(tool);
             } else {
-                current.blocks.push(live_tool_block(
+                let mut block = live_tool_block(
                     invocation_id.clone(),
                     String::new(),
                     serde_json::json!({}),
@@ -235,7 +244,11 @@ pub(crate) fn update_current_turn_from_stream(
                     }]),
                     now_timestamp_ms(),
                     false,
-                ));
+                );
+                if let CurrentTurnBlock::Tool { tool } = &mut block {
+                    sync_widget_projection(tool);
+                }
+                current.blocks.push(block);
             }
         }
         StreamEvent::ToolCallCompleted {
@@ -253,8 +266,13 @@ pub(crate) fn update_current_turn_from_stream(
                 tool.result_content = Some(content.clone());
                 tool.result_details = details.clone();
                 tool.failed = Some(*failed);
+                sync_widget_projection(tool);
             }
         }
-        StreamEvent::Log { .. } | StreamEvent::Retrying { .. } | StreamEvent::Done => {}
+        StreamEvent::WidgetHostCommand { .. }
+        | StreamEvent::WidgetClientEvent { .. }
+        | StreamEvent::Log { .. }
+        | StreamEvent::Retrying { .. }
+        | StreamEvent::Done => {}
     }
 }

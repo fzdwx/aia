@@ -1,8 +1,10 @@
 import { normalizeToolArguments } from "@/lib/tool-display"
 import type {
   CurrentTurnSnapshot,
+  CurrentUiWidget,
   SseEvent,
   StreamingBlock,
+  StreamingUiWidget,
   StreamingTurn,
   ToolOutputSegment,
   TurnStatus,
@@ -98,16 +100,123 @@ function deriveWidgetPreviewHtml(tool: {
   return html.length > 0 ? html : undefined
 }
 
-function withWidgetPreview<
+function deriveStreamingWidget(tool: {
+  invocationId: string
+  toolName: string
+  arguments: Record<string, unknown>
+  rawArguments?: string
+  output: string
+  outputSegments?: ToolOutputSegment[]
+  resultDetails?: Record<string, unknown>
+  completed: boolean
+}): StreamingUiWidget | undefined {
+  if (!isWidgetRendererToolName(tool.toolName)) {
+    return undefined
+  }
+
+  const details = tool.resultDetails ?? undefined
+  const title =
+    (typeof details?.title === "string" && details.title.trim().length > 0
+      ? details.title.trim()
+      : undefined) ??
+    (typeof tool.arguments.title === "string" &&
+    tool.arguments.title.trim().length > 0
+      ? tool.arguments.title.trim()
+      : undefined) ??
+    "Widget"
+  const description =
+    (typeof details?.description === "string"
+      ? details.description
+      : undefined) ??
+    (typeof tool.arguments.description === "string"
+      ? tool.arguments.description
+      : undefined) ??
+    ""
+  const html =
+    (typeof details?.html === "string" && details.html.trim().length > 0
+      ? details.html.trim()
+      : undefined) ?? deriveWidgetPreviewHtml(tool)
+
+  if (!html || html.length === 0) {
+    return undefined
+  }
+
+  const contentType =
+    (typeof details?.content_type === "string" &&
+    details.content_type.trim().length > 0
+      ? details.content_type.trim()
+      : undefined) ?? "text/html"
+
+  return {
+    instanceId: tool.invocationId,
+    phase: tool.completed ? "final" : "preview",
+    document: {
+      title,
+      description,
+      html,
+      contentType,
+    },
+  }
+}
+
+function mapCurrentWidget(
+  widget: CurrentUiWidget | undefined
+): StreamingUiWidget | undefined {
+  if (!widget) {
+    return undefined
+  }
+
+  return {
+    instanceId: widget.instance_id,
+    phase: widget.phase,
+    document: {
+      title: widget.document.title,
+      description: widget.document.description,
+      html: widget.document.html,
+      contentType: widget.document.content_type,
+    },
+  }
+}
+
+function mapHostCommandWidget(
+  command: Extract<StreamEventData, { kind: "widget_host_command" }>["command"]
+): StreamingUiWidget | undefined {
+  if (command.type !== "render") {
+    return undefined
+  }
+
+  return mapCurrentWidget(command.widget)
+}
+
+function mapStreamingWidget(
+  widget: StreamingUiWidget | undefined
+): StreamingUiWidget | undefined {
+  return widget
+}
+
+function withWidgetProjection<
   T extends {
+    invocationId: string
     toolName: string
+    arguments: Record<string, unknown>
     output: string
     outputSegments?: ToolOutputSegment[]
     rawArguments?: string
+    resultDetails?: Record<string, unknown>
+    completed: boolean
   },
->(tool: T): T & { previewHtml?: string } {
+>(tool: T): T & { previewHtml?: string; widget?: StreamingUiWidget } {
   const previewHtml = deriveWidgetPreviewHtml(tool)
-  return previewHtml == null ? tool : { ...tool, previewHtml }
+  const widget = deriveStreamingWidget(tool)
+  if (previewHtml == null && widget == null) {
+    return tool
+  }
+
+  return {
+    ...tool,
+    ...(previewHtml == null ? {} : { previewHtml }),
+    ...(widget == null ? {} : { widget }),
+  }
 }
 
 function tryParseRawToolArguments(
@@ -162,7 +271,7 @@ export function currentTurnToStreamingTurn(
           return {
             type: "tool",
             tool: {
-              ...withWidgetPreview({
+              ...withWidgetProjection({
                 invocationId: block.tool.invocation_id,
                 toolName: block.tool.tool_name,
                 arguments: normalizeToolArguments(block.tool.arguments),
@@ -176,6 +285,7 @@ export function currentTurnToStreamingTurn(
                 resultContent: block.tool.result_content ?? undefined,
                 resultDetails: block.tool.result_details ?? undefined,
                 failed: block.tool.failed ?? undefined,
+                widget: mapCurrentWidget(block.tool.widget),
               }),
             },
           } as const
@@ -253,7 +363,7 @@ export function applyStreamEventToBlocks(
       nextBlocks[existingIndex] = {
         ...block,
         tool: {
-          ...withWidgetPreview({
+          ...withWidgetProjection({
             ...block.tool,
             toolName: data.tool_name || block.tool.toolName,
             arguments: mergedArguments,
@@ -263,6 +373,7 @@ export function applyStreamEventToBlocks(
             detectedAtMs: shouldRepairPlaceholder
               ? data.detected_at_ms
               : block.tool.detectedAtMs,
+            widget: mapStreamingWidget(data.widget) ?? block.tool.widget,
           }),
         },
       }
@@ -270,7 +381,7 @@ export function applyStreamEventToBlocks(
       nextBlocks.push({
         type: "tool",
         tool: {
-          ...withWidgetPreview({
+          ...withWidgetProjection({
             invocationId: data.invocation_id,
             toolName: data.tool_name,
             arguments: normalizeToolArguments(data.arguments),
@@ -280,6 +391,7 @@ export function applyStreamEventToBlocks(
             detectedAtMs: data.detected_at_ms,
             output: "",
             completed: false,
+            widget: mapStreamingWidget(data.widget),
           }),
         },
       })
@@ -300,11 +412,12 @@ export function applyStreamEventToBlocks(
       nextBlocks[existingIndex] = {
         ...block,
         tool: {
-          ...withWidgetPreview({
+          ...withWidgetProjection({
             ...block.tool,
             toolName: data.tool_name || block.tool.toolName,
             arguments: parsedArguments ?? block.tool.arguments,
             rawArguments,
+            widget: mapStreamingWidget(data.widget) ?? block.tool.widget,
           }),
         },
       }
@@ -313,7 +426,7 @@ export function applyStreamEventToBlocks(
       nextBlocks.push({
         type: "tool",
         tool: {
-          ...withWidgetPreview({
+          ...withWidgetProjection({
             invocationId: data.invocation_id,
             toolName: data.tool_name,
             arguments: tryParseRawToolArguments(rawArguments) ?? {},
@@ -321,6 +434,7 @@ export function applyStreamEventToBlocks(
             detectedAtMs: Date.now(),
             output: "",
             completed: false,
+            widget: mapStreamingWidget(data.widget),
           }),
         },
       })
@@ -343,7 +457,7 @@ export function applyStreamEventToBlocks(
       nextBlocks[existingIndex] = {
         ...block,
         tool: {
-          ...withWidgetPreview({
+          ...withWidgetProjection({
             ...block.tool,
             toolName: data.tool_name || block.tool.toolName,
             arguments: mergedArguments,
@@ -357,6 +471,7 @@ export function applyStreamEventToBlocks(
               shouldRepairPlaceholder || block.tool.startedAtMs == null
                 ? data.started_at_ms
                 : block.tool.startedAtMs,
+            widget: mapStreamingWidget(data.widget) ?? block.tool.widget,
           }),
         },
       }
@@ -365,7 +480,7 @@ export function applyStreamEventToBlocks(
       nextBlocks.push({
         type: "tool",
         tool: {
-          ...withWidgetPreview({
+          ...withWidgetProjection({
             invocationId: data.invocation_id,
             toolName: data.tool_name,
             arguments: normalizeToolArguments(data.arguments),
@@ -376,6 +491,7 @@ export function applyStreamEventToBlocks(
             startedAtMs,
             output: "",
             completed: false,
+            widget: mapStreamingWidget(data.widget),
           }),
         },
       })
@@ -415,10 +531,11 @@ export function applyStreamEventToBlocks(
       nextBlocks[existingIndex] = {
         ...block,
         tool: {
-          ...withWidgetPreview({
+          ...withWidgetProjection({
             ...block.tool,
             output: block.tool.output + data.text,
             outputSegments,
+            widget: mapStreamingWidget(data.widget) ?? block.tool.widget,
           }),
         },
       }
@@ -427,7 +544,7 @@ export function applyStreamEventToBlocks(
       nextBlocks.push({
         type: "tool",
         tool: {
-          ...withWidgetPreview({
+          ...withWidgetProjection({
             invocationId: data.invocation_id,
             toolName: "",
             arguments: {},
@@ -436,10 +553,44 @@ export function applyStreamEventToBlocks(
             output: data.text,
             outputSegments: [{ stream: data.stream, text: data.text }],
             completed: false,
+            widget: mapStreamingWidget(data.widget),
           }),
         },
       })
     }
+    return nextBlocks
+  }
+
+  if (data.kind === "widget_host_command") {
+    const nextWidget =
+      mapHostCommandWidget(data.command) ?? mapStreamingWidget(data.widget)
+    if (!nextWidget) {
+      return nextBlocks
+    }
+
+    const existingIndex = findToolBlockIndex(nextBlocks, data.invocation_id)
+    if (existingIndex < 0) {
+      return nextBlocks
+    }
+
+    const block = nextBlocks[existingIndex] as Extract<
+      StreamingBlock,
+      { type: "tool" }
+    >
+    nextBlocks[existingIndex] = {
+      ...block,
+      tool: {
+        ...withWidgetProjection({
+          ...block.tool,
+          widget: nextWidget,
+          previewHtml: nextWidget.document.html,
+        }),
+      },
+    }
+    return nextBlocks
+  }
+
+  if (data.kind === "widget_client_event") {
     return nextBlocks
   }
 
@@ -453,7 +604,7 @@ export function applyStreamEventToBlocks(
       nextBlocks[existingIndex] = {
         ...block,
         tool: {
-          ...withWidgetPreview({
+          ...withWidgetProjection({
             ...block.tool,
             startedAtMs:
               block.tool.startedAtMs ??
@@ -467,6 +618,7 @@ export function applyStreamEventToBlocks(
             failed: data.failed,
             // 工具完成后清理 segments，只保留 output 字符串，释放内存
             outputSegments: undefined,
+            widget: mapStreamingWidget(data.widget) ?? block.tool.widget,
           }),
         },
       }

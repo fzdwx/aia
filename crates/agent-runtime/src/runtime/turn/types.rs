@@ -52,6 +52,8 @@ impl TurnBuffers {
             | StreamEvent::ToolCallReady { .. }
             | StreamEvent::ToolCallStarted { .. }
             | StreamEvent::ToolOutputDelta { .. }
+            | StreamEvent::WidgetHostCommand { .. }
+            | StreamEvent::WidgetClientEvent { .. }
             | StreamEvent::ToolCallCompleted { .. }
             | StreamEvent::Retrying { .. }
             | StreamEvent::Log { .. }

@@ -147,9 +147,10 @@ export function UserMessageBlock({ content }: { content: string }) {
   const shouldCollapsible = content.length > USER_MESSAGE_COLLAPSE_THRESHOLD
   const [expanded, setExpanded] = useState(!shouldCollapsible)
 
-  const displayContent = shouldCollapsible && !expanded
-    ? content.slice(0, USER_MESSAGE_COLLAPSE_THRESHOLD) + "..."
-    : content
+  const displayContent =
+    shouldCollapsible && !expanded
+      ? content.slice(0, USER_MESSAGE_COLLAPSE_THRESHOLD) + "..."
+      : content
 
   return (
     <div
@@ -181,9 +182,11 @@ export function UserMessageBlock({ content }: { content: string }) {
             <button
               type="button"
               onClick={() => setExpanded(!expanded)}
-              className="text-caption mt-2 text-muted-foreground hover:text-foreground transition-colors"
+              className="text-caption mt-2 text-muted-foreground transition-colors hover:text-foreground"
             >
-              {expanded ? "收起" : `展开全部 (${Math.ceil(content.length / 1000)}k 字符)`}
+              {expanded
+                ? "收起"
+                : `展开全部 (${Math.ceil(content.length / 1000)}k 字符)`}
             </button>
           )}
         </div>

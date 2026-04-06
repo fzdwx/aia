@@ -66,6 +66,7 @@
 
 - Web 界面要保持流畅、低闪烁、低阻塞
 - 流式体验需要稳定，不应频繁出现布局跳动和状态漂移
+- widget host 需要通过统一协议承接流式预览、完成态执行、bridge 动作与恢复语义，而不是长期依赖 Web-only 特判
 - session 列表、历史恢复、当前轮次恢复、消息队列、interrupt/cancel 都应具备清晰一致的表现
 - 配置面板、trace 工作台、channel 工作台都应在同一信息架构下继续收稳
 
@@ -90,6 +91,7 @@
 - `agent-server` 控制面
 - 共享 runtime / tools / store / trace 主链
 - channel 接入的桥接边界
+- widget host/runtime 的共享协议收口（仅限 chat 内 host parity，不含 dashboard/pin/export 产品层）
 
 当前阶段**不要求**：
 

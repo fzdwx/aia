@@ -20,6 +20,7 @@ import type {
   TraceOverview,
   UpdateChannelRequest,
 } from "./types"
+import type { WidgetClientEvent } from "./widget-protocol"
 
 export type ContextStats = {
   total_entries: number
@@ -188,7 +189,10 @@ export async function retryTurn(
   const res = await fetch("/api/turn/retry", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ failed_turn_id: failedTurnId, session_id: sessionId }),
+    body: JSON.stringify({
+      failed_turn_id: failedTurnId,
+      session_id: sessionId,
+    }),
   })
   if (!res.ok) throw new Error(`POST /api/turn/retry failed: ${res.status}`)
 }
@@ -246,6 +250,21 @@ export async function interruptTurn(sessionId?: string): Promise<boolean> {
     throw new Error(`POST /api/session/interrupt failed: ${res.status}`)
   const payload = (await res.json()) as { interrupted?: boolean }
   return payload.interrupted === true
+}
+
+export async function sendWidgetClientEvent(body: {
+  session_id?: string
+  turn_id?: string
+  invocation_id: string
+  event: WidgetClientEvent
+}): Promise<void> {
+  const res = await fetch("/api/session/widget-event", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok)
+    throw new Error(`POST /api/session/widget-event failed: ${res.status}`)
 }
 
 // ── Provider endpoints (unchanged) ─────────────────────────────

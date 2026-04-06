@@ -2,7 +2,8 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_core::{
-    CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta, ToolResult,
+    CoreError, Tool, ToolCall, ToolDefinition, ToolExecutionContext, ToolOutputDelta,
+    ToolOutputStream, ToolResult,
 };
 use agent_core_macros::ToolArgsSchema as DeriveToolArgsSchema;
 use agent_prompts::tool_descriptions::glob_tool_description;
@@ -52,7 +53,7 @@ impl Tool for GlobTool {
     async fn call(
         &self,
         call: &ToolCall,
-        _output: &mut (dyn FnMut(ToolOutputDelta) + Send),
+        output: &mut (dyn FnMut(ToolOutputDelta) + Send),
         context: &ToolExecutionContext,
     ) -> Result<ToolResult, CoreError> {
         let args: GlobToolArgs = call.parse_arguments()?;
@@ -77,7 +78,7 @@ impl Tool for GlobTool {
             })));
         }
 
-        match run_glob_search(pattern.clone(), base, limit, abort).await? {
+        match run_glob_search(pattern.clone(), base, limit, abort, output).await? {
             GlobSearchOutcome::Completed(result) => Ok(ToolResult::from_call(call, result.content)
                 .with_details(serde_json::json!({
                     "pattern": pattern,
@@ -104,6 +105,7 @@ async fn run_glob_search(
     base: PathBuf,
     limit: usize,
     abort: agent_core::AbortSignal,
+    output: &mut (dyn FnMut(ToolOutputDelta) + Send),
 ) -> Result<GlobSearchOutcome, CoreError> {
     let glob = globset::Glob::new(&pattern)
         .map_err(|e| CoreError::new(format!("invalid glob pattern: {e}")))?
@@ -136,12 +138,17 @@ async fn run_glob_search(
     let match_count = entries.len();
     let returned = entries.len().min(limit);
     let truncated = match_count > limit;
-    let content = entries
-        .iter()
-        .take(limit)
-        .map(|(p, _)| p.display().to_string())
-        .collect::<Vec<_>>()
-        .join("\n");
+    let returned_entries =
+        entries.iter().take(limit).map(|(p, _)| p.display().to_string()).collect::<Vec<_>>();
+    for (index, entry) in returned_entries.iter().enumerate() {
+        let mut text = String::new();
+        if index > 0 {
+            text.push('\n');
+        }
+        text.push_str(entry);
+        output(ToolOutputDelta { stream: ToolOutputStream::Stdout, text });
+    }
+    let content = returned_entries.join("\n");
 
     Ok(GlobSearchOutcome::Completed(GlobSearchResult { content, match_count, returned, truncated }))
 }

@@ -237,6 +237,13 @@ session facts
 - app 壳承担桥接与控制面
 - 若某段逻辑可以在多个 app / client 复用，应优先下沉到共享层
 
+### 5. Widget Host 协议
+
+- 当前 `WidgetRenderer` 已经存在，但它不应长期停留在“Web 特判 HTML sandbox”层级
+- widget 的宿主语义、bridge 动作、生命周期阶段与 capability 边界，应优先下沉到共享协议，而不是继续堆在 `apps/web`
+- `apps/web` 负责 widget host 的渲染与交互承接；`apps/agent-server` 负责 current-turn / SSE / replay 投影；共享 crate 负责稳定协议与 capability 语义
+- dashboard / pin / export / cross-widget orchestration 属于后续产品层能力，不应在第一波 host/runtime 收口时混入基础协议层
+
 ### 4. Channel 边界
 
 - transport 专属协议留在 channel crate
@@ -251,6 +258,7 @@ session facts
    - runtime ownership / return-path 复杂
 2. server 驱动面与共享 runtime 之间还能继续下沉的辅助逻辑
 3. 工具协议对外映射与 MCP 接入边界
+4. widget host 协议仍处于从 `WidgetRenderer` Web 特判向共享语义收口的早期阶段；当前已开始 capability 解耦和最小协议建模，但还未完成 runtime/server/Web 的统一投影
 
 这些是当前的结构热点，不应再被新的客户端表层需求挤掉优先级。
 

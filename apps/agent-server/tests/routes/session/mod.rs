@@ -16,7 +16,7 @@ use crate::routes::test_support::{
 };
 use agent_core::{
     QuestionAnswer, QuestionItem, QuestionKind, QuestionRequest, QuestionResult,
-    QuestionResultStatus,
+    QuestionResultStatus, StreamEvent, WidgetClientEvent,
 };
 use agent_store::{SessionAutoRenamePolicy, SessionTitleSource};
 
@@ -227,6 +227,50 @@ async fn get_pending_question_returns_request_from_session_tape() {
         body.get("request").and_then(|value| value.get("request_id")),
         Some(&serde_json::json!("qreq_123"))
     );
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn report_widget_client_event_broadcasts_stream_event() {
+    let (state, root) =
+        test_state_with_session_manager("session-widget-client-event", sample_registry());
+    let session = state
+        .session_manager
+        .create_session(Some("Session One".into()))
+        .await
+        .expect("session should be created");
+    let mut rx = state.broadcast_tx.subscribe();
+
+    let response = handlers::report_widget_client_event(
+        State(state.clone()),
+        Json(super::WidgetClientEventRequest {
+            session_id: Some(session.id.clone()),
+            turn_id: Some("turn-widget-1".into()),
+            invocation_id: "call-widget-1".into(),
+            event: WidgetClientEvent::Resize { height: 320, first: true },
+        }),
+    )
+    .await
+    .into_response();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let payload = rx.recv().await.expect("broadcast payload should arrive");
+    match payload {
+        crate::sse::SsePayload::Stream { session_id, turn_id, event, .. } => {
+            assert_eq!(session_id, session.id);
+            assert_eq!(turn_id, "turn-widget-1");
+            match event {
+                StreamEvent::WidgetClientEvent { invocation_id, event } => {
+                    assert_eq!(invocation_id, "call-widget-1");
+                    assert_eq!(event, WidgetClientEvent::Resize { height: 320, first: true });
+                }
+                other => panic!("expected widget client event, got {other:?}"),
+            }
+        }
+        _ => panic!("expected stream payload"),
+    }
 
     let _ = std::fs::remove_dir_all(root);
 }

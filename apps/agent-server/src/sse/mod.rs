@@ -1,4 +1,4 @@
-use agent_core::StreamEvent;
+use agent_core::{StreamEvent, UiWidget};
 use agent_runtime::TurnLifecycle;
 use agent_store::{SessionAutoRenamePolicy, SessionTitleSource};
 use axum::response::sse::Event;
@@ -26,6 +26,7 @@ pub enum SsePayload {
         session_id: String,
         turn_id: String,
         event: StreamEvent,
+        widget: Option<UiWidget>,
     },
     Status {
         session_id: String,
@@ -139,6 +140,8 @@ struct StreamData {
     turn_id: String,
     #[serde(flatten)]
     event: StreamEvent,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    widget: Option<UiWidget>,
 }
 
 #[derive(Serialize)]
@@ -217,9 +220,12 @@ fn serialize_sse_data<T: Serialize>(event_name: &str, payload: &T) -> String {
 impl SsePayload {
     pub fn into_axum_event(self) -> Result<Event, std::convert::Infallible> {
         match self {
-            Self::Stream { session_id, turn_id, event } => Ok(Event::default()
-                .event("stream")
-                .data(serialize_sse_data("stream", &StreamData { session_id, turn_id, event }))),
+            Self::Stream { session_id, turn_id, event, widget } => {
+                Ok(Event::default().event("stream").data(serialize_sse_data(
+                    "stream",
+                    &StreamData { session_id, turn_id, event, widget },
+                )))
+            }
             Self::Status { session_id, turn_id, status } => Ok(Event::default()
                 .event("status")
                 .data(serialize_sse_data("status", &StatusData { session_id, turn_id, status }))),

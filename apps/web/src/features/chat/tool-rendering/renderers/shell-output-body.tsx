@@ -23,7 +23,9 @@ export function ShellOutputBody({
   const hasStreamingSegments = segments.length > 0
   const followTrigger = hasStreamingSegments
     ? segments
-        .map((segment) => `${segment.stream}:${stripAnsiSequences(segment.text)}`)
+        .map(
+          (segment) => `${segment.stream}:${stripAnsiSequences(segment.text)}`
+        )
         .join("\u0000")
     : stripAnsiSequences(output ?? "")
 

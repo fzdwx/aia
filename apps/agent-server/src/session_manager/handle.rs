@@ -9,7 +9,7 @@ use crate::runtime_worker::{
     CreateProviderInput, CurrentTurnSnapshot, ProviderInfoSnapshot, RuntimeWorkerError,
     UpdateProviderInput,
 };
-use agent_core::{QuestionRequest, QuestionResult};
+use agent_core::{QuestionRequest, QuestionResult, WidgetClientEvent};
 use session_tape::SessionProviderBinding;
 
 use super::message_queue::{QueueMessageResponse, QueuedMessage};
@@ -233,6 +233,23 @@ impl SessionManagerHandle {
 
     pub async fn interrupt_turn(&self, session_id: String) -> Result<bool, RuntimeWorkerError> {
         self.request(|reply| SessionCommand::InterruptTurn { session_id, reply }).await
+    }
+
+    pub async fn report_widget_client_event(
+        &self,
+        session_id: String,
+        turn_id: Option<String>,
+        invocation_id: String,
+        event: WidgetClientEvent,
+    ) -> Result<(), RuntimeWorkerError> {
+        self.request(|reply| SessionCommand::ReportWidgetClientEvent {
+            session_id,
+            turn_id,
+            invocation_id,
+            event,
+            reply,
+        })
+        .await
     }
 }
 

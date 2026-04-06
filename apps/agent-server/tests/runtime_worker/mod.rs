@@ -148,6 +148,7 @@ fn rebuild_session_snapshots_from_tape_projects_completed_tool_block() {
                 tool_name: "Read".to_string(),
                 arguments: serde_json::json!({ "file_path": "Cargo.toml" }),
                 raw_arguments: "{\"file_path\":\"Cargo.toml\"}".to_string(),
+                widget: None,
                 detected_at_ms: current.started_at_ms,
                 started_at_ms: Some(current.started_at_ms),
                 finished_at_ms: Some(current.started_at_ms),
@@ -159,6 +160,52 @@ fn rebuild_session_snapshots_from_tape_projects_completed_tool_block() {
                 failed: Some(false),
             }
         }]
+    );
+}
+
+#[test]
+fn rebuild_session_snapshots_projects_widget_document_for_completed_widget_renderer() {
+    let mut tape = SessionTape::new();
+    let turn_id = "turn-widget-1";
+    let call = ToolCall::new("WidgetRenderer")
+        .with_invocation_id("call-widget-1")
+        .with_argument("title", "流式 widget")
+        .with_argument("description", "用于回放的 widget")
+        .with_argument("html", "<div class=\"card\">live</div>");
+    let result = ToolResult::from_call(&call, "Rendered widget: 流式 widget").with_details(
+        serde_json::json!({
+            "title": "流式 widget",
+            "description": "用于回放的 widget",
+            "html": "<div class=\"card\">final</div>",
+            "content_type": "text/html",
+        }),
+    );
+
+    tape.append_entry(
+        TapeEntry::message(&Message::new(Role::User, "渲染 widget")).with_run_id(turn_id),
+    );
+    tape.append_entry(TapeEntry::tool_call(&call).with_run_id(turn_id));
+    tape.append_entry(TapeEntry::tool_result(&result).with_run_id(turn_id));
+
+    let snapshots = rebuild_session_snapshots_from_tape(&tape);
+    let current = snapshots.current_turn.expect("应保留当前未完成轮次");
+
+    let CurrentTurnBlock::Tool { tool } = &current.blocks[0] else {
+        panic!("expected tool block");
+    };
+
+    assert_eq!(
+        tool.widget,
+        Some(agent_core::UiWidget {
+            instance_id: "call-widget-1".into(),
+            phase: agent_core::UiWidgetPhase::Final,
+            document: agent_core::UiWidgetDocument {
+                title: "流式 widget".into(),
+                description: "用于回放的 widget".into(),
+                html: "<div class=\"card\">final</div>".into(),
+                content_type: "text/html".into(),
+            },
+        })
     );
 }
 

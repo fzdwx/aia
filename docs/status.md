@@ -2,7 +2,7 @@
 
 > 本文件只保留 **当前真实状态**。详细历史看 `docs/evolution-log.md`，未完成事项看 `docs/todo.md`。
 
-- Last verified: `2026-04-02`
+- Last verified: `2026-04-05`
 - Current source of truth: 以当前代码与 RFC 头部状态为准；本文件负责做压缩后的事实对齐
 
 ## 当前阶段
@@ -128,7 +128,8 @@
 1. 优先继续收口 server 驱动面与宿主边界，而不是继续扩张客户端表层能力
 2. 在工具协议边界稳定的前提下推进 MCP 接入
 3. 继续下沉可复用驱动辅助，降低其他客户端复用 `agent-server` 的成本
-4. 观察 `Question` 控制面在真实 provider / 多步工具链下的边缘稳定性，并明确 RFC 0001 的完成线
+4. 在不偏离当前阶段主线的前提下，继续推进 widget host 协议收口：先把共享协议与宿主边界做实，再按需补 sandbox/CSP、ErrorBoundary 与 capture/export
+5. 观察 `Question` 控制面在真实 provider / 多步工具链下的边缘稳定性，并明确 RFC 0001 的完成线
 
 ## 暂时不做
 
@@ -143,3 +144,8 @@
 - `apps/agent-server/src/session_manager/turn_execution.rs` 仍是当前实现复杂度热点
 - `RFC 0001` 不应被误写成“已完全实现”；当前是控制面与承接面可用，但抽象收口尚未正式完成
 - 桌面壳尚未开工；当前跨平台方向仍以 Web + server 复用为主
+- `WidgetRenderer` 当前已具备参数流式预览、stable iframe、current-turn 恢复，以及前后端贯通的共享 widget bridge 协议层：前端已把 `render` / `theme_tokens`、`ready` / `scripts_ready` / `resize` / `error` / `send_prompt` / `open_link` 收敛成协议辅助层，并继续保留 `aia-widget-*` 兼容别名
+- runtime / server 已开始把 widget bridge 作为一等 `stream` 事件承载：`WidgetHostCommand::Render` 会随流式工具事件显式广播，前端宿主也会通过 `POST /api/session/widget-event` 把 `WidgetClientEvent` 回传到 server 并转成显式 SSE `stream` 事件
+- 当前 `POST /api/session/widget-event` 主路径面向 live/current-turn widget 交互；turn 完成后的 widget 交互是否也要继续回传，还需要后续补 turn 级上下文再决定是否扩展
+- widget host 协议当前仍未持久化进 tape：后端已具备显式收发与广播，但 `WidgetHostCommand` / `WidgetClientEvent` 还没有进入持久化、重放与历史恢复主链
+- sandbox/CSP、ErrorBoundary、CSS bridge 深化与 capture/export 仍是后续工作，但不应抢在当前 bridge/tool 协议/MCP 主线之前扩成 dashboard 产品层

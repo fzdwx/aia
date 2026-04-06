@@ -55,9 +55,10 @@ impl ToolExecutor for ToolRegistry {
         self.tools
             .values()
             .filter(|tool| {
-                !tool.requires_interactive_capability()
-                    || capabilities.supports_interactive_components
-                        && capabilities.can_use_question_tool()
+                (!tool.requires_interactive_capability()
+                    || capabilities.supports_interactive_components)
+                    && (!tool.requires_question_capability()
+                        || capabilities.can_use_question_tool())
             })
             .map(|tool| tool.definition())
             .collect()

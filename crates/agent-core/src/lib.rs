@@ -9,6 +9,7 @@ mod registry;
 mod streaming;
 mod tooling;
 mod traits;
+mod widget;
 
 #[cfg(test)]
 #[path = "../tests/lib/mod.rs"]
@@ -36,3 +37,7 @@ pub use tooling::{
     ToolSchemaProperty,
 };
 pub use traits::{LanguageModel, Tool, ToolExecutor};
+pub use widget::{
+    UiWidget, UiWidgetDocument, UiWidgetPhase, WidgetCanvasSnapshot, WidgetClientEvent,
+    WidgetHostCommand,
+};
