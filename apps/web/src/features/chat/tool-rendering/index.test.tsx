@@ -357,6 +357,7 @@ describe("tool renderer registry", () => {
     const html = renderWithTheme(details)
     expect(html).toContain("iframe")
     expect(html).toContain("srcDoc=")
+    expect(html).toContain('allow="fullscreen"')
     expect(html).toContain("aia-widget-send-prompt")
     expect(html).toContain("aia-widget-open-link")
     expect(html).toContain("aia-widget-error")
@@ -370,6 +371,10 @@ describe("tool renderer registry", () => {
     expect(html).toContain("type: &#x27;error&#x27;")
     expect(html).toContain("type: &#x27;send_prompt&#x27;")
     expect(html).toContain("type: &#x27;open_link&#x27;")
+    expect(html).toContain("canUseFullscreen")
+    expect(html).toContain(
+      "Fullscreen is not available in this widget environment."
+    )
     expect(html).toContain("href: url")
     expect(html).toContain("aia-widget-root")
     expect(html).toContain("aia-widget-description")

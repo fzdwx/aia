@@ -701,6 +701,14 @@ function buildSandboxDocument({
   <div id="aia-widget-description" class="sr-only">${safeDescription}</div>
   <div id="aia-widget-root"></div>
   <script>
+    const reportWidgetError = (message) => {
+      const normalizedMessage = typeof message === 'string' && message.trim().length > 0
+        ? message
+        : 'Widget runtime error';
+      parent.postMessage({ type: 'error', message: normalizedMessage }, '*');
+      parent.postMessage({ type: 'aia-widget-error', message: normalizedMessage }, '*');
+    };
+
     const measureIntrinsicHeight = () => {
       if (!root) {
         return 1;
@@ -754,6 +762,61 @@ function buildSandboxDocument({
       parent.postMessage({ type: 'aia-widget-open-link', url }, '*');
     };
 
+    const getFullscreenPolicy = () => document.permissionsPolicy || document.featurePolicy || null;
+
+    const canUseFullscreen = () => {
+      const rootElement = document.documentElement;
+      if (!rootElement || typeof rootElement.requestFullscreen !== 'function') {
+        return false;
+      }
+
+      const policy = getFullscreenPolicy();
+      if (!policy || typeof policy.allowsFeature !== 'function') {
+        return true;
+      }
+
+      try {
+        return policy.allowsFeature('fullscreen');
+      } catch (_error) {
+        return true;
+      }
+    };
+
+    const nativeRequestFullscreen = Element.prototype.requestFullscreen;
+    if (typeof nativeRequestFullscreen === 'function') {
+      Element.prototype.requestFullscreen = function requestFullscreen(...args) {
+        if (!canUseFullscreen()) {
+          reportWidgetError('Fullscreen is not available in this widget environment.');
+          return Promise.resolve();
+        }
+
+        return nativeRequestFullscreen.apply(this, args).catch((error) => {
+          const message = error && typeof error.message === 'string'
+            ? error.message
+            : 'Fullscreen request failed';
+          reportWidgetError(message);
+          return Promise.resolve();
+        });
+      };
+    }
+
+    const nativeExitFullscreen = document.exitFullscreen?.bind(document);
+    if (typeof nativeExitFullscreen === 'function') {
+      document.exitFullscreen = (...args) => {
+        if (!canUseFullscreen()) {
+          return Promise.resolve();
+        }
+
+        return nativeExitFullscreen(...args).catch((error) => {
+          const message = error && typeof error.message === 'string'
+            ? error.message
+            : 'Exit fullscreen failed';
+          reportWidgetError(message);
+          return Promise.resolve();
+        });
+      };
+    }
+
     ${buildThemeTokenScript()}
 
     document.addEventListener('click', (event) => {
@@ -766,14 +829,7 @@ function buildSandboxDocument({
     });
 
     window.addEventListener('error', (event) => {
-      parent.postMessage({
-        type: 'error',
-        message: event.message || 'Widget runtime error'
-      }, '*');
-      parent.postMessage({
-        type: 'aia-widget-error',
-        message: event.message || 'Widget runtime error'
-      }, '*');
+      reportWidgetError(event.message || 'Widget runtime error');
     });
 
     window.addEventListener('unhandledrejection', (event) => {
@@ -783,8 +839,7 @@ function buildSandboxDocument({
           : reason && typeof reason.message === 'string'
             ? reason.message
             : 'Widget promise rejection';
-        parent.postMessage({ type: 'error', message }, '*');
-        parent.postMessage({ type: 'aia-widget-error', message }, '*');
+        reportWidgetError(message);
     });
 
     const observer = new ResizeObserver(postHeight);
@@ -1141,6 +1196,8 @@ function WidgetSandbox({
       ref={iframeRef}
       title={title}
       srcDoc={srcDoc}
+      allow="fullscreen"
+      allowFullScreen
       sandbox="allow-scripts allow-popups"
       className="w-full overflow-hidden rounded-[calc(var(--radius)*1.25)] bg-transparent"
       style={{ height: frameHeight, minHeight: 1, overflow: "hidden" }}
