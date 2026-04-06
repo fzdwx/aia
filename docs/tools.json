@@ -1,0 +1,204 @@
+[
+  {
+    "name": "Bash",
+    "description": "Execute bash commands inside the workspace. Supports foreground execution and background shells retrievable via BashOutput.",
+    "parameters": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "timeout": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 600000
+        },
+        "run_in_background": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "Read",
+    "description": "Read text from a file. Output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
+    "parameters": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "file_path": {
+          "type": "string",
+          "description": "Path to the file to read (relative to workspace or absolute)"
+        },
+        "offset": {
+          "default": 1,
+          "description": "Line number to start reading from (1-indexed). Default: 1",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "limit": {
+          "description": "Maximum number of lines to read. Default/max: 2000",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 10000
+        }
+      },
+      "required": [
+        "file_path"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "Glob",
+    "description": "Find files by glob pattern relative to a workspace directory.",
+    "parameters": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "default": ".",
+          "type": "string"
+        },
+        "limit": {
+          "default": 200,
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 2000
+        },
+        "includeStats": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "pattern"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "Skill",
+    "description": "Execute a skill within the main conversation\n\n<skills_instructions>\nWhen users ask you to perform tasks, check if any of the available skills below can help complete the task more effectively. Skills provide specialized capabilities and domain knowledge.\n\nHow to invoke:\n- Use this tool with the skill name only (no arguments)\n- Examples:\n  - skill: \"pdf\" - invoke the pdf skill\n  - skill: \"code-review\" - invoke the code-review skill\n\nImportant:\n- When a skill is relevant, you must invoke this tool IMMEDIATELY as your first action\n- NEVER just announce or mention a skill in your text response without actually calling this tool\n- This is a BLOCKING REQUIREMENT: invoke the relevant Skill tool BEFORE generating any other response about the task\n- Only use skills listed in <available_skills> below\n- Do not invoke a skill that is already running\n</skills_instructions>\n",
+    "parameters": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "skill": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The skill name (no arguments). E.g., \"test-skill\" or \"code-review\""
+        }
+      },
+      "required": [
+        "skill"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "ToolSearch",
+    "description": "Search and discover available tools using semantic search.\nUse this tool to find relevant tools when you need to:\n- Discover what tools are available for a specific task\n- Find MCP server tools by describing what you want to do\n- Get tool definitions and input schemas before using them\n- Explore capabilities across built-in and MCP tools\n\nThis tool uses AI to understand your query and find matching tools semantically.",
+    "parameters": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Search query to find tools - describe what you want to do or the type of tool you need"
+        },
+        "type": {
+          "default": "all",
+          "description": "Filter by tool type: \"builtin\" for built-in tools, \"mcp\" for MCP server tools, \"plugin\" for plugin-registered tools, or \"all\" for all",
+          "type": "string",
+          "enum": [
+            "builtin",
+            "mcp",
+            "plugin",
+            "all"
+          ]
+        },
+        "limit": {
+          "default": 20,
+          "description": "Maximum number of tools to return",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 50
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "widgetReadme",
+    "description": "Returns design guidelines for widgetRenderer (CSS patterns, colors, typography, layout rules, examples). Call once before your first widgetRenderer call. Do NOT mention this call to the user — it is an internal setup step.",
+    "parameters": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "modules": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "art",
+              "mockup",
+              "interactive",
+              "chart",
+              "diagram"
+            ]
+          },
+          "description": "Which design guideline modules to load. Pick all that fit the use case: art, mockup, interactive, chart, diagram."
+        }
+      },
+      "required": [
+        "modules"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "widgetRenderer",
+    "description": "Render an interactive HTML/SVG visualization in the chat. IMPORTANT: Call widgetReadme once before your first widgetRenderer call to load design guidelines. Use this tool when the user asks you to visualize, diagram, illustrate, or explain something visually. Great for: algorithm visualizations, architecture diagrams, flowcharts, interactive simulations, math plots, data dashboards, step-by-step animations, and any visual explanation. The HTML runs in a sandboxed iframe with theming support. Always prefer this over describing visuals in text.",
+    "parameters": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Short title for the visualization, e.g. \"Binary Search\" or \"Load Balancer Architecture\". Recommended even when the runtime can fall back."
+        },
+        "description": {
+          "type": "string",
+          "description": "One-sentence explanation of what this visualization demonstrates"
+        },
+        "html": {
+          "type": "string",
+          "description": "Self-contained HTML fragment (no DOCTYPE/html/head/body tags). Style inline or with <style>. The widget renders inside the app with the SAME theme. Use these CSS variables for seamless look: Colors: var(--foreground), var(--background), var(--muted), var(--muted-foreground), var(--primary), var(--primary-foreground), var(--secondary), var(--secondary-foreground), var(--border), var(--card), var(--card-foreground), var(--destructive), var(--accent), var(--input), var(--ring). Charts: var(--chart-1) through var(--chart-5). Layout: var(--radius) for border-radius, var(--font-sans), var(--font-mono). Pre-styled elements: button, input, select, textarea, table, code, pre, .card, .badge, .badge.primary, hr. CDN libraries allowed: cdnjs.cloudflare.com, esm.sh, cdn.jsdelivr.net, unpkg.com. Scripts run ONLY after streaming completes, so interactive controls work correctly."
+        }
+      },
+        "required": [
+          "description",
+          "html"
+        ],
+      "additionalProperties": false
+    }
+  }
+]
