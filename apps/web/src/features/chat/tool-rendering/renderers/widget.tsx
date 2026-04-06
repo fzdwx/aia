@@ -701,22 +701,45 @@ function buildSandboxDocument({
   <div id="aia-widget-description" class="sr-only">${safeDescription}</div>
   <div id="aia-widget-root"></div>
   <script>
-    const postHeight = () => {
-      const rootRectHeight = root
-        ? Math.ceil(root.getBoundingClientRect().height)
-        : 0;
-      const rootScrollHeight = root ? root.scrollHeight : 0;
-      const rootOffsetHeight = root ? root.offsetHeight : 0;
-      const nextHeight = Math.max(
-        rootRectHeight,
-        rootScrollHeight,
-        rootOffsetHeight,
-        document.documentElement.scrollHeight,
-        document.documentElement.offsetHeight,
-        document.body.scrollHeight,
-        document.body.offsetHeight,
+    const measureIntrinsicHeight = () => {
+      if (!root) {
+        return 1;
+      }
+
+      const rootRect = root.getBoundingClientRect();
+      const rootTop = rootRect.top;
+      let visualBottom = rootRect.bottom;
+
+      for (const element of root.querySelectorAll('*')) {
+        const style = window.getComputedStyle(element);
+        if (style.display === 'none' || style.position === 'fixed') {
+          continue;
+        }
+
+        const rect = element.getBoundingClientRect();
+        if (!Number.isFinite(rect.bottom)) {
+          continue;
+        }
+
+        if (rect.width <= 0 && rect.height <= 0) {
+          continue;
+        }
+
+        visualBottom = Math.max(visualBottom, rect.bottom);
+      }
+
+      const descendantExtent = Math.max(0, Math.ceil(visualBottom - rootTop));
+      return Math.max(
+        Math.ceil(rootRect.height),
+        root.scrollHeight,
+        root.offsetHeight,
+        descendantExtent,
         1
       );
+    };
+
+    const postHeight = () => {
+      const nextHeight = measureIntrinsicHeight();
       parent.postMessage({ type: 'resize', height: nextHeight, first: false }, '*');
       parent.postMessage({ type: 'aia-widget-height', height: nextHeight }, '*');
     };

@@ -432,6 +432,32 @@ describe("tool renderer registry", () => {
     expect(html).toContain("li")
   })
 
+  test("measures widget iframe height from intrinsic content instead of viewport height", () => {
+    const details = toolRendererRegistry.renderDetails({
+      toolName: "WidgetRenderer",
+      arguments: {
+        title: "步进音序器",
+        description: "验证 iframe 高度不会被 viewport 反馈放大。",
+        html: '<div class="card">demo</div>',
+      },
+      details: {
+        title: "步进音序器",
+        description: "验证 iframe 高度不会被 viewport 反馈放大。",
+        html: '<div class="card">demo</div>',
+      },
+      outputContent: "Rendered widget: 步进音序器",
+      succeeded: true,
+    })
+
+    const html = renderWithTheme(details)
+    expect(html).toContain("measureIntrinsicHeight")
+    expect(html).toContain("querySelectorAll")
+    expect(html).not.toContain("document.documentElement.scrollHeight")
+    expect(html).not.toContain("document.documentElement.offsetHeight")
+    expect(html).not.toContain("document.body.scrollHeight")
+    expect(html).not.toContain("document.body.offsetHeight")
+  })
+
   test("renders websearch tool title and meta from query and options", () => {
     const title = toolRendererRegistry.renderTitle({
       toolName: "WebSearch",
