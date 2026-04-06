@@ -8,7 +8,7 @@ fn default_session_prompt_keeps_context_contract() {
     assert!(prompt.contains("LANGUAGE RULE (CRITICAL)"));
     assert!(prompt.contains("Context Contract"));
     assert!(prompt.contains("80%"));
-    assert!(prompt.contains("95%"));
+    assert!(prompt.contains("90%"));
     assert!(prompt.contains("SYSTEM INFO - You are running on linux."));
     assert!(prompt.contains(
         "WORKING DIRECTORY - Your current working directory is: /home/like/projects/aia."

@@ -92,11 +92,16 @@ export type ToolTraceContext = {
   parent_step_index: number
 }
 
+export type ToolInvocationReplayEvent =
+  | { kind: "widget_host_command"; command: WidgetBridgeHostCommand }
+  | { kind: "widget_client_event"; event: WidgetBridgeClientEvent }
+
 export type ToolInvocationLifecycle = {
   call: ToolCall
   started_at_ms: number
   finished_at_ms: number
   trace_context?: ToolTraceContext | null
+  replay_events?: ToolInvocationReplayEvent[]
   outcome: ToolInvocationOutcome
 }
 

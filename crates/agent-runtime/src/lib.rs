@@ -9,6 +9,6 @@ pub use hooks::{
 pub use runtime::{AgentRuntime, RuntimeError};
 pub use types::{
     ContextStats, RuntimeEvent, RuntimeSubscriberId, ToolInvocationLifecycle,
-    ToolInvocationOutcome, ToolTraceContext, TurnBlock, TurnControl, TurnLifecycle, TurnOutcome,
-    TurnOutput,
+    ToolInvocationOutcome, ToolInvocationReplayEvent, ToolTraceContext, TurnBlock, TurnControl,
+    TurnLifecycle, TurnOutcome, TurnOutput,
 };

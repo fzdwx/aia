@@ -3,7 +3,7 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
-use agent_core::{StreamEvent, ToolOutputStream, ToolRegistry};
+use agent_core::{StreamEvent, ToolOutputStream, ToolRegistry, WidgetHostCommand};
 use agent_runtime::{AgentRuntime, ContextStats};
 
 use crate::{
@@ -120,10 +120,6 @@ pub(crate) fn update_current_turn_from_stream(
             if let Some(tool) = find_tool_output_mut(&mut current.blocks, invocation_id) {
                 tool.tool_name = tool_name.clone();
                 tool.arguments = normalize_object_value(arguments);
-                if tool.raw_arguments.is_empty() {
-                    tool.raw_arguments =
-                        serde_json::to_string(arguments).unwrap_or_else(|_| "{}".to_string());
-                }
                 sync_widget_projection(tool);
             } else {
                 let mut block = live_tool_block(
@@ -136,8 +132,6 @@ pub(crate) fn update_current_turn_from_stream(
                     false,
                 );
                 if let CurrentTurnBlock::Tool { tool } = &mut block {
-                    tool.raw_arguments =
-                        serde_json::to_string(arguments).unwrap_or_else(|_| "{}".to_string());
                     sync_widget_projection(tool);
                 }
                 current.blocks.push(block);
@@ -173,10 +167,6 @@ pub(crate) fn update_current_turn_from_stream(
             if let Some(tool) = find_tool_output_mut(&mut current.blocks, &call.invocation_id) {
                 tool.tool_name = call.tool_name.clone();
                 tool.arguments = normalize_object_value(&call.arguments);
-                if tool.raw_arguments.is_empty() {
-                    tool.raw_arguments =
-                        serde_json::to_string(&call.arguments).unwrap_or_else(|_| "{}".to_string());
-                }
                 sync_widget_projection(tool);
             } else {
                 let mut block = live_tool_block(
@@ -189,8 +179,6 @@ pub(crate) fn update_current_turn_from_stream(
                     false,
                 );
                 if let CurrentTurnBlock::Tool { tool } = &mut block {
-                    tool.raw_arguments =
-                        serde_json::to_string(&call.arguments).unwrap_or_else(|_| "{}".to_string());
                     sync_widget_projection(tool);
                 }
                 current.blocks.push(block);
@@ -200,10 +188,6 @@ pub(crate) fn update_current_turn_from_stream(
             if let Some(tool) = find_tool_output_mut(&mut current.blocks, invocation_id) {
                 tool.tool_name = tool_name.clone();
                 tool.arguments = normalize_object_value(arguments);
-                if tool.raw_arguments.is_empty() {
-                    tool.raw_arguments =
-                        serde_json::to_string(arguments).unwrap_or_else(|_| "{}".to_string());
-                }
                 tool.started_at_ms = Some(
                     tool.started_at_ms
                         .map(|existing| existing.min(*started_at_ms))
@@ -221,8 +205,6 @@ pub(crate) fn update_current_turn_from_stream(
                     true,
                 );
                 if let CurrentTurnBlock::Tool { tool } = &mut block {
-                    tool.raw_arguments =
-                        serde_json::to_string(arguments).unwrap_or_else(|_| "{}".to_string());
                     sync_widget_projection(tool);
                 }
                 current.blocks.push(block);
@@ -267,6 +249,14 @@ pub(crate) fn update_current_turn_from_stream(
                 tool.result_details = details.clone();
                 tool.failed = Some(*failed);
                 sync_widget_projection(tool);
+            }
+        }
+        StreamEvent::WidgetHostCommand {
+            invocation_id,
+            command: WidgetHostCommand::Render { widget },
+        } => {
+            if let Some(tool) = find_tool_output_mut(&mut current.blocks, invocation_id) {
+                tool.widget = Some(widget.clone());
             }
         }
         StreamEvent::WidgetHostCommand { .. }

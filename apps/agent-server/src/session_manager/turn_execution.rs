@@ -5,6 +5,7 @@ use std::sync::{Arc, RwLock};
 use agent_core::{StreamEvent, ToolRegistry, WidgetHostCommand};
 use agent_runtime::{AgentRuntime, ContextStats, RuntimeEvent, RuntimeSubscriberId, TurnLifecycle};
 use agent_store::SessionRecord;
+use session_tape::TapeEntry;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::{
@@ -163,6 +164,8 @@ impl<'a> TurnExecutionService<'a> {
                 current_turn_snapshot: slot.current_turn.clone(),
                 history_snapshot: slot.history.clone(),
                 context_stats_snapshot: slot.context_stats.clone(),
+                pending_widget_tape_state: slot.pending_widget_tape_state.clone(),
+                pending_widget_tape_notify: slot.pending_widget_tape_notify.clone(),
                 trace_recorder: ToolTraceRecorder::new(self.config.store.clone()),
                 registry: self.config.registry.clone(),
                 sessions_dir: self.config.sessions_dir.clone(),
@@ -358,6 +361,9 @@ pub(super) struct TurnWorkerContext {
     pub(super) current_turn_snapshot: Arc<RwLock<Option<CurrentTurnSnapshot>>>,
     pub(super) history_snapshot: Arc<RwLock<Vec<TurnLifecycle>>>,
     pub(super) context_stats_snapshot: Arc<RwLock<ContextStats>>,
+    pub(super) pending_widget_tape_state:
+        Arc<std::sync::Mutex<super::types::PendingWidgetTapeState>>,
+    pub(super) pending_widget_tape_notify: Arc<tokio::sync::Notify>,
     pub(super) trace_recorder: ToolTraceRecorder,
     pub(super) registry: provider_registry::ProviderRegistry,
     pub(super) sessions_dir: std::path::PathBuf,
@@ -381,38 +387,93 @@ impl TurnWorker {
         let stream_session_id = self.context.session_id.clone();
         let stream_turn_id = self.context.turn_id.clone();
         let stream_snapshot = self.context.current_turn_snapshot.clone();
-
+        let pending_widget_tape_state = self.context.pending_widget_tape_state.clone();
+        let pending_widget_tape_notify = self.context.pending_widget_tape_notify.clone();
+        let flush_broadcast = self.context.broadcast_tx.clone();
+        let flush_session_id = self.context.session_id.clone();
+        let flush_turn_id = self.context.turn_id.clone();
         let prompts = std::mem::take(&mut self.prompts);
         let turn_control = self.turn_control.clone();
         let continue_mode = self.continue_mode;
         let result = if continue_mode {
+            let event_state = pending_widget_tape_state.clone();
+            let event_notify = pending_widget_tape_notify.clone();
+            let flush_state = pending_widget_tape_state.clone();
+            let flush_broadcast = flush_broadcast.clone();
+            let flush_session_id = flush_session_id.clone();
+            let flush_turn_id = flush_turn_id.clone();
             self.runtime
-                .handle_continue_streaming(prompts, turn_control, |event| {
-                    Self::handle_stream_event(
-                        &event,
-                        &mut current_status,
-                        &status_broadcast,
-                        &stream_session_id,
-                        &stream_turn_id,
-                        &stream_snapshot,
-                    );
-                })
+                .handle_continue_streaming_with_runtime_tick(
+                    prompts,
+                    turn_control,
+                    |event| {
+                        Self::handle_stream_event(
+                            &event,
+                            &mut current_status,
+                            &status_broadcast,
+                            &stream_session_id,
+                            &stream_turn_id,
+                            &stream_snapshot,
+                            &event_state,
+                            &event_notify,
+                        );
+                    },
+                    move |runtime| {
+                        Self::flush_pending_widget_tape_entries(
+                            runtime,
+                            &flush_state,
+                            &flush_broadcast,
+                            &flush_session_id,
+                            &flush_turn_id,
+                        );
+                    },
+                    pending_widget_tape_notify,
+                )
                 .await
         } else {
+            let event_state = pending_widget_tape_state.clone();
+            let event_notify = pending_widget_tape_notify.clone();
+            let flush_state = pending_widget_tape_state.clone();
+            let flush_broadcast = flush_broadcast.clone();
+            let flush_session_id = flush_session_id.clone();
+            let flush_turn_id = flush_turn_id.clone();
             self.runtime
-                .handle_turn_streaming(prompts, turn_control, |event| {
-                    Self::handle_stream_event(
-                        &event,
-                        &mut current_status,
-                        &status_broadcast,
-                        &stream_session_id,
-                        &stream_turn_id,
-                        &stream_snapshot,
-                    );
-                })
+                .handle_turn_streaming_with_runtime_tick(
+                    prompts,
+                    turn_control,
+                    |event| {
+                        Self::handle_stream_event(
+                            &event,
+                            &mut current_status,
+                            &status_broadcast,
+                            &stream_session_id,
+                            &stream_turn_id,
+                            &stream_snapshot,
+                            &event_state,
+                            &event_notify,
+                        );
+                    },
+                    move |runtime| {
+                        Self::flush_pending_widget_tape_entries(
+                            runtime,
+                            &flush_state,
+                            &flush_broadcast,
+                            &flush_session_id,
+                            &flush_turn_id,
+                        );
+                    },
+                    pending_widget_tape_notify,
+                )
                 .await
         };
         *write_lock(&self.context.context_stats_snapshot) = self.runtime.context_stats();
+        Self::flush_pending_widget_tape_entries(
+            &mut self.runtime,
+            &self.context.pending_widget_tape_state,
+            &self.context.broadcast_tx,
+            &self.context.session_id,
+            &self.context.turn_id,
+        );
 
         match result {
             Ok(_) => self.handle_terminal_events(None).await,
@@ -514,6 +575,8 @@ impl TurnWorker {
         stream_session_id: &str,
         stream_turn_id: &str,
         stream_snapshot: &Arc<RwLock<Option<CurrentTurnSnapshot>>>,
+        pending_widget_tape_state: &Arc<std::sync::Mutex<super::types::PendingWidgetTapeState>>,
+        pending_widget_tape_notify: &Arc<tokio::sync::Notify>,
     ) {
         fn widget_from_snapshot(
             snapshot: &Arc<RwLock<Option<CurrentTurnSnapshot>>>,
@@ -587,15 +650,52 @@ impl TurnWorker {
             }
             _ => None,
         } {
+            let command = WidgetHostCommand::Render { widget: widget.clone() };
             let _ = status_broadcast.send(SsePayload::Stream {
                 session_id: stream_session_id.to_string(),
                 turn_id: stream_turn_id.to_string(),
                 event: StreamEvent::WidgetHostCommand {
-                    invocation_id,
-                    command: WidgetHostCommand::Render { widget: widget.clone() },
+                    invocation_id: invocation_id.clone(),
+                    command: command.clone(),
                 },
                 widget: Some(widget),
             });
+
+            if let Ok(mut pending) = pending_widget_tape_state.lock() {
+                pending.host_commands.insert(
+                    invocation_id.clone(),
+                    TapeEntry::widget_host_command(&invocation_id, &command)
+                        .with_run_id(stream_turn_id),
+                );
+                pending_widget_tape_notify.notify_one();
+            }
+        }
+    }
+
+    fn flush_pending_widget_tape_entries(
+        runtime: &mut AgentRuntime<ServerModel, ToolRegistry>,
+        pending_widget_tape_state: &Arc<std::sync::Mutex<super::types::PendingWidgetTapeState>>,
+        broadcast_tx: &broadcast::Sender<SsePayload>,
+        session_id: &str,
+        turn_id: &str,
+    ) {
+        let entries = if let Ok(mut pending) = pending_widget_tape_state.lock() {
+            let host_entries = pending.host_commands.values().cloned().collect::<Vec<_>>();
+            let client_entries = std::mem::take(&mut pending.client_events);
+            pending.host_commands.clear();
+            host_entries.into_iter().chain(client_entries).collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
+        for entry in entries {
+            if let Err(error) = runtime.append_tape_entry(entry) {
+                let _ = broadcast_tx.send(SsePayload::Error {
+                    session_id: session_id.to_string(),
+                    turn_id: Some(turn_id.to_string()),
+                    message: error.to_string(),
+                });
+            }
         }
     }
 }

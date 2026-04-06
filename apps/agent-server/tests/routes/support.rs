@@ -69,7 +69,7 @@ pub(crate) fn test_state_with_session_manager_setup(
             .expect("sqlite store should initialize"),
     );
     setup(root.as_path(), &store);
-    let active_provider = registry.active_provider().cloned();
+    let active_provider = registry.first_provider().cloned();
     let provider_registry_snapshot = Arc::new(RwLock::new(registry.clone()));
     let provider_info_snapshot = Arc::new(RwLock::new(match active_provider.as_ref() {
         Some(profile) => ProviderInfoSnapshot {

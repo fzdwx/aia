@@ -146,6 +146,10 @@
 - 桌面壳尚未开工；当前跨平台方向仍以 Web + server 复用为主
 - `WidgetRenderer` 当前已具备参数流式预览、stable iframe、current-turn 恢复，以及前后端贯通的共享 widget bridge 协议层：前端已把 `render` / `theme_tokens`、`ready` / `scripts_ready` / `resize` / `error` / `send_prompt` / `open_link` 收敛成协议辅助层，并继续保留 `aia-widget-*` 兼容别名
 - runtime / server 已开始把 widget bridge 作为一等 `stream` 事件承载：`WidgetHostCommand::Render` 会随流式工具事件显式广播，前端宿主也会通过 `POST /api/session/widget-event` 把 `WidgetClientEvent` 回传到 server 并转成显式 SSE `stream` 事件
-- 当前 `POST /api/session/widget-event` 主路径面向 live/current-turn widget 交互；turn 完成后的 widget 交互是否也要继续回传，还需要后续补 turn 级上下文再决定是否扩展
-- widget host 协议当前仍未持久化进 tape：后端已具备显式收发与广播，但 `WidgetHostCommand` / `WidgetClientEvent` 还没有进入持久化、重放与历史恢复主链
+- widget bridge 事件已进入 session tape 主链：运行中的 host/client 事件会先缓存在 session slot，turn 返回后统一刷入 tape；空闲态的 `POST /api/session/widget-event` 会直接写入 tape
+- current-turn 重建已开始消费显式 `widget_host_command`：带 `run_id` 的 `render` 事件可在 `rebuild_session_snapshots_from_tape(...)` 中恢复到对应 tool block 的 `widget` 投影，用于 hydrate 当前未完成轮次
+- completed-turn 历史模型已开始携带一等 `replay_events`：`ToolInvocationLifecycle` 现在会保留 `widget_host_command` / `widget_client_event` 序列，前端 completed tool row 也会消费其中的 render 事件恢复 widget 预览
+- 当前前端已把 `turn_id` 传到 completed `WidgetRenderer` 的宿主上报路径，已完成轮次的 widget 交互可以继续回传到 server；是否还要扩展到历史页以外的更多宿主入口，后续再按 turn 级上下文继续收口
+- 运行中的 widget 事件已开始通过 runtime 持有者侧入口即时排空：server 会在流式 delta 与显式通知到达时驱动 runtime 直接 `append_tape_entry(...)`，不再只依赖 turn 返回时的统一刷盘
+- turn 返回时的缓冲刷盘仍然保留为兜底路径；后续若要继续收口，可以考虑把这条 runtime-side drain 进一步抽成更通用的 per-session runtime hook，而不只是 widget 专用入口
 - sandbox/CSP、ErrorBoundary、CSS bridge 深化与 capture/export 仍是后续工作，但不应抢在当前 bridge/tool 协议/MCP 主线之前扩成 dashboard 产品层

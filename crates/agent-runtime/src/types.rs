@@ -1,4 +1,7 @@
-use agent_core::{AbortSignal, Completion, CompletionUsage, ToolCall, ToolDefinition, ToolResult};
+use agent_core::{
+    AbortSignal, Completion, CompletionUsage, ToolCall, ToolDefinition, ToolResult,
+    WidgetClientEvent, WidgetHostCommand,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug)]
@@ -46,12 +49,21 @@ pub struct ToolTraceContext {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ToolInvocationReplayEvent {
+    WidgetHostCommand { command: WidgetHostCommand },
+    WidgetClientEvent { event: WidgetClientEvent },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ToolInvocationLifecycle {
     pub call: ToolCall,
     pub started_at_ms: u64,
     pub finished_at_ms: u64,
     #[serde(default)]
     pub trace_context: Option<ToolTraceContext>,
+    #[serde(default)]
+    pub replay_events: Vec<ToolInvocationReplayEvent>,
     pub outcome: ToolInvocationOutcome,
 }
 

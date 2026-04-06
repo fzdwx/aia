@@ -1,6 +1,6 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use agent_core::{Message, ToolCall, ToolResult};
+use agent_core::{Message, ToolCall, ToolResult, WidgetClientEvent, WidgetHostCommand};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -67,6 +67,26 @@ impl TapeEntry {
                 "name": name,
                 "data": data.unwrap_or(Value::Null)
             }),
+        )
+    }
+
+    pub fn widget_host_command(invocation_id: &str, command: &WidgetHostCommand) -> Self {
+        Self::event(
+            "widget_host_command",
+            Some(serde_json::json!({
+                "invocation_id": invocation_id,
+                "command": command,
+            })),
+        )
+    }
+
+    pub fn widget_client_event(invocation_id: &str, event: &WidgetClientEvent) -> Self {
+        Self::event(
+            "widget_client_event",
+            Some(serde_json::json!({
+                "invocation_id": invocation_id,
+                "event": event,
+            })),
         )
     }
 

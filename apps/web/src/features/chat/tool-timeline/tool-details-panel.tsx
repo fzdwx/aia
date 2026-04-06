@@ -44,6 +44,7 @@ const OMITTED_DETAIL_KEYS = new Set([
 export function renderToolDetailsPanel(item: ToolRowItem) {
   const normalizedToolName = normalizeToolName(item.toolName)
   const renderData = {
+    turnId: item.turnId,
     toolName: item.toolName,
     arguments: item.arguments,
     rawArguments: item.rawArguments,

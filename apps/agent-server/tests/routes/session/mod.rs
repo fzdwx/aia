@@ -233,19 +233,57 @@ async fn get_pending_question_returns_request_from_session_tape() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn report_widget_client_event_broadcasts_stream_event() {
+    let session_id = "session-widget-client-event";
+    let suffix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+    let root = std::env::temp_dir().join(format!("aia-routes-widget-client-event-{suffix}"));
     let (state, root) =
-        test_state_with_session_manager("session-widget-client-event", sample_registry());
-    let session = state
-        .session_manager
-        .create_session(Some("Session One".into()))
-        .await
-        .expect("session should be created");
+        test_state_with_session_manager_setup(root, sample_registry(), |root, store| {
+            store
+                .create_session(&agent_store::SessionRecord::new(
+                    session_id,
+                    "Session One",
+                    "model-primary",
+                ))
+                .expect("session record should be inserted");
+
+            let session_path = root.join("sessions").join(format!("{session_id}.jsonl"));
+            let mut tape = session_tape::SessionTape::load_jsonl_or_default(&session_path)
+                .expect("session tape should load");
+            let turn_id = "turn-widget-1";
+            let call = agent_core::ToolCall::new("WidgetRenderer")
+                .with_invocation_id("call-widget-1")
+                .with_argument("title", "Widget")
+                .with_argument("description", "可上报事件")
+                .with_argument("html", "<div>widget</div>");
+            let result = agent_core::ToolResult::from_call(&call, "Rendered widget: Widget")
+                .with_details(serde_json::json!({
+                    "title": "Widget",
+                    "description": "可上报事件",
+                    "html": "<div>widget</div>",
+                    "content_type": "text/html"
+                }));
+
+            tape.append_entry(
+                session_tape::TapeEntry::message(&agent_core::Message::new(
+                    agent_core::Role::User,
+                    "渲染 widget",
+                ))
+                .with_run_id(turn_id),
+            );
+            tape.append_entry(session_tape::TapeEntry::tool_call(&call).with_run_id(turn_id));
+            tape.append_entry(session_tape::TapeEntry::tool_result(&result).with_run_id(turn_id));
+            tape.append_entry(
+                session_tape::TapeEntry::event("turn_completed", None).with_run_id(turn_id),
+            );
+            tape.save_jsonl(&session_path).expect("session tape should save");
+        });
+
     let mut rx = state.broadcast_tx.subscribe();
 
     let response = handlers::report_widget_client_event(
         State(state.clone()),
         Json(super::WidgetClientEventRequest {
-            session_id: Some(session.id.clone()),
+            session_id: Some(session_id.to_string()),
             turn_id: Some("turn-widget-1".into()),
             invocation_id: "call-widget-1".into(),
             event: WidgetClientEvent::Resize { height: 320, first: true },
@@ -258,8 +296,10 @@ async fn report_widget_client_event_broadcasts_stream_event() {
 
     let payload = rx.recv().await.expect("broadcast payload should arrive");
     match payload {
-        crate::sse::SsePayload::Stream { session_id, turn_id, event, .. } => {
-            assert_eq!(session_id, session.id);
+        crate::sse::SsePayload::Stream {
+            session_id: payload_session_id, turn_id, event, ..
+        } => {
+            assert_eq!(payload_session_id, session_id);
             assert_eq!(turn_id, "turn-widget-1");
             match event {
                 StreamEvent::WidgetClientEvent { invocation_id, event } => {
@@ -271,6 +311,32 @@ async fn report_widget_client_event_broadcasts_stream_event() {
         }
         _ => panic!("expected stream payload"),
     }
+
+    let tape = session_tape::SessionTape::load_jsonl_or_default(
+        &root.join("sessions").join(format!("{session_id}.jsonl")),
+    )
+    .expect("session tape should load");
+    let event_entry = tape
+        .entries()
+        .iter()
+        .rev()
+        .find(|entry| entry.event_name() == Some("widget_client_event"))
+        .expect("widget client event should persist to tape");
+    assert_eq!(
+        event_entry
+            .event_data()
+            .and_then(|value| value.get("invocation_id"))
+            .and_then(|value| value.as_str()),
+        Some("call-widget-1")
+    );
+    assert_eq!(
+        event_entry
+            .event_data()
+            .and_then(|value| value.get("event"))
+            .and_then(|value| value.get("type"))
+            .and_then(|value| value.as_str()),
+        Some("resize")
+    );
 
     let _ = std::fs::remove_dir_all(root);
 }

@@ -9,7 +9,10 @@ import { buildDetailEntries } from "./tool-rendering/helpers"
 import { ExpandableOutput, ToolDetailSection } from "./tool-rendering/ui"
 import { StreamingToolGroup, ToolGroup } from "./tool-timeline"
 import { renderToolDetailsPanel } from "./tool-timeline/tool-details-panel"
-import { isContextExplorationTool } from "./tool-timeline-helpers"
+import {
+  fromInvocation,
+  isContextExplorationTool,
+} from "./tool-timeline-helpers"
 
 function renderWithTheme(content: ReactElement) {
   return renderToStaticMarkup(
@@ -745,6 +748,56 @@ describe("tool timeline", () => {
     expect(html).toContain('data-slot="tool-row-inline-details"')
     expect(html).toContain("iframe")
     expect(html).toContain("aia-widget-update")
+  })
+
+  test("replays completed widget renderer html from invocation replay events", () => {
+    const item = fromInvocation(
+      {
+        call: {
+          invocation_id: "widget-history-1",
+          tool_name: "WidgetRenderer",
+          arguments: {
+            title: "历史 widget",
+            description: "回放 replay event",
+          },
+        },
+        started_at_ms: 100,
+        finished_at_ms: 200,
+        trace_context: null,
+        replay_events: [
+          {
+            kind: "widget_host_command",
+            command: {
+              type: "render",
+              widget: {
+                instance_id: "widget-history-1",
+                phase: "preview",
+                document: {
+                  title: "历史 widget",
+                  description: "回放 replay event",
+                  html: '<div class="card">replayed</div>',
+                  content_type: "text/html",
+                },
+              },
+            },
+          },
+        ],
+        outcome: {
+          status: "succeeded",
+          result: {
+            invocation_id: "widget-history-1",
+            tool_name: "WidgetRenderer",
+            content: "Rendered widget: 历史 widget",
+          },
+        },
+      },
+      "turn-widget-history-1"
+    )
+
+    expect(item.turnId).toBe("turn-widget-history-1")
+    expect(item.previewHtml).toBe('<div class="card">replayed</div>')
+    expect(item.details?.html).toBe('<div class="card">replayed</div>')
+    expect(item.details?.title).toBe("历史 widget")
   })
 
   test("renders TapeHandoff details without generic or summary headings", () => {

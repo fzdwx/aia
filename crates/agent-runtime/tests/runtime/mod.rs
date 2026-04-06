@@ -14,6 +14,7 @@ use async_trait::async_trait;
 use builtin_tools::build_tool_registry;
 use serde_json::json;
 use session_tape::SessionTape;
+use tokio::sync::Notify;
 
 use super::{AgentRuntime, RuntimeEvent, helpers::duration_since_unix_epoch};
 use crate::{
@@ -54,6 +55,26 @@ where
     T: ToolExecutor,
 {
     run_async(runtime.handle_turn_streaming(vec![user_input.into()], control, |_| {}))
+}
+
+fn run_turn_with_runtime_tick<M, T>(
+    runtime: &mut AgentRuntime<M, T>,
+    user_input: impl Into<String>,
+    control: TurnControl,
+    pending_signal: Arc<Notify>,
+    on_runtime_tick: impl FnMut(&mut AgentRuntime<M, T>) + Send,
+) -> Result<crate::TurnOutput, crate::RuntimeError>
+where
+    M: LanguageModel,
+    T: ToolExecutor,
+{
+    run_async(runtime.handle_turn_streaming_with_runtime_tick(
+        vec![user_input.into()],
+        control,
+        |_| {},
+        on_runtime_tick,
+        pending_signal,
+    ))
 }
 
 #[test]
@@ -2091,6 +2112,53 @@ fn 成功轮会保留模型返回的真实_usage() {
             cached_tokens: 0,
         })
     );
+}
+
+#[test]
+fn runtime_tick_signal_can_persist_entries_during_running_turn() {
+    let identity = ModelIdentity::new("local", "stub", ModelDisposition::Balanced);
+    let mut runtime = AgentRuntime::new(StubModel, StubTools, identity);
+    let pending_signal = Arc::new(Notify::new());
+    let ticked = Arc::new(Mutex::new(false));
+    let ticked_flag = ticked.clone();
+    pending_signal.notify_one();
+
+    let _ = run_turn_with_runtime_tick(
+        &mut runtime,
+        "你好",
+        TurnControl::new(AbortSignal::new()),
+        pending_signal,
+        move |runtime| {
+            let mut ticked = mutex_lock(&ticked_flag);
+            if *ticked {
+                return;
+            }
+            *ticked = true;
+            runtime
+                .append_tape_entry(
+                    session_tape::TapeEntry::event(
+                        "widget_client_event",
+                        Some(json!({
+                            "invocation_id": "runtime-widget-1",
+                            "event": { "type": "scripts_ready" }
+                        })),
+                    )
+                    .with_run_id("turn-test"),
+                )
+                .expect("runtime tick should persist entry");
+        },
+    )
+    .expect("turn should complete");
+
+    assert!(*mutex_lock(&ticked));
+    assert!(runtime.tape().entries().iter().any(|entry| {
+        entry.event_name() == Some("widget_client_event")
+            && entry
+                .event_data()
+                .and_then(|value| value.get("invocation_id"))
+                .and_then(|value| value.as_str())
+                == Some("runtime-widget-1")
+    }));
 }
 
 // --- Context compression tests ---

@@ -1,5 +1,6 @@
 use agent_core::{CompletionStopReason, LanguageModel, Message, Role, StreamEvent, ToolExecutor};
 use session_tape::TapeEntry;
+use tokio::sync::Notify;
 
 use crate::{RuntimeEvent, TurnControl, TurnOutput};
 
@@ -40,6 +41,8 @@ where
         mut buffers: TurnBuffers,
         mut llm_step_index: u32,
         mut on_delta: impl FnMut(StreamEvent) + Send,
+        mut on_runtime_tick: impl FnMut(&mut Self) + Send,
+        pending_signal: Option<std::sync::Arc<Notify>>,
     ) -> Result<TurnOutput, RuntimeError> {
         let abort_signal = control.abort_signal();
         let mut already_compressed = false;
@@ -77,37 +80,81 @@ where
             let mut completion_result = None;
 
             loop {
-                tokio::select! {
-                    result = &mut completion_future, if completion_result.is_none() => {
-                        completion_result = Some(result);
-                    }
-                    maybe_event = model_event_rx.recv() => {
-                        let Some(event) = maybe_event else {
-                            if completion_result.is_some() {
-                                break;
+                if let Some(signal) = pending_signal.as_ref() {
+                    tokio::select! {
+                        result = &mut completion_future, if completion_result.is_none() => {
+                            completion_result = Some(result);
+                        }
+                        _ = signal.notified() => {
+                            on_runtime_tick(self);
+                        }
+                        maybe_event = model_event_rx.recv() => {
+                            let Some(event) = maybe_event else {
+                                if completion_result.is_some() {
+                                    break;
+                                }
+                                continue;
+                            };
+
+                            let ready_call = match &event {
+                                StreamEvent::ToolCallReady { call } => Some(call.clone()),
+                                _ => None,
+                            };
+                            buffers.record_stream_event(&event);
+                            on_delta(event);
+                            on_runtime_tick(self);
+
+                            if let Some(call) = ready_call
+                                && streamed_ready_tool_calls.insert(call.invocation_id.clone())
+                            {
+                                self.execute_stream_ready_tool_call(
+                                    &turn_id,
+                                    llm_trace_context.as_ref(),
+                                    &call,
+                                    &mut buffers,
+                                    &abort_signal,
+                                    &mut on_delta,
+                                )
+                                .await?;
+                                on_runtime_tick(self);
                             }
-                            continue;
-                        };
+                        }
+                    }
+                } else {
+                    tokio::select! {
+                        result = &mut completion_future, if completion_result.is_none() => {
+                            completion_result = Some(result);
+                        }
+                        maybe_event = model_event_rx.recv() => {
+                            let Some(event) = maybe_event else {
+                                if completion_result.is_some() {
+                                    break;
+                                }
+                                continue;
+                            };
 
-                        let ready_call = match &event {
-                            StreamEvent::ToolCallReady { call } => Some(call.clone()),
-                            _ => None,
-                        };
-                        buffers.record_stream_event(&event);
-                        on_delta(event);
+                            let ready_call = match &event {
+                                StreamEvent::ToolCallReady { call } => Some(call.clone()),
+                                _ => None,
+                            };
+                            buffers.record_stream_event(&event);
+                            on_delta(event);
+                            on_runtime_tick(self);
 
-                        if let Some(call) = ready_call
-                            && streamed_ready_tool_calls.insert(call.invocation_id.clone())
-                        {
-                            self.execute_stream_ready_tool_call(
-                                &turn_id,
-                                llm_trace_context.as_ref(),
-                                &call,
-                                &mut buffers,
-                                &abort_signal,
-                                &mut on_delta,
-                            )
-                            .await?;
+                            if let Some(call) = ready_call
+                                && streamed_ready_tool_calls.insert(call.invocation_id.clone())
+                            {
+                                self.execute_stream_ready_tool_call(
+                                    &turn_id,
+                                    llm_trace_context.as_ref(),
+                                    &call,
+                                    &mut buffers,
+                                    &abort_signal,
+                                    &mut on_delta,
+                                )
+                                .await?;
+                                on_runtime_tick(self);
+                            }
                         }
                     }
                 }
@@ -120,6 +167,7 @@ where
                         };
                         buffers.record_stream_event(&event);
                         on_delta(event);
+                        on_runtime_tick(self);
 
                         if let Some(call) = ready_call
                             && streamed_ready_tool_calls.insert(call.invocation_id.clone())
@@ -133,6 +181,7 @@ where
                                 &mut on_delta,
                             )
                             .await?;
+                            on_runtime_tick(self);
                         }
                     }
                     break;
@@ -237,6 +286,7 @@ where
                     );
                 }
             };
+            on_runtime_tick(self);
 
             let CompletionProcessingResult::Continue { saw_tool_calls } = processing_result;
 
@@ -337,6 +387,66 @@ where
             buffers,
             llm_step_index,
             on_delta,
+            |_| {},
+            None,
+        )
+        .await
+    }
+
+    pub async fn handle_turn_streaming_with_runtime_tick(
+        &mut self,
+        user_inputs: Vec<String>,
+        control: TurnControl,
+        on_delta: impl FnMut(StreamEvent) + Send,
+        on_runtime_tick: impl FnMut(&mut Self) + Send,
+        pending_signal: std::sync::Arc<Notify>,
+    ) -> Result<TurnOutput, RuntimeError> {
+        if user_inputs.is_empty() {
+            return Err(RuntimeError::session("no user messages provided"));
+        }
+
+        let turn_id = next_turn_id();
+        let started_at_ms = now_timestamp_ms();
+        let abort_signal = control.abort_signal();
+
+        self.ensure_agent_started()?;
+
+        let mut llm_step_index = 0_u32;
+
+        if abort_signal.is_aborted() {
+            return Err(RuntimeError::cancelled());
+        }
+
+        self.maybe_auto_compress_current_context(&turn_id, &mut llm_step_index).await;
+
+        if abort_signal.is_aborted() {
+            return Err(RuntimeError::cancelled());
+        }
+
+        let mut user_entry_ids = Vec::with_capacity(user_inputs.len());
+        for user_input in &user_inputs {
+            let user_input = self.rewrite_input(user_input.clone())?;
+            let user_message = Message::new(Role::User, user_input);
+            let entry_id =
+                self.append_tape_entry(TapeEntry::message(&user_message).with_run_id(&turn_id))?;
+            user_entry_ids.push(entry_id);
+            self.publish_event(RuntimeEvent::UserMessage { content: user_message.content.clone() });
+        }
+
+        let buffers = TurnBuffers::with_user_entries(user_entry_ids);
+        let preview: String = user_inputs.join("\n");
+        self.notify_turn_start(&turn_id, &preview);
+
+        self.drive_turn_loop(
+            turn_id,
+            started_at_ms,
+            user_inputs,
+            control,
+            buffers,
+            llm_step_index,
+            on_delta,
+            on_runtime_tick,
+            Some(pending_signal),
         )
         .await
     }
@@ -381,6 +491,52 @@ where
             buffers,
             llm_step_index,
             on_delta,
+            |_| {},
+            None,
+        )
+        .await
+    }
+
+    pub async fn handle_continue_streaming_with_runtime_tick(
+        &mut self,
+        user_messages: Vec<String>,
+        control: TurnControl,
+        on_delta: impl FnMut(StreamEvent) + Send,
+        on_runtime_tick: impl FnMut(&mut Self) + Send,
+        pending_signal: std::sync::Arc<Notify>,
+    ) -> Result<TurnOutput, RuntimeError> {
+        let turn_id = next_turn_id();
+        let started_at_ms = now_timestamp_ms();
+        let abort_signal = control.abort_signal();
+
+        self.ensure_agent_started()?;
+
+        let mut llm_step_index = 0_u32;
+
+        if abort_signal.is_aborted() {
+            return Err(RuntimeError::cancelled());
+        }
+
+        self.maybe_auto_compress_current_context(&turn_id, &mut llm_step_index).await;
+
+        if abort_signal.is_aborted() {
+            return Err(RuntimeError::cancelled());
+        }
+
+        let buffers = TurnBuffers::empty();
+
+        self.notify_turn_start(&turn_id, "(continue)");
+
+        self.drive_turn_loop(
+            turn_id,
+            started_at_ms,
+            user_messages,
+            control,
+            buffers,
+            llm_step_index,
+            on_delta,
+            on_runtime_tick,
+            Some(pending_signal),
         )
         .await
     }

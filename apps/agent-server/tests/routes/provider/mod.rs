@@ -2,7 +2,7 @@ use provider_registry::{ModelConfig, ModelLimit, ProviderKind, ProviderProfile};
 
 use super::{
     ModelConfigDto, ModelLimitDto,
-    handlers::{parse_provider_kind, provider_info_from_snapshot, provider_list_item},
+    handlers::{parse_provider_kind, provider_list_item},
 };
 
 #[test]
@@ -39,20 +39,7 @@ fn parse_provider_kind_rejects_unknown_protocol() {
 }
 
 #[test]
-fn provider_info_from_snapshot_projects_fields() {
-    let info = provider_info_from_snapshot(&crate::session_manager::ProviderInfoSnapshot {
-        name: "rayin".into(),
-        model: "gpt-5.4".into(),
-        connected: true,
-    });
-
-    assert_eq!(info.name, "rayin");
-    assert_eq!(info.model, "gpt-5.4");
-    assert!(info.connected);
-}
-
-#[test]
-fn provider_list_item_marks_active_provider() {
+fn provider_list_item_projects_provider_fields() {
     let profile = ProviderProfile {
         name: "rayin".into(),
         kind: ProviderKind::OpenAiResponses,
@@ -67,8 +54,9 @@ fn provider_list_item_marks_active_provider() {
         }],
     };
 
-    let item = provider_list_item(&profile, Some("rayin"));
-    assert!(item.active);
+    let item = provider_list_item(&profile);
+    assert_eq!(item.name, "rayin");
+    assert_eq!(item.base_url, "https://example.com");
     assert_eq!(item.kind, "openai-responses");
     assert_eq!(item.models.len(), 1);
 }

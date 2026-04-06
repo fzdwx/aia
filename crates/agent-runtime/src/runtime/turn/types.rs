@@ -1,12 +1,15 @@
+use std::collections::BTreeMap;
+
 use agent_core::{CompletionUsage, StreamEvent};
 
-use crate::{ToolInvocationLifecycle, TurnBlock};
+use crate::{ToolInvocationLifecycle, ToolInvocationReplayEvent, TurnBlock};
 
 pub(super) struct TurnBuffers {
     pub(super) source_entry_ids: Vec<u64>,
     pub(super) aggregated_thinking: String,
     pub(super) streamed_thinking: String,
     pub(super) tool_invocations: Vec<ToolInvocationLifecycle>,
+    pub(super) replay_events_by_invocation: BTreeMap<String, Vec<ToolInvocationReplayEvent>>,
     pub(super) blocks: Vec<TurnBlock>,
     pub(super) last_assistant_text: Option<String>,
     pub(super) last_assistant_entry_id: Option<u64>,
@@ -20,6 +23,7 @@ impl TurnBuffers {
             aggregated_thinking: String::new(),
             streamed_thinking: String::new(),
             tool_invocations: Vec::new(),
+            replay_events_by_invocation: BTreeMap::new(),
             blocks: Vec::new(),
             last_assistant_text: None,
             last_assistant_entry_id: None,
@@ -52,13 +56,29 @@ impl TurnBuffers {
             | StreamEvent::ToolCallReady { .. }
             | StreamEvent::ToolCallStarted { .. }
             | StreamEvent::ToolOutputDelta { .. }
-            | StreamEvent::WidgetHostCommand { .. }
-            | StreamEvent::WidgetClientEvent { .. }
             | StreamEvent::ToolCallCompleted { .. }
             | StreamEvent::Retrying { .. }
             | StreamEvent::Log { .. }
             | StreamEvent::Done => {}
+            StreamEvent::WidgetHostCommand { invocation_id, command } => {
+                self.replay_events_by_invocation.entry(invocation_id.clone()).or_default().push(
+                    ToolInvocationReplayEvent::WidgetHostCommand { command: command.clone() },
+                );
+            }
+            StreamEvent::WidgetClientEvent { invocation_id, event } => {
+                self.replay_events_by_invocation
+                    .entry(invocation_id.clone())
+                    .or_default()
+                    .push(ToolInvocationReplayEvent::WidgetClientEvent { event: event.clone() });
+            }
         }
+    }
+
+    pub(super) fn take_replay_events(
+        &mut self,
+        invocation_id: &str,
+    ) -> Vec<ToolInvocationReplayEvent> {
+        self.replay_events_by_invocation.remove(invocation_id).unwrap_or_default()
     }
 
     pub(super) fn failure_context<'a>(

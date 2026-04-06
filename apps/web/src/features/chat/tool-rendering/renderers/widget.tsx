@@ -14,6 +14,7 @@ import { ExpandableOutput, ToolDetailSection } from "../ui"
 
 type WidgetSandboxProps = {
   invocationId?: string
+  turnId?: string
   title: string
   description: string | null
   html: string
@@ -807,6 +808,7 @@ function buildWidgetPayload({
 // eslint-disable-next-line react-refresh/only-export-components
 function WidgetSandbox({
   invocationId,
+  turnId,
   title,
   description,
   html,
@@ -1003,7 +1005,7 @@ function WidgetSandbox({
       const payload = normalizeWidgetClientEvent(event.data)
       if (!payload) return
 
-      if (isStreaming && invocationId) {
+      if (invocationId) {
         void Promise.all([
           import("@/lib/api"),
           import("@/stores/chat-store"),
@@ -1015,6 +1017,7 @@ function WidgetSandbox({
 
           void sendWidgetClientEvent({
             session_id: sessionId,
+            turn_id: turnId,
             invocation_id: invocationId,
             event: payload,
           }).catch((error) => {
@@ -1097,7 +1100,7 @@ function WidgetSandbox({
       themeObserver.disconnect()
       frame?.removeEventListener("load", sendThemeToFrame)
     }
-  }, [flushRenderPayload, invocationId, isStreaming])
+  }, [flushRenderPayload, invocationId, turnId])
 
   useEffect(() => {
     latestRenderPayloadRef.current = createWidgetRenderPayloads(
@@ -1236,6 +1239,7 @@ export function createWidgetRendererRenderer(): ToolRenderer {
       return (
         <WidgetSandbox
           invocationId={data.invocationId}
+          turnId={data.turnId}
           title={title}
           description={description}
           html={html}

@@ -1,6 +1,7 @@
 import type {
   StreamingToolOutput,
   ToolInvocationLifecycle,
+  ToolInvocationReplayEvent,
   ToolOutputSegment,
 } from "@/lib/types"
 
@@ -10,6 +11,7 @@ import { formatSearchInvocation } from "./search-invocation"
 export type ToolRowItem = {
   id: string
   invocationId?: string
+  turnId?: string
   toolName: string
   arguments: Record<string, unknown>
   rawArguments?: string
@@ -91,43 +93,99 @@ export function buildCategorySummary(
   }))
 }
 
-export function fromInvocation(inv: ToolInvocationLifecycle): ToolRowItem {
+function applyReplayEvents(
+  item: ToolRowItem,
+  replayEvents: ToolInvocationReplayEvent[] | undefined
+): ToolRowItem {
+  if (!replayEvents || replayEvents.length === 0) {
+    return item
+  }
+
+  let nextItem = item
+  for (const event of replayEvents) {
+    if (
+      event.kind === "widget_host_command" &&
+      event.command.type === "render"
+    ) {
+      const document = event.command.widget.document
+      nextItem = {
+        ...nextItem,
+        previewHtml: document.html,
+        details: {
+          ...nextItem.details,
+          title:
+            typeof nextItem.details?.title === "string"
+              ? nextItem.details.title
+              : document.title,
+          description:
+            typeof nextItem.details?.description === "string"
+              ? nextItem.details.description
+              : document.description,
+          html:
+            typeof nextItem.details?.html === "string"
+              ? nextItem.details.html
+              : document.html,
+          content_type:
+            typeof nextItem.details?.content_type === "string"
+              ? nextItem.details.content_type
+              : document.contentType,
+        },
+      }
+    }
+  }
+
+  return nextItem
+}
+
+export function fromInvocation(
+  inv: ToolInvocationLifecycle,
+  turnId?: string
+): ToolRowItem {
   const { call, outcome } = inv
   if (outcome.status === "succeeded") {
-    return {
+    return applyReplayEvents(
+      {
+        id: call.invocation_id,
+        invocationId: call.invocation_id,
+        turnId,
+        toolName: call.tool_name,
+        detectedAtMs: inv.started_at_ms,
+        arguments: call.arguments,
+        previewHtml: undefined,
+        startedAtMs: inv.started_at_ms,
+        finishedAtMs: inv.finished_at_ms,
+        succeeded: true,
+        outputContent: outcome.result.content,
+        outputSegments: undefined,
+        details: outcome.result.details,
+      },
+      inv.replay_events
+    )
+  }
+  return applyReplayEvents(
+    {
       id: call.invocation_id,
       invocationId: call.invocation_id,
+      turnId,
       toolName: call.tool_name,
       detectedAtMs: inv.started_at_ms,
       arguments: call.arguments,
       previewHtml: undefined,
       startedAtMs: inv.started_at_ms,
       finishedAtMs: inv.finished_at_ms,
-      succeeded: true,
-      outputContent: outcome.result.content,
+      succeeded: false,
+      outputContent: outcome.status === "failed" ? outcome.message : "",
       outputSegments: undefined,
-      details: outcome.result.details,
-    }
-  }
-  return {
-    id: call.invocation_id,
-    invocationId: call.invocation_id,
-    toolName: call.tool_name,
-    detectedAtMs: inv.started_at_ms,
-    arguments: call.arguments,
-    previewHtml: undefined,
-    startedAtMs: inv.started_at_ms,
-    finishedAtMs: inv.finished_at_ms,
-    succeeded: false,
-    outputContent: outcome.status === "failed" ? outcome.message : "",
-    outputSegments: undefined,
-  }
+    },
+    inv.replay_events
+  )
 }
 
 export function fromStreamingTool(tool: StreamingToolOutput): ToolRowItem {
   return {
     id: tool.invocationId,
     invocationId: tool.invocationId,
+    turnId: undefined,
     toolName: tool.toolName,
     arguments: tool.arguments,
     rawArguments: tool.rawArguments,

@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use agent_core::{
     QuestionRequest, QuestionResult, RequestTimeoutConfig, ToolRegistry, WidgetClientEvent,
@@ -9,8 +9,9 @@ use agent_runtime::{AgentRuntime, ContextStats, RuntimeHooks, RuntimeSubscriberI
 use agent_store::{AiaStore, SessionRecord};
 use provider_registry::ProviderRegistry;
 use session_tape::SessionProviderBinding;
+use session_tape::TapeEntry;
 use tokio::sync::oneshot as tokio_oneshot;
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{Notify, broadcast, mpsc, oneshot};
 
 use crate::{
     model::ServerModel,
@@ -58,6 +59,14 @@ pub(crate) struct SessionSlot {
     pub(crate) interrupt_requested: bool,
     /// 正在处理队列标志（防止处理期间新消息直接开始 turn）
     pub(crate) queue_processing: bool,
+    pub(crate) pending_widget_tape_state: Arc<Mutex<PendingWidgetTapeState>>,
+    pub(crate) pending_widget_tape_notify: Arc<Notify>,
+}
+
+#[derive(Default)]
+pub(crate) struct PendingWidgetTapeState {
+    pub(crate) host_commands: BTreeMap<String, TapeEntry>,
+    pub(crate) client_events: Vec<TapeEntry>,
 }
 
 impl SessionSlot {
@@ -82,6 +91,8 @@ impl SessionSlot {
             message_queue,
             interrupt_requested: false,
             queue_processing: false,
+            pending_widget_tape_state: Arc::new(Mutex::new(PendingWidgetTapeState::default())),
+            pending_widget_tape_notify: Arc::new(Notify::new()),
         }
     }
 
@@ -167,6 +178,9 @@ impl SessionSlot {
         RuntimeWorkerError,
     > {
         let state = std::mem::replace(&mut self.execution, SlotExecutionState::Transitioning);
+        if let Ok(mut pending) = self.pending_widget_tape_state.lock() {
+            *pending = PendingWidgetTapeState::default();
+        }
         match state {
             SlotExecutionState::Idle { runtime, subscriber } => {
                 let running_turn = RunningTurnHandle { control: runtime.turn_control() };

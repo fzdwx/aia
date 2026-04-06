@@ -20,6 +20,18 @@ import {
 } from "./message-sections/status-surfaces"
 import { TurnMeta } from "./message-sections/turn-meta"
 
+function withStableContentKeys(prefix: string, contents: string[]) {
+  const counts = new Map<string, number>()
+  return contents.map((content) => {
+    const seen = counts.get(content) ?? 0
+    counts.set(content, seen + 1)
+    return {
+      key: `${prefix}-${content}-${seen}`,
+      content,
+    }
+  })
+}
+
 function TurnView({ turn }: { turn: TurnLifecycle }) {
   const latestRetriableTurnId = useChatStore((state) => {
     for (let index = state.turns.length - 1; index >= 0; index -= 1) {
@@ -40,14 +52,18 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
   const grouped = groupBlocks(turn.blocks)
   const userMessages =
     turn.user_messages ?? (turn.user_message ? [turn.user_message] : [])
+  const keyedUserMessages = withStableContentKeys(
+    `${turn.turn_id}-user`,
+    userMessages
+  )
 
   return (
     <div
       data-turn-id={turn.turn_id}
       className="mb-8 animate-[message-in_250ms_ease-out_both] last:mb-0"
     >
-      {userMessages.map((content, i) => (
-        <div key={i} className="mb-5">
+      {keyedUserMessages.map(({ key, content }) => (
+        <div key={key} className="mb-5">
           <UserMessageBlock content={content} />
         </div>
       ))}
@@ -56,12 +72,25 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
         data-component="assistant-message"
         className="group/turn flex w-full flex-col gap-4 [&>*[data-type='thinking']+*[data-type='tools']]:-mt-3 [&>*[data-type='tools']+*[data-type='thinking']]:-mt-3 [&>*[data-type='tools']+*[data-type='tools']]:-mt-3"
       >
-        {grouped.map((group, i) => {
+        {grouped.map((group) => {
+          const groupKey =
+            group.type === "tools"
+              ? `${turn.turn_id}-tools-${group.invocations.map((invocation) => invocation.call.invocation_id).join("-")}`
+              : group.type === "single" && group.block.kind === "thinking"
+                ? `${turn.turn_id}-thinking-${group.block.content}`
+                : group.type === "single" && group.block.kind === "assistant"
+                  ? `${turn.turn_id}-assistant-${group.block.content}`
+                  : group.type === "single" && group.block.kind === "failure"
+                    ? `${turn.turn_id}-failure-${group.block.message}`
+                    : `${turn.turn_id}-cancelled-${group.type === "single" && group.block.kind === "cancelled" ? group.block.message : "block"}`
+
           if (group.type === "tools") {
             return (
-              <div key={i} data-type="tools">
+              <div key={groupKey} data-type="tools">
                 <MemoizedToolGroup
-                  items={group.invocations.map(fromInvocation)}
+                  items={group.invocations.map((invocation) =>
+                    fromInvocation(invocation, turn.turn_id)
+                  )}
                 />
               </div>
             )
@@ -69,14 +98,14 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
 
           if (group.type === "single" && group.block.kind === "thinking") {
             return (
-              <div key={i} data-type="thinking">
+              <div key={groupKey} data-type="thinking">
                 <ThinkingBlock content={group.block.content} />
               </div>
             )
           }
 
           return (
-            <div key={i} data-type="text">
+            <div key={groupKey} data-type="text">
               <BlockRenderer block={group.block} />
             </div>
           )
@@ -90,6 +119,10 @@ function TurnView({ turn }: { turn: TurnLifecycle }) {
 function StreamingView({ streaming }: { streaming: StreamingTurn }) {
   const groups = groupStreamingBlocks(streaming.blocks)
   const userMessages = streaming.userMessages ?? []
+  const keyedUserMessages = withStableContentKeys(
+    `${streaming.turnId}-stream-user`,
+    userMessages
+  )
   const renderedGroups = groups.map((group, index) => {
     const previousGroup = index > 0 ? groups[index - 1] : null
 
@@ -110,8 +143,8 @@ function StreamingView({ streaming }: { streaming: StreamingTurn }) {
 
   return (
     <div className="mb-8 animate-[message-in_250ms_ease-out_both]">
-      {userMessages.map((content, i) => (
-        <div key={i} className="mb-5">
+      {keyedUserMessages.map(({ key, content }) => (
+        <div key={key} className="mb-5">
           <UserMessageBlock content={content} />
         </div>
       ))}

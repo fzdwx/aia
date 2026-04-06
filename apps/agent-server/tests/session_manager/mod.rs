@@ -5,14 +5,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::runtime_worker::RunningTurnHandle;
 use crate::sse::TurnStatus;
-use agent_core::{RequestTimeoutConfig, StreamEvent};
+use agent_core::{RequestTimeoutConfig, StreamEvent, WidgetClientEvent, WidgetHostCommand};
 use agent_store::SessionRecord;
-use session_tape::SessionTape;
+use session_tape::{SessionTape, TapeEntry};
 
 use super::{
-    CurrentTurnSnapshot, SessionManagerConfig, SessionQueryService, SessionSlot,
-    SessionSlotFactory, SlotExecutionState, SlotStatus, collect_runtime_events, read_lock,
-    spawn_session_manager, update_current_turn_from_stream, update_current_turn_status, write_lock,
+    CurrentTurnSnapshot, RuntimeReturn, SessionManagerConfig, SessionManagerLoop,
+    SessionQueryService, SessionSlot, SessionSlotFactory, SlotExecutionState, SlotStatus,
+    collect_runtime_events, read_lock, spawn_session_manager, update_current_turn_from_stream,
+    update_current_turn_status, write_lock,
 };
 
 fn run_async<T>(future: impl Future<Output = T>) -> T {
@@ -240,6 +241,8 @@ fn get_session_info_uses_cached_stats_when_turn_is_running() {
             message_queue: Vec::new(),
             interrupt_requested: false,
             queue_processing: false,
+            pending_widget_tape_state: Arc::new(Mutex::new(Default::default())),
+            pending_widget_tape_notify: Arc::new(tokio::sync::Notify::new()),
         },
     );
 
@@ -292,6 +295,8 @@ fn running_session_slot_keeps_in_memory_provider_binding() {
             message_queue: Vec::new(),
             interrupt_requested: false,
             queue_processing: false,
+            pending_widget_tape_state: Arc::new(Mutex::new(Default::default())),
+            pending_widget_tape_notify: Arc::new(tokio::sync::Notify::new()),
         },
     );
 
@@ -754,6 +759,8 @@ fn handle_cancel_turn_marks_running_snapshot_as_cancelled() {
             message_queue: Vec::new(),
             interrupt_requested: false,
             queue_processing: false,
+            pending_widget_tape_state: Arc::new(Mutex::new(Default::default())),
+            pending_widget_tape_notify: Arc::new(tokio::sync::Notify::new()),
         },
     );
     let (broadcast_tx, _broadcast_rx) = tokio::sync::broadcast::channel(8);
@@ -791,6 +798,59 @@ fn handle_cancel_turn_marks_running_snapshot_as_cancelled() {
     let guard = read_lock(&current_turn);
     let current = guard.as_ref().expect("snapshot should still exist");
     assert_eq!(current.status, TurnStatus::Cancelled);
+}
+
+#[test]
+fn handle_runtime_return_flushes_pending_widget_entries_into_tape() {
+    let root = temp_session_dir("widget-return-flush");
+    let config = sample_manager_config(&root);
+    let (command_tx, command_rx) = tokio::sync::mpsc::channel(8);
+    let (return_tx, return_rx) = tokio::sync::mpsc::channel(8);
+    let mut manager = SessionManagerLoop::new(config, command_tx, command_rx, return_tx, return_rx);
+
+    let mut slot = SessionSlotFactory::new(&manager.config)
+        .create("session-1")
+        .expect("session slot should build");
+    let session_path = slot.session_path.clone();
+    let (runtime, subscriber, _running_turn) =
+        slot.begin_turn().expect("idle slot should start turn");
+
+    if let Ok(mut pending) = slot.pending_widget_tape_state.lock() {
+        pending.host_commands.insert(
+            "call-widget-1".into(),
+            TapeEntry::widget_host_command(
+                "call-widget-1",
+                &WidgetHostCommand::Render {
+                    widget: agent_core::UiWidget {
+                        instance_id: "call-widget-1".into(),
+                        phase: agent_core::UiWidgetPhase::Preview,
+                        document: agent_core::UiWidgetDocument {
+                            title: "流式 widget".into(),
+                            description: "flush on return".into(),
+                            html: "<div>preview</div>".into(),
+                            content_type: "text/html".into(),
+                        },
+                    },
+                },
+            )
+            .with_run_id("turn-1"),
+        );
+        pending.client_events.push(
+            TapeEntry::widget_client_event("call-widget-1", &WidgetClientEvent::ScriptsReady)
+                .with_run_id("turn-1"),
+        );
+    }
+
+    manager.slots.insert("session-1".into(), slot);
+    manager.handle_runtime_return(RuntimeReturn {
+        session_id: "session-1".into(),
+        runtime,
+        subscriber,
+    });
+
+    let tape = SessionTape::load_jsonl_or_default(&session_path).expect("session tape should load");
+    assert!(tape.entries().iter().any(|entry| entry.event_name() == Some("widget_host_command")));
+    assert!(tape.entries().iter().any(|entry| entry.event_name() == Some("widget_client_event")));
 }
 
 #[test]

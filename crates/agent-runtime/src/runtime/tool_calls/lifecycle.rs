@@ -133,6 +133,7 @@ where
             started_at_ms: context.started_at_ms,
             finished_at_ms,
             trace_context: context.tool_trace_context,
+            replay_events: Vec::new(),
             outcome,
         })
     }

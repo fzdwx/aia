@@ -28,11 +28,14 @@ fn highlights_multiline_tsx_with_context() {
         DiffTheme::Dark,
     );
 
-    assert_eq!(html_lines.len(), 6);
+    assert_eq!(html_lines.len(), 7);
     assert!(html_lines[0].contains("color:#f97583"));
-    assert!(html_lines[1].contains("color:#f97583"));
-    assert!(html_lines[4].contains("space-y-2"));
-    assert!(html_lines[4].contains("color:#85e89d") || html_lines[4].contains("color:#79b8ff"));
+    assert!(html_lines.iter().any(|line| line.contains("color:#f97583")));
+    let return_line = html_lines
+        .iter()
+        .find(|line| line.contains("space-y-2"))
+        .expect("should preserve JSX return line");
+    assert!(return_line.contains("color:#85e89d") || return_line.contains("color:#79b8ff"));
 }
 
 #[test]

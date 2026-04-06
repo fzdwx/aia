@@ -5,8 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use agent_core::RequestTimeoutConfig;
 use provider_registry::{ProviderProfile, ProviderRegistry};
 
-use super::{ProviderSyncService, ReturnedRuntimeSync};
-use crate::runtime_worker::{SwitchProviderInput, UpdateProviderInput};
+use super::ProviderSyncService;
+use crate::runtime_worker::UpdateProviderInput;
 use crate::session_manager::{SessionManagerConfig, SessionSlotFactory, prepare_runtime_sync};
 use session_tape::SessionProviderBinding;
 
@@ -102,46 +102,6 @@ fn updating_non_active_provider_keeps_unbound_session_unmodified() {
             .latest_provider_binding(),
         None,
     );
-
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn switching_provider_marks_running_session_for_return_sync() {
-    let root = temp_root("switch-running");
-    let mut config = sample_config(&root, sample_registry());
-    let mut slot =
-        SessionSlotFactory::new(&config).create("session-1").expect("session slot should build");
-    let (mut runtime, _subscriber, _running_turn) =
-        slot.begin_turn().expect("idle slot should start turn");
-
-    let mut slots = HashMap::new();
-    slots.insert("session-1".to_string(), slot);
-
-    let mut service = ProviderSyncService::new(&mut slots, &mut config);
-    service
-        .switch_provider(SwitchProviderInput { name: "backup".into() })
-        .expect("provider switch should succeed");
-
-    let pending_binding = slots["session-1"].pending_provider_binding().cloned();
-    let session_path = slots["session-1"].session_path.clone();
-    assert!(matches!(
-        pending_binding,
-        Some(SessionProviderBinding::Provider { ref name, .. }) if name == "backup"
-    ));
-
-    ReturnedRuntimeSync::new(
-        "session-1",
-        &session_path,
-        &config.registry,
-        config.store.clone(),
-        pending_binding.clone(),
-    )
-    .apply(&mut runtime)
-    .expect("returned runtime should resync");
-
-    assert_eq!(runtime.tape().latest_provider_binding(), pending_binding);
-    assert_eq!(runtime.model_identity().name, "model-backup");
 
     let _ = std::fs::remove_dir_all(root);
 }

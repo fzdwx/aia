@@ -38,6 +38,7 @@ function ToolTrigger({
   const isRunning = item.finishedAtMs == null
   const renderData = {
     invocationId: item.invocationId ?? item.id,
+    turnId: item.turnId,
     toolName: item.toolName,
     arguments: item.arguments,
     rawArguments: item.rawArguments,
@@ -110,6 +111,7 @@ function ToolRow({
   })
   const renderData = {
     invocationId: item.invocationId ?? item.id,
+    turnId: item.turnId,
     toolName: item.toolName,
     arguments: item.arguments,
     rawArguments: item.rawArguments,

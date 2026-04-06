@@ -382,5 +382,6 @@ fn responses_http_502_writes_failed_trace_record() {
     let trace = wait_for_trace(&store, "trace-502");
     assert_eq!(trace.status, LlmTraceStatus::Failed);
     assert_eq!(trace.status_code, Some(502));
-    assert!(trace.response_body.as_deref().is_some_and(|body| body.contains("gateway failure")));
+    assert!(trace.error.as_deref().is_some_and(|body| body.contains("502")));
+    assert_eq!(trace.response_summary.get("http_status_code"), Some(&serde_json::json!(502)));
 }

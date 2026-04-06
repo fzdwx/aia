@@ -1,6 +1,10 @@
 use super::*;
 
-use agent_core::{CompletionUsage, Message, Role, ToolCall, ToolResult};
+use agent_core::{
+    CompletionUsage, Message, Role, ToolCall, ToolResult, UiWidget, UiWidgetDocument,
+    UiWidgetPhase, WidgetHostCommand,
+};
+use agent_runtime::ToolInvocationReplayEvent;
 use agent_runtime::{TurnLifecycle, TurnOutcome};
 use session_tape::{SessionTape, TapeEntry};
 
@@ -207,6 +211,138 @@ fn rebuild_session_snapshots_projects_widget_document_for_completed_widget_rende
             },
         })
     );
+}
+
+#[test]
+fn rebuild_session_snapshots_projects_widget_host_render_event_into_current_turn() {
+    let mut tape = SessionTape::new();
+    let turn_id = "turn-widget-live-1";
+    let call = ToolCall::new("WidgetRenderer")
+        .with_invocation_id("call-widget-live-1")
+        .with_argument("title", "流式 widget")
+        .with_argument("description", "来自 host render event");
+
+    tape.append_entry(
+        TapeEntry::message(&Message::new(Role::User, "渲染中的 widget")).with_run_id(turn_id),
+    );
+    tape.append_entry(TapeEntry::tool_call(&call).with_run_id(turn_id));
+    tape.append_entry(
+        TapeEntry::event(
+            "widget_host_command",
+            Some(serde_json::json!({
+                "invocation_id": "call-widget-live-1",
+                "command": WidgetHostCommand::Render {
+                    widget: UiWidget {
+                        instance_id: "call-widget-live-1".into(),
+                        phase: UiWidgetPhase::Preview,
+                        document: UiWidgetDocument {
+                            title: "流式 widget".into(),
+                            description: "来自 host render event".into(),
+                            html: "<div class=\"card\">preview</div>".into(),
+                            content_type: "text/html".into(),
+                        },
+                    }
+                }
+            })),
+        )
+        .with_run_id(turn_id),
+    );
+
+    let snapshots = rebuild_session_snapshots_from_tape(&tape);
+    let current = snapshots.current_turn.expect("应保留当前未完成轮次");
+
+    let CurrentTurnBlock::Tool { tool } = &current.blocks[0] else {
+        panic!("expected tool block");
+    };
+
+    assert_eq!(tool.invocation_id, "call-widget-live-1");
+    assert_eq!(tool.tool_name, "WidgetRenderer");
+    assert!(!tool.completed);
+    assert_eq!(
+        tool.widget,
+        Some(UiWidget {
+            instance_id: "call-widget-live-1".into(),
+            phase: UiWidgetPhase::Preview,
+            document: UiWidgetDocument {
+                title: "流式 widget".into(),
+                description: "来自 host render event".into(),
+                html: "<div class=\"card\">preview</div>".into(),
+                content_type: "text/html".into(),
+            },
+        })
+    );
+}
+
+#[test]
+fn rebuild_session_snapshots_attaches_widget_replay_events_to_completed_invocation() {
+    let mut tape = SessionTape::new();
+    let turn_id = "turn-widget-history-1";
+    let call = ToolCall::new("WidgetRenderer")
+        .with_invocation_id("call-widget-history-1")
+        .with_argument("title", "历史 widget")
+        .with_argument("description", "完成态重放");
+    let result = ToolResult::from_call(&call, "Rendered widget: 历史 widget").with_details(
+        serde_json::json!({
+            "title": "历史 widget",
+            "description": "完成态重放",
+            "html": "<div class=\"card\">final</div>",
+            "content_type": "text/html"
+        }),
+    );
+
+    tape.append_entry(
+        TapeEntry::message(&Message::new(Role::User, "恢复历史 widget")).with_run_id(turn_id),
+    );
+    tape.append_entry(TapeEntry::tool_call(&call).with_run_id(turn_id));
+    tape.append_entry(
+        TapeEntry::widget_host_command(
+            "call-widget-history-1",
+            &WidgetHostCommand::Render {
+                widget: UiWidget {
+                    instance_id: "call-widget-history-1".into(),
+                    phase: UiWidgetPhase::Preview,
+                    document: UiWidgetDocument {
+                        title: "历史 widget".into(),
+                        description: "完成态重放".into(),
+                        html: "<div class=\"card\">preview</div>".into(),
+                        content_type: "text/html".into(),
+                    },
+                },
+            },
+        )
+        .with_run_id(turn_id),
+    );
+    tape.append_entry(TapeEntry::tool_result(&result).with_run_id(turn_id));
+    tape.append_entry(
+        TapeEntry::widget_client_event(
+            "call-widget-history-1",
+            &agent_core::WidgetClientEvent::ScriptsReady,
+        )
+        .with_run_id(turn_id),
+    );
+    tape.append_entry(TapeEntry::event("turn_completed", None).with_run_id(turn_id));
+
+    let snapshots = rebuild_session_snapshots_from_tape(&tape);
+    let turn = snapshots.history.last().expect("应生成完成态 turn");
+    let invocation = turn
+        .tool_invocations
+        .iter()
+        .find(|invocation| invocation.call.invocation_id == "call-widget-history-1")
+        .expect("应存在目标 invocation");
+
+    assert_eq!(invocation.replay_events.len(), 2);
+    assert!(matches!(
+        &invocation.replay_events[0],
+        ToolInvocationReplayEvent::WidgetHostCommand {
+            command: WidgetHostCommand::Render { widget }
+        } if widget.document.html == "<div class=\"card\">preview</div>"
+    ));
+    assert!(matches!(
+        &invocation.replay_events[1],
+        ToolInvocationReplayEvent::WidgetClientEvent {
+            event: agent_core::WidgetClientEvent::ScriptsReady
+        }
+    ));
 }
 
 #[test]

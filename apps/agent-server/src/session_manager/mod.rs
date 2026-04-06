@@ -19,8 +19,8 @@ use std::sync::{Arc, RwLock};
 
 use agent_core::{
     ModelIdentity, PromptCacheConfig, PromptCacheRetention as RuntimePromptCacheRetention,
-    QuestionRequest, QuestionResult, QuestionResultStatus, ReasoningEffort, StreamEvent,
-    WidgetClientEvent,
+    QuestionRequest, QuestionResult, QuestionResultStatus, ReasoningEffort, StreamEvent, UiWidget,
+    UiWidgetDocument, UiWidgetPhase, WidgetClientEvent,
 };
 use agent_runtime::AgentRuntime;
 use agent_store::{
@@ -332,6 +332,16 @@ impl SessionManagerLoop {
                     });
                 }
                 let pending_provider_binding = slot.take_pending_provider_binding();
+                let pending_widget_entries = if let Ok(mut pending) =
+                    slot.pending_widget_tape_state.lock()
+                {
+                    let host_entries = pending.host_commands.values().cloned().collect::<Vec<_>>();
+                    let client_entries = std::mem::take(&mut pending.client_events);
+                    pending.host_commands.clear();
+                    host_entries.into_iter().chain(client_entries).collect::<Vec<_>>()
+                } else {
+                    Vec::new()
+                };
                 let sync = ReturnedRuntimeSync::new(
                     &ret.session_id,
                     &session_path,
@@ -345,6 +355,16 @@ impl SessionManagerLoop {
                         turn_id: None,
                         message: error.message,
                     });
+                }
+
+                for entry in pending_widget_entries {
+                    if let Err(error) = ret.runtime.append_tape_entry(entry) {
+                        let _ = self.config.broadcast_tx.send(SsePayload::Error {
+                            session_id: ret.session_id.clone(),
+                            turn_id: None,
+                            message: error.to_string(),
+                        });
+                    }
                 }
 
                 *write_lock(&slot.context_stats) = ret.runtime.context_stats();
@@ -915,7 +935,7 @@ impl SessionManagerLoop {
         invocation_id: String,
         event: WidgetClientEvent,
     ) -> Result<(), RuntimeWorkerError> {
-        let slot = self.slots.get(session_id).ok_or_else(|| {
+        let slot = self.slots.get_mut(session_id).ok_or_else(|| {
             RuntimeWorkerError::not_found(format!("session not found: {session_id}"))
         })?;
 
@@ -931,16 +951,148 @@ impl SessionManagerLoop {
                 })?,
         };
 
-        let widget = read_lock(&slot.current_turn).as_ref().and_then(|current| {
-            current.blocks.iter().rev().find_map(|block| match block {
-                crate::runtime_worker::CurrentTurnBlock::Tool { tool }
-                    if tool.invocation_id == invocation_id =>
-                {
-                    tool.widget.clone()
-                }
-                _ => None,
+        let widget = read_lock(&slot.current_turn)
+            .as_ref()
+            .and_then(|current| {
+                current.blocks.iter().rev().find_map(|block| match block {
+                    crate::runtime_worker::CurrentTurnBlock::Tool { tool }
+                        if tool.invocation_id == invocation_id =>
+                    {
+                        tool.widget.clone()
+                    }
+                    _ => None,
+                })
             })
+            .or_else(|| {
+                let history = read_lock(&slot.history);
+                history
+                    .iter()
+                    .find(|turn| turn.turn_id == resolved_turn_id)
+                    .and_then(|turn| {
+                        turn.tool_invocations
+                            .iter()
+                            .find(|invocation| invocation.call.invocation_id == invocation_id)
+                    })
+                    .and_then(|invocation| {
+                        invocation
+                            .replay_events
+                            .iter()
+                            .rev()
+                            .find_map(|event| match event {
+                                agent_runtime::ToolInvocationReplayEvent::WidgetHostCommand {
+                                    command: agent_core::WidgetHostCommand::Render { widget },
+                                } => Some(widget.clone()),
+                                _ => None,
+                            })
+                            .or_else(|| match &invocation.outcome {
+                                agent_runtime::ToolInvocationOutcome::Succeeded { result } => {
+                                    let details = result.details.as_ref()?;
+                                    let html = details
+                                        .get("html")
+                                        .and_then(|value| value.as_str())
+                                        .filter(|value| !value.trim().is_empty())?;
+                                    Some(UiWidget {
+                                        instance_id: invocation.call.invocation_id.clone(),
+                                        phase: UiWidgetPhase::Final,
+                                        document: UiWidgetDocument {
+                                            title: details
+                                                .get("title")
+                                                .and_then(|value| value.as_str())
+                                                .or_else(|| {
+                                                    invocation
+                                                        .call
+                                                        .arguments
+                                                        .get("title")
+                                                        .and_then(|value| value.as_str())
+                                                })
+                                                .unwrap_or("Widget")
+                                                .to_string(),
+                                            description: details
+                                                .get("description")
+                                                .and_then(|value| value.as_str())
+                                                .or_else(|| {
+                                                    invocation
+                                                        .call
+                                                        .arguments
+                                                        .get("description")
+                                                        .and_then(|value| value.as_str())
+                                                })
+                                                .unwrap_or_default()
+                                                .to_string(),
+                                            html: html.to_string(),
+                                            content_type: details
+                                                .get("content_type")
+                                                .and_then(|value| value.as_str())
+                                                .unwrap_or("text/html")
+                                                .to_string(),
+                                        },
+                                    })
+                                }
+                                agent_runtime::ToolInvocationOutcome::Failed { .. } => None,
+                            })
+                    })
+            });
+
+        let known_invocation = read_lock(&slot.current_turn).as_ref().is_some_and(|current| {
+            current.turn_id == resolved_turn_id
+                && current.blocks.iter().any(|block| match block {
+                    crate::runtime_worker::CurrentTurnBlock::Tool { tool } => {
+                        tool.invocation_id == invocation_id
+                    }
+                    _ => false,
+                })
+        }) || read_lock(&slot.history).iter().any(|turn| {
+            turn.turn_id == resolved_turn_id
+                && turn
+                    .tool_invocations
+                    .iter()
+                    .any(|invocation| invocation.call.invocation_id == invocation_id)
         });
+
+        if !known_invocation {
+            return Err(RuntimeWorkerError::bad_request(format!(
+                "widget invocation not found for turn: {invocation_id}"
+            )));
+        }
+
+        {
+            let mut history = write_lock(&slot.history);
+            if let Some(turn) = history.iter_mut().find(|turn| turn.turn_id == resolved_turn_id) {
+                for invocation in &mut turn.tool_invocations {
+                    if invocation.call.invocation_id == invocation_id {
+                        invocation.replay_events.push(
+                            agent_runtime::ToolInvocationReplayEvent::WidgetClientEvent {
+                                event: event.clone(),
+                            },
+                        );
+                    }
+                }
+                for block in &mut turn.blocks {
+                    if let agent_runtime::TurnBlock::ToolInvocation { invocation } = block
+                        && invocation.call.invocation_id == invocation_id
+                    {
+                        invocation.replay_events.push(
+                            agent_runtime::ToolInvocationReplayEvent::WidgetClientEvent {
+                                event: event.clone(),
+                            },
+                        );
+                    }
+                }
+            }
+        }
+
+        let entry =
+            TapeEntry::widget_client_event(&invocation_id, &event).with_run_id(&resolved_turn_id);
+        if slot.status() == SlotStatus::Running {
+            if let Ok(mut pending) = slot.pending_widget_tape_state.lock() {
+                pending.client_events.push(entry);
+            }
+            slot.pending_widget_tape_notify.notify_one();
+        } else if let Some(runtime) = slot.runtime_mut() {
+            runtime
+                .append_tape_entry(entry)
+                .map_err(|error| RuntimeWorkerError::internal(error.to_string()))?;
+        }
 
         let _ = self.config.broadcast_tx.send(SsePayload::Stream {
             session_id: session_id.to_string(),

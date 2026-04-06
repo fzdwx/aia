@@ -159,6 +159,9 @@ where
                                 on_delta,
                             )
                             .await?;
+                        let mut invocation = invocation;
+                        invocation.replay_events =
+                            buffers.take_replay_events(&invocation.call.invocation_id);
                         buffers.blocks.push(TurnBlock::ToolInvocation {
                             invocation: Box::new(invocation.clone()),
                         });
@@ -337,6 +340,9 @@ where
                                     prepared,
                                     on_delta,
                                 )?;
+                                let mut invocation = invocation;
+                                invocation.replay_events =
+                                    buffers.take_replay_events(&invocation.call.invocation_id);
                                 completed_invocations.push((tool_call_entry_id, invocation));
                             }
                         }
@@ -393,6 +399,8 @@ where
                 on_delta,
             )
             .await?;
+        let mut invocation = invocation;
+        invocation.replay_events = buffers.take_replay_events(&invocation.call.invocation_id);
         buffers.blocks.push(TurnBlock::ToolInvocation { invocation: Box::new(invocation.clone()) });
         buffers.tool_invocations.push(invocation.clone());
         Ok(invocation)
