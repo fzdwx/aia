@@ -129,6 +129,51 @@ test("connectEvents batches adjacent text stream deltas before dispatch", async 
   vi.useRealTimers()
 })
 
+test("connectEvents batches adjacent tool output deltas before dispatch", async () => {
+  vi.useFakeTimers()
+  vi.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource)
+  const onEvent = vi.fn()
+
+  const dispose = connectEvents(onEvent)
+
+  MockEventSource.instance?.emit("stream", {
+    session_id: "session-1",
+    turn_id: "turn-1",
+    kind: "tool_output_delta",
+    invocation_id: "shell-1",
+    stream: "stdout",
+    text: "hello",
+  })
+  MockEventSource.instance?.emit("stream", {
+    session_id: "session-1",
+    turn_id: "turn-1",
+    kind: "tool_output_delta",
+    invocation_id: "shell-1",
+    stream: "stdout",
+    text: " world",
+  })
+
+  expect(onEvent).not.toHaveBeenCalled()
+
+  await vi.advanceTimersByTimeAsync(16)
+
+  expect(onEvent).toHaveBeenCalledTimes(1)
+  expect(onEvent).toHaveBeenCalledWith({
+    type: "stream",
+    data: {
+      session_id: "session-1",
+      turn_id: "turn-1",
+      kind: "tool_output_delta",
+      invocation_id: "shell-1",
+      stream: "stdout",
+      text: "hello world",
+    },
+  })
+
+  dispose()
+  vi.useRealTimers()
+})
+
 test("connectEvents flushes pending text delta before non-text stream event", () => {
   vi.useFakeTimers()
   vi.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource)

@@ -44,6 +44,46 @@ describe("chat sse projection", () => {
     ])
   })
 
+  test("caps streaming tool output tail while preserving live segments", () => {
+    const largeChunk = "x".repeat(70_000)
+    const blocks = applyStreamEventToBlocks(
+      [
+        {
+          type: "tool",
+          tool: {
+            invocationId: "shell-tail-1",
+            toolName: "Shell",
+            arguments: { command: "cat huge.log" },
+            detectedAtMs: 1,
+            startedAtMs: 1,
+            output: "prefix-",
+            completed: false,
+          },
+        },
+      ],
+      {
+        kind: "tool_output_delta",
+        invocation_id: "shell-tail-1",
+        stream: "stdout",
+        text: largeChunk,
+        session_id: "session-1",
+        turn_id: "turn-1",
+      }
+    )
+
+    const block = blocks[0]
+    expect(block?.type).toBe("tool")
+    if (!block || block.type !== "tool") {
+      throw new Error("expected first block to stay a tool block")
+    }
+
+    expect(block.tool.output.length).toBeLessThanOrEqual(64 * 1024)
+    expect(block.tool.output.endsWith(largeChunk.slice(-(64 * 1024)))).toBe(true)
+    expect(block.tool.outputSegments).toEqual([
+      { stream: "stdout", text: largeChunk.slice(-(64 * 1024)) },
+    ])
+  })
+
   test("accumulates widget renderer output for live preview", () => {
     const blocks = applyStreamEventToBlocks(
       [
@@ -104,6 +144,57 @@ describe("chat sse projection", () => {
         contentType: "text/html",
       },
     })
+  })
+
+  test("prefers widget payload html over truncated output tail", () => {
+    const hugeHtml = `<div>${"x".repeat(70_000)}</div>`
+    const blocks = applyStreamEventToBlocks(
+      [
+        {
+          type: "tool",
+          tool: {
+            invocationId: "widget-tail-1",
+            toolName: "WidgetRenderer",
+            arguments: {
+              title: "流式 widget",
+              description: "large html preview",
+            },
+            detectedAtMs: 1,
+            startedAtMs: 1,
+            output: "",
+            completed: false,
+          },
+        },
+      ],
+      {
+        kind: "tool_output_delta",
+        invocation_id: "widget-tail-1",
+        stream: "stdout",
+        text: hugeHtml,
+        widget: {
+          instanceId: "widget-tail-1",
+          phase: "preview",
+          document: {
+            title: "流式 widget",
+            description: "large html preview",
+            html: hugeHtml,
+            contentType: "text/html",
+          },
+        },
+        session_id: "session-1",
+        turn_id: "turn-1",
+      }
+    )
+
+    const block = blocks[0]
+    expect(block?.type).toBe("tool")
+    if (!block || block.type !== "tool") {
+      throw new Error("expected first block to stay a tool block")
+    }
+
+    expect(block.tool.output.length).toBeLessThanOrEqual(64 * 1024)
+    expect(block.tool.previewHtml).toBe(hugeHtml)
+    expect(block.tool.widget?.document.html).toBe(hugeHtml)
   })
 
   test("accumulates raw tool arguments for widget parameter streaming", () => {

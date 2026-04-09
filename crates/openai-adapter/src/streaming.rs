@@ -14,6 +14,21 @@ use crate::{
 
 const STREAM_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
+fn error_has_structured_http_context(error: &OpenAiAdapterError) -> bool {
+    error.status_code().is_some() || error.response_body().is_some()
+}
+
+fn preserve_richer_retry_error(
+    current_error: OpenAiAdapterError,
+    retained_error: Option<OpenAiAdapterError>,
+) -> OpenAiAdapterError {
+    if error_has_structured_http_context(&current_error) {
+        current_error
+    } else {
+        retained_error.unwrap_or(current_error)
+    }
+}
+
 async fn send_with_abort(
     request_builder: reqwest::RequestBuilder,
     abort: &AbortSignal,
@@ -263,6 +278,7 @@ where
 
     let client = http_client(request)?;
     let policy = RetryPolicy::default();
+    let mut retained_error: Option<OpenAiAdapterError> = None;
 
     for attempt_index in 1..=policy.max_attempts {
         if abort.is_aborted() {
@@ -296,6 +312,9 @@ where
                     && attempt_state.can_retry()
                     && should_retry(&error) =>
             {
+                if error_has_structured_http_context(&error) {
+                    retained_error = Some(error.clone());
+                }
                 let delay = backoff_delay(policy, attempt_index);
                 sink(StreamEvent::Retrying {
                     attempt: attempt_index,
@@ -304,7 +323,7 @@ where
                 });
                 sleep_with_abort(delay, abort).await?;
             }
-            Err(error) => return Err(error),
+            Err(error) => return Err(preserve_richer_retry_error(error, retained_error)),
         }
     }
 

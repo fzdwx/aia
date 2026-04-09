@@ -21,12 +21,9 @@ export function ShellOutputBody({
   const shouldFollowRef = useRef(true)
   // segments 可能在工具完成后被清理，此时使用 output
   const hasStreamingSegments = segments.length > 0
+  const lastSegment = hasStreamingSegments ? segments[segments.length - 1] : null
   const followTrigger = hasStreamingSegments
-    ? segments
-        .map(
-          (segment) => `${segment.stream}:${stripAnsiSequences(segment.text)}`
-        )
-        .join("\u0000")
+    ? `${segments.length}:${lastSegment?.stream ?? ""}:${lastSegment ? stripAnsiSequences(lastSegment.text) : ""}`
     : stripAnsiSequences(output ?? "")
 
   useEffect(() => {

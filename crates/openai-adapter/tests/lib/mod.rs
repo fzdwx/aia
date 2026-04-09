@@ -64,6 +64,41 @@ fn complete_model<M: LanguageModel>(
 }
 
 #[test]
+fn responses_streaming_retry_preserves_last_http_error_context() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("address should resolve");
+
+    let handle = thread::spawn(move || {
+        for _ in 0..3 {
+            let (mut stream, _) = listener.accept().expect("accept should succeed");
+            let mut buffer = [0_u8; 4096];
+            let _ = stream.read(&mut buffer).expect("request should be readable");
+
+            let body = r#"{"error":"gateway failure"}"#;
+            let response = format!(
+                "HTTP/1.1 502 Bad Gateway\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).expect("response write should succeed");
+        }
+    });
+
+    let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
+        format!("http://{address}"),
+        "test-key",
+        "gpt-4.1-mini",
+    ))
+    .expect("model should build");
+
+    let error = complete_model(&model, sample_request()).expect_err("completion should fail");
+
+    handle.join().expect("server thread should exit");
+    assert!(error.to_string().contains("502"));
+    assert!(error.to_string().contains("gateway failure"));
+}
+
+#[test]
 fn 请求体会映射模型指令消息与工具() {
     let model = OpenAiResponsesModel::new(OpenAiResponsesConfig::new(
         "http://127.0.0.1:1",

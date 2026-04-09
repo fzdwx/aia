@@ -2,7 +2,7 @@
 
 > 本文件只保留 **当前真实状态**。详细历史看 `docs/evolution-log.md`，未完成事项看 `docs/todo.md`。
 
-- Last verified: `2026-04-05`
+- Last verified: `2026-04-08`
 - Current source of truth: 以当前代码与 RFC 头部状态为准；本文件负责做压缩后的事实对齐
 
 ## 当前阶段
@@ -62,6 +62,9 @@
 - Settings / Providers / Channels / Trace 工作台
 - 基于 `streamdown` 的统一 Markdown 渲染
 - SSE 文本增量合帧、`streamdown` block-level tail update 与超大流式 Markdown 降级，降低长 thinking / 大文本块场景下的前端内存与重渲染压力
+- provider streaming 自动重试在最终失败时会保留最后一次真实 HTTP 错误上下文，不再把 `502` 等上游状态码覆盖成泛化的“重试次数已耗尽”
+- Web 端 `tool_output_delta` 的流式投影现已对 `output` 与单段 `outputSegments` 做尾部窗口裁剪，并避免滚动跟随逻辑在每个 delta 上全量拼接所有 segments，降低长 shell / 大 widget HTML 输出场景下的前端内存与 GC 压力
+- Web SSE 接入层现已把相邻同 `session/turn/invocation/stream` 的 `tool_output_delta` 按帧合并后再派发，进一步降低长工具输出场景下的 store 更新频率与 React 重渲染压力
 
 ### 5. Session 能力
 

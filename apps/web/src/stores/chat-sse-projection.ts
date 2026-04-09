@@ -12,6 +12,48 @@ import type {
 
 type StreamEventData = Extract<SseEvent, { type: "stream" }>["data"]
 
+const MAX_STREAMING_TOOL_OUTPUT_TAIL_CHARS = 64 * 1024
+const MAX_STREAMING_TOOL_OUTPUT_SEGMENTS = 200
+
+function appendOutputTail(existingOutput: string, delta: string): string {
+  const combined = existingOutput + delta
+  if (combined.length <= MAX_STREAMING_TOOL_OUTPUT_TAIL_CHARS) {
+    return combined
+  }
+  return combined.slice(-MAX_STREAMING_TOOL_OUTPUT_TAIL_CHARS)
+}
+
+function appendOutputSegments(
+  existingSegments: ToolOutputSegment[] | undefined,
+  nextSegment: ToolOutputSegment
+): ToolOutputSegment[] {
+  const segments = existingSegments ?? []
+  const lastSegment = segments[segments.length - 1]
+
+  if (lastSegment && lastSegment.stream === nextSegment.stream) {
+    const mergedLastText = appendOutputTail(lastSegment.text, nextSegment.text)
+    const mergedLastSegment = {
+      stream: lastSegment.stream,
+      text: mergedLastText,
+    } as const
+    if (segments.length === 1) {
+      return [mergedLastSegment]
+    }
+    return [...segments.slice(0, -1), mergedLastSegment]
+  }
+
+  const boundedSegment = {
+    stream: nextSegment.stream,
+    text: appendOutputTail("", nextSegment.text),
+  } as const
+
+  if (segments.length >= MAX_STREAMING_TOOL_OUTPUT_SEGMENTS) {
+    return [...segments.slice(-MAX_STREAMING_TOOL_OUTPUT_SEGMENTS + 1), boundedSegment]
+  }
+
+  return [...segments, boundedSegment]
+}
+
 function isWidgetRendererToolName(toolName: string): boolean {
   return toolName === "WidgetRenderer" || toolName === "widgetRenderer"
 }
@@ -76,9 +118,22 @@ function deriveWidgetPreviewHtml(tool: {
   output: string
   outputSegments?: ToolOutputSegment[]
   rawArguments?: string
+  resultDetails?: Record<string, unknown>
+  widget?: StreamingUiWidget
 }): string | undefined {
   if (!isWidgetRendererToolName(tool.toolName)) {
     return undefined
+  }
+
+  if (tool.widget?.document.html.trim()) {
+    return tool.widget.document.html.trim()
+  }
+
+  if (
+    typeof tool.resultDetails?.html === "string" &&
+    tool.resultDetails.html.trim().length > 0
+  ) {
+    return tool.resultDetails.html.trim()
   }
 
   const stdout = (tool.outputSegments ?? [])
@@ -109,9 +164,17 @@ function deriveStreamingWidget(tool: {
   outputSegments?: ToolOutputSegment[]
   resultDetails?: Record<string, unknown>
   completed: boolean
+  widget?: StreamingUiWidget
 }): StreamingUiWidget | undefined {
   if (!isWidgetRendererToolName(tool.toolName)) {
     return undefined
+  }
+
+  if (
+    tool.widget &&
+    tool.widget.phase === (tool.completed ? "final" : "preview")
+  ) {
+    return tool.widget
   }
 
   const details = tool.resultDetails ?? undefined
@@ -204,6 +267,7 @@ function withWidgetProjection<
     rawArguments?: string
     resultDetails?: Record<string, unknown>
     completed: boolean
+    widget?: StreamingUiWidget
   },
 >(tool: T): T & { previewHtml?: string; widget?: StreamingUiWidget } {
   const previewHtml = deriveWidgetPreviewHtml(tool)
@@ -506,36 +570,36 @@ export function applyStreamEventToBlocks(
         StreamingBlock,
         { type: "tool" }
       >
-      // 合并相邻的同类型 segment，避免无限累积
-      const existingSegments = block.tool.outputSegments ?? []
-      const lastSegment = existingSegments[existingSegments.length - 1]
-      let outputSegments: ToolOutputSegment[]
-
-      if (lastSegment && lastSegment.stream === data.stream) {
-        // 合并到上一个 segment，避免创建新对象
-        outputSegments = [
-          ...existingSegments.slice(0, -1),
-          { stream: lastSegment.stream, text: lastSegment.text + data.text },
-        ]
-      } else {
-        // 限制最大 segment 数量，防止内存无限增长
-        const MAX_SEGMENTS = 200
-        outputSegments = [
-          ...(existingSegments.length >= MAX_SEGMENTS
-            ? existingSegments.slice(-MAX_SEGMENTS + 1)
-            : existingSegments),
-          { stream: data.stream, text: data.text },
-        ]
-      }
+      const outputSegments = appendOutputSegments(block.tool.outputSegments, {
+        stream: data.stream,
+        text: data.text,
+      })
+      const nextOutput = appendOutputTail(block.tool.output, data.text)
+      const nextWidget = mapStreamingWidget(data.widget)
 
       nextBlocks[existingIndex] = {
         ...block,
         tool: {
           ...withWidgetProjection({
             ...block.tool,
-            output: block.tool.output + data.text,
+            output: nextOutput,
             outputSegments,
-            widget: mapStreamingWidget(data.widget) ?? block.tool.widget,
+            widget:
+              nextWidget ??
+              (block.tool.widget &&
+              isWidgetRendererToolName(block.tool.toolName) &&
+              data.stream === "stdout"
+                ? {
+                    ...block.tool.widget,
+                    document: {
+                      ...block.tool.widget.document,
+                      html: outputSegments
+                        .filter((segment) => segment.stream === "stdout")
+                        .map((segment) => segment.text)
+                        .join(""),
+                    },
+                  }
+                : block.tool.widget),
           }),
         },
       }
@@ -550,7 +614,7 @@ export function applyStreamEventToBlocks(
             arguments: {},
             detectedAtMs: startedAtMs,
             startedAtMs,
-            output: data.text,
+            output: appendOutputTail("", data.text),
             outputSegments: [{ stream: data.stream, text: data.text }],
             completed: false,
             widget: mapStreamingWidget(data.widget),

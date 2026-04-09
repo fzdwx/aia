@@ -22,6 +22,24 @@
 - `2026-03-18 Session 61` 到 `Session 72` 记录的是 channel 从过渡 webhook / 旧配置语义一路收口到 SQLite + 长连接运行态的过程；越早的条目越可能带有中间形态描述。
 - `2026-03-19 Session 79` 到 `Session 80` 记录的是一度切到 `markstream-react` 的尝试，但这条路线后来已在 `2026-03-23 Session 106` 回退；当前 Markdown 主路径请以后者与 `docs/status.md` 为准。
 
+## 2026-04-08 Session 113
+
+**Diagnosis**：按 `docs/self.md` 的 wake 流程先做了仓库体检：`cargo check --workspace` 通过，但 `cargo test -p agent-server` 暴露出 `responses_http_502_writes_failed_trace_record` 失败。顺着 `agent-server -> openai-adapter` 错误链路排查后确认，问题不在 trace 记录本身，而是在 provider streaming 自动重试的末尾：当前实现如果前几次请求拿到了带 `502`/response body 的真实 HTTP 错误，但后一次重试返回的是缺少 status/body 的泛化错误，最终会直接把最后一次泛化错误返回给上层，导致 `agent-server` 看到的是“重试次数已耗尽”式信息，而不是带 `502` 的真实上游失败上下文。
+**Decision**：不取消现有 provider-backed 自动重试，也不改 `agent-server` trace 记录策略；只在 `crates/openai-adapter` 的流式重试收口点保留“信息更丰富的最后一次 HTTP 错误”，让最终返回错误优先携带 status code / response body。这样既保留自动重试收益，又避免失败后的诊断信息被重试包装吞掉。
+**Changes**：
+- `crates/openai-adapter/src/streaming.rs`：新增“更丰富错误优先”逻辑；重试过程中若已经出现过带 `status_code` 或 `response_body` 的错误，最终失败时会优先返回这类真实 HTTP 错误上下文，而不是被后续泛化错误覆盖。
+- `crates/openai-adapter/tests/lib/mod.rs`：新增 `responses_streaming_retry_preserves_last_http_error_context` 回归，锁住“连续 502 重试后仍保留 502 与响应体”的行为。
+- `docs/status.md`、`docs/evolution-log.md`：同步记录本轮 provider streaming 失败诊断信息收口。
+**Verification**：`cargo test -p openai-adapter responses_streaming_retry_preserves_last_http_error_context`；`cargo test -p agent-server responses_http_502_writes_failed_trace_record`。
+**Commit**：未提交。
+**Next direction**：继续按 `docs/todo.md` 的主线回到 `apps/agent-server/src/session_manager/turn_execution.rs`，优先收口 runtime ownership / return-path；这轮 502 错误链路收住后，后续排查 provider / trace / retry 相关问题时会更稳。
+
+**Update**：同轮继续沿用户刚指出的 `tool_output_delta` 内存问题往下收。顺着 `apps/agent-server -> apps/web` 链路排查后确认，主要放大点不在 Rust 侧，而在前端流式投影：`apps/web/src/stores/chat-sse-projection.ts` 会在每个 `tool_output_delta` 上重新拼整份 `output`，同 stream segment 合并时也会持续复制越来越大的 `segment.text`；`ShellOutputBody` 的滚动跟随触发器还会在每次更新时把所有 segments 全量 `map().join()` 一遍。长 shell 输出或大 widget HTML 流式场景下，这会把字符串复制复杂度推到接近平方级，导致页面内存和 GC 压力暴增。
+**Update**：本轮把修复控制在 Web streaming path 内，不改后端协议：`apps/web/src/stores/chat-sse-projection.ts` 现在为流式工具输出引入 64KB 尾部窗口，`output` 与单条合并后的 `outputSegments` 都只保留最近尾部；widget preview 优先使用显式 widget payload / details，不再依赖完整 `output` 常驻内存；同时 `apps/web/src/features/chat/tool-rendering/renderers/shell-output-body.tsx` 把滚动跟随触发器改成只依赖 segment 数量和最后一段，而不是每次全量扫描所有 segments。对应补了“裁剪 output tail 但保留 live segments”“widget payload 优先于截断 output”“恢复后的 widget segment 继续合并”测试。
+**Verification**：`cd apps/web && ./node_modules/.bin/vp test --run src/stores/chat-sse-projection.test.ts`；`cd apps/web && ./node_modules/.bin/tsc --noEmit`。
+**Update**：同轮继续把 `tool_output_delta` 的降压往 SSE 接入层前推一步：`apps/web/src/lib/api.ts` 现在会像 `thinking_delta/text_delta` 一样，在约一帧内合并相邻且同 `session_id/turn_id/invocation_id/stream` 的 `tool_output_delta`，再统一派发给 store；避免长 shell 输出把 Zustand/React 以 token 级频率反复唤醒。`apps/web/src/lib/api.test.ts` 也新增了对应的合帧回归测试。
+**Verification**：`cd apps/web && ./node_modules/.bin/vp test --run src/lib/api.test.ts src/stores/chat-sse-projection.test.ts`；`cd apps/web && ./node_modules/.bin/tsc --noEmit`；`just web-test`；`just web-typecheck`。
+
 ## 2026-04-02 Session 112
 
 **Diagnosis**：用户反馈 Web 前端在流式渲染 Markdown 时内存占用偏大，尤其是超长 `thinking` 内容或生成出很多 text block 的场景。顺着 `apps/web` 的链路排查后确认，热点不只是 `streamdown` 本身，而是前端把每个 `thinking_delta` / `text_delta` 都立即投影到 store 并触发整棵流式消息重渲染；同时 `StreamingView` 中所有文本组都会继续以 `streaming` 模式渲染，导致已经稳定的旧块也跟着反复参与流式 Markdown 解析。

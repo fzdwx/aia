@@ -463,66 +463,135 @@ export async function computeDiff(
 
 const STREAM_EVENT_FLUSH_DELAY_MS = 16
 
+type BufferedStreamDelta = Extract<SseEvent, { type: "stream" }>['data']
+
+function canMergeBufferedStreamDelta(
+  pending: BufferedStreamDelta,
+  incoming: BufferedStreamDelta
+): boolean {
+  if (
+    pending.session_id !== incoming.session_id ||
+    pending.turn_id !== incoming.turn_id ||
+    pending.kind !== incoming.kind
+  ) {
+    return false
+  }
+
+  if (pending.kind === "text_delta" && incoming.kind === "text_delta") {
+    return true
+  }
+
+  if (
+    pending.kind === "thinking_delta" &&
+    incoming.kind === "thinking_delta"
+  ) {
+    return true
+  }
+
+  if (
+    pending.kind === "tool_output_delta" &&
+    incoming.kind === "tool_output_delta"
+  ) {
+    return (
+      pending.invocation_id === incoming.invocation_id &&
+      pending.stream === incoming.stream
+    )
+  }
+
+  return false
+}
+
+function mergeBufferedStreamDelta(
+  pending: BufferedStreamDelta,
+  incoming: BufferedStreamDelta
+): BufferedStreamDelta {
+  if (pending.kind === "text_delta" && incoming.kind === "text_delta") {
+    return {
+      ...pending,
+      text: pending.text + incoming.text,
+    }
+  }
+
+  if (
+    pending.kind === "thinking_delta" &&
+    incoming.kind === "thinking_delta"
+  ) {
+    return {
+      ...pending,
+      text: pending.text + incoming.text,
+    }
+  }
+
+  if (
+    pending.kind === "tool_output_delta" &&
+    incoming.kind === "tool_output_delta"
+  ) {
+    return {
+      ...pending,
+      text: pending.text + incoming.text,
+      widget: incoming.widget ?? pending.widget,
+    }
+  }
+
+  return incoming
+}
+
 /**
  * Connect to the global SSE stream. Returns a cleanup function.
  */
 export function connectEvents(onEvent: (event: SseEvent) => void): () => void {
   const es = new EventSource("/api/events")
-  let pendingTextDelta: Extract<SseEvent, { type: "stream" }>["data"] | null =
-    null
+  let pendingStreamDelta: BufferedStreamDelta | null = null
   let streamFlushTimer: ReturnType<typeof globalThis.setTimeout> | null = null
 
-  function flushPendingTextDelta() {
-    if (!pendingTextDelta) return
+  function flushPendingStreamDelta() {
+    if (!pendingStreamDelta) return
     onEvent({
       type: "stream",
-      data: pendingTextDelta,
+      data: pendingStreamDelta,
     })
-    pendingTextDelta = null
+    pendingStreamDelta = null
   }
 
-  function schedulePendingTextDeltaFlush() {
+  function schedulePendingStreamDeltaFlush() {
     if (streamFlushTimer != null) return
     streamFlushTimer = globalThis.setTimeout(() => {
       streamFlushTimer = null
-      flushPendingTextDelta()
+      flushPendingStreamDelta()
     }, STREAM_EVENT_FLUSH_DELAY_MS)
   }
 
-  function clearPendingTextDeltaFlush() {
+  function clearPendingStreamDeltaFlush() {
     if (streamFlushTimer == null) return
     globalThis.clearTimeout(streamFlushTimer)
     streamFlushTimer = null
   }
 
-  function emitStreamEvent(
-    data: Extract<SseEvent, { type: "stream" }>["data"]
-  ) {
-    if (data.kind !== "text_delta" && data.kind !== "thinking_delta") {
-      clearPendingTextDeltaFlush()
-      flushPendingTextDelta()
+  function emitStreamEvent(data: BufferedStreamDelta) {
+    if (
+      data.kind !== "text_delta" &&
+      data.kind !== "thinking_delta" &&
+      data.kind !== "tool_output_delta"
+    ) {
+      clearPendingStreamDeltaFlush()
+      flushPendingStreamDelta()
       onEvent({ type: "stream", data })
       return
     }
 
     if (
-      pendingTextDelta &&
-      pendingTextDelta.session_id === data.session_id &&
-      pendingTextDelta.turn_id === data.turn_id &&
-      pendingTextDelta.kind === data.kind
+      pendingStreamDelta &&
+      canMergeBufferedStreamDelta(pendingStreamDelta, data)
     ) {
-      pendingTextDelta = {
-        ...pendingTextDelta,
-        text: pendingTextDelta.text + data.text,
-      }
-      schedulePendingTextDeltaFlush()
+      pendingStreamDelta = mergeBufferedStreamDelta(pendingStreamDelta, data)
+      schedulePendingStreamDeltaFlush()
       return
     }
 
-    clearPendingTextDeltaFlush()
-    flushPendingTextDelta()
-    pendingTextDelta = data
-    schedulePendingTextDeltaFlush()
+    clearPendingStreamDeltaFlush()
+    flushPendingStreamDelta()
+    pendingStreamDelta = data
+    schedulePendingStreamDeltaFlush()
   }
 
   function maybeEmitEnvelopeError(raw: Record<string, unknown>): boolean {
@@ -567,8 +636,8 @@ export function connectEvents(onEvent: (event: SseEvent) => void): () => void {
           emitStreamEvent(data as Extract<SseEvent, { type: "stream" }>["data"])
           return
         }
-        clearPendingTextDeltaFlush()
-        flushPendingTextDelta()
+        clearPendingStreamDeltaFlush()
+        flushPendingStreamDelta()
         onEvent({ type, data } as SseEvent)
       } catch {
         // skip malformed
@@ -603,8 +672,8 @@ export function connectEvents(onEvent: (event: SseEvent) => void): () => void {
   es.addEventListener("queue_processing", handle("queue_processing"))
 
   return () => {
-    clearPendingTextDeltaFlush()
-    flushPendingTextDelta()
+    clearPendingStreamDeltaFlush()
+    flushPendingStreamDelta()
     es.close()
   }
 }
