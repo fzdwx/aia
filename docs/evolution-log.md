@@ -40,6 +40,18 @@
 **Update**：同轮继续把 `tool_output_delta` 的降压往 SSE 接入层前推一步：`apps/web/src/lib/api.ts` 现在会像 `thinking_delta/text_delta` 一样，在约一帧内合并相邻且同 `session_id/turn_id/invocation_id/stream` 的 `tool_output_delta`，再统一派发给 store；避免长 shell 输出把 Zustand/React 以 token 级频率反复唤醒。`apps/web/src/lib/api.test.ts` 也新增了对应的合帧回归测试。
 **Verification**：`cd apps/web && ./node_modules/.bin/vp test --run src/lib/api.test.ts src/stores/chat-sse-projection.test.ts`；`cd apps/web && ./node_modules/.bin/tsc --noEmit`；`just web-test`；`just web-typecheck`。
 
+## 2026-04-08 Session 114
+
+**Diagnosis**：继续按 `docs/self.md` 自驱巡检后，回到 `docs/todo.md` 明确挂着的 `apps/agent-server` runtime ownership / return-path 热点。复看 `apps/agent-server/src/session_manager/mod.rs` 的 `handle_runtime_return(...)` 时发现一个实际可靠性漏洞：当上一个 turn 返回后存在内存 message queue，当前实现会先把 `slot.message_queue.drain(..)` 清空并追加 `message_dequeued` 事件，然后才 `try_send(SessionCommand::SubmitQueuedMessages { ... })` 发起下一轮。如果这个 `try_send` 因 command receiver 已关闭、瞬时不可用等原因失败，消息已经从队列里丢掉，`queue_processing` 还可能保持为 `true`，后续普通消息入口也会被错误地当成“仍在处理队列”。
+**Decision**：不改 message queue 的整体语义，也不扩成新的持久化机制；只把 `handle_runtime_return(...)` 的顺序收口到更安全的状态：先把 queued content 作为只读快照准备好，`SubmitQueuedMessages` 成功派发后再真正 drain 队列并追加 `message_dequeued` 事件；若 dispatch 失败，则保留原队列并复位 `queue_processing`。这样不改变成功路径，但能避免失败路径静默丢消息。
+**Changes**：
+- `apps/agent-server/src/session_manager/mod.rs`：`handle_runtime_return(...)` 现在只有在 `SubmitQueuedMessages` 成功入队后，才会真正 drain `slot.message_queue` 并写入 `message_dequeued`；失败时保留队列并复位 `queue_processing`，同时广播显式错误。
+- `apps/agent-server/tests/session_manager/mod.rs`：新增 `handle_runtime_return_keeps_queue_when_dispatch_send_fails` 回归，锁住“调度失败不丢队列、不残留 processing 标志”的行为。
+- `docs/status.md`、`docs/evolution-log.md`：同步记录本轮 return-path 收口。
+**Verification**：`cargo test -p agent-server handle_runtime_return_keeps_queue_when_dispatch_send_fails -- --nocapture`；`cargo test -p agent-server`。
+**Commit**：未提交。
+**Next direction**：继续沿 `handle_runtime_return(...)` / `turn_execution.rs` 收口，把“runtime 返回后的同步、刷盘、queue 接续、自动压缩触发”拆成更清晰的局部 helper，逐步压低 `apps/agent-server` app 壳复杂度。
+
 ## 2026-04-02 Session 112
 
 **Diagnosis**：用户反馈 Web 前端在流式渲染 Markdown 时内存占用偏大，尤其是超长 `thinking` 内容或生成出很多 text block 的场景。顺着 `apps/web` 的链路排查后确认，热点不只是 `streamdown` 本身，而是前端把每个 `thinking_delta` / `text_delta` 都立即投影到 store 并触发整棵流式消息重渲染；同时 `StreamingView` 中所有文本组都会继续以 `streaming` 模式渲染，导致已经稳定的旧块也跟着反复参与流式 Markdown 解析。

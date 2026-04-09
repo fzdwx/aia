@@ -65,6 +65,7 @@
 - provider streaming 自动重试在最终失败时会保留最后一次真实 HTTP 错误上下文，不再把 `502` 等上游状态码覆盖成泛化的“重试次数已耗尽”
 - Web 端 `tool_output_delta` 的流式投影现已对 `output` 与单段 `outputSegments` 做尾部窗口裁剪，并避免滚动跟随逻辑在每个 delta 上全量拼接所有 segments，降低长 shell / 大 widget HTML 输出场景下的前端内存与 GC 压力
 - Web SSE 接入层现已把相邻同 `session/turn/invocation/stream` 的 `tool_output_delta` 按帧合并后再派发，进一步降低长工具输出场景下的 store 更新频率与 React 重渲染压力
+- `apps/agent-server` 的 runtime return-path 现已避免 queued message 在二次 `SubmitQueuedMessages` 调度失败时被提前 `drain` 丢失；失败时会保留队列并复位 `queue_processing`
 
 ### 5. Session 能力
 

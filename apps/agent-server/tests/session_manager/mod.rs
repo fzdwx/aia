@@ -854,6 +854,40 @@ fn handle_runtime_return_flushes_pending_widget_entries_into_tape() {
 }
 
 #[test]
+fn handle_runtime_return_keeps_queue_when_dispatch_send_fails() {
+    let root = temp_session_dir("queue-dispatch-failure");
+    let config = sample_manager_config(&root);
+    let (command_tx, dropped_command_rx) = tokio::sync::mpsc::channel(1);
+    drop(dropped_command_rx);
+    let (_dummy_command_tx, command_rx) = tokio::sync::mpsc::channel(1);
+    let (return_tx, return_rx) = tokio::sync::mpsc::channel(8);
+    let mut manager = SessionManagerLoop::new(config, command_tx, command_rx, return_tx, return_rx);
+
+    let mut slot = SessionSlotFactory::new(&manager.config)
+        .create("session-1")
+        .expect("session slot should build");
+    slot.message_queue.push(super::QueuedMessage {
+        id: "msg-1".into(),
+        content: "queued follow-up".into(),
+        queued_at_ms: 1,
+    });
+    let (runtime, subscriber, _running_turn) =
+        slot.begin_turn().expect("idle slot should start turn");
+
+    manager.slots.insert("session-1".into(), slot);
+    manager.handle_runtime_return(RuntimeReturn {
+        session_id: "session-1".into(),
+        runtime,
+        subscriber,
+    });
+
+    let slot = manager.slots.get("session-1").expect("session slot should remain");
+    assert_eq!(slot.message_queue.len(), 1);
+    assert_eq!(slot.message_queue[0].content, "queued follow-up");
+    assert!(!slot.queue_processing);
+}
+
+#[test]
 fn spawned_turn_worker_completes_bootstrap_turn() {
     let temp_root = temp_session_dir("turn-worker");
     let cleanup_root = temp_root.clone();

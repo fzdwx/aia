@@ -397,22 +397,7 @@ impl SessionManagerLoop {
                     // 设置队列处理标志，防止新消息直接开始 turn
                     slot.queue_processing = true;
 
-                    let messages: Vec<QueuedMessage> = slot.message_queue.drain(..).collect();
-
-                    // 通过 runtime 追加 dequeued 事件到 tape（会有正确的 ID 分配）
-                    if let Some(runtime) = slot.runtime_mut() {
-                        for msg in &messages {
-                            let entry = TapeEntry::event(
-                                "message_dequeued",
-                                Some(serde_json::json!({
-                                    "id": msg.id
-                                })),
-                            );
-                            let _ = runtime.append_tape_entry(entry);
-                        }
-                    }
-
-                    Some(messages.iter().map(|m| m.content.clone()).collect::<Vec<String>>())
+                    Some(slot.message_queue.iter().map(|m| m.content.clone()).collect::<Vec<String>>())
                 } else {
                     None
                 };
@@ -433,18 +418,81 @@ impl SessionManagerLoop {
 
         // 处理队列消息
         if let Some(contents) = queued_messages {
-            // 广播队列处理事件
-            let _ = self.config.broadcast_tx.send(SsePayload::QueueProcessing {
-                session_id: ret.session_id.clone(),
-                count: contents.len() as u32,
-            });
+            let session_id = ret.session_id;
+            let queue_count = contents.len() as u32;
 
             // 通过 command_tx 发送新命令来开始 turn
-            let _ = self.command_tx.try_send(SessionCommand::SubmitQueuedMessages {
-                session_id: ret.session_id,
+            match self.command_tx.try_send(SessionCommand::SubmitQueuedMessages {
+                session_id: session_id.clone(),
                 messages: contents,
                 reply: drop_reply_channel(),
+            }) {
+                Ok(()) => {
+                    self.finalize_queued_messages_dispatch(&session_id);
+                    let _ = self.config.broadcast_tx.send(SsePayload::QueueProcessing {
+                        session_id,
+                        count: queue_count,
+                    });
+                }
+                Err(error) => {
+                    self.restore_failed_queue_dispatch(&session_id);
+                    let _ = self.config.broadcast_tx.send(SsePayload::Error {
+                        session_id,
+                        turn_id: None,
+                        message: format!("queued turn dispatch failed: {error}"),
+                    });
+                }
+            }
+        }
+    }
+
+    fn finalize_queued_messages_dispatch(&mut self, session_id: &str) {
+        let Some(slot) = self.slots.get_mut(session_id) else {
+            return;
+        };
+
+        if slot.runtime().is_none() {
+            slot.queue_processing = false;
+            let _ = self.config.broadcast_tx.send(SsePayload::Error {
+                session_id: session_id.to_string(),
+                turn_id: None,
+                message: "queued turn dispatch lost idle runtime handle".into(),
             });
+            return;
+        }
+
+        let messages = std::mem::take(&mut slot.message_queue);
+        let Some(runtime) = slot.runtime_mut() else {
+            slot.message_queue = messages;
+            slot.queue_processing = false;
+            let _ = self.config.broadcast_tx.send(SsePayload::Error {
+                session_id: session_id.to_string(),
+                turn_id: None,
+                message: "queued turn dispatch lost idle runtime handle".into(),
+            });
+            return;
+        };
+
+        for msg in &messages {
+            let entry = TapeEntry::event(
+                "message_dequeued",
+                Some(serde_json::json!({
+                    "id": msg.id
+                })),
+            );
+            if let Err(error) = runtime.append_tape_entry(entry) {
+                let _ = self.config.broadcast_tx.send(SsePayload::Error {
+                    session_id: session_id.to_string(),
+                    turn_id: None,
+                    message: format!("session append failed: {error}"),
+                });
+            }
+        }
+    }
+
+    fn restore_failed_queue_dispatch(&mut self, session_id: &str) {
+        if let Some(slot) = self.slots.get_mut(session_id) {
+            slot.queue_processing = false;
         }
     }
 
