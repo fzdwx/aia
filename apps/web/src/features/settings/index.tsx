@@ -22,11 +22,8 @@ import { NEW_PROVIDER_SETTINGS_KEY } from "@/stores/chat-store"
 import { useProviderRegistryStore } from "@/stores/provider-registry-store"
 import { useWorkbenchStore } from "@/stores/workbench-store"
 
-const SETTINGS_META_LABEL_FOREGROUND = "workspace-section-label text-foreground"
-const SETTINGS_PANEL_HELP_TEXT = "workspace-panel-copy"
 const SETTINGS_BADGE =
   "text-ui-xs rounded-sm border border-border/30 px-1.5 py-0.5 font-medium"
-const SETTINGS_INFO_TEXT = "workspace-meta"
 const SETTINGS_MONO_COUNT = "workspace-code text-muted-foreground"
 
 function nextModelRowKey(): string {
@@ -109,6 +106,7 @@ export function SettingsPanel() {
   const [models, setModels] = useState<ModelFormRow[]>([emptyModelRow()])
   const [itemQuery, setItemQuery] = useState("")
   const [submitting, setSubmitting] = useState(false)
+  const [dirty, setDirty] = useState(false)
   const settingsScopeId = useId()
 
   const searchInputId = `${settingsScopeId}-search`
@@ -116,7 +114,6 @@ export function SettingsPanel() {
   const providerProtocolInputId = `${settingsScopeId}-provider-protocol`
   const providerProtocolLabelId = `${providerProtocolInputId}-label`
   const providerApiKeyInputId = `${settingsScopeId}-provider-api-key`
-  const providerApiKeyHintId = `${providerApiKeyInputId}-hint`
   const providerBaseUrlInputId = `${settingsScopeId}-provider-base-url`
 
   useEffect(() => {
@@ -126,6 +123,7 @@ export function SettingsPanel() {
       setApiKey("")
       setBaseUrl("https://api.openai.com/v1")
       setModels([emptyModelRow()])
+      setDirty(false)
       return
     }
 
@@ -143,6 +141,7 @@ export function SettingsPanel() {
         supports_reasoning: model.supports_reasoning,
       }))
     )
+    setDirty(false)
   }, [selectedProvider])
 
   useEffect(() => {
@@ -159,10 +158,12 @@ export function SettingsPanel() {
         rowIndex === index ? { ...row, ...patch } : row
       )
     )
+    setDirty(true)
   }
 
   function removeModelRow(index: number) {
     setModels((prev) => prev.filter((_, rowIndex) => rowIndex !== index))
+    setDirty(true)
   }
 
   function buildModels(): ModelConfig[] {
@@ -190,7 +191,25 @@ export function SettingsPanel() {
   const hasValidModel = models.some((model) => model.id.trim())
 
   function handleKindChange(value: string | null) {
-    if (value) setKind(value)
+    if (value) {
+      setKind(value)
+      setDirty(true)
+    }
+  }
+
+  function handleNameChange(value: string) {
+    setName(value)
+    setDirty(true)
+  }
+
+  function handleBaseUrlChange(value: string) {
+    setBaseUrl(value)
+    setDirty(true)
+  }
+
+  function handleApiKeyChange(value: string) {
+    setApiKey(value)
+    setDirty(true)
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -215,6 +234,7 @@ export function SettingsPanel() {
           selectedProvider.name,
           body as Parameters<typeof storeUpdateProvider>[1]
         )
+        setDirty(false)
         return
       }
 
@@ -227,6 +247,7 @@ export function SettingsPanel() {
         base_url: baseUrl.trim(),
       })
       selectProviderName(providerName)
+      setDirty(false)
     } finally {
       setSubmitting(false)
     }
@@ -272,10 +293,6 @@ export function SettingsPanel() {
     [normalizedItemQuery, supportedChannels]
   )
 
-  const workspaceDescription = isProvidersSection
-    ? "Manage provider connections and model catalogs"
-    : "Manage channel transport profiles"
-
   const providerSubmitDisabled =
     submitting ||
     (!selectedProvider && !name.trim()) ||
@@ -286,28 +303,23 @@ export function SettingsPanel() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="flex items-start justify-between gap-3 border-b border-border/30 px-4 py-2.5">
-        <div className="flex min-w-0 items-start gap-3">
+      <div className="flex items-center justify-between gap-3 border-b border-border/30 px-4 py-2.5">
+        <div className="flex min-w-0 items-center gap-3">
           <button
             type="button"
             onClick={() => setView("chat")}
-            className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+            className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
             aria-label="Back to chat"
           >
             <ArrowLeft className="size-3" />
           </button>
-          <div className="min-w-0">
-            <h1 className="text-ui-xs mt-0.5 font-semibold tracking-tight text-foreground">
-              Settings
-            </h1>
-            <p className="workspace-panel-copy mt-1 text-muted-foreground">
-              {workspaceDescription}
-            </p>
-          </div>
+          <h1 className="workspace-section-label text-foreground">
+            Settings
+          </h1>
         </div>
 
-        <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
-          <div className="relative min-w-0 sm:w-[260px]">
+        <div className="flex shrink-0 items-center gap-2">
+          <div className="relative min-w-0 sm:w-[200px]">
             <label htmlFor={searchInputId} className="sr-only">
               {isProvidersSection ? "Search providers" : "Search channels"}
             </label>
@@ -318,24 +330,12 @@ export function SettingsPanel() {
               onChange={(event) => setItemQuery(event.target.value)}
               placeholder={
                 isProvidersSection
-                  ? "Filter providers by name or protocol"
-                  : "Filter channels by label or transport"
+                  ? "Filter providers"
+                  : "Filter channels"
               }
               className="h-8 pl-9"
             />
           </div>
-
-          {isProvidersSection ? (
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => selectProviderName(NEW_PROVIDER_SETTINGS_KEY)}
-              className="text-ui-xs h-8 bg-foreground px-3 tracking-[0.04em] text-background normal-case hover:bg-foreground/92"
-            >
-              <Plus className="size-3.5" />
-              New provider
-            </Button>
-          ) : null}
         </div>
       </div>
 
@@ -345,16 +345,9 @@ export function SettingsPanel() {
             <div className="flex min-h-0 flex-col overflow-hidden">
               <div className="shrink-0 border-b border-border/25 px-3 py-2.5">
                 <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <p className={SETTINGS_META_LABEL_FOREGROUND}>
-                      {isProvidersSection ? "Providers" : "Channel catalog"}
-                    </p>
-                    <p className={`mt-0.5 ${SETTINGS_PANEL_HELP_TEXT}`}>
-                      {isProvidersSection
-                        ? "Review hosts, protocols, and models at a glance."
-                        : "Compare transport status and setup scope at a glance."}
-                    </p>
-                  </div>
+                  <p className="workspace-section-label text-foreground">
+                    {isProvidersSection ? "Providers" : "Channels"}
+                  </p>
                   <span className={SETTINGS_MONO_COUNT}>
                     {isProvidersSection
                       ? filteredProviders.length
@@ -364,69 +357,73 @@ export function SettingsPanel() {
               </div>
 
               <div className="min-h-0 flex-1 overflow-y-auto p-2.5">
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   {isProvidersSection ? (
-                    filteredProviders.length === 0 ? (
-                      <p className="workspace-panel-copy px-3 py-4 text-muted-foreground">
-                        {providerList.length === 0 && !normalizedItemQuery
-                          ? "No providers yet. Create one to get started."
-                          : "No matches found. Try filtering by name or protocol."}
-                      </p>
-                    ) : (
-                      filteredProviders.map((providerItem) => {
-                        const isActive =
-                          providerItem.name === selectedProviderName &&
-                          selectedProviderName !== NEW_PROVIDER_SETTINGS_KEY
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => selectProviderName(NEW_PROVIDER_SETTINGS_KEY)}
+                        className={cn(
+                          "flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left transition-colors",
+                          selectedProviderName === NEW_PROVIDER_SETTINGS_KEY
+                            ? "bg-muted/65 text-foreground"
+                            : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+                        )}
+                        aria-pressed={selectedProviderName === NEW_PROVIDER_SETTINGS_KEY}
+                      >
+                        <Plus className="size-3.5 shrink-0" />
+                        <span className="text-ui-sm font-medium text-foreground">New provider</span>
+                      </button>
+                      {filteredProviders.length === 0 ? (
+                        <p className="workspace-panel-copy px-3 py-4 text-muted-foreground">
+                          {providerList.length === 0 && !normalizedItemQuery
+                            ? "No providers yet"
+                            : "No matches"}
+                        </p>
+                      ) : (
+                        filteredProviders.map((providerItem) => {
+                          const isActive =
+                            providerItem.name === selectedProviderName &&
+                            selectedProviderName !== NEW_PROVIDER_SETTINGS_KEY
 
-                        return (
-                          <button
-                            key={providerItem.name}
-                            type="button"
-                            onClick={() =>
-                              selectProviderName(providerItem.name)
-                            }
-                            className={cn(
-                              "flex w-full flex-col gap-1.5 rounded-lg border px-3 py-3 text-left transition-colors",
-                              isActive
-                                ? "border-border/55 bg-muted/65 text-foreground"
-                                : "border-transparent text-muted-foreground hover:border-border/30 hover:bg-muted/45 hover:text-foreground"
-                            )}
-                            aria-pressed={isActive}
-                          >
-                            <span className="flex items-start justify-between gap-2">
-                              <span className="min-w-0">
-                                <span className="text-ui-sm block truncate font-medium tracking-[0.01em] text-foreground">
+                          return (
+                            <button
+                              key={providerItem.name}
+                              type="button"
+                              onClick={() =>
+                                selectProviderName(providerItem.name)
+                              }
+                              className={cn(
+                                "flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left transition-colors",
+                                isActive
+                                  ? "bg-muted/65 text-foreground"
+                                  : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+                              )}
+                              aria-pressed={isActive}
+                            >
+                              <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" />
+                              <span className="min-w-0 flex-1">
+                                <span className="text-ui-sm block truncate font-medium text-foreground">
                                   {providerItem.name}
                                 </span>
-                                <span
-                                  className={`mt-0.5 block ${SETTINGS_INFO_TEXT}`}
-                                >
-                                  {providerHost(providerItem.base_url)}
+                                <span className="text-ui-xs mt-0.5 block text-muted-foreground">
+                                  {providerItem.models.length} model{providerItem.models.length === 1 ? "" : "s"}
                                 </span>
                               </span>
-                            </span>
-                            <span className="text-ui-xs flex flex-wrap items-center gap-1.5 text-muted-foreground/85">
-                              <span className="rounded-sm border border-border/30 px-1.5 py-0.5">
-                                {providerProtocolLabel(providerItem.kind)}
-                              </span>
-                              <span className="rounded-sm border border-border/30 px-1.5 py-0.5 tabular-nums">
-                                {providerItem.models.length} model
-                                {providerItem.models.length === 1 ? "" : "s"}
-                              </span>
-                            </span>
-                          </button>
-                        )
-                      })
-                    )
+                            </button>
+                          )
+                        })
+                      )}
+                    </>
                   ) : channelsLoading && supportedChannels.length === 0 ? (
                     <p className="workspace-panel-copy px-3 py-4 text-muted-foreground">
-                      Loading channel transports...
+                      Loading...
                     </p>
                   ) : filteredChannels.length === 0 ? (
                     <p className="workspace-panel-copy px-3 py-4 text-muted-foreground">
                       {supportedChannels.length === 0 && !normalizedItemQuery
-                        ? "No configurable channels are available yet."
-                        : "No matches found. Try filtering by transport or label."}
+                        ? "No channels available"
+                        : "No matches"}
                     </p>
                   ) : (
                     filteredChannels.map((channel) => {
@@ -435,7 +432,6 @@ export function SettingsPanel() {
                         configuredChannels,
                         channel.transport
                       )
-                      const fieldCount = channelConfigFields(channel)
 
                       return (
                         <button
@@ -443,45 +439,29 @@ export function SettingsPanel() {
                           type="button"
                           onClick={() => selectTransport(channel.transport)}
                           className={cn(
-                            "flex w-full flex-col gap-1.5 rounded-lg border px-3 py-3 text-left transition-colors",
+                            "flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left transition-colors",
                             isActive
-                              ? "border-border/55 bg-muted/65 text-foreground"
-                              : "border-transparent text-muted-foreground hover:border-border/30 hover:bg-muted/45 hover:text-foreground"
+                              ? "bg-muted/65 text-foreground"
+                              : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
                           )}
                           aria-pressed={isActive}
                         >
-                          <span className="flex items-start justify-between gap-2">
-                            <span className="min-w-0">
-                              <span className="text-ui-sm block truncate font-medium tracking-[0.01em] text-foreground">
-                                {channel.label}
-                              </span>
-                              <span className="workspace-meta mt-0.5 block truncate text-muted-foreground/90">
-                                {channel.transport}
-                              </span>
+                          <span
+                            className={cn(
+                              "size-1.5 shrink-0 rounded-full",
+                              configured?.enabled
+                                ? "bg-emerald-500"
+                                : configured
+                                  ? "bg-amber-500"
+                                  : "bg-muted-foreground/40"
+                            )}
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="text-ui-sm block truncate font-medium text-foreground">
+                              {channel.label}
                             </span>
-                            <span
-                              className={cn(
-                                SETTINGS_BADGE,
-                                configured?.enabled
-                                  ? "border-border/40 bg-muted/55 text-foreground/80"
-                                  : configured
-                                    ? "border-amber-500/40 bg-amber-500/10 text-amber-600"
-                                    : "text-muted-foreground"
-                              )}
-                            >
-                              {configured
-                                ? configured.enabled
-                                  ? "running"
-                                  : "paused"
-                                : "setup"}
-                            </span>
-                          </span>
-                          <span className="text-ui-xs flex flex-wrap items-center gap-1.5 text-muted-foreground/85">
-                            <span className="rounded-sm border border-border/30 px-1.5 py-0.5 tabular-nums">
-                              {fieldCount} field{fieldCount === 1 ? "" : "s"}
-                            </span>
-                            <span className="rounded-sm border border-border/30 px-1.5 py-0.5">
-                              {configured ? configured.id : "no saved profile"}
+                            <span className="text-ui-xs mt-0.5 block text-muted-foreground">
+                              {configured?.enabled ? "running" : configured ? "paused" : "setup"}
                             </span>
                           </span>
                         </button>
@@ -492,47 +472,47 @@ export function SettingsPanel() {
               </div>
             </div>
 
-            <div className="flex min-h-0 flex-col overflow-hidden border-l border-border/25">
+            <div className="flex min-h-0 flex-col overflow-hidden">
               {isProvidersSection ? (
                 <>
                   <div className="shrink-0 border-b border-border/25 px-3 py-2.5">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h2 className="text-ui-xs truncate font-semibold text-foreground">
-                            {selectedProvider
-                              ? selectedProvider.name
-                              : "New provider"}
-                          </h2>
-                          <Badge variant="outline" className="text-ui-xs">
-                            {selectedProvider
-                              ? providerProtocolLabel(selectedProvider.kind)
-                              : providerProtocolLabel(kind)}
-                          </Badge>
-                        </div>
-                        <p className="workspace-panel-copy mt-1 text-muted-foreground">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        {selectedProvider ? (
+                          <span className="size-1.5 rounded-full bg-emerald-500" />
+                        ) : null}
+                        <h2 className="text-ui-sm truncate font-semibold text-foreground">
                           {selectedProvider
-                            ? `Host ${providerHost(selectedProvider.base_url)} · ${selectedProvider.models.length} models registered.`
-                            : "Save these settings to add a provider and make it available to new sessions."}
-                        </p>
+                            ? selectedProvider.name
+                            : "New provider"}
+                        </h2>
+                        <Badge variant="outline" className="text-ui-xs">
+                          {selectedProvider
+                            ? providerProtocolLabel(selectedProvider.kind)
+                            : providerProtocolLabel(kind)}
+                        </Badge>
+                        {selectedProvider ? (
+                          <span className="text-ui-xs text-muted-foreground">
+                            {selectedProvider.models.length} model{selectedProvider.models.length === 1 ? "" : "s"}
+                          </span>
+                        ) : null}
                       </div>
-
                       {selectedProvider ? (
                         <Button
                           type="button"
                           variant="ghost"
                           size="sm"
                           onClick={() => void handleDeleteProvider()}
-                          className="h-9 shrink-0 px-3 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          className="h-7 shrink-0 px-2 text-ui-xs text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                         >
-                          <Trash2 className="size-3.5" />
-                          Delete provider
+                          <Trash2 className="size-3" />
                         </Button>
                       ) : null}
                     </div>
                   </div>
 
                   <form
+                    id="provider-form"
                     onSubmit={handleSubmit}
                     className="flex min-h-0 flex-1 flex-col overflow-hidden"
                   >
@@ -544,7 +524,7 @@ export function SettingsPanel() {
                         providerProtocolInputId={providerProtocolInputId}
                         providerProtocolLabelId={providerProtocolLabelId}
                         selectedProviderLocked={selectedProvider != null}
-                        onNameChange={setName}
+                        onNameChange={handleNameChange}
                         onKindChange={handleKindChange}
                       />
 
@@ -552,43 +532,69 @@ export function SettingsPanel() {
                         selectedProvider={selectedProvider != null}
                         providerBaseUrlInputId={providerBaseUrlInputId}
                         providerApiKeyInputId={providerApiKeyInputId}
-                        providerApiKeyHintId={providerApiKeyHintId}
                         baseUrl={baseUrl}
                         apiKey={apiKey}
-                        onBaseUrlChange={setBaseUrl}
-                        onApiKeyChange={setApiKey}
+                        onBaseUrlChange={handleBaseUrlChange}
+                        onApiKeyChange={handleApiKeyChange}
                       />
 
                       <ProviderModelCatalogSection
                         modelRowsWithId={modelRowsWithId.length}
                         models={models}
                         settingsScopeId={settingsScopeId}
-                        onAddModel={() =>
+                        onAddModel={() => {
                           setModels((prev) => [emptyModelRow(), ...prev])
-                        }
+                          setDirty(true)
+                        }}
                         onUpdateModelRow={updateModelRow}
                         onRemoveModelRow={removeModelRow}
                       />
                     </div>
 
                     <div className="shrink-0 border-t border-border/20 px-3 py-2.5">
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <p className="workspace-meta text-muted-foreground">
-                          {!hasValidModel
-                            ? "Add at least one model ID before saving."
-                            : selectedProvider
-                              ? "Saving updates this provider."
-                              : "Saving creates this provider and selects it automatically."}
-                        </p>
+                      <div className="flex items-center justify-between gap-3">
+                        {dirty ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-ui-xs font-medium text-primary">Unsaved</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (selectedProvider) {
+                                  setName(selectedProvider.name)
+                                  setKind(selectedProvider.kind)
+                                  setApiKey("")
+                                  setBaseUrl(selectedProvider.base_url)
+                                  setModels(
+                                    selectedProvider.models.map((model) => ({
+                                      _key: nextModelRowKey(),
+                                      id: model.id,
+                                      display_name: model.display_name ?? "",
+                                      limit_context: model.limit?.context?.toString() ?? "",
+                                      limit_output: model.limit?.output?.toString() ?? "",
+                                      supports_reasoning: model.supports_reasoning,
+                                    }))
+                                  )
+                                } else {
+                                  setName("")
+                                  setKind("openai-responses")
+                                  setApiKey("")
+                                  setBaseUrl("https://api.openai.com/v1")
+                                  setModels([emptyModelRow()])
+                                }
+                                setDirty(false)
+                              }}
+                              className="text-ui-xs text-muted-foreground transition-colors hover:text-foreground"
+                            >
+                              Discard
+                            </button>
+                          </div>
+                        ) : <div />}
                         <Button
                           type="submit"
                           disabled={providerSubmitDisabled}
-                          className="min-h-9 min-w-[190px]"
+                          className="min-h-8 min-w-[120px]"
                         >
-                          <Plus className="size-3.5" />
-                          {selectedProvider
-                            ? "Save provider"
-                            : "Create provider"}
+                          {selectedProvider ? "Save" : "Create"}
                         </Button>
                       </div>
                     </div>
