@@ -22,6 +22,18 @@
 - `2026-03-18 Session 61` 到 `Session 72` 记录的是 channel 从过渡 webhook / 旧配置语义一路收口到 SQLite + 长连接运行态的过程；越早的条目越可能带有中间形态描述。
 - `2026-03-19 Session 79` 到 `Session 80` 记录的是一度切到 `markstream-react` 的尝试，但这条路线后来已在 `2026-03-23 Session 106` 回退；当前 Markdown 主路径请以后者与 `docs/status.md` 为准。
 
+## 2026-04-10 Session 115
+
+**Diagnosis**：按 `docs/self.md` 的 wake 流程做了仓库体检：`cargo check --workspace` 通过，但 `cargo test -p channel-feishu` 暴露出 `TurnLifecycle` 测试仍使用已更名的 `user_message` 字段（应为 `user_messages: Vec<String>`），导致编译失败。修复该字段后全量测试通过。随后巡检 `apps/agent-server/src/session_manager/turn_execution.rs` 中的 `handle_stream_event` 时发现：对每个 tool-related stream event，该函数会对 `widget_from_snapshot` 做两次完全相同的调用（一次为原始事件广播附带 widget，一次为 `WidgetHostCommand::Render` 广播），且两次遍历 snapshot 的 invocation_id 匹配逻辑也完全重复，属于无谓的冗余计算与克隆。
+**Decision**：先修编译失败，再把 `handle_stream_event` 中的两次 `widget_from_snapshot` 合并为一次，复用查得的 `(invocation_id, widget)` 元组分别服务于原始事件广播和 `WidgetHostCommand` 广播。行为不变，只是消除了重复的 snapshot 遍历和克隆。
+**Changes**：
+- `crates/channel-feishu/tests/runtime/mod.rs`：`extract_final_answer_from_turn_keeps_multiple_assistant_blocks` 测试中 `TurnLifecycle` 字段从 `user_message: "用户问题".into()` 改为 `user_messages: vec!["用户问题".into()]`。
+- `apps/agent-server/src/session_manager/turn_execution.rs`：`handle_stream_event` 中把两次 `widget_from_snapshot` 调用合并为一次，先查出 `Option<(String, UiWidget)>` 再分别消费；`pending_widget_tape_state.insert` 调整为先构造 tape entry 再 insert，避免 move 顺序问题。
+- `docs/evolution-log.md`：记录本轮编译修复与冗余消除。
+**Verification**：`cargo fmt --all`、`cargo test --workspace`（全部通过，0 failed）、`cargo check --workspace`。
+**Commit**：待提交。
+**Next direction**：继续沿 `apps/agent-server` runtime ownership / return-path 主线收口，优先把 `handle_runtime_return` 中的 pending widget tape drain 与 provider sync 应用逻辑进一步拆分，降低单函数复杂度。
+
 ## 2026-04-08 Session 113
 
 **Diagnosis**：按 `docs/self.md` 的 wake 流程先做了仓库体检：`cargo check --workspace` 通过，但 `cargo test -p agent-server` 暴露出 `responses_http_502_writes_failed_trace_record` 失败。顺着 `agent-server -> openai-adapter` 错误链路排查后确认，问题不在 trace 记录本身，而是在 provider streaming 自动重试的末尾：当前实现如果前几次请求拿到了带 `502`/response body 的真实 HTTP 错误，但后一次重试返回的是缺少 status/body 的泛化错误，最终会直接把最后一次泛化错误返回给上层，导致 `agent-server` 看到的是“重试次数已耗尽”式信息，而不是带 `502` 的真实上游失败上下文。

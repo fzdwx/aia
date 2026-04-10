@@ -113,7 +113,9 @@ pub(super) async fn run_embedded_brush(
                 .transpose()
                 .map_err(|e| CoreError::new(format!("embedded shell exited without status: {e}")))?
                 .unwrap_or(FORCED_TERMINATE_EXIT_CODE),
-            Ok(Err(join_error)) if join_error.is_cancelled() => forced_terminate_exit_code(finished),
+            Ok(Err(join_error)) if join_error.is_cancelled() => {
+                forced_terminate_exit_code(finished)
+            }
             Ok(Err(_)) | Err(_) => FORCED_TERMINATE_EXIT_CODE,
         }
     } else {

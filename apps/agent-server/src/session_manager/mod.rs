@@ -397,7 +397,12 @@ impl SessionManagerLoop {
                     // 设置队列处理标志，防止新消息直接开始 turn
                     slot.queue_processing = true;
 
-                    Some(slot.message_queue.iter().map(|m| m.content.clone()).collect::<Vec<String>>())
+                    Some(
+                        slot.message_queue
+                            .iter()
+                            .map(|m| m.content.clone())
+                            .collect::<Vec<String>>(),
+                    )
                 } else {
                     None
                 };
@@ -429,10 +434,10 @@ impl SessionManagerLoop {
             }) {
                 Ok(()) => {
                     self.finalize_queued_messages_dispatch(&session_id);
-                    let _ = self.config.broadcast_tx.send(SsePayload::QueueProcessing {
-                        session_id,
-                        count: queue_count,
-                    });
+                    let _ = self
+                        .config
+                        .broadcast_tx
+                        .send(SsePayload::QueueProcessing { session_id, count: queue_count });
                 }
                 Err(error) => {
                     self.restore_failed_queue_dispatch(&session_id);

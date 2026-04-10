@@ -329,7 +329,7 @@ fn extract_final_answer_from_turn_keeps_multiple_assistant_blocks() {
         started_at_ms: 1,
         finished_at_ms: 2,
         source_entry_ids: vec![],
-        user_message: "用户问题".into(),
+        user_messages: vec!["用户问题".into()],
         blocks: vec![
             agent_runtime::TurnBlock::Assistant { content: "第一段回复".into() },
             agent_runtime::TurnBlock::Assistant { content: "第二段回复".into() },

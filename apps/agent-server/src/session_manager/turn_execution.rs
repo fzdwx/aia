@@ -620,25 +620,9 @@ impl TurnWorker {
         }
 
         update_current_turn_from_stream(stream_snapshot, event);
-        let widget = match event {
-            StreamEvent::ToolCallDetected { invocation_id, .. }
-            | StreamEvent::ToolCallArgumentsDelta { invocation_id, .. }
-            | StreamEvent::ToolCallReady { call: agent_core::ToolCall { invocation_id, .. } }
-            | StreamEvent::ToolCallStarted { invocation_id, .. }
-            | StreamEvent::ToolOutputDelta { invocation_id, .. }
-            | StreamEvent::ToolCallCompleted { invocation_id, .. } => {
-                widget_from_snapshot(stream_snapshot, invocation_id)
-            }
-            _ => None,
-        };
-        let _ = status_broadcast.send(SsePayload::Stream {
-            session_id: stream_session_id.to_string(),
-            turn_id: stream_turn_id.to_string(),
-            event: event.clone(),
-            widget,
-        });
 
-        if let Some((invocation_id, widget)) = match event {
+        // 对 tool 相关事件：从 snapshot 查一次 widget，复用于原始事件广播和 WidgetHostCommand
+        let tool_widget: Option<(String, agent_core::UiWidget)> = match event {
             StreamEvent::ToolCallDetected { invocation_id, .. }
             | StreamEvent::ToolCallArgumentsDelta { invocation_id, .. }
             | StreamEvent::ToolCallReady { call: agent_core::ToolCall { invocation_id, .. } }
@@ -649,7 +633,19 @@ impl TurnWorker {
                     .map(|widget| (invocation_id.clone(), widget))
             }
             _ => None,
-        } {
+        };
+        let widget = tool_widget.as_ref().map(|(_, w)| w.clone());
+
+        // 广播原始 stream event，附带当前 widget 状态
+        let _ = status_broadcast.send(SsePayload::Stream {
+            session_id: stream_session_id.to_string(),
+            turn_id: stream_turn_id.to_string(),
+            event: event.clone(),
+            widget,
+        });
+
+        // 若 tool block 有 widget，额外广播 WidgetHostCommand::Render 并缓存到 pending tape
+        if let Some((invocation_id, widget)) = tool_widget {
             let command = WidgetHostCommand::Render { widget: widget.clone() };
             let _ = status_broadcast.send(SsePayload::Stream {
                 session_id: stream_session_id.to_string(),
@@ -662,11 +658,9 @@ impl TurnWorker {
             });
 
             if let Ok(mut pending) = pending_widget_tape_state.lock() {
-                pending.host_commands.insert(
-                    invocation_id.clone(),
-                    TapeEntry::widget_host_command(&invocation_id, &command)
-                        .with_run_id(stream_turn_id),
-                );
+                let tape_entry = TapeEntry::widget_host_command(&invocation_id, &command)
+                    .with_run_id(stream_turn_id);
+                pending.host_commands.insert(invocation_id, tape_entry);
                 pending_widget_tape_notify.notify_one();
             }
         }
