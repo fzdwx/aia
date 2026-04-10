@@ -332,16 +332,10 @@ impl SessionManagerLoop {
                     });
                 }
                 let pending_provider_binding = slot.take_pending_provider_binding();
-                let pending_widget_entries = if let Ok(mut pending) =
-                    slot.pending_widget_tape_state.lock()
-                {
-                    let host_entries = pending.host_commands.values().cloned().collect::<Vec<_>>();
-                    let client_entries = std::mem::take(&mut pending.client_events);
-                    pending.host_commands.clear();
-                    host_entries.into_iter().chain(client_entries).collect::<Vec<_>>()
-                } else {
-                    Vec::new()
-                };
+                // Note: TurnWorker already flushes pending widget tape entries before
+                // returning RuntimeReturn; the drain here was redundant and would
+                // duplicate entries already persisted by the worker's final flush
+                // + tape entry listener.
                 let sync = ReturnedRuntimeSync::new(
                     &ret.session_id,
                     &session_path,
@@ -355,16 +349,6 @@ impl SessionManagerLoop {
                         turn_id: None,
                         message: error.message,
                     });
-                }
-
-                for entry in pending_widget_entries {
-                    if let Err(error) = ret.runtime.append_tape_entry(entry) {
-                        let _ = self.config.broadcast_tx.send(SsePayload::Error {
-                            session_id: ret.session_id.clone(),
-                            turn_id: None,
-                            message: error.to_string(),
-                        });
-                    }
                 }
 
                 *write_lock(&slot.context_stats) = ret.runtime.context_stats();
