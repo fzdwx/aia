@@ -12,6 +12,7 @@ const EMBEDDED_SHELL_NAME: &str = "brush";
 
 const FORCED_TERMINATE_EXIT_CODE: i32 = 130;
 const ABORT_DRAIN_GRACE_PERIOD: std::time::Duration = std::time::Duration::from_millis(200);
+const ABORT_HANDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
 
 #[derive(Debug)]
 pub(super) struct EmbeddedShellExecution {
@@ -92,16 +93,38 @@ pub(super) async fn run_embedded_brush(
         }
     }
 
-    stdout_handle.await.map_err(|_| CoreError::new("stdout capture task panicked"))?;
-    stderr_handle.await.map_err(|_| CoreError::new("stderr capture task panicked"))?;
+    let was_aborted = abort.is_aborted();
 
-    let exit_code = match shell_handle.await {
-        Ok(()) => finished
-            .transpose()
-            .map_err(|e| CoreError::new(format!("embedded shell exited without status: {e}")))?
-            .unwrap_or(FORCED_TERMINATE_EXIT_CODE),
-        Err(join_error) if join_error.is_cancelled() => forced_terminate_exit_code(finished),
-        Err(_) => FORCED_TERMINATE_EXIT_CODE,
+    // When aborted, the capture readers and shell task may be stuck indefinitely
+    // because brush's run_string() is not cancellation-cooperative — it holds
+    // the pipe writers open and blocks on the child process.  Use a timeout so
+    // we don't hang forever waiting for them.
+    if was_aborted {
+        let _ = tokio::time::timeout(ABORT_HANDLE_TIMEOUT, stdout_handle).await;
+        let _ = tokio::time::timeout(ABORT_HANDLE_TIMEOUT, stderr_handle).await;
+    } else {
+        stdout_handle.await.map_err(|_| CoreError::new("stdout capture task panicked"))?;
+        stderr_handle.await.map_err(|_| CoreError::new("stderr capture task panicked"))?;
+    }
+
+    let exit_code = if was_aborted {
+        match tokio::time::timeout(ABORT_HANDLE_TIMEOUT, shell_handle).await {
+            Ok(Ok(())) => finished
+                .transpose()
+                .map_err(|e| CoreError::new(format!("embedded shell exited without status: {e}")))?
+                .unwrap_or(FORCED_TERMINATE_EXIT_CODE),
+            Ok(Err(join_error)) if join_error.is_cancelled() => forced_terminate_exit_code(finished),
+            Ok(Err(_)) | Err(_) => FORCED_TERMINATE_EXIT_CODE,
+        }
+    } else {
+        match shell_handle.await {
+            Ok(()) => finished
+                .transpose()
+                .map_err(|e| CoreError::new(format!("embedded shell exited without status: {e}")))?
+                .unwrap_or(FORCED_TERMINATE_EXIT_CODE),
+            Err(join_error) if join_error.is_cancelled() => forced_terminate_exit_code(finished),
+            Err(_) => FORCED_TERMINATE_EXIT_CODE,
+        }
     };
 
     Ok(EmbeddedShellExecution { stdout, stderr, exit_code })
