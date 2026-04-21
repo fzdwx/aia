@@ -260,7 +260,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     const queuePromise = apiFetchQueue(id)
     setActiveWorkspaceRoot(null)
 
-    set((state) => ({
+    set(() => ({
       activeSessionId: id,
       ...resetSessionProjection(true),
     }))
@@ -464,7 +464,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           if (status === "waiting") {
             const prev = get().streamingTurn
             if (prev) {
-              set((state) => {
+              set(() => {
                 const nextStreamingTurn = withStreamingStatus(prev, "waiting")
                 return {
                   _pendingPrompt: null,
@@ -475,7 +475,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             } else {
               const prompt = get()._pendingPrompt
               if (prompt) {
-                set((state) => {
+                set(() => {
                   const nextStreamingTurn = createPendingStreamingTurn([prompt])
                   return {
                     _pendingPrompt: null,
@@ -491,7 +491,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           } else {
             const prev = get().streamingTurn
             if (prev) {
-              set((state) => {
+              set(() => {
                 const nextStreamingTurn = withStreamingStatus(prev, status)
                 return {
                   streamingTurn: nextStreamingTurn,
